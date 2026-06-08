@@ -41,6 +41,10 @@ export class CostStructureService {
     });
   }
 
+  async getById(userId: string, id: string) {
+    return this.requireStructure(userId, id);
+  }
+
   async create(userId: string, companyId: string, input: CreateCostStructureInput, ctx: AuditContext) {
     await this.requireCompany(userId, companyId);
     const structure = await this.db.costStructure.create({

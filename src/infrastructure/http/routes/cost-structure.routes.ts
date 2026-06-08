@@ -34,6 +34,12 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     },
   );
 
+  app.get('/cost-structures/:id', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const structure = await service.getById(request.authUser!.id, id);
+    return { data: structure };
+  });
+
   // Carga de cada bloque de configuración (validación dentro del servicio).
   for (const section of ['raw-material', 'direct-labor', 'indirect-costs'] as const) {
     const key =

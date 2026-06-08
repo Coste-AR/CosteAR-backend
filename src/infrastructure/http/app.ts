@@ -11,6 +11,7 @@ import { registerCompanyRoutes } from './routes/company.routes.js';
 import { registerCostStructureRoutes } from './routes/cost-structure.routes.js';
 import { registerMacroRoutes } from './routes/macro.routes.js';
 import { registerAlertRoutes } from './routes/alert.routes.js';
+import { registerUserRoutes } from './routes/user.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -91,6 +92,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerCostStructureRoutes(api);
       await registerMacroRoutes(api);
       await registerAlertRoutes(api);
+      await registerUserRoutes(api);
     },
     { prefix },
   );
