@@ -98,6 +98,12 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: updated });
   });
 
+  // Feed unificado para Centro de automatización (todas los estados, reciente primero)
+  app.get('/validaciones/feed', { preHandler: authenticate }, async (request, reply) => {
+    const result = await svc.listFeed(request.authUser!.id);
+    return reply.send(result);
+  });
+
   // Historial de transiciones de una entrada
   app.get('/validaciones/:entryId/history', { preHandler: authenticate }, async (request, reply) => {
     const { entryId } = request.params as { entryId: string };

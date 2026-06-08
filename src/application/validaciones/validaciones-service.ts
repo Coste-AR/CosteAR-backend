@@ -109,6 +109,24 @@ export class ValidacionesService {
   }
 
   /**
+   * Feed unificado de todas las entradas (todas los estados),
+   * usado en el Centro de automatización para ver el flujo completo.
+   */
+  async listFeed(costistId: string, limit = 50) {
+    const items = await this.db.dataEntry.findMany({
+      where: { costistId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        connection: {
+          include: { company: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    return { data: items, total: items.length };
+  }
+
+  /**
    * Obtiene el historial completo de transiciones de una entrada.
    */
   async getEntryHistory(entryId: string, costistId: string) {
