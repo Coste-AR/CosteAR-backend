@@ -33,9 +33,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   const auth = new AuthService();
   const email = new EmailService();
 
-  // Rate limit estricto para los endpoints sensibles.
-  const loginLimit = { rateLimit: { max: 5, timeWindow: '15 minutes' } };
-  const registerLimit = { rateLimit: { max: 3, timeWindow: '1 hour' } };
+  // Rate limit estricto para los endpoints sensibles EN PRODUCCIÓN.
+  // En desarrollo se relaja para no bloquear las pruebas del equipo.
+  const isProd = getEnv().NODE_ENV === 'production';
+  const loginLimit = {
+    rateLimit: { max: isProd ? 5 : 100, timeWindow: '15 minutes' },
+  };
+  const registerLimit = {
+    rateLimit: { max: isProd ? 3 : 100, timeWindow: '1 hour' },
+  };
 
   app.post('/auth/register', { config: registerLimit }, async (request, reply) => {
     const input = registerSchema.parse(request.body);
