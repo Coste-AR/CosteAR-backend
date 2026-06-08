@@ -1,0 +1,271 @@
+// CosteAR — Modelo de datos
+// Multi-tenant: cada User es un tenant. El aislamiento se refuerza con
+// Row-Level Security a nivel PostgreSQL (ver migration rls.sql).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identidad y seguridad
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  COSTISTA
+  ADMIN
+}
+
+model User {
+  id                  String    @id @default(uuid()) @db.Uuid
+  email               String    @unique
+  passwordHash        String
+  name                String
+  role                UserRole  @default(COSTISTA)
+
+  // 2FA (TOTP)
+  twoFactorEnabled    Boolean   @default(false)
+  twoFactorSecret     String?   // cifrado AES-256 en reposo
+  twoFactorBackupCodes String[] @default([]) // hashes Argon2id de un solo uso
+
+  // Estado de cuenta / anti-bruteforce
+  isActive            Boolean   @default(true)
+  isLocked            Boolean   @default(false)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  companies           Company[]
+  refreshTokens       RefreshToken[]
+  alerts              Alert[]
+  auditLogs           AuditLog[]
+  passwordResets      PasswordReset[]
+  alertSettings       AlertSetting?
+
+  @@map("users")
+}
+
+// Refresh tokens opacos, rotados en cada uso. Se guarda solo el hash.
+// `familyId` agrupa la cadena de rotación: si se detecta reuso de un token
+// ya rotado, se invalida toda la familia (robo de sesión).
+model RefreshToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  familyId    String    @db.Uuid
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  // Cuando se rota, apunta al token que lo reemplazó (para detectar reuso).
+  replacedBy  String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  userAgent   String?
+  ipAddress   String?
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+// ---------------------------------------------------------------------------
+// Cartera de clientes (PyMEs)
+// ---------------------------------------------------------------------------
+
+model Company {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  industry  String?
+  cuit      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  costStructures CostStructure[]
+  alerts         Alert[]
+
+  @@index([userId])
+  @@map("companies")
+}
+
+// ---------------------------------------------------------------------------
+// Estructura de costos (por empresa × producto × período)
+// ---------------------------------------------------------------------------
+
+enum CostStructureStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+model CostStructure {
+  id          String              @id @default(uuid()) @db.Uuid
+  companyId   String              @db.Uuid
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId      String              @db.Uuid // denormalizado para RLS
+  productName String
+  period      String              // "YYYY-MM"
+  status      CostStructureStatus @default(DRAFT)
+
+  // Configuración de los tres elementos del costo (JSONB tipado en la app).
+  rawMaterialConfig   Json?
+  directLaborConfig   Json?
+  indirectCostConfig  Json?
+
+  // Datos de venta para el cálculo de margen.
+  salesUnitPrice  Decimal? @db.Decimal(18, 4)
+  salesQuantity   Decimal? @db.Decimal(18, 4)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  calculations CostCalculation[]
+  alerts       Alert[]
+
+  @@index([companyId])
+  @@index([userId])
+  @@map("cost_structures")
+}
+
+// Resultado de un cálculo. Inmutable: cada recálculo crea un registro nuevo,
+// preservando la trazabilidad histórica (qué datos macro se usaron, cuándo).
+model CostCalculation {
+  id                  String        @id @default(uuid()) @db.Uuid
+  costStructureId     String        @db.Uuid
+  costStructure       CostStructure @relation(fields: [costStructureId], references: [id], onDelete: Cascade)
+  userId              String        @db.Uuid
+  macroSnapshotId     String?       @db.Uuid
+
+  rawMaterialConsumed Decimal       @db.Decimal(18, 4)
+  directLaborTotal    Decimal       @db.Decimal(18, 4)
+  indirectCostsApplied Decimal      @db.Decimal(18, 4)
+  productionCost      Decimal       @db.Decimal(18, 4)
+  costOfGoodsSold     Decimal       @db.Decimal(18, 4)
+  grossMargin         Decimal       @db.Decimal(18, 4)
+  grossMarginPct      Decimal       @db.Decimal(9, 4)
+
+  // Snapshot completo del resultado para auditoría / reconstrucción.
+  detail              Json
+
+  calculatedAt        DateTime      @default(now())
+
+  @@index([costStructureId])
+  @@index([userId])
+  @@map("cost_calculations")
+}
+
+// ---------------------------------------------------------------------------
+// Datos macroeconómicos (BCRA, INDEC, ARCA, paritarias)
+// ---------------------------------------------------------------------------
+
+enum MacroSource {
+  BCRA
+  INDEC
+  ARCA
+  PARITARIA
+}
+
+// Inmutable: nunca se edita, solo se insertan nuevos snapshots.
+model MacroSnapshot {
+  id            String      @id @default(uuid()) @db.Uuid
+  source        MacroSource
+  indicatorCode String      // ej. "USD_OFICIAL", "IPC_NACIONAL", "PARITARIA_METALURGICO"
+  value         Decimal     @db.Decimal(18, 6)
+  effectiveDate DateTime
+  fetchedAt     DateTime    @default(now())
+  metadata      Json?
+
+  @@unique([source, indicatorCode, effectiveDate])
+  @@index([source, indicatorCode])
+  @@map("macro_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Alertas
+// ---------------------------------------------------------------------------
+
+enum AlertType {
+  MARGIN_BELOW_THRESHOLD
+  MACRO_CHANGE
+  COST_SPIKE
+}
+
+model Alert {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId       String?       @db.Uuid
+  company         Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  costStructureId String?       @db.Uuid
+  costStructure   CostStructure? @relation(fields: [costStructureId], references: [id], onDelete: SetNull)
+
+  type            AlertType
+  message         String
+  threshold       Decimal?      @db.Decimal(18, 4)
+  actualValue     Decimal?      @db.Decimal(18, 4)
+
+  isRead          Boolean       @default(false)
+  emailSentAt     DateTime?
+  readAt          DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([userId])
+  @@index([costStructureId])
+  @@map("alerts")
+}
+
+model AlertSetting {
+  id                    String  @id @default(uuid()) @db.Uuid
+  userId                String  @unique @db.Uuid
+  user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Umbral de margen (%) bajo el cual se dispara la alerta.
+  marginThresholdPct    Decimal @default(15) @db.Decimal(9, 4)
+  emailNotifications    Boolean @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("alert_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoría (append-only)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String   // ej. "auth.login.success", "company.create", "cost_structure.update"
+  entityType String?
+  entityId   String?
+  oldValue   Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
