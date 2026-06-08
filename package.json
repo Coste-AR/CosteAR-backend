@@ -10,6 +10,7 @@
     "dev": "tsx watch --env-file=.env src/infrastructure/http/server.ts",
     "build": "tsc",
     "start": "node dist/infrastructure/http/server.js",
+    "start:worker": "node dist/infrastructure/workers/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

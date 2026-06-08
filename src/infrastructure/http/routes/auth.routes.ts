@@ -13,12 +13,20 @@ import { getEnv } from '../../config/env.js';
 
 const REFRESH_COOKIE = 'costear_rt';
 
-/** Setea el refresh token como cookie httpOnly, secure, SameSite=strict. */
+/**
+ * Setea el refresh token como cookie httpOnly.
+ * - Desarrollo: SameSite=Strict (frontend y backend en localhost).
+ * - Producción: SameSite=None + Secure, porque el frontend (otro dominio)
+ *   necesita poder enviar la cookie al backend en /auth/refresh. El token es
+ *   opaco, httpOnly y rotado, y el CORS está en whitelist: el riesgo CSRF
+ *   queda acotado.
+ */
 function setRefreshCookie(reply: FastifyReply, tokens: TokenPair): void {
+  const isProd = getEnv().NODE_ENV === 'production';
   reply.setCookie(REFRESH_COOKIE, tokens.refreshToken, {
     httpOnly: true,
-    secure: getEnv().NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'strict',
     path: `/api/${getEnv().API_VERSION}/auth`,
     expires: tokens.refreshExpiresAt,
     signed: true,
