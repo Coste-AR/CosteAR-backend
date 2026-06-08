@@ -24,7 +24,7 @@ export class EmailAlreadyExistsError extends ConflictError {
   override readonly code = 'EMAIL_EXISTS';
   constructor() {
     // Mensaje neutro: no confirma directamente la existencia en flujos sensibles.
-    super('No se pudo completar el registro con esos datos');
+    super('Ya existe una cuenta con ese email');
   }
 }
 

@@ -48,7 +48,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     rateLimit: { max: isProd ? 5 : 100, timeWindow: '15 minutes' },
   };
   const registerLimit = {
-    rateLimit: { max: isProd ? 3 : 100, timeWindow: '1 hour' },
+    rateLimit: { max: isProd ? 20 : 100, timeWindow: '1 hour' },
   };
 
   app.post('/auth/register', { config: registerLimit }, async (request, reply) => {
