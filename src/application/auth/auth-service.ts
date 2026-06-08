@@ -54,6 +54,20 @@ export class AuthService {
     return user !== null;
   }
 
+  async cuitExists(cuit: string): Promise<boolean> {
+    const clean = cuit.replace(/[-\s]/g, '');
+    // Normalizar a formato XX-XXXXXXXX-X para buscar
+    const formatted =
+      clean.length === 11
+        ? `${clean.slice(0, 2)}-${clean.slice(2, 10)}-${clean.slice(10)}`
+        : cuit;
+    const user = await this.db.user.findFirst({
+      where: { cuit: { in: [cuit, clean, formatted] } },
+      select: { id: true },
+    });
+    return user !== null;
+  }
+
   // -- Registro -----------------------------------------------------------
 
   async register(input: RegisterInput, ctx: AuditContext): Promise<AuthResult> {
@@ -112,7 +126,15 @@ export class AuthService {
   // -- Login --------------------------------------------------------------
 
   async login(input: LoginInput, ctx: AuditContext): Promise<AuthResult> {
-    const user = await this.db.user.findUnique({ where: { email: input.email } });
+    // Normalizar CUIT: buscar con y sin guiones
+    const cuitClean = input.cuit.replace(/[-\s]/g, '');
+    const cuitFormatted =
+      cuitClean.length === 11
+        ? `${cuitClean.slice(0, 2)}-${cuitClean.slice(2, 10)}-${cuitClean.slice(10)}`
+        : input.cuit;
+    const user = await this.db.user.findFirst({
+      where: { cuit: { in: [input.cuit, cuitClean, cuitFormatted] } },
+    });
 
     // Comparación a tiempo constante incluso si el usuario no existe: siempre
     // ejecutamos un verify para no filtrar la existencia por timing.
@@ -121,7 +143,7 @@ export class AuthService {
         '$argon2id$v=19$m=65536,t=3,p=4$ZHVtbXlzYWx0ZHVtbXk$ZHVtbXloYXNoZHVtbXloYXNoZHVtbXloYXNoZHVt',
         input.password,
       );
-      await recordAudit({ ...ctx, action: 'auth.login.unknown_email', newValue: { email: input.email } }, this.db);
+      await recordAudit({ ...ctx, action: 'auth.login.unknown_cuit', newValue: { cuit: input.cuit } }, this.db);
       throw new InvalidCredentialsError();
     }
 

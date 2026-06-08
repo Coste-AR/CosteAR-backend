@@ -9,7 +9,7 @@ import { UnauthorizedError, ForbiddenError, ConflictError } from './domain-error
 export class InvalidCredentialsError extends UnauthorizedError {
   override readonly code = 'INVALID_CREDENTIALS';
   constructor() {
-    super('Email o contraseña incorrectos');
+    super('CUIT o contraseña incorrectos');
   }
 }
 

@@ -51,6 +51,22 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     rateLimit: { max: isProd ? 20 : 100, timeWindow: '1 hour' },
   };
 
+  // Verifica disponibilidad de CUIT sin revelar más info que la necesaria.
+  app.get('/auth/check-cuit', {
+    config: { rateLimit: { max: isProd ? 30 : 200, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const { cuit } = request.query as { cuit?: string };
+    if (!cuit) {
+      return reply.status(400).send({ error: { message: 'CUIT requerido' } });
+    }
+    const clean = cuit.replace(/[-\s]/g, '');
+    if (!/^\d{11}$/.test(clean)) {
+      return reply.status(400).send({ error: { message: 'CUIT inválido' } });
+    }
+    const exists = await auth.cuitExists(cuit);
+    return reply.send({ data: { available: !exists } });
+  });
+
   // Verifica disponibilidad de email sin revelar más info que la necesaria.
   // Rate limit propio para evitar enumeración masiva.
   app.get('/auth/check-email', {

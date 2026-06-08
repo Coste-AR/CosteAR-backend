@@ -36,7 +36,8 @@ model User {
   role                UserRole  @default(COSTISTA)
 
   // Datos profesionales (capturados en el onboarding)
-  cuit                String?   // CUIT / CUIL del profesional (11 dígitos)
+  // cuit es el identificador de login (único, nullable solo para retrocompatibilidad)
+  cuit                String?   @unique  // CUIT / CUIL del profesional (11 dígitos)
   dni                 String?
   professionalType    ProfessionalType?
   licenseNumber       String?   // matrícula profesional (CPCE)
