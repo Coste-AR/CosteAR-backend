@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx watch src/infrastructure/http/server.ts",
+    "dev": "tsx watch --env-file=.env src/infrastructure/http/server.ts",
     "build": "tsc",
     "start": "node dist/infrastructure/http/server.js",
     "test": "vitest run",
@@ -21,7 +21,7 @@
     "db:rls": "node scripts/apply-rls.mjs",
     "db:seed": "node prisma/seed.mjs",
     "db:setup": "prisma migrate dev --name init && node scripts/apply-rls.mjs",
-    "worker": "tsx src/infrastructure/workers/index.ts",
+    "worker": "tsx --env-file=.env src/infrastructure/workers/index.ts",
     "keys:generate": "node scripts/generate-keys.mjs"
   },
   "dependencies": {
