@@ -19,6 +19,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "db:rls": "node scripts/apply-rls.mjs",
+    "db:seed": "node prisma/seed.mjs",
     "db:setup": "prisma migrate dev --name init && node scripts/apply-rls.mjs",
     "worker": "tsx src/infrastructure/workers/index.ts",
     "keys:generate": "node scripts/generate-keys.mjs"
