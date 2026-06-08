@@ -60,16 +60,46 @@ export class AuthService {
     }
 
     const passwordHash = await hashPassword(input.password);
-    const user = await this.db.user.create({
-      data: {
-        email: input.email,
-        passwordHash,
-        name: input.name,
-        alertSettings: { create: {} }, // umbral de margen por defecto
-      },
+
+    // Alta completa en una transacción: usuario + preferencias + cartera inicial.
+    const user = await this.db.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email: input.email,
+          passwordHash,
+          name: input.name,
+          cuit: input.cuit,
+          dni: input.dni ?? null,
+          professionalType: input.professionalType,
+          licenseNumber: input.licenseNumber ?? null,
+          province: input.province,
+          onboardedAt: new Date(),
+          alertSettings: { create: { marginThresholdPct: input.marginThresholdPct } },
+        },
+      });
+
+      if (input.initialClients?.length) {
+        await tx.company.createMany({
+          data: input.initialClients.map((c) => ({
+            userId: created.id,
+            name: c.name,
+            industry: c.industry ?? null,
+            cuit: c.cuit ?? null,
+          })),
+        });
+      }
+      return created;
     });
 
-    await recordAudit({ ...ctx, userId: user.id, action: 'auth.register.success' }, this.db);
+    await recordAudit(
+      {
+        ...ctx,
+        userId: user.id,
+        action: 'auth.register.success',
+        newValue: { initialClients: input.initialClients?.length ?? 0 },
+      },
+      this.db,
+    );
     const tokens = await this.issueTokens(user, ctx);
     return { user: this.publicUser(user), tokens };
   }

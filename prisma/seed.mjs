@@ -77,6 +77,9 @@ async function main() {
     update: {},
     create: {
       email: DEMO_EMAIL, passwordHash, name: 'Costista Demo',
+      cuit: '20123456786', dni: '12345678',
+      professionalType: 'CONTADOR_PUBLICO', province: 'Tucumán',
+      onboardedAt: new Date(),
       alertSettings: { create: { marginThresholdPct: 15 } },
     },
   });

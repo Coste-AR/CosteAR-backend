@@ -16,12 +16,63 @@ export const passwordSchema = z
   .regex(/[A-Z]/, 'Debe incluir al menos una mayúscula')
   .regex(/[0-9]/, 'Debe incluir al menos un número');
 
+/** Validación de CUIT/CUIL argentino (11 dígitos + dígito verificador). */
+function isValidCuitCuil(value: string): boolean {
+  const clean = value.replace(/[-\s]/g, '');
+  if (!/^\d{11}$/.test(clean)) return false;
+  const digits = clean.split('').map(Number);
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const sum = weights.reduce((acc, w, i) => acc + w * digits[i]!, 0);
+  const mod = 11 - (sum % 11);
+  const check = mod === 11 ? 0 : mod === 10 ? 9 : mod;
+  return check === digits[10];
+}
+
+export const professionalTypeSchema = z.enum([
+  'CONTADOR_PUBLICO',
+  'LIC_ADMINISTRACION',
+  'CONSULTOR_INDEPENDIENTE',
+  'ANALISTA_INTERNO',
+  'OTRO',
+]);
+
+/** Cliente inicial opcional, cargado durante el onboarding. */
+export const initialClientSchema = z.object({
+  name: z.string().min(2, 'Nombre demasiado corto').max(160).trim(),
+  industry: z.string().max(120).trim().optional(),
+  cuit: z
+    .string()
+    .trim()
+    .refine(isValidCuitCuil, 'CUIT del cliente inválido')
+    .optional(),
+});
+
 export const registerSchema = z.object({
+  // Paso 1 — Cuenta
   email: z.string().email('Email inválido').toLowerCase().trim(),
   password: passwordSchema,
   name: z.string().min(2, 'Nombre demasiado corto').max(120).trim(),
+
+  // Paso 2 — Datos profesionales
+  cuit: z.string().trim().refine(isValidCuitCuil, 'CUIT/CUIL inválido'),
+  dni: z
+    .string()
+    .trim()
+    .regex(/^\d{7,8}$/, 'DNI inválido (7 u 8 dígitos)')
+    .optional(),
+  professionalType: professionalTypeSchema,
+  licenseNumber: z.string().max(60).trim().optional(),
+  province: z.string().min(2).max(80).trim().default('Tucumán'),
+
+  // Paso 3 — Cartera inicial (opcional)
+  initialClients: z.array(initialClientSchema).max(20).optional(),
+
+  // Paso 4 — Preferencias
+  marginThresholdPct: z.number().finite().min(0).max(100).default(15),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
+
+export { isValidCuitCuil };
 
 export const loginSchema = z.object({
   email: z.string().email().toLowerCase().trim(),

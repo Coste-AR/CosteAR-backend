@@ -20,12 +20,28 @@ enum UserRole {
   ADMIN
 }
 
+enum ProfessionalType {
+  CONTADOR_PUBLICO
+  LIC_ADMINISTRACION
+  CONSULTOR_INDEPENDIENTE
+  ANALISTA_INTERNO
+  OTRO
+}
+
 model User {
   id                  String    @id @default(uuid()) @db.Uuid
   email               String    @unique
   passwordHash        String
   name                String
   role                UserRole  @default(COSTISTA)
+
+  // Datos profesionales (capturados en el onboarding)
+  cuit                String?   // CUIT / CUIL del profesional (11 dígitos)
+  dni                 String?
+  professionalType    ProfessionalType?
+  licenseNumber       String?   // matrícula profesional (CPCE)
+  province            String?
+  onboardedAt         DateTime? // marca cuándo completó el alta guiada
 
   // 2FA (TOTP)
   twoFactorEnabled    Boolean   @default(false)
