@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 /**
  * Percentage — value object inmutable para porcentajes (tasas, márgenes, ITCS).

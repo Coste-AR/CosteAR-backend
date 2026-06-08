@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 // Configuración global de decimal.js: 28 dígitos de precisión, redondeo
 // bancario (ROUND_HALF_EVEN) para minimizar sesgo acumulado en cálculos.
