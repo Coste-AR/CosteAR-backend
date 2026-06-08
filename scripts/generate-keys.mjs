@@ -8,11 +8,11 @@ const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
 });
 
-const escape = (pem) => pem.trim().replace(/\n/g, '\\n');
+const toBase64 = (pem) => Buffer.from(pem.trim()).toString('base64');
 const rand = (bytes) => randomBytes(bytes).toString('hex');
 
-console.log(`JWT_PRIVATE_KEY="${escape(privateKey)}"`);
-console.log(`JWT_PUBLIC_KEY="${escape(publicKey)}"`);
+console.log(`JWT_PRIVATE_KEY=${toBase64(privateKey)}`);
+console.log(`JWT_PUBLIC_KEY=${toBase64(publicKey)}`);
 console.log(`COOKIE_SECRET=${rand(32)}`);
-console.log(`TOTP_ENCRYPTION_KEY=${rand(16)}`); // 16 bytes hex = 32 chars
+console.log(`TOTP_ENCRYPTION_KEY=${rand(16)}`);
 console.log(`ARGON2_PEPPER=${rand(32)}`);
