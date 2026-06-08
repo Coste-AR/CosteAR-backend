@@ -45,6 +45,34 @@ export class CostStructureService {
     return this.requireStructure(userId, id);
   }
 
+  /** Genera el .xlsx de la estructura (datos + Estado de Costos). */
+  async exportToExcel(userId: string, id: string): Promise<{ buffer: Buffer; filename: string }> {
+    const s = await this.db.costStructure.findFirst({
+      where: { id, userId },
+      include: { company: true },
+    });
+    if (!s) throw new NotFoundError('Estructura de costos no encontrada');
+    if (!s.rawMaterialConfig || !s.directLaborConfig || !s.indirectCostConfig) {
+      throw new ValidationError('Cargá MP, MOD y CIP antes de exportar');
+    }
+
+    const { exportCostStructureToXlsx } = await import('./excel-export.js');
+    const buffer = await exportCostStructureToXlsx({
+      productName: s.productName,
+      period: s.period,
+      companyName: s.company.name,
+      rawMaterialConfig: s.rawMaterialConfig,
+      directLaborConfig: s.directLaborConfig,
+      indirectCostConfig: s.indirectCostConfig,
+      salesUnitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
+      salesQuantity: s.salesQuantity ? Number(s.salesQuantity) : 0,
+    });
+    const safeName = `${s.company.name}-${s.productName}-${s.period}`
+      .replace(/[^a-zA-Z0-9-]/g, '_')
+      .slice(0, 80);
+    return { buffer, filename: `CosteAR-${safeName}.xlsx` };
+  }
+
   async create(userId: string, companyId: string, input: CreateCostStructureInput, ctx: AuditContext) {
     await this.requireCompany(userId, companyId);
     const structure = await this.db.costStructure.create({

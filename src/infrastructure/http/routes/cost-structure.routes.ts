@@ -40,6 +40,16 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     return { data: structure };
   });
 
+  // Exportar a Excel (.xlsx) — el costista se lleva su planilla.
+  app.get('/cost-structures/:id/export', { preHandler: authenticate }, async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    const { buffer, filename } = await service.exportToExcel(request.authUser!.id, id);
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .send(buffer);
+  });
+
   // Carga de cada bloque de configuración (validación dentro del servicio).
   for (const section of ['raw-material', 'direct-labor', 'indirect-costs'] as const) {
     const key =
