@@ -49,6 +49,11 @@ export interface AuthResult {
 export class AuthService {
   constructor(private readonly db: PrismaClient = prisma) {}
 
+  async emailExists(email: string): Promise<boolean> {
+    const user = await this.db.user.findUnique({ where: { email }, select: { id: true } });
+    return user !== null;
+  }
+
   // -- Registro -----------------------------------------------------------
 
   async register(input: RegisterInput, ctx: AuditContext): Promise<AuthResult> {

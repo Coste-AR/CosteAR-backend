@@ -51,6 +51,19 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     rateLimit: { max: isProd ? 20 : 100, timeWindow: '1 hour' },
   };
 
+  // Verifica disponibilidad de email sin revelar más info que la necesaria.
+  // Rate limit propio para evitar enumeración masiva.
+  app.get('/auth/check-email', {
+    config: { rateLimit: { max: isProd ? 30 : 200, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const { email: emailParam } = request.query as { email?: string };
+    if (!emailParam || !/\S+@\S+\.\S+/.test(emailParam)) {
+      return reply.status(400).send({ error: { message: 'Email inválido' } });
+    }
+    const existing = await auth.emailExists(emailParam.toLowerCase());
+    return reply.send({ data: { available: !existing } });
+  });
+
   app.post('/auth/register', { config: registerLimit }, async (request, reply) => {
     const input = registerSchema.parse(request.body);
     const result = await auth.register(input, auditContext(request));
