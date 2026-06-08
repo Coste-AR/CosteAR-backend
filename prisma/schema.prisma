@@ -64,6 +64,7 @@ model User {
   auditLogs           AuditLog[]
   passwordResets      PasswordReset[]
   alertSettings       AlertSetting?
+  costistConnections  EmpresaConnection[] @relation("costist_connections")
 
   @@map("users")
 }
@@ -118,8 +119,9 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  costStructures CostStructure[]
-  alerts         Alert[]
+  costStructures      CostStructure[]
+  alerts              Alert[]
+  empresaConnections  EmpresaConnection[]
 
   @@index([userId])
   @@map("companies")
@@ -262,6 +264,95 @@ model AlertSetting {
   updatedAt             DateTime @updatedAt
 
   @@map("alert_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Conexiones empresa ↔ costista (data lake por par)
+// ---------------------------------------------------------------------------
+
+// Una empresa puede estar conectada a uno o más costistas.
+// Cada conexión tiene su propio espacio de datos (data lake).
+model EmpresaConnection {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  costistId   String   @db.Uuid
+  costist     User     @relation("costist_connections", fields: [costistId], references: [id], onDelete: Cascade)
+  apiKey      String   @unique @default(uuid()) // clave para que la empresa suba datos
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  dataEntries DataEntry[]
+
+  @@unique([companyId, costistId])
+  @@index([costistId])
+  @@map("empresa_connections")
+}
+
+// ---------------------------------------------------------------------------
+// Entradas de datos (cargadas por la empresa, validadas por el costista)
+// ---------------------------------------------------------------------------
+
+enum DataEntryStatus {
+  PENDING    // recién cargada, esperando revisión
+  APPROVED   // el costista la aprobó y actualizó la estructura de costos
+  REJECTED   // el costista la rechazó (no es válida o ya está cubierta)
+  CORRECTED  // el costista la corrigió antes de aprobar
+}
+
+enum DataEntrySourceType {
+  TEXT
+  PDF
+  IMAGE
+  WHATSAPP
+}
+
+model DataEntry {
+  id           String              @id @default(uuid()) @db.Uuid
+  connectionId String              @db.Uuid
+  connection   EmpresaConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  costistId    String              @db.Uuid // denormalizado para RLS y queries rápidas
+
+  rawContent   String              // texto libre / descripción del documento
+  sourceType   DataEntrySourceType @default(TEXT)
+  status       DataEntryStatus     @default(PENDING)
+
+  // Contenido corregido (si el costista modificó antes de aprobar)
+  correctedContent String?
+
+  // Nota interna del costista al aprobar / rechazar
+  reviewNote   String?
+  reviewedAt   DateTime?
+  reviewedBy   String?   @db.Uuid
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  history      ValidationHistory[]
+
+  @@index([connectionId])
+  @@index([costistId, status])
+  @@map("data_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Historial de validaciones (inmutable, trazabilidad)
+// ---------------------------------------------------------------------------
+
+model ValidationHistory {
+  id          String          @id @default(uuid()) @db.Uuid
+  entryId     String          @db.Uuid
+  entry       DataEntry       @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  costistId   String          @db.Uuid
+
+  fromStatus  DataEntryStatus
+  toStatus    DataEntryStatus
+  note        String?
+  createdAt   DateTime        @default(now())
+
+  @@index([entryId])
+  @@map("validation_history")
 }
 
 // ---------------------------------------------------------------------------
