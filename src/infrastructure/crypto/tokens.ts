@@ -23,7 +23,8 @@ export interface AccessTokenPayload {
 
 export function signAccessToken(payload: AccessTokenPayload): string {
   const env = getEnv();
-  return jwt.sign(payload, env.JWT_PRIVATE_KEY, {
+  const privateKey = env.JWT_PRIVATE_KEY.replace(/\\n/g, '\n');
+  return jwt.sign(payload, privateKey, {
     algorithm: 'RS256',
     expiresIn: env.JWT_ACCESS_EXPIRY,
     issuer: 'costear',
@@ -32,7 +33,8 @@ export function signAccessToken(payload: AccessTokenPayload): string {
 
 export function verifyAccessToken(token: string): AccessTokenPayload {
   const env = getEnv();
-  const decoded = jwt.verify(token, env.JWT_PUBLIC_KEY, {
+  const publicKey = env.JWT_PUBLIC_KEY.replace(/\\n/g, '\n');
+  const decoded = jwt.verify(token, publicKey, {
     algorithms: ['RS256'],
     issuer: 'costear',
   });
