@@ -1,93 +1,105 @@
 import { describe, it, expect } from 'vitest';
-import { Decimal } from 'decimal.js';
 import {
   calcWorkingDays,
   calcITCS,
-  calcDepartmentHourlyRate,
   calcDirectLabor,
+  type DirectLaborConfig,
 } from '@/domain/calculations/direct-labor.js';
-import { Percentage } from '@/domain/value-objects/percentage.js';
+
+/**
+ * Ground truth: hoja "2-MOD Ejemplo" del Excel v3.0.
+ * Verifica la metodología completa de la cátedra (días → IAP → ITCS → tarifa).
+ */
+
+// Configuración idéntica al ejemplo del Excel.
+const example: DirectLaborConfig = {
+  workingDays: {
+    totalDaysPerYear: 365,
+    unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 3, holidaysOnWeekend: 4 },
+    paidAbsence: { holidays: 19, vacations: 14, sickness: 5, specialLeaves: 2, workAccidents: 1 },
+  },
+  itcs: {
+    derivationBase: 0.27,
+    fixedArt: 0.015,
+    uncertainRemunerative: [
+      { name: 'Premio por Productividad', coefficient: 0.03 },
+      { name: 'Antigüedad', coefficient: 0.04 },
+      { name: 'Premio por Asistencia Perfecta', coefficient: 0.02 },
+    ],
+    uncertainNonRemunerative: [
+      { name: 'Ropa de trabajo', coefficient: 0.01 },
+      { name: 'Viandas / comedor', coefficient: 0.015 },
+      { name: 'Medicamentos', coefficient: 0.005 },
+    ],
+  },
+  departments: [
+    { name: 'Departamento Productivo 1', basicRemuneration: 4500000, hoursWorked: 12000 },
+    { name: 'Departamento Productivo 2', basicRemuneration: 3200000, hoursWorked: 9000 },
+    { name: 'Departamento Productivo 3', basicRemuneration: 2800000, hoursWorked: 8000 },
+  ],
+};
 
 describe('Hoja 2 — Mano de Obra Directa', () => {
-  describe('calcWorkingDays', () => {
-    it('descuenta no-laborables, vacaciones y ausencias', () => {
-      const days = calcWorkingDays({
-        totalDaysPerYear: 365,
-        nonWorkingDays: 113, // 52 domingos + ~13 feriados + sábados aprox
-        vacationDays: 14,
-        averageAbsenceDays: 8,
-      });
-      expect(days.toNumber()).toBe(230);
+  describe('A) Distribución de días', () => {
+    const r = calcWorkingDays(example.workingDays);
+
+    it('Total ausentismo no pago = (52+52+3)−4 = 103', () => {
+      expect(r.totalUnpaidAbsence.toNumber()).toBe(103);
+    });
+
+    it('Días totales a pagar = 365 − 103 = 262', () => {
+      expect(r.daysToPayFor.toNumber()).toBe(262);
+    });
+
+    it('Total ausentismo pago = 19+14+5+2+1 = 41', () => {
+      expect(r.totalPaidAbsence.toNumber()).toBe(41);
+    });
+
+    it('Días de trabajo efectivo = 262 − 41 = 221', () => {
+      expect(r.effectiveWorkDays.toNumber()).toBe(221);
+    });
+
+    it('IAP = 41/221 ≈ 18,55 %', () => {
+      expect(r.iap.toPercent()).toBeCloseTo(18.552, 2);
     });
   });
 
-  describe('calcITCS', () => {
-    it('suma los componentes de cargas sociales', () => {
-      const itcs = calcITCS([
-        { name: 'Jubilación', percent: 16 },
-        { name: 'Obra social', percent: 6 },
-        { name: 'ART', percent: 5 },
-        { name: 'SAC s/cargas', percent: 9 },
-        { name: 'Vacaciones', percent: 6 },
-      ]);
-      expect(itcs.toPercent()).toBe(42);
+  describe('C) ITCS', () => {
+    const days = calcWorkingDays(example.workingDays);
+    const itcs = calcITCS(example.itcs, days.iap);
+
+    it('Cargas ciertas = 0.27 + 0.015 + 1/12 + 0.0225 ≈ 39,08 %', () => {
+      expect(itcs.certainCharges.toPercent()).toBeCloseTo(39.083, 2);
+    });
+
+    it('Inciertas no remunerativas = 1+1.5+0.5 = 3 %', () => {
+      expect(itcs.uncertainNonRemunerative.toPercent()).toBeCloseTo(3, 3);
+    });
+
+    it('ITCS total ≈ 79,99 % (valor del Excel)', () => {
+      expect(itcs.itcs.toPercent()).toBeCloseTo(79.99, 1);
     });
   });
 
-  describe('calcDepartmentHourlyRate', () => {
-    it('calcula la tarifa horaria integral', () => {
-      const workingDays = calcWorkingDays({
-        totalDaysPerYear: 365,
-        nonWorkingDays: 115,
-        vacationDays: 14,
-        averageAbsenceDays: 6,
-      }); // 230 días
+  describe('D) Costo y tarifa por departamento', () => {
+    const r = calcDirectLabor(example);
 
-      const itcs = Percentage.fromPercent(50);
-
-      const result = calcDepartmentHourlyRate(
-        { departmentName: 'Armado', workers: 5, monthlyWage: 400000, hoursPerDay: 8 },
-        workingDays,
-        itcs,
-      );
-
-      // Nominal anual: 400000 × 13 × 5 = 26.000.000
-      expect(result.annualNominalCost.toNumber()).toBe(26000000);
-      // Integral: 26.000.000 × 1.5 = 39.000.000
-      expect(result.annualIntegralCost.toNumber()).toBe(39000000);
-      // Horas productivas: 230 × 8 × 5 = 9200
-      expect(result.productiveHours.toNumber()).toBe(9200);
-      // Tarifa: 39.000.000 / 9200 = 4239.13
-      expect(result.hourlyRate.toFixed(2)).toBe('4239.13');
+    it('aplica el ITCS sobre las remuneraciones básicas', () => {
+      const d1 = r.departments[0]!;
+      // 4.500.000 × (1 + 0.7999) ≈ 8.099.600
+      expect(d1.totalMod.toNumber()).toBeCloseTo(8099600, -2);
+      // Tarifa = total / 12000 HH
+      expect(d1.hourlyRate.toNumber()).toBeCloseTo(674.97, 0);
     });
 
-    it('lanza error si las horas productivas son cero', () => {
-      expect(() =>
-        calcDepartmentHourlyRate(
-          { departmentName: 'X', workers: 0, monthlyWage: 100, hoursPerDay: 8 },
-          new Decimal(230),
-          Percentage.fromPercent(50),
-        ),
-      ).toThrow(/división por cero/);
+    it('costo total MOD = Σ de los tres departamentos', () => {
+      // 10.500.000 (básicas) × (1 + ITCS 79,99 %) con precisión decimal exacta.
+      expect(r.totalMod.toNumber()).toBeCloseTo(18898986.03, 1);
     });
-  });
 
-  describe('calcDirectLabor integral', () => {
-    it('suma el costo integral de todos los departamentos', () => {
-      const result = calcDirectLabor(
-        { totalDaysPerYear: 365, nonWorkingDays: 115, vacationDays: 14, averageAbsenceDays: 6 },
-        [{ name: 'Cargas', percent: 50 }],
-        [
-          { departmentName: 'Armado', workers: 5, monthlyWage: 400000, hoursPerDay: 8 },
-          { departmentName: 'Pintura', workers: 3, monthlyWage: 350000, hoursPerDay: 8 },
-        ],
-      );
-
-      // Armado integral: 39.000.000
-      // Pintura nominal: 350000 × 13 × 3 = 13.650.000 × 1.5 = 20.475.000
-      expect(result.totalIntegralCost.toNumber()).toBe(59475000);
-      expect(result.workingDays.toNumber()).toBe(230);
-      expect(result.itcs.toPercent()).toBe(50);
+    it('expone el detalle de días e ITCS', () => {
+      expect(r.workingDays.effectiveWorkDays.toNumber()).toBe(221);
+      expect(r.itcs.itcs.toPercent()).toBeCloseTo(79.99, 1);
     });
   });
 });

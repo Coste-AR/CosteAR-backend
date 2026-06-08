@@ -40,23 +40,41 @@ export type RawMaterialConfig = z.infer<typeof rawMaterialConfigSchema>;
 
 // --- Mano de Obra Directa (Hoja 2) ---
 
+const namedCoefficient = z.object({
+  name: z.string().min(1).max(120),
+  coefficient: z.number().finite().min(0).max(10),
+});
+
 export const directLaborConfigSchema = z.object({
   workingDays: z.object({
     totalDaysPerYear: positive,
-    nonWorkingDays: nonNeg,
-    vacationDays: nonNeg,
-    averageAbsenceDays: nonNeg,
+    unpaidAbsence: z.object({
+      sundays: nonNeg,
+      saturdays: nonNeg,
+      unjustifiedAbsences: nonNeg,
+      holidaysOnWeekend: nonNeg,
+    }),
+    paidAbsence: z.object({
+      holidays: nonNeg,
+      vacations: nonNeg,
+      sickness: nonNeg,
+      specialLeaves: nonNeg,
+      workAccidents: nonNeg,
+    }),
   }),
-  socialCharges: z
-    .array(z.object({ name: z.string().min(1).max(120), percent: nonNeg }))
-    .max(50),
+  itcs: z.object({
+    derivationBase: z.number().finite().min(0).max(10),
+    fixedArt: z.number().finite().min(0).max(10),
+    sacFraction: z.number().finite().min(0).max(1).optional(),
+    uncertainRemunerative: z.array(namedCoefficient).max(50),
+    uncertainNonRemunerative: z.array(namedCoefficient).max(50),
+  }),
   departments: z
     .array(
       z.object({
-        departmentName: z.string().min(1).max(120),
-        workers: z.number().int().positive(),
-        monthlyWage: positive,
-        hoursPerDay: positive,
+        name: z.string().min(1).max(120),
+        basicRemuneration: positive,
+        hoursWorked: positive,
       }),
     )
     .max(100),

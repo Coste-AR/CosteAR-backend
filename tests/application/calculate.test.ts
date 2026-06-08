@@ -20,9 +20,26 @@ describe('runCalculation — orquestación completa del motor', () => {
       ],
     },
     directLabor: {
-      workingDays: { totalDaysPerYear: 365, nonWorkingDays: 115, vacationDays: 14, averageAbsenceDays: 6 },
-      socialCharges: [{ name: 'Cargas', percent: 50 }],
-      departments: [{ departmentName: 'Armado', workers: 5, monthlyWage: 400000, hoursPerDay: 8 }],
+      workingDays: {
+        totalDaysPerYear: 365,
+        unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 3, holidaysOnWeekend: 4 },
+        paidAbsence: { holidays: 19, vacations: 14, sickness: 5, specialLeaves: 2, workAccidents: 1 },
+      },
+      itcs: {
+        derivationBase: 0.27,
+        fixedArt: 0.015,
+        uncertainRemunerative: [
+          { name: 'Productividad', coefficient: 0.03 },
+          { name: 'Antigüedad', coefficient: 0.04 },
+          { name: 'Asistencia', coefficient: 0.02 },
+        ],
+        uncertainNonRemunerative: [
+          { name: 'Ropa', coefficient: 0.01 },
+          { name: 'Viandas', coefficient: 0.015 },
+          { name: 'Medicamentos', coefficient: 0.005 },
+        ],
+      },
+      departments: [{ name: 'Armado', basicRemuneration: 4500000, hoursWorked: 12000 }],
     },
     indirectCosts: {
       centers: [
@@ -50,9 +67,9 @@ describe('runCalculation — orquestación completa del motor', () => {
     expect(r.rawMaterialConsumed).toBe(943250);
   });
 
-  it('produce MOD integral = 39.000.000 (Armado)', () => {
+  it('produce MOD = básicas 4.500.000 × (1 + ITCS 79,99 %)', () => {
     const r = runCalculation(input);
-    expect(r.directLaborTotal).toBe(39000000);
+    expect(r.directLaborTotal).toBeCloseTo(8099565.43, 0);
   });
 
   it('aplica CIP = 200 × 900 = 180.000', () => {
@@ -62,23 +79,23 @@ describe('runCalculation — orquestación completa del motor', () => {
 
   it('consolida el costo de producción coherentemente', () => {
     const r = runCalculation(input);
-    // Producción = MP 943250 + MOD 39.000.000 + CIP 180.000 = 40.123.250
-    expect(r.productionCost).toBe(40123250);
-    expect(r.costOfGoodsSold).toBe(40123250); // sin inventarios
+    // Producción = MP 943.250 + MOD ~8.099.565 + CIP 180.000
+    expect(r.productionCost).toBeCloseTo(9222815.43, 0);
+    expect(r.costOfGoodsSold).toBeCloseTo(9222815.43, 0); // sin inventarios
   });
 
   it('calcula el margen (ventas 3.000.000 − CPV)', () => {
     const r = runCalculation(input);
-    // Ventas = 3000 × 1000 = 3.000.000; CPV enorme → margen negativo
-    expect(r.grossMargin).toBe(3000000 - 40123250);
+    // Ventas = 3000 × 1000 = 3.000.000; CPV mayor → margen negativo
+    expect(r.grossMargin).toBeCloseTo(3000000 - 9222815.43, 0);
     expect(r.grossMarginPct).toBeLessThan(0);
   });
 
   it('expone el detalle por hoja', () => {
     const r = runCalculation(input);
     expect(r.detail.rawMaterial.optimalLot).toBeCloseTo(836.66, 1);
-    expect(r.detail.directLabor.workingDays).toBe(230);
-    expect(r.detail.directLabor.itcsPercent).toBe(50);
+    expect(r.detail.directLabor.workingDays).toBe(221);
+    expect(r.detail.directLabor.itcsPercent).toBeCloseTo(79.99, 1);
     expect(r.detail.indirectCosts.perDepartment.prod1!.appliedCip).toBe(180000);
   });
 });

@@ -25,15 +25,28 @@ const catedra = {
     ],
   },
   directLaborConfig: {
-    workingDays: { totalDaysPerYear: 365, nonWorkingDays: 115, vacationDays: 14, averageAbsenceDays: 6 },
-    socialCharges: [
-      { name: 'Jubilación', percent: 16 }, { name: 'Obra social', percent: 6 },
-      { name: 'ART', percent: 5 }, { name: 'SAC s/cargas', percent: 9 },
-      { name: 'Vacaciones', percent: 6 }, { name: 'Otros', percent: 8 },
-    ],
+    workingDays: {
+      totalDaysPerYear: 365,
+      unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 3, holidaysOnWeekend: 4 },
+      paidAbsence: { holidays: 19, vacations: 14, sickness: 5, specialLeaves: 2, workAccidents: 1 },
+    },
+    itcs: {
+      derivationBase: 0.27, fixedArt: 0.015,
+      uncertainRemunerative: [
+        { name: 'Premio por Productividad', coefficient: 0.03 },
+        { name: 'Antigüedad', coefficient: 0.04 },
+        { name: 'Premio por Asistencia Perfecta', coefficient: 0.02 },
+      ],
+      uncertainNonRemunerative: [
+        { name: 'Ropa de trabajo', coefficient: 0.01 },
+        { name: 'Viandas / comedor', coefficient: 0.015 },
+        { name: 'Medicamentos', coefficient: 0.005 },
+      ],
+    },
     departments: [
-      { departmentName: 'Armado', workers: 5, monthlyWage: 400000, hoursPerDay: 8 },
-      { departmentName: 'Pintura', workers: 3, monthlyWage: 350000, hoursPerDay: 8 },
+      { name: 'Departamento Productivo 1', basicRemuneration: 4500000, hoursWorked: 12000 },
+      { name: 'Departamento Productivo 2', basicRemuneration: 3200000, hoursWorked: 9000 },
+      { name: 'Departamento Productivo 3', basicRemuneration: 2800000, hoursWorked: 8000 },
     ],
   },
   indirectCostConfig: {

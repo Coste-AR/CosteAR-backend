@@ -70,12 +70,8 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const rawMaterialConsumed = ledger.rawMaterialConsumed;
 
   // --- Hoja 2: Mano de Obra Directa ---
-  const labor = calcDirectLabor(
-    input.directLabor.workingDays,
-    input.directLabor.socialCharges,
-    input.directLabor.departments,
-  );
-  const directLaborTotal = labor.totalIntegralCost;
+  const labor = calcDirectLabor(input.directLabor);
+  const directLaborTotal = labor.totalMod;
 
   // --- Hoja 3: Costos Indirectos ---
   const centers: CostCenter[] = input.indirectCosts.centers;
@@ -149,7 +145,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
 
   const hourlyRates: Record<string, number> = {};
   for (const d of labor.departments) {
-    hourlyRates[d.departmentName] = d.hourlyRate.toNumber();
+    hourlyRates[d.name] = d.hourlyRate.toNumber();
   }
 
   return {
@@ -167,8 +163,8 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         finalStockValue: ledger.finalBalanceValue.toNumber(),
       },
       directLabor: {
-        workingDays: labor.workingDays.toNumber(),
-        itcsPercent: labor.itcs.toPercent(),
+        workingDays: labor.workingDays.effectiveWorkDays.toNumber(),
+        itcsPercent: labor.itcs.itcs.toPercent(),
         hourlyRates,
       },
       indirectCosts: { perDepartment },
