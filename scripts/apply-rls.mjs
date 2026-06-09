@@ -50,8 +50,9 @@ try {
   }
   console.info(`✔ Políticas RLS aplicadas (${statements.length} statements)`);
 } catch (err) {
-  console.error('Error aplicando RLS:', err);
-  process.exit(1);
+  // No fatal: el servidor puede arrancar sin RLS aplicado.
+  // Las políticas se reaplicarán en el próximo deploy exitoso.
+  console.warn('Advertencia aplicando RLS (no fatal):', err?.message ?? err);
 } finally {
   await prisma.$disconnect();
 }

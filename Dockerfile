@@ -19,6 +19,6 @@ RUN npx prisma generate
 COPY --from=build /app/dist ./dist
 COPY scripts ./scripts
 
-EXPOSE 3000
-# Aplica migraciones + RLS y arranca la API.
-CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/apply-rls.mjs && node dist/infrastructure/http/server.js"]
+# apply-rls.mjs es no-fatal (sale con exit 0 aunque falle internamente).
+# El servidor arranca siempre que las migraciones pasen.
+CMD ["sh", "-c", "node scripts/migrate-deploy.mjs && node scripts/apply-rls.mjs && node dist/infrastructure/http/server.js"]

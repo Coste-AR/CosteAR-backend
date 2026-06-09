@@ -1,5 +1,4 @@
 // Capturar errores no manejados ANTES de cualquier otra cosa.
-// Sin esto los crashes del startup aparecen silenciosos en Railway.
 process.on('uncaughtException', (err) => {
   console.error('[FATAL] uncaughtException:', err);
   process.exit(1);
@@ -19,19 +18,22 @@ import { scheduleMacroSync } from '../workers/scheduler.js';
 /**
  * Punto de entrada del servidor HTTP.
  *
- * Redis/BullMQ es opcional: si no está disponible el servidor arranca en
- * modo degradado (sin recálculo automático). El healthcheck en /health
- * siempre responde para que Railway no marque el deploy como fallido.
+ * El servidor escucha PRIMERO para que el healthcheck pase.
+ * Workers y BullMQ se inician después, en modo degradado si Redis no está.
  */
 async function main(): Promise<void> {
   console.log('[startup] Iniciando CosteAR backend...');
+
   const env = getEnv();
   console.log(`[startup] Entorno: ${env.NODE_ENV}, puerto: ${env.PORT}`);
 
-  // buildApp puede fallar si faltan env vars críticas (JWT, DB, etc.)
   const app = await buildApp();
 
-  // --- Workers BullMQ (degradable) ---
+  // --- Escuchar PRIMERO — el healthcheck debe responder cuanto antes ---
+  await app.listen({ port: env.PORT, host: '0.0.0.0' });
+  app.log.info(`CosteAR API escuchando en http://0.0.0.0:${env.PORT}`);
+
+  // --- Workers BullMQ (degradable — no bloquea el startup) ---
   let macroWorker: Awaited<ReturnType<typeof startMacroSyncWorker>> | null = null;
   let recalcWorker: Awaited<ReturnType<typeof startRecalculateWorker>> | null = null;
 
@@ -40,7 +42,7 @@ async function main(): Promise<void> {
     recalcWorker = startRecalculateWorker();
     app.log.info('Workers BullMQ activos: macro-sync, recalculate');
   } catch (err) {
-    app.log.warn({ err }, 'Workers BullMQ no pudieron iniciarse — modo degradado (sin recálculo automático)');
+    app.log.warn({ err }, 'Workers BullMQ no pudieron iniciarse — modo degradado');
   }
 
   // --- Cron + startup sync (degradable) ---
@@ -48,7 +50,6 @@ async function main(): Promise<void> {
     try {
       await scheduleMacroSync(macroSyncQueue, env.MACRO_SYNC_CRON);
       app.log.info(`Cron macro-sync programado: ${env.MACRO_SYNC_CRON}`);
-
       if (env.NODE_ENV === 'production') {
         await macroSyncQueue.add('startup-sync', {}, { delay: 5_000 });
       }
@@ -66,15 +67,6 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', () => void close('SIGINT'));
   process.on('SIGTERM', () => void close('SIGTERM'));
-
-  // --- HTTP listen (siempre, aunque Redis haya fallado) ---
-  try {
-    await app.listen({ port: env.PORT, host: '0.0.0.0' });
-    app.log.info(`CosteAR API escuchando en http://localhost:${env.PORT}`);
-  } catch (err) {
-    app.log.error(err);
-    process.exit(1);
-  }
 }
 
 void main();
