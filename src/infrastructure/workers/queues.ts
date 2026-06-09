@@ -2,40 +2,77 @@ import { Queue, type ConnectionOptions } from 'bullmq';
 import { getEnv } from '../config/env.js';
 
 /**
- * Conexión a Redis para BullMQ expresada como opciones (host/port), no como
- * instancia de ioredis: así evitamos el conflicto de tipos entre la copia de
- * ioredis de la app y la que bundlea BullMQ. BullMQ crea su propia conexión.
+ * Parsea REDIS_URL en formato host/port para BullMQ.
+ * Acepta:
+ *   - redis://[:password@]host:port
+ *   - rediss://[:password@]host:port  (TLS)
+ *   - host:port  (sin scheme, formato interno Railway)
  *
- * Fail-fast: si Redis no está disponible BullMQ lanza en vez de reintentar
- * indefinidamente, lo que colgaría el proceso antes de que el servidor escuche.
+ * Fail-fast: connectTimeout 4 s, sin reintentos.
+ * Si Redis no está disponible BullMQ lanza en vez de colgar el proceso.
  */
 function parseRedisConnection(): ConnectionOptions {
-  const url = new URL(getEnv().REDIS_URL);
+  const raw = getEnv().REDIS_URL;
+
+  // Añadir scheme si falta para que URL() no tire.
+  const normalized = /^rediss?:\/\//i.test(raw) ? raw : `redis://${raw}`;
+
+  let host = 'localhost';
+  let port = 6379;
+  let password: string | undefined;
+  let tls = false;
+
+  try {
+    const url = new URL(normalized);
+    host = url.hostname || 'localhost';
+    port = url.port ? Number(url.port) : 6379;
+    password = url.password || undefined;
+    tls = url.protocol === 'rediss:';
+  } catch {
+    // URL inválida — usar defaults y dejar que el error aparezca en los logs
+    console.warn(`[queues] REDIS_URL inválida: "${raw}" — usando localhost:6379`);
+  }
+
   return {
-    host: url.hostname,
-    port: url.port ? Number(url.port) : 6379,
-    ...(url.password ? { password: url.password } : {}),
-    // null = reintentos infinitos (cuelga el proceso) → 0 = falla inmediato
+    host,
+    port,
+    ...(password ? { password } : {}),
+    ...(tls ? { tls: {} } : {}),
+    // Fail-fast: no reintentar si Redis no está disponible.
     maxRetriesPerRequest: 0,
-    // Sin retryStrategy BullMQ reintenta con backoff exponencial para siempre.
-    // Retornando null se desactiva: el error llega al caller.
     retryStrategy: () => null,
-    // Aborta el intento de conexión TCP a los 4 s.
     connectTimeout: 4_000,
-    // No esperar a que la conexión esté lista antes de devolver el cliente.
-    enableOfflineQueue: false,
   };
 }
-
-export const connection: ConnectionOptions = parseRedisConnection();
 
 export const QUEUE_NAMES = {
   macroSync: 'macro-sync',
   recalculate: 'recalculate',
 } as const;
 
-export const macroSyncQueue = new Queue(QUEUE_NAMES.macroSync, { connection });
-export const recalculateQueue = new Queue(QUEUE_NAMES.recalculate, { connection });
+/**
+ * Crea una Queue con conexión fail-fast.
+ * Si la creación falla (URL inválida, Redis caído) devuelve null para que
+ * server.ts pueda arrancar en modo degradado.
+ */
+function createQueue(name: string): Queue | null {
+  try {
+    const connection = parseRedisConnection();
+    return new Queue(name, { connection });
+  } catch (err) {
+    console.warn(`[queues] No se pudo crear la queue "${name}":`, err);
+    return null;
+  }
+}
+
+// Las queues se crean una sola vez al importar el módulo.
+// Si Redis no está disponible quedan en null; server.ts maneja el modo degradado.
+export const macroSyncQueue: Queue = createQueue(QUEUE_NAMES.macroSync) as Queue;
+export const recalculateQueue: Queue = createQueue(QUEUE_NAMES.recalculate) as Queue;
+
+export function getConnection(): ConnectionOptions {
+  return parseRedisConnection();
+}
 
 export interface RecalculateJob {
   /** Indicador macro que cambió y disparó el recálculo. */

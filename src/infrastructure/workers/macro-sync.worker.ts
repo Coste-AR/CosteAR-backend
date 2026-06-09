@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { connection, QUEUE_NAMES, recalculateQueue } from './queues.js';
+import { getConnection, QUEUE_NAMES, recalculateQueue } from './queues.js';
 import { BcraClient } from '../external-apis/bcra.js';
 import { IndecClient } from '../external-apis/indec.js';
 import { MacroService } from '../../application/macro/macro-service.js';
@@ -37,7 +37,7 @@ export function startMacroSyncWorker(): Worker {
 
       return { significantChange };
     },
-    { connection },
+    { connection: getConnection() },
   );
 }
 

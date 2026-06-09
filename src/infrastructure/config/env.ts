@@ -10,8 +10,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   API_VERSION: z.string().default('v1'),
 
-  DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url(),
+  DATABASE_URL: z.string().min(1),
+  // REDIS_URL puede ser una URL completa (redis://...) o host:port.
+  // No forzamos .url() para no rechazar formatos válidos de Railway.
+  REDIS_URL: z.string().min(1),
 
   JWT_PRIVATE_KEY: z.string().min(1),
   JWT_PUBLIC_KEY: z.string().min(1),

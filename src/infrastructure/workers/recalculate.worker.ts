@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { connection, QUEUE_NAMES, type RecalculateJob } from './queues.js';
+import { getConnection, QUEUE_NAMES, type RecalculateJob } from './queues.js';
 import { prisma } from '../database/prisma.js';
 import { CostStructureService } from '../../application/cost-structures/cost-structure-service.js';
 import { AlertService } from '../../application/alerts/alert-service.js';
@@ -71,6 +71,6 @@ export function startRecalculateWorker(): Worker<RecalculateJob> {
 
       return { recalculated: active.length, alerted };
     },
-    { connection },
+    { connection: getConnection() },
   );
 }
