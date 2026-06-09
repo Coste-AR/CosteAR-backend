@@ -69,17 +69,8 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export { isValidCuitCuil };
 
 export const loginSchema = z.object({
-  // CUIT/CUIL es el identificador principal de sesión (11 dígitos, con o sin guiones).
-  cuit: z
-    .string()
-    .trim()
-    .refine(
-      (v) => {
-        const clean = v.replace(/[-\s]/g, '');
-        return /^\d{11}$/.test(clean);
-      },
-      'CUIT/CUIL inválido — debe tener 11 dígitos',
-    ),
+  // Identificador: puede ser CUIT/CUIL (costistas) o email (operadores de empresa).
+  identifier: z.string().trim().min(1, 'Ingresá tu CUIT o email'),
   password: z.string().min(1, 'La contraseña es requerida'),
   // Código TOTP opcional: se exige en un segundo paso si el usuario tiene 2FA.
   twoFactorCode: z.string().regex(/^\d{6}$/).optional(),

@@ -43,6 +43,33 @@ export class EmailService {
     );
   }
 
+  async sendOperatorInvite(
+    to: string,
+    operatorName: string,
+    companyName: string,
+    tempPassword: string,
+  ): Promise<void> {
+    const env = getEnv();
+    const loginUrl = `${env.CORS_ORIGIN.split(',')[0]}/login`;
+    await this.send(
+      to,
+      `CosteAR — Acceso al portal de ${companyName}`,
+      `<div style="font-family:Arial,sans-serif;color:#16181D;max-width:520px">
+        <h2 style="color:#6E1423">CosteAR</h2>
+        <p>Hola <strong>${operatorName}</strong>,</p>
+        <p>Tu costista te habilitó el acceso al portal de carga de datos de <strong>${companyName}</strong>.</p>
+        <div style="background:#f6f5f3;border-radius:8px;padding:16px;margin:16px 0">
+          <p style="margin:0 0 8px;font-size:13px;color:#5B6066">TUS CREDENCIALES</p>
+          <p style="margin:4px 0"><strong>Email:</strong> ${to}</p>
+          <p style="margin:4px 0"><strong>Contraseña temporal:</strong> <code style="background:#e8e6e3;padding:2px 6px;border-radius:4px">${tempPassword}</code></p>
+        </div>
+        <p>Al ingresar por primera vez, vas a poder cambiar tu contraseña.</p>
+        <p><a href="${loginUrl}" style="background:#6E1423;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">Ingresar al portal</a></p>
+        <p style="color:#5B6066;font-size:12px;margin-top:24px">Si no esperabas este acceso, ignorá este mensaje.</p>
+      </div>`,
+    );
+  }
+
   async sendMarginAlert(
     to: string,
     companyName: string,

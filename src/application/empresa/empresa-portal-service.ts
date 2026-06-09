@@ -1,35 +1,42 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { hashPassword } from '../../infrastructure/crypto/password.js';
-import { NotFoundError, ConflictError, ForbiddenError } from '../../domain/errors/domain-error.js';
+import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
+import { EmailService } from '../../infrastructure/email/email-service.js';
 import { randomBytes } from 'node:crypto';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
  *
- * Flujo:
- *  1. El costista llama a generateOperatorAccess(companyId, costistId).
+ * Flujo revisado:
+ *  1. El costista llama a generateOperatorAccess(companyId, costistId, name, email).
  *     Se crea un User con rol EMPRESA_OPERATOR vinculado a la EmpresaConnection.
- *     Se devuelven las credenciales temporales al costista para que las comparta.
- *  2. El operador inicia sesión con CUIT temporal + contraseña temporal.
+ *     Se envía un email al operador con sus credenciales temporales.
+ *     mustChangePassword = true → el operador debe cambiar su contraseña al entrar.
+ *  2. El operador inicia sesión con su EMAIL + contraseña temporal.
  *     El router del front detecta rol EMPRESA_OPERATOR y muestra solo el portal.
+ *     Si mustChangePassword está activo, redirige a cambiar contraseña.
  *  3. El operador sube documentos (texto o nombre de archivo).
  *     Se crean DataEntry con status PENDING para que el costista valide.
  *  4. El costista puede ver sus operadores y revocar accesos.
  */
 export class EmpresaPortalService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly emailService: EmailService = new EmailService(),
+  ) {}
 
   /**
    * El costista genera un operador para una empresa.
-   * Crea la EmpresaConnection si no existe todavía.
-   * Devuelve las credenciales en claro una única vez.
+   * El operador recibe sus credenciales por email.
+   * Devuelve las credenciales en claro para que el costista también las vea una única vez.
    */
   async generateOperatorAccess(
     companyId: string,
     costistId: string,
     operatorName: string,
-  ): Promise<{ cuit: string; tempPassword: string; operatorId: string }> {
+    operatorEmail: string,
+  ): Promise<{ email: string; tempPassword: string; operatorId: string }> {
     // Verificar que la empresa pertenece al costista
     const company = await this.db.company.findFirst({
       where: { id: companyId, userId: costistId },
@@ -46,31 +53,34 @@ export class EmpresaPortalService {
       });
     }
 
-    // Generar credenciales temporales
-    // CUIT sintético: prefijo 88 (no válido para personas reales, así se diferencia)
-    // + 8 dígitos random + dígito verificador 0
-    const randomPart = randomBytes(4).toString('hex').slice(0, 8); // 8 hex chars → 8 dígitos
-    const cuitBase = `88${randomPart}`;
-    // Calcular dígito verificador real
-    const cuit = buildSyntheticCuit(cuitBase);
-
-    const tempPassword = randomBytes(6).toString('hex'); // 12 chars legibles
+    const tempPassword = randomBytes(6).toString('hex'); // 12 chars alfanuméricos
     const passwordHash = await hashPassword(tempPassword);
 
     const operator = await this.db.user.create({
       data: {
         name: operatorName,
-        email: `operador-${connection.id}-${Date.now()}@costear.internal`,
-        cuit,
+        email: operatorEmail.toLowerCase().trim(),
         passwordHash,
         role: 'EMPRESA_OPERATOR',
+        mustChangePassword: true,
         operatorConnectionId: connection.id,
-        // Onboarding no aplica para operadores
         onboardedAt: new Date(),
       },
     });
 
-    return { cuit, tempPassword, operatorId: operator.id };
+    // Enviar credenciales por email (no fatal: si falla el email el acceso igual se crea)
+    try {
+      await this.emailService.sendOperatorInvite(
+        operatorEmail,
+        operatorName,
+        company.name,
+        tempPassword,
+      );
+    } catch (err) {
+      console.warn('[empresa-portal] Email de invitación no pudo enviarse:', err);
+    }
+
+    return { email: operatorEmail, tempPassword, operatorId: operator.id };
   }
 
   /**
@@ -87,7 +97,7 @@ export class EmpresaPortalService {
       select: {
         id: true,
         name: true,
-        cuit: true,
+        email: true,
         isActive: true,
         createdAt: true,
       },
@@ -176,19 +186,4 @@ export class EmpresaPortalService {
       },
     });
   }
-}
-
-/**
- * Genera un CUIT sintético (prefijo 88) con dígito verificador válido.
- * Se usa solo para identificar operadores de empresa en el sistema.
- */
-function buildSyntheticCuit(base: string): string {
-  // base = "88XXXXXXXX" (10 dígitos)
-  const digits = base.padEnd(10, '0').slice(0, 10).split('').map(Number);
-  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
-  const sum = weights.reduce((acc, w, i) => acc + w * (digits[i] ?? 0), 0);
-  const mod = 11 - (sum % 11);
-  const check = mod === 11 ? 0 : mod === 10 ? 9 : mod;
-  // Formato: XX-XXXXXXXX-X
-  return `${base.slice(0, 2)}-${base.slice(2, 10)}-${check}`;
 }

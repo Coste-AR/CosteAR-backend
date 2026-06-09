@@ -5,6 +5,7 @@ import { authenticate } from '../plugins/authenticate.js';
 
 const generateAccessSchema = z.object({
   operatorName: z.string().min(2, 'Nombre demasiado corto').max(120).trim(),
+  operatorEmail: z.string().email('Email inválido').toLowerCase().trim(),
 });
 
 const submitDocSchema = z.object({
@@ -24,8 +25,8 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
     { preHandler: authenticate },
     async (request, reply) => {
       const { companyId } = request.params as { companyId: string };
-      const { operatorName } = generateAccessSchema.parse(request.body);
-      const result = await svc.generateOperatorAccess(companyId, request.authUser!.id, operatorName);
+      const { operatorName, operatorEmail } = generateAccessSchema.parse(request.body);
+      const result = await svc.generateOperatorAccess(companyId, request.authUser!.id, operatorName, operatorEmail);
       return reply.status(201).send({ data: result });
     },
   );

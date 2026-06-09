@@ -55,6 +55,7 @@ model User {
   isLocked            Boolean   @default(false)
   failedLoginAttempts Int       @default(0)
   lockedUntil         DateTime?
+  mustChangePassword  Boolean   @default(false) // true en operadores invitados hasta que cambien la clave
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt

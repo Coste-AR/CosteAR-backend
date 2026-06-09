@@ -7,7 +7,9 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyTwoFactorSchema,
+  passwordSchema,
 } from '../../../shared/schemas/auth.schema.js';
+import { z } from 'zod';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
 import { getEnv } from '../../config/env.js';
 
@@ -136,6 +138,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/reset-password', async (request, reply) => {
     const input = resetPasswordSchema.parse(request.body);
     await auth.resetPassword(input, auditContext(request));
+    return reply.send({ data: { success: true } });
+  });
+
+  // --- Cambio de contraseña en primer login (solo EMPRESA_OPERATOR con mustChangePassword) ---
+
+  app.post('/auth/set-first-password', { preHandler: authenticate }, async (request, reply) => {
+    const { newPassword } = z.object({ newPassword: passwordSchema }).parse(request.body);
+    await auth.setFirstPassword(request.authUser!.id, newPassword, auditContext(request));
     return reply.send({ data: { success: true } });
   });
 

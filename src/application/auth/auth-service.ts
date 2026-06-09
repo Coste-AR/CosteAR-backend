@@ -24,6 +24,7 @@ import {
   InvalidTwoFactorError,
   InvalidRefreshTokenError,
 } from '../../domain/errors/auth-errors.js';
+import { ForbiddenError } from '../../domain/errors/domain-error.js';
 import { getEnv } from '../../infrastructure/config/env.js';
 import type {
   RegisterInput,
@@ -42,7 +43,7 @@ export interface TokenPair {
 }
 
 export interface AuthResult {
-  user: { id: string; email: string; name: string; role: string };
+  user: { id: string; email: string; name: string; role: string; mustChangePassword: boolean };
   tokens: TokenPair;
 }
 
@@ -126,15 +127,26 @@ export class AuthService {
   // -- Login --------------------------------------------------------------
 
   async login(input: LoginInput, ctx: AuditContext): Promise<AuthResult> {
-    // Normalizar CUIT: buscar con y sin guiones
-    const cuitClean = input.cuit.replace(/[-\s]/g, '');
-    const cuitFormatted =
-      cuitClean.length === 11
-        ? `${cuitClean.slice(0, 2)}-${cuitClean.slice(2, 10)}-${cuitClean.slice(10)}`
-        : input.cuit;
-    const user = await this.db.user.findFirst({
-      where: { cuit: { in: [input.cuit, cuitClean, cuitFormatted] } },
-    });
+    // El identificador puede ser email (operadores) o CUIT (costistas).
+    const isEmail = input.identifier.includes('@');
+
+    let user: User | null = null;
+
+    if (isEmail) {
+      user = await this.db.user.findUnique({
+        where: { email: input.identifier.toLowerCase().trim() },
+      });
+    } else {
+      // Normalizar CUIT: buscar con y sin guiones
+      const cuitClean = input.identifier.replace(/[-\s]/g, '');
+      const cuitFormatted =
+        cuitClean.length === 11
+          ? `${cuitClean.slice(0, 2)}-${cuitClean.slice(2, 10)}-${cuitClean.slice(10)}`
+          : input.identifier;
+      user = await this.db.user.findFirst({
+        where: { cuit: { in: [input.identifier, cuitClean, cuitFormatted] } },
+      });
+    }
 
     // Comparación a tiempo constante incluso si el usuario no existe: siempre
     // ejecutamos un verify para no filtrar la existencia por timing.
@@ -143,7 +155,7 @@ export class AuthService {
         '$argon2id$v=19$m=65536,t=3,p=4$ZHVtbXlzYWx0ZHVtbXk$ZHVtbXloYXNoZHVtbXloYXNoZHVtbXloYXNoZHVt',
         input.password,
       );
-      await recordAudit({ ...ctx, action: 'auth.login.unknown_cuit', newValue: { cuit: input.cuit } }, this.db);
+      await recordAudit({ ...ctx, action: 'auth.login.unknown_identifier', newValue: { identifier: input.identifier } }, this.db);
       throw new InvalidCredentialsError();
     }
 
@@ -388,7 +400,30 @@ export class AuthService {
     return user;
   }
 
+  /**
+   * Permite a un operador con mustChangePassword=true establecer su nueva contraseña.
+   * No requiere la contraseña actual: la clave temporal ya fue verificada en el login.
+   */
+  async setFirstPassword(userId: string, newPassword: string, ctx: AuditContext): Promise<void> {
+    const user = await this.requireUser(userId);
+    if (!user.mustChangePassword) {
+      throw new ForbiddenError('Esta acción solo está disponible en el primer inicio de sesión');
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await this.db.user.update({
+      where: { id: userId },
+      data: { passwordHash, mustChangePassword: false },
+    });
+    await recordAudit({ ...ctx, userId, action: 'auth.password.first_change' }, this.db);
+  }
+
   private publicUser(user: User) {
-    return { id: user.id, email: user.email, name: user.name, role: user.role };
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+    };
   }
 }
