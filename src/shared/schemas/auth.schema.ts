@@ -16,16 +16,10 @@ export const passwordSchema = z
   .regex(/[A-Z]/, 'Debe incluir al menos una mayúscula')
   .regex(/[0-9]/, 'Debe incluir al menos un número');
 
-/** Validación de CUIT/CUIL argentino (11 dígitos + dígito verificador). */
+/** Validación de CUIT/CUIL argentino — 11 dígitos numéricos (con o sin guiones). */
 function isValidCuitCuil(value: string): boolean {
   const clean = value.replace(/[-\s]/g, '');
-  if (!/^\d{11}$/.test(clean)) return false;
-  const digits = clean.split('').map(Number);
-  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
-  const sum = weights.reduce((acc, w, i) => acc + w * digits[i]!, 0);
-  const mod = 11 - (sum % 11);
-  const check = mod === 11 ? 0 : mod === 10 ? 9 : mod;
-  return check === digits[10];
+  return /^\d{11}$/.test(clean);
 }
 
 export const professionalTypeSchema = z.enum([
