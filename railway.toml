@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "npm run prisma:deploy && npm run start"
+startCommand = "node scripts/migrate-deploy.mjs && node scripts/apply-rls.mjs && node dist/infrastructure/http/entry.js"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"

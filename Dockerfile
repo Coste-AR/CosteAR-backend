@@ -21,4 +21,4 @@ COPY scripts ./scripts
 
 # apply-rls.mjs es no-fatal (sale con exit 0 aunque falle internamente).
 # El servidor arranca siempre que las migraciones pasen.
-CMD ["sh", "-c", "node scripts/migrate-deploy.mjs && node scripts/apply-rls.mjs && node dist/infrastructure/http/server.js"]
+CMD ["sh", "-c", "node scripts/migrate-deploy.mjs && node scripts/apply-rls.mjs && node dist/infrastructure/http/entry.js"]
