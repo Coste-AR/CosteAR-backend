@@ -76,7 +76,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   // --- Rate limiting global respaldado por Redis ---
   // En test usamos el store en memoria para no requerir Redis.
   if (env.NODE_ENV !== 'test') {
-    const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: true });
+    // retryStrategy: null → falla inmediato si no hay conexión, no reintenta.
+    // connectTimeout: 4 000 ms → no bloquea el startup indefinidamente.
+    const redis = new Redis(env.REDIS_URL, {
+      maxRetriesPerRequest: 0,
+      retryStrategy: () => null,
+      lazyConnect: true,
+      connectTimeout: 4_000,
+    });
     await redis.connect().catch(() => {
       app.log.warn('Redis no disponible: rate limit usará memoria local');
     });
