@@ -2,9 +2,6 @@
 builder = "nixpacks"
 
 [deploy]
-# Sin healthcheckPath: Railway considera el deploy exitoso en cuanto el proceso
-# arranca. Esto evita que el healthcheck timeout bloquee deploys que tardan
-# en inicializarse (migraciones + Redis + workers).
-startCommand = "node scripts/migrate-deploy.mjs && node scripts/apply-rls.mjs && node dist/infrastructure/http/entry.js"
+startCommand = "node dist/infrastructure/http/entry.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
