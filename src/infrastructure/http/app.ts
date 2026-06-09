@@ -53,10 +53,18 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // --- CORS: lista blanca explícita, nunca '*' con credenciales ---
+  // CORS_ORIGIN puede ser una lista separada por comas: "https://foo.vercel.app,http://localhost:5173"
+  const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
   await app.register(cors, {
-    origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()),
+    origin: (origin, cb) => {
+      // Requests sin origin (curl, Postman, server-to-server) siempre pasan.
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      app.log.warn({ origin, allowedOrigins }, 'CORS: origen rechazado');
+      cb(new Error(`Origin ${origin} no permitido por CORS`), false);
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
   // --- Cookies firmadas (refresh token httpOnly) ---
