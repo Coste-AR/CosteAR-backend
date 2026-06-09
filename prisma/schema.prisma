@@ -67,9 +67,10 @@ model User {
   passwordResets      PasswordReset[]
   alertSettings       AlertSetting?
   costistConnections  EmpresaConnection[] @relation("costist_connections")
-  // Para EMPRESA_OPERATOR: referencia a la conexión que les da acceso
-  operatorConnectionId String? @db.Uuid
-  operatorConnection   EmpresaConnection? @relation("operator_connection", fields: [operatorConnectionId], references: [id], onDelete: SetNull)
+  // Para EMPRESA_OPERATOR: puede pertenecer a varias empresas
+  memberships         OperatorMembership[]
+  sentInvites         OperatorInvite[]    @relation("invite_sender")
+  receivedInvites     OperatorInvite[]    @relation("invite_receiver")
 
   @@map("users")
 }
@@ -289,11 +290,57 @@ model EmpresaConnection {
   updatedAt   DateTime @updatedAt
 
   dataEntries DataEntry[]
-  operators   User[]      @relation("operator_connection")
+  memberships OperatorMembership[]
+  invites     OperatorInvite[]
 
   @@unique([companyId, costistId])
   @@index([costistId])
   @@map("empresa_connections")
+}
+
+// Un operador puede pertenecer a N empresas (una membership por empresa)
+model OperatorMembership {
+  id           String            @id @default(uuid()) @db.Uuid
+  operatorId   String            @db.Uuid
+  operator     User              @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  connectionId String            @db.Uuid
+  connection   EmpresaConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  isActive     Boolean           @default(true)
+  joinedAt     DateTime          @default(now())
+
+  @@unique([operatorId, connectionId])
+  @@index([operatorId])
+  @@index([connectionId])
+  @@map("operator_memberships")
+}
+
+// Código de invitación para que un operador se una a una empresa
+model OperatorInvite {
+  id           String            @id @default(uuid()) @db.Uuid
+  code         String            @unique              // código legible, ej: "THIBAUT-X7K2"
+  connectionId String            @db.Uuid
+  connection   EmpresaConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  costistId    String            @db.Uuid             // quien generó la invitación
+  costist      User              @relation("invite_sender", fields: [costistId], references: [id], onDelete: Cascade)
+  inviteeEmail String                                 // email al que se invitó
+  inviteeId    String?           @db.Uuid             // se rellena cuando acepta
+  invitee      User?             @relation("invite_receiver", fields: [inviteeId], references: [id], onDelete: SetNull)
+  status       InviteStatus      @default(PENDING)
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  createdAt    DateTime          @default(now())
+
+  @@index([code])
+  @@index([connectionId])
+  @@index([inviteeEmail])
+  @@map("operator_invites")
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
 }
 
 // ---------------------------------------------------------------------------
