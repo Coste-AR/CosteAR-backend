@@ -3,6 +3,7 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { hashPassword } from '../../infrastructure/crypto/password.js';
 import { NotFoundError, ForbiddenError, ConflictError } from '../../domain/errors/domain-error.js';
 import { EmailService } from '../../infrastructure/email/email-service.js';
+import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { randomBytes } from 'node:crypto';
 
 /**
@@ -29,6 +30,7 @@ export class EmpresaPortalService {
   constructor(
     private readonly db: PrismaClient = prisma,
     private readonly emailService: EmailService = new EmailService(),
+    private readonly groq: GroqService = new GroqService(),
   ) {}
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -279,6 +281,14 @@ export class EmpresaPortalService {
       throw new ForbiddenError('Tenés acceso a varias empresas. Indicá a cuál querés enviar.');
     }
 
+    // Análisis de AI — no bloquea el guardado si falla
+    const aiAnalysis = await this.groq.analyzeDocument({
+      text: input.rawContent,
+      fileData: input.fileData,
+      fileMimeType: input.fileMimeType,
+      fileName: input.fileName,
+    });
+
     return this.db.dataEntry.create({
       data: {
         connectionId: membership.connectionId,
@@ -289,6 +299,7 @@ export class EmpresaPortalService {
         fileName: input.fileName ?? null,
         fileData: input.fileData ?? null,
         fileMimeType: input.fileMimeType ?? null,
+        reviewNote: aiAnalysis || null,
       },
     });
   }

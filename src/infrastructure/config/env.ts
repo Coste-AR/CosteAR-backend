@@ -23,6 +23,8 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().min(1).default('re_placeholder'),
   EMAIL_FROM: z.string().default('noreply@costear.app'),
 
+  GROQ_API_KEY: z.string().min(1).default(''),
+
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),
   INDEC_API_URL: z.string().url().default('https://apis.datos.gob.ar/series/api'),
 
