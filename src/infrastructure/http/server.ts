@@ -1,3 +1,14 @@
+// Capturar errores no manejados ANTES de cualquier otra cosa.
+// Sin esto los crashes del startup aparecen silenciosos en Railway.
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] uncaughtException:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] unhandledRejection:', reason);
+  process.exit(1);
+});
+
 import { buildApp } from './app.js';
 import { getEnv } from '../config/env.js';
 import { startMacroSyncWorker } from '../workers/macro-sync.worker.js';
@@ -13,7 +24,9 @@ import { scheduleMacroSync } from '../workers/scheduler.js';
  * siempre responde para que Railway no marque el deploy como fallido.
  */
 async function main(): Promise<void> {
+  console.log('[startup] Iniciando CosteAR backend...');
   const env = getEnv();
+  console.log(`[startup] Entorno: ${env.NODE_ENV}, puerto: ${env.PORT}`);
 
   // buildApp puede fallar si faltan env vars críticas (JWT, DB, etc.)
   const app = await buildApp();
