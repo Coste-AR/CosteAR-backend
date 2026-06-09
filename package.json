@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch --env-file=.env src/infrastructure/http/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/infrastructure/http/entry.js",
     "start:worker": "node dist/infrastructure/workers/index.js",
     "test": "vitest run",

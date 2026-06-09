@@ -58,7 +58,9 @@ export const QUEUE_NAMES = {
 function createQueue(name: string): Queue | null {
   try {
     const connection = parseRedisConnection();
-    return new Queue(name, { connection });
+    const queue = new Queue(name, { connection });
+    queue.on('error', (err) => console.warn(`[queues] Queue "${name}" error:`, err.message));
+    return queue;
   } catch (err) {
     console.warn(`[queues] No se pudo crear la queue "${name}":`, err);
     return null;

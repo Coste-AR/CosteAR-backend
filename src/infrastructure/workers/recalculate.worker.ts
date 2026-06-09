@@ -16,7 +16,7 @@ export function startRecalculateWorker(): Worker<RecalculateJob> {
   const alerts = new AlertService();
   const email = new EmailService();
 
-  return new Worker<RecalculateJob>(
+  const worker = new Worker<RecalculateJob>(
     QUEUE_NAMES.recalculate,
     async (job) => {
       const candidates = await prisma.costStructure.findMany({
@@ -73,4 +73,6 @@ export function startRecalculateWorker(): Worker<RecalculateJob> {
     },
     { connection: getConnection() },
   );
+  worker.on('error', (err) => console.warn('[worker] recalculate error:', err.message));
+  return worker;
 }

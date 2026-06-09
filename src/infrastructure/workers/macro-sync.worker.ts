@@ -15,7 +15,7 @@ export function startMacroSyncWorker(): Worker {
   const bcra = new BcraClient();
   const indec = new IndecClient();
 
-  return new Worker(
+  const worker = new Worker(
     QUEUE_NAMES.macroSync,
     async (job) => {
       job.log?.('Iniciando sync macro');
@@ -39,6 +39,8 @@ export function startMacroSyncWorker(): Worker {
     },
     { connection: getConnection() },
   );
+  worker.on('error', (err) => console.warn('[worker] macro-sync error:', err.message));
+  return worker;
 }
 
 async function persistAndDetect(
