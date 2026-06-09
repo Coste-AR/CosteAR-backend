@@ -9,10 +9,15 @@ const generateAccessSchema = z.object({
 });
 
 const submitDocSchema = z.object({
-  rawContent: z.string().min(1).max(10_000),
+  rawContent: z.string().max(10_000).default(''),
   sourceType: z.enum(['TEXT', 'PDF', 'IMAGE']).default('TEXT'),
   fileName: z.string().max(255).optional(),
-});
+  fileData: z.string().max(6_000_000).optional(),   // base64, máx ~4.5 MB
+  fileMimeType: z.string().max(100).optional(),
+}).refine(
+  (d) => d.rawContent.trim().length > 0 || d.fileData,
+  { message: 'Ingresá una descripción o adjuntá un archivo' },
+);
 
 export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise<void> {
   const svc = new EmpresaPortalService();

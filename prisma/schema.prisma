@@ -324,6 +324,11 @@ model DataEntry {
   sourceType   DataEntrySourceType @default(TEXT)
   status       DataEntryStatus     @default(PENDING)
 
+  // Adjunto (PDF o imagen) guardado como base64 en la DB
+  fileName     String?             // nombre original del archivo
+  fileData     String?             // base64 del archivo (máx ~4MB útil)
+  fileMimeType String?             // ej: "application/pdf", "image/jpeg"
+
   // Contenido corregido (si el costista modificó antes de aprobar)
   correctedContent String?
 

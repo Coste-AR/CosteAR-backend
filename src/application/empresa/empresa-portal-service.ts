@@ -135,6 +135,8 @@ export class EmpresaPortalService {
       rawContent: string;
       sourceType: 'TEXT' | 'PDF' | 'IMAGE';
       fileName?: string;
+      fileData?: string;
+      fileMimeType?: string;
     },
   ) {
     const operator = await this.db.user.findUnique({
@@ -155,11 +157,12 @@ export class EmpresaPortalService {
       data: {
         connectionId: operator.operatorConnection.id,
         costistId: operator.operatorConnection.costistId,
-        rawContent: input.fileName
-          ? `[${input.fileName}] ${input.rawContent}`
-          : input.rawContent,
+        rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
         sourceType: input.sourceType,
         status: 'PENDING',
+        fileName: input.fileName ?? null,
+        fileData: input.fileData ?? null,
+        fileMimeType: input.fileMimeType ?? null,
       },
     });
   }
@@ -183,6 +186,8 @@ export class EmpresaPortalService {
         reviewNote: true,
         createdAt: true,
         reviewedAt: true,
+        fileName: true,
+        fileMimeType: true,
       },
     });
   }
