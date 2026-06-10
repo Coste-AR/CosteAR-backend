@@ -435,3 +435,73 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_logs")
 }
+
+// ---------------------------------------------------------------------------
+// Clasificador de documentos en cascada
+// ---------------------------------------------------------------------------
+
+// Aprende de cada proveedor validado: CUIT → tipo + sección habitual.
+// Se actualiza cada vez que el costista aprueba/corrige una entrada.
+// Scoped por costistId para que cada costista tenga su propia base.
+model SupplierFingerprint {
+  id                String   @id @default(uuid()) @db.Uuid
+  costistId         String   @db.Uuid              // costista propietario
+  supplierCuit      String                          // CUIT del proveedor (sin guiones: 11 dígitos)
+  documentType      String                          // tipo más frecuente: FACTURA_COMPRA, etc.
+  costSection       String                          // sección más frecuente: MATERIA_PRIMA, etc.
+  timesSeenCorrect  Int      @default(0)
+  timesOverridden   Int      @default(0)
+  confidenceBonus   Int      @default(0)            // calculado: min(25, timesSeenCorrect * 5)
+  updatedAt         DateTime @updatedAt
+
+  @@unique([costistId, supplierCuit])
+  @@index([costistId])
+  @@map("supplier_fingerprints")
+}
+
+// Log inmutable de cada clasificación realizada.
+model ClassificationAudit {
+  id                      String   @id @default(uuid()) @db.Uuid
+  dataEntryId             String   @db.Uuid
+  companyId               String   @db.Uuid
+  costistId               String   @db.Uuid
+
+  // Pipeline results
+  qualityGate             String                          // PASS | PARTIAL | FAIL
+  definitiveSignal        String?                         // señal de capa 1 que disparó
+  corroboratingSignals    Json                            // SignalResult[]
+  numericValidationDelta  Int      @default(0)
+  supplierFingerprintUsed Boolean  @default(false)
+  aiUsed                  Boolean  @default(false)
+  confidenceCap           Int?                            // 65 si calidad parcial
+
+  // Final result
+  documentType            String                          // FACTURA_COMPRA, REMITO, etc.
+  costSection             String                          // MATERIA_PRIMA, etc.
+  confidence              Int
+  requiresReview          Boolean  @default(false)
+
+  // Human validation (filled in by validaciones-service on review)
+  validatedByCostista     Boolean  @default(false)
+  costaValidatedAt        DateTime?
+  costaOverrode           Boolean  @default(false)
+  costaCorrection         Json?                           // { type?, section? }
+
+  createdAt               DateTime @default(now())
+
+  @@index([dataEntryId])
+  @@index([costistId])
+  @@map("classification_audits")
+}
+
+// Registro de CAEs ya procesados para detectar documentos duplicados.
+model ProcessedCAE {
+  id            String   @id @default(uuid()) @db.Uuid
+  cae           String   @unique
+  dataEntryId   String   @db.Uuid
+  companyId     String   @db.Uuid
+  processedAt   DateTime @default(now())
+
+  @@index([companyId])
+  @@map("processed_caes")
+}
