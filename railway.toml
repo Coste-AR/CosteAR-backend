@@ -2,6 +2,6 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "npx prisma migrate deploy && node dist/infrastructure/http/entry.js"
+startCommand = "npx prisma migrate deploy; node dist/infrastructure/http/entry.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
