@@ -251,6 +251,37 @@ export class EmpresaPortalService {
     });
   }
 
+  // ── Costista: resetear contraseña de un operador ──────────────────────────
+  // Genera una nueva contraseña temporal y devuelve las credenciales al costista
+  // para que las comparta por cualquier medio (WhatsApp, etc.).
+  // No requiere email funcionando.
+
+  async resetOperatorPassword(operatorId: string, costistId: string): Promise<{ email: string; tempPassword: string }> {
+    // Verificar que el operador pertenece a alguna empresa del costista
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId, connection: { costistId } },
+      include: { operator: { select: { id: true, email: true, role: true } } },
+    });
+    if (!membership) throw new NotFoundError('Operador no encontrado en tus empresas');
+    if (membership.operator.role !== 'EMPRESA_OPERATOR') throw new ForbiddenError('Solo se puede resetear contraseña de operadores');
+
+    const tempPassword = randomBytes(6).toString('hex');
+    const passwordHash = await hashPassword(tempPassword);
+
+    await this.db.user.update({
+      where: { id: operatorId },
+      data: { passwordHash, mustChangePassword: true },
+    });
+
+    // Invalidar todas las sesiones activas del operador
+    await this.db.refreshToken.updateMany({
+      where: { userId: operatorId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    return { email: membership.operator.email, tempPassword };
+  }
+
   // ── Operador: listar sus empresas ──────────────────────────────────────────
 
   async listMyCompanies(operatorId: string) {

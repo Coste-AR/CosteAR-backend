@@ -57,6 +57,17 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
     },
   );
 
+  // ── Costista: resetear contraseña de un operador ──────────────────────────
+  app.post(
+    '/empresa-portal/operators/:operatorId/reset-password',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { operatorId } = request.params as { operatorId: string };
+      const result = await svc.resetOperatorPassword(operatorId, request.authUser!.id);
+      return reply.send({ data: result });
+    },
+  );
+
   // ── Operador: aceptar invitación por código ────────────────────────────────
   app.post(
     '/empresa-portal/accept-invite',
