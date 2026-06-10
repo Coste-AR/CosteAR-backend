@@ -5,6 +5,9 @@ import { NotFoundError, ForbiddenError, ConflictError } from '../../domain/error
 import { EmailService } from '../../infrastructure/email/email-service.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { randomBytes } from 'node:crypto';
+import { classifyDocument } from '../../infrastructure/classifier/cascade-classifier.js';
+import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
+import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -257,7 +260,7 @@ export class EmpresaPortalService {
     input: {
       rawContent: string;
       sourceType: 'TEXT' | 'PDF' | 'IMAGE';
-      connectionId?: string; // si tiene múltiples empresas, elige cuál
+      connectionId?: string;
       fileName?: string;
       fileData?: string;
       fileMimeType?: string;
@@ -281,7 +284,10 @@ export class EmpresaPortalService {
       throw new ForbiddenError('Tenés acceso a varias empresas. Indicá a cuál querés enviar.');
     }
 
-    // Análisis de AI — no bloquea el guardado si falla
+    const costistId = membership.connection.costistId;
+    const companyId = membership.connection.companyId;
+
+    // ── Step 1: Run Groq document analysis (for extraction + quality assessment) ──
     const aiAnalysis = await this.groq.analyzeDocument({
       text: input.rawContent,
       fileData: input.fileData,
@@ -289,13 +295,41 @@ export class EmpresaPortalService {
       fileName: input.fileName,
     });
 
-    // Guardamos el JSON completo del AI en reviewNote para que el costista lo use
+    // ── Step 2: Extract supplier CUIT from text for fingerprinting ─────────────
+    const textToClassify = input.rawContent || (input.fileName ?? '');
+    const foundCuits = extractCuits(textToClassify);
+    const supplierCuit = foundCuits[0] ?? null;
+
+    // ── Step 3: Check for duplicate CAE ───────────────────────────────────────
+    const cae = extractCAE(textToClassify);
+    if (cae) {
+      const existingCAE = await this.db.processedCAE.findUnique({ where: { cae } });
+      if (existingCAE) {
+        return {
+          isDuplicate: true,
+          duplicateEntryId: existingCAE.dataEntryId,
+          message: 'Este documento ya fue enviado anteriormente.',
+        };
+      }
+    }
+
+    // ── Step 4: Run cascade classifier ────────────────────────────────────────
+    const classification = await classifyDocument({
+      text: textToClassify,
+      costistId,
+      companyId,
+      dataEntryId: 'pending', // will be updated after DB insert
+      supplierCuit,
+      groqQuality: aiAnalysis?.quality ?? null,
+    });
+
+    // ── Step 5: Save DataEntry ─────────────────────────────────────────────────
     const aiJson = aiAnalysis ? JSON.stringify(aiAnalysis) : null;
 
-    return this.db.dataEntry.create({
+    const entry = await this.db.dataEntry.create({
       data: {
         connectionId: membership.connectionId,
-        costistId: membership.connection.costistId,
+        costistId,
         rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
         sourceType: input.sourceType,
         status: 'PENDING',
@@ -305,6 +339,48 @@ export class EmpresaPortalService {
         reviewNote: aiJson,
       },
     });
+
+    // ── Step 6: Persist audit + CAE in a transaction ──────────────────────────
+    await this.db.$transaction(async (tx) => {
+      await tx.classificationAudit.create({
+        data: {
+          dataEntryId: entry.id,
+          companyId,
+          costistId,
+          qualityGate: classification.qualityGate,
+          definitiveSignal: classification.definitiveSignal,
+          corroboratingSignals: classification.signals as unknown as Parameters<typeof tx.classificationAudit.create>[0]['data']['corroboratingSignals'],
+          numericValidationDelta: 0,
+          supplierFingerprintUsed: classification.supplierFingerprintUsed,
+          aiUsed: classification.aiUsed,
+          confidenceCap: classification.confidenceCap,
+          documentType: classification.documentType,
+          costSection: classification.costSection,
+          confidence: classification.confidence,
+          requiresReview: classification.requiresReview,
+        },
+      });
+
+      if (cae) {
+        await tx.processedCAE.create({
+          data: { cae, dataEntryId: entry.id, companyId },
+        });
+      }
+    });
+
+    return {
+      id: entry.id,
+      status: entry.status,
+      aiResponse: aiJson,
+      classification: {
+        documentType: classification.documentType,
+        costSection: classification.costSection,
+        confidence: classification.confidence,
+        requiresReview: classification.requiresReview,
+        qualityGate: classification.qualityGate,
+      },
+      isDuplicate: false,
+    };
   }
 
   // ── Operador: historial de envíos ──────────────────────────────────────────

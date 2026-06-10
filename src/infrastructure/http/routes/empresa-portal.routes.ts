@@ -84,8 +84,8 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
     { preHandler: authenticate },
     async (request, reply) => {
       const input = submitDocSchema.parse(request.body);
-      const entry = await svc.submitDocument(request.authUser!.id, input);
-      return reply.status(201).send({ data: { id: entry.id, status: entry.status, aiResponse: entry.reviewNote ?? null } });
+      const result = await svc.submitDocument(request.authUser!.id, input);
+      return reply.status(201).send({ data: result });
     },
   );
 
