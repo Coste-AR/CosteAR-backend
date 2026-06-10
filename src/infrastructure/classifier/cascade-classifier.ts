@@ -1,5 +1,5 @@
 // src/infrastructure/classifier/cascade-classifier.ts
-import { runQualityGate } from './layers/layer0-quality-gate.js';
+import { runQualityGate, PARTIAL_CONFIDENCE_CAP } from './layers/layer0-quality-gate.js';
 import { detectIntent }   from './layers/layer0a-intent-detection.js';
 import { runLayer1 }      from './layers/layer1-definitive-signals.js';
 import { runLayer2 }      from './layers/layer2-corroborating-signals.js';
@@ -141,13 +141,24 @@ export async function classifyDocument(input: ClassifierInput & {
 
   const confidenceCap = qualityResult.confidenceCap;
 
+  // Para calidad parcial: el threshold efectivo baja al cap para no bloquear
+  // documentos con señales fuertes que de igual forma están capeados.
+  // Ej: confidenceCap=65, CONFIDENCE_THRESHOLD=72 → si exigiéramos 72 nunca
+  // pasaría, pero si hay señal definitiva con 65 de confianza ya es suficiente.
+  const EFFECTIVE_THRESHOLD = confidenceCap !== null
+    ? Math.min(CONFIDENCE_THRESHOLD, confidenceCap)
+    : CONFIDENCE_THRESHOLD;
+
   // ── Supplier Fingerprint Lookup ────────────────────────────────────────────
+  // El bonus solo se aplica si el costSection aprendido coincide con la sección
+  // que sugiere el texto actual (Layer 4 temprano). Esto evita contaminar
+  // clasificaciones donde el mismo proveedor vende cosas distintas a la misma empresa.
   let supplierFingerprintUsed = false;
   let fingerprintBonus = 0;
+  let fingerprintLearnedSection: string | null = null;
 
   if (input.supplierCuit) {
     try {
-      // Buscar primero por companyId (específico) y luego genérico
       const fp = await prisma.supplierFingerprint.findFirst({
         where: {
           costistId:    input.costistId,
@@ -156,7 +167,8 @@ export async function classifyDocument(input: ClassifierInput & {
         },
       });
       if (fp && fp.timesSeenCorrect >= 3) {
-        supplierFingerprintUsed = true;
+        fingerprintLearnedSection = fp.costSection;
+        // El bonus se reserva; se aplica condicionalmente después de Layer 4
         fingerprintBonus = fp.confidenceBonus;
       }
     } catch {
@@ -171,11 +183,20 @@ export async function classifyDocument(input: ClassifierInput & {
     let confidence = confidenceCap !== null
       ? Math.min(layer1.confidence, confidenceCap)
       : layer1.confidence;
-    confidence = Math.min(confidence + fingerprintBonus, confidenceCap ?? 100);
 
+    // Aplicar fingerprint bonus solo si la sección aprendida coincide con la
+    // que Layer 4 sugiere para este texto. Si el proveedor vendió siempre MP
+    // pero ahora el texto habla de algo diferente, no inflamos la confianza.
     const l4 = runLayer4(layer1.documentType, text, industryCategory);
+    const sectionMatch = !fingerprintLearnedSection
+      || l4.requiresAI                                // sin decisión todavía → aceptamos bonus
+      || fingerprintLearnedSection === l4.costSection; // coincide → bonus válido
+    if (sectionMatch) {
+      confidence = Math.min(confidence + fingerprintBonus, confidenceCap ?? 100);
+      if (fingerprintBonus > 0 && sectionMatch) supplierFingerprintUsed = true;
+    }
 
-    if (confidence >= CONFIDENCE_THRESHOLD && !l4.requiresAI) {
+    if (confidence >= EFFECTIVE_THRESHOLD && !l4.requiresAI) {
       return {
         documentType: layer1.documentType as DocumentType,
         costSection:  l4.costSection,
@@ -201,7 +222,7 @@ export async function classifyDocument(input: ClassifierInput & {
     }
 
     // Layer 1 encontró doc type pero Layer 4 necesita IA para el cost section
-    if (l4.requiresAI && confidence >= CONFIDENCE_THRESHOLD) {
+    if (l4.requiresAI && confidence >= EFFECTIVE_THRESHOLD) {
       const aiResult = await runLayer5({
         text,
         accumulatedPts: confidence,
@@ -222,7 +243,7 @@ export async function classifyDocument(input: ClassifierInput & {
           documentType: layer1.documentType as DocumentType,
           costSection:  finalSection,
           confidence:   finalConf,
-          requiresReview: finalConf < CONFIDENCE_THRESHOLD,
+          requiresReview: finalConf < EFFECTIVE_THRESHOLD,
           isDuplicate:  false,
           qualityGate:  qualityResult.gate,
           definitiveSignal: layer1.label,
@@ -264,7 +285,19 @@ export async function classifyDocument(input: ClassifierInput & {
   // ── Layer 4: Business Routing ──────────────────────────────────────────────
   const l4 = runLayer4(suggestedType ?? 'DESCONOCIDO', text, industryCategory);
 
-  if (accumulatedPts >= CONFIDENCE_THRESHOLD && !l4.requiresAI) {
+  // Aplicar fingerprint bonus sobre el score acumulado (layers 2-3), misma
+  // lógica: solo si el costSection aprendido coincide con lo que Layer 4 sugiere.
+  if (!supplierFingerprintUsed && fingerprintBonus > 0) {
+    const sectionMatch2 = !fingerprintLearnedSection
+      || l4.requiresAI
+      || fingerprintLearnedSection === l4.costSection;
+    if (sectionMatch2) {
+      accumulatedPts = Math.min(accumulatedPts + fingerprintBonus, confidenceCap ?? 100);
+      supplierFingerprintUsed = true;
+    }
+  }
+
+  if (accumulatedPts >= EFFECTIVE_THRESHOLD && !l4.requiresAI) {
     return {
       documentType: (suggestedType ?? 'DESCONOCIDO') as DocumentType,
       costSection:  l4.costSection,

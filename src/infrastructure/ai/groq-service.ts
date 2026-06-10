@@ -10,6 +10,7 @@
  */
 
 import { getEnv } from '../config/env.js';
+import { groqFetch } from './groq-rate-limiter.js';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
@@ -143,7 +144,7 @@ export class GroqService {
 
       const model = isImage ? VISION_MODEL : TEXT_MODEL;
 
-      const res = await fetch(GROQ_API_URL, {
+      const res = await groqFetch(GROQ_API_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -244,7 +245,7 @@ Respondé SOLO con JSON:
 }`;
 
     try {
-      const res = await fetch(GROQ_API_URL, {
+      const res = await groqFetch(GROQ_API_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
