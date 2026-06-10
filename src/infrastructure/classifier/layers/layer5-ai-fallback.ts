@@ -44,6 +44,9 @@ export async function runLayer5(input: {
   accumulatedPts: number;
   foundSignalLabels: string[];
   suggestedType: string | null;
+  industryLabel?: string;
+  industryCategory?: string;
+  intent?: string;
 }): Promise<Layer5Result | null> {
   const service = getGroq();
   if (!service) return null;

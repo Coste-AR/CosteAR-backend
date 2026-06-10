@@ -1,67 +1,171 @@
-import type { DocumentType, CostSection } from '../types.js';
+// src/infrastructure/classifier/layers/layer4-business-routing.ts
+import type { DocumentType, CostSection, IndustryCategory } from '../types.js';
+import { getIndustryProfile } from '../industry/industry-profile.js';
 
 export interface Layer4Result {
   costSection: CostSection;
   confidence: number;
   requiresAI: boolean;
+  reasoning: string;
 }
 
-const MP_KEYWORDS = [
-  'materia prima', 'insumo', 'material', ' kg', 'litro', 'tonelada',
-  'bobina', 'rollo', 'envase', 'embalaje', 'chapa', 'alambre', 'tela', 'hilo',
-  'resina', 'pintura', 'solvente', 'madera', 'cartón', 'plástico',
-];
-
-const CIP_KEYWORDS = [
-  'alquiler', 'alq.', 'servicio', 'energía', 'energia', 'electricidad',
-  'gas', 'mantenimiento', 'mant.', 'seguro', 'limpieza', 'vigilancia',
-  'telefonía', 'telefonia', 'internet', 'agua', 'abono', 'cuota',
-  'reparacion', 'reparación', 'repuesto', 'herramienta',
-];
-
 /**
- * Layer 4: Business Routing.
- * Determines which cost section a classified document belongs to.
+ * Layer 4: Business Routing con conciencia de rubro.
+ * Determina a qué sección de costos pertenece un documento.
+ *
+ * Usa el perfil de industria para sobreescribir las reglas genéricas
+ * cuando el rubro tiene convenciones distintas.
  */
-export function runLayer4(documentType: DocumentType | string, text: string): Layer4Result {
+export function runLayer4(
+  documentType: DocumentType | string,
+  text: string,
+  industryCategory: IndustryCategory = 'DEFAULT',
+): Layer4Result {
   const lower = text.toLowerCase();
+  const profile = getIndustryProfile(industryCategory);
 
   switch (documentType) {
+    // ── Liquidaciones y planillas → siempre MOD ───────────────────────────────
     case 'LIQUIDACION_MOD':
     case 'PLANILLA_HORAS':
-      return { costSection: 'MANO_DE_OBRA', confidence: 99, requiresAI: false };
+      return {
+        costSection: 'MANO_DE_OBRA',
+        confidence: 99,
+        requiresAI: false,
+        reasoning: 'Liquidación de haberes o planilla de horas → Mano de Obra Directa',
+      };
 
+    // ── Facturas de venta → siempre VENTAS ───────────────────────────────────
     case 'FACTURA_VENTA':
-      return { costSection: 'VENTAS', confidence: 99, requiresAI: false };
+      return {
+        costSection: 'VENTAS',
+        confidence: 99,
+        requiresAI: false,
+        reasoning: 'Factura de venta emitida → Ventas',
+      };
 
-    case 'REMITO': {
-      if (/\brecibimos\b|\bentrada\b|\bcompra\b/i.test(text)) {
-        return { costSection: 'MATERIA_PRIMA', confidence: 80, requiresAI: false };
-      }
-      if (/\bdespachamos\b|\bsalida\b|\bventa\b/i.test(text)) {
-        return { costSection: 'VENTAS', confidence: 80, requiresAI: false };
-      }
-      return { costSection: 'DESCONOCIDO', confidence: 50, requiresAI: true };
-    }
-
+    // ── Notas de débito/crédito → CIP por defecto ─────────────────────────────
     case 'NOTA_DEBITO':
     case 'NOTA_CREDITO':
-      return { costSection: 'COSTOS_INDIRECTOS', confidence: 85, requiresAI: false };
+      return {
+        costSection: 'COSTOS_INDIRECTOS',
+        confidence: 85,
+        requiresAI: false,
+        reasoning: 'Nota de débito/crédito → Costos Indirectos de Producción',
+      };
 
+    // ── Remito → según contexto o IA ─────────────────────────────────────────
+    case 'REMITO': {
+      if (/\brecibimos\b|\bentrada\b|\bcompra\b/i.test(text)) {
+        return {
+          costSection: 'MATERIA_PRIMA',
+          confidence: 80,
+          requiresAI: false,
+          reasoning: 'Remito de entrada/compra → Materia Prima',
+        };
+      }
+      if (/\bdespachamos\b|\bsalida\b|\bventa\b/i.test(text)) {
+        return {
+          costSection: 'VENTAS',
+          confidence: 80,
+          requiresAI: false,
+          reasoning: 'Remito de salida/venta → Ventas',
+        };
+      }
+      return {
+        costSection: 'DESCONOCIDO',
+        confidence: 50,
+        requiresAI: true,
+        reasoning: 'Remito sin dirección clara → requiere análisis adicional',
+      };
+    }
+
+    // ── Factura de compra → análisis detallado con contexto de rubro ─────────
     case 'FACTURA_COMPRA': {
-      const mpScore = MP_KEYWORDS.filter((kw) => lower.includes(kw)).length;
-      const cipScore = CIP_KEYWORDS.filter((kw) => lower.includes(kw)).length;
-
-      if (mpScore > cipScore && mpScore >= 1) {
-        return { costSection: 'MATERIA_PRIMA', confidence: 82 + Math.min(mpScore * 3, 15), requiresAI: false };
-      }
-      if (cipScore > mpScore && cipScore >= 1) {
-        return { costSection: 'COSTOS_INDIRECTOS', confidence: 82 + Math.min(cipScore * 3, 15), requiresAI: false };
-      }
-      return { costSection: 'DESCONOCIDO', confidence: 50, requiresAI: true };
+      return routeFacturaCompra(lower, profile, industryCategory);
     }
 
     default:
-      return { costSection: 'DESCONOCIDO', confidence: 0, requiresAI: true };
+      return {
+        costSection: 'DESCONOCIDO',
+        confidence: 0,
+        requiresAI: true,
+        reasoning: 'Tipo de documento no reconocido → requiere análisis',
+      };
   }
+}
+
+// ── Routing de Factura de Compra con perfil de industria ─────────────────────
+
+function routeFacturaCompra(
+  lower: string,
+  profile: ReturnType<typeof getIndustryProfile>,
+  industryCategory: IndustryCategory,
+): Layer4Result {
+
+  // Primero: combustible/energía — dependen del rubro
+  const hasFuel    = /\bgasoil\b|\bcombustible\b|\bnafta\b|\bGNC\b/.test(lower);
+  const hasEnergy  = /\belectricidad\b|\bluz el[eé]ctrica\b|\bgas natural\b|\benergia\b/.test(lower);
+
+  if (hasFuel && profile.fuelIsMP) {
+    return {
+      costSection: 'MATERIA_PRIMA',
+      confidence: 88,
+      requiresAI: false,
+      reasoning: `Combustible en rubro ${profile.label} → Materia Prima (insumo de producción directa)`,
+    };
+  }
+  if (hasEnergy && profile.energyIsMP) {
+    return {
+      costSection: 'MATERIA_PRIMA',
+      confidence: 85,
+      requiresAI: false,
+      reasoning: `Energía en rubro ${profile.label} → Materia Prima (insumo directo del proceso)`,
+    };
+  }
+
+  // Punteo de keywords por sección usando el perfil del rubro
+  const mpScore  = profile.mpKeywords.filter((kw)  => lower.includes(kw.toLowerCase())).length;
+  const cipScore = profile.cipKeywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
+  const modScore = profile.modKeywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
+
+  // MOD: si el texto menciona servicios de personal directo
+  if (modScore > 0 && modScore >= mpScore && modScore >= cipScore) {
+    return {
+      costSection: 'MANO_DE_OBRA',
+      confidence: 80,
+      requiresAI: false,
+      reasoning: `Factura con indicadores de mano de obra directa (${modScore} señales)`,
+    };
+  }
+
+  if (mpScore > cipScore && mpScore >= 1) {
+    const conf = 82 + Math.min(mpScore * 3, 15);
+    const matched = profile.mpKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+    return {
+      costSection: 'MATERIA_PRIMA',
+      confidence: conf,
+      requiresAI: false,
+      reasoning: `Factura de compra con insumos de Materia Prima en rubro ${profile.label} (${matched.join(', ')})`,
+    };
+  }
+
+  if (cipScore > mpScore && cipScore >= 1) {
+    const conf = 82 + Math.min(cipScore * 3, 15);
+    const matched = profile.cipKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+    return {
+      costSection: 'COSTOS_INDIRECTOS',
+      confidence: conf,
+      requiresAI: false,
+      reasoning: `Factura de compra con costos indirectos en rubro ${profile.label} (${matched.join(', ')})`,
+    };
+  }
+
+  // Sin keywords detectadas → fallback a Groq con contexto de rubro
+  return {
+    costSection: 'DESCONOCIDO',
+    confidence: 50,
+    requiresAI: true,
+    reasoning: `Sin señales de clasificación suficientes para rubro ${profile.label} → requiere análisis por IA`,
+  };
 }

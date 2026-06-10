@@ -18,9 +18,24 @@ export class ValidacionesService {
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
-        include: {
+        select: {
+          id: true, rawContent: true, sourceType: true, status: true,
+          correctedContent: true, reviewNote: true, reviewedAt: true, createdAt: true,
+          fileName: true, fileMimeType: true,
+          // fileData excluido del listado (performance — se sirve por endpoint separado)
           connection: {
             include: { company: { select: { id: true, name: true, industry: true } } },
+          },
+          // Incluir el audit de clasificación para mostrar la explicación
+          classificationAudits: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: {
+              documentType: true, costSection: true, confidence: true,
+              requiresReview: true, definitiveSignal: true, aiUsed: true,
+              supplierFingerprintUsed: true, intent: true, industryCategory: true,
+              explanation: true, corroboratingSignals: true,
+            },
           },
         },
       }),
@@ -79,7 +94,10 @@ export class ValidacionesService {
       correctedContent?: string;
     },
   ) {
-    const entry = await this.db.dataEntry.findUnique({ where: { id: entryId } });
+    const entry = await this.db.dataEntry.findUnique({
+      where: { id: entryId },
+      include: { connection: { select: { companyId: true } } },
+    });
     if (!entry) throw new NotFoundError('Entrada no encontrada');
     if (entry.costistId !== costistId) throw new ForbiddenError('No tenés permiso para revisar esta entrada');
     if (entry.status !== 'PENDING') throw new ForbiddenError('Solo se pueden revisar entradas pendientes');
@@ -127,8 +145,10 @@ export class ValidacionesService {
           });
 
           if (supplierCuit) {
-            const existing = await tx.supplierFingerprint.findUnique({
-              where: { costistId_supplierCuit: { costistId, supplierCuit } },
+            const companyId = entry.connection.companyId;
+
+            const existing = await tx.supplierFingerprint.findFirst({
+              where: { costistId, supplierCuit, companyId },
             });
 
             if (existing) {
@@ -151,6 +171,7 @@ export class ValidacionesService {
               await tx.supplierFingerprint.create({
                 data: {
                   costistId,
+                  companyId,
                   supplierCuit,
                   documentType: audit.documentType,
                   costSection: audit.costSection,

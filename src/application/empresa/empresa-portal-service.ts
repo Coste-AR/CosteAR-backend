@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { classifyDocument } from '../../infrastructure/classifier/cascade-classifier.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
+import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -287,7 +288,14 @@ export class EmpresaPortalService {
     const costistId = membership.connection.costistId;
     const companyId = membership.connection.companyId;
 
-    // ── Step 1: Run Groq document analysis (for extraction + quality assessment) ──
+    // ── Step 1: Fetch company industry for industry-aware classification ────────
+    const company = await this.db.company.findUnique({
+      where: { id: companyId },
+      select: { industry: true },
+    });
+    const industry = company?.industry ?? null;
+
+    // ── Step 2: Run Groq document analysis (extraction + quality + OCR) ────────
     const aiAnalysis = await this.groq.analyzeDocument({
       text: input.rawContent,
       fileData: input.fileData,
@@ -295,12 +303,18 @@ export class EmpresaPortalService {
       fileName: input.fileName,
     });
 
-    // ── Step 2: Extract supplier CUIT from text for fingerprinting ─────────────
-    const textToClassify = input.rawContent || (input.fileName ?? '');
+    // ── Step 3: Build enriched text (solves image classification problem) ──────
+    // Para imágenes: rawContent = "[Archivo: img.jpg]" → sin señales.
+    // enrichedText combina el OCR de Groq con los datos extraídos para que
+    // las capas 1-4 puedan clasificar correctamente.
+    const enrichedText = buildEnrichedText(input.rawContent, aiAnalysis);
+
+    // ── Step 4: Extract supplier CUIT — desde enrichedText (incluye OCR) ──────
+    const textToClassify = enrichedText || input.rawContent || (input.fileName ?? '');
     const foundCuits = extractCuits(textToClassify);
     const supplierCuit = foundCuits[0] ?? null;
 
-    // ── Step 3: Check for duplicate CAE ───────────────────────────────────────
+    // ── Step 5: Check for duplicate CAE ───────────────────────────────────────
     const cae = extractCAE(textToClassify);
     if (cae) {
       const existingCAE = await this.db.processedCAE.findUnique({ where: { cae } });
@@ -313,14 +327,18 @@ export class EmpresaPortalService {
       }
     }
 
-    // ── Step 4: Run cascade classifier ────────────────────────────────────────
+    // ── Step 6: Run cascade classifier v2 ─────────────────────────────────────
     const classification = await classifyDocument({
-      text: textToClassify,
+      text: input.rawContent || (input.fileName ?? ''),
+      enrichedText,
+      industry,
+      sourceType: input.sourceType,
       costistId,
       companyId,
-      dataEntryId: 'pending', // will be updated after DB insert
+      dataEntryId: 'pending',
       supplierCuit,
       groqQuality: aiAnalysis?.quality ?? null,
+      extractedData: aiAnalysis?.extractedData as Record<string, unknown> | null ?? null,
     });
 
     // ── Step 5: Save DataEntry ─────────────────────────────────────────────────
@@ -340,7 +358,7 @@ export class EmpresaPortalService {
       },
     });
 
-    // ── Step 6: Persist audit + CAE in a transaction ──────────────────────────
+    // ── Step 7: Persist audit + CAE in a transaction ──────────────────────────
     await this.db.$transaction(async (tx) => {
       await tx.classificationAudit.create({
         data: {
@@ -358,6 +376,9 @@ export class EmpresaPortalService {
           costSection: classification.costSection,
           confidence: classification.confidence,
           requiresReview: classification.requiresReview,
+          intent: classification.intent,
+          industryCategory: classification.industryCategory,
+          explanation: classification.explanation,
         },
       });
 

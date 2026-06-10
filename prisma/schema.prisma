@@ -387,7 +387,8 @@ model DataEntry {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  history      ValidationHistory[]
+  history               ValidationHistory[]
+  classificationAudits  ClassificationAudit[]
 
   @@index([connectionId])
   @@index([costistId, status])
@@ -446,6 +447,7 @@ model AuditLog {
 model SupplierFingerprint {
   id                String   @id @default(uuid()) @db.Uuid
   costistId         String   @db.Uuid              // costista propietario
+  companyId         String   @db.Uuid              // empresa específica (proveedor puede vender distinto a distintas empresas)
   supplierCuit      String                          // CUIT del proveedor (sin guiones: 11 dígitos)
   documentType      String                          // tipo más frecuente: FACTURA_COMPRA, etc.
   costSection       String                          // sección más frecuente: MATERIA_PRIMA, etc.
@@ -454,16 +456,17 @@ model SupplierFingerprint {
   confidenceBonus   Int      @default(0)            // calculado: min(25, timesSeenCorrect * 5)
   updatedAt         DateTime @updatedAt
 
-  @@unique([costistId, supplierCuit])
+  @@unique([costistId, supplierCuit, companyId])
   @@index([costistId])
   @@map("supplier_fingerprints")
 }
 
 // Log inmutable de cada clasificación realizada.
 model ClassificationAudit {
-  id                      String   @id @default(uuid()) @db.Uuid
-  dataEntryId             String   @db.Uuid
-  companyId               String   @db.Uuid
+  id                      String    @id @default(uuid()) @db.Uuid
+  dataEntryId             String    @db.Uuid
+  dataEntry               DataEntry @relation(fields: [dataEntryId], references: [id], onDelete: Cascade)
+  companyId               String    @db.Uuid
   costistId               String   @db.Uuid
 
   // Pipeline results
@@ -480,6 +483,9 @@ model ClassificationAudit {
   costSection             String                          // MATERIA_PRIMA, etc.
   confidence              Int
   requiresReview          Boolean  @default(false)
+  intent                  String   @default("DOCUMENTO_FORMAL")  // InputIntent
+  industryCategory        String   @default("DEFAULT")           // IndustryCategory
+  explanation             String?                         // explicación legible para el costista
 
   // Human validation (filled in by validaciones-service on review)
   validatedByCostista     Boolean  @default(false)

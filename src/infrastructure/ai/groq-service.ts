@@ -187,6 +187,9 @@ export class GroqService {
     accumulatedPts: number;
     foundSignalLabels: string[];
     suggestedType: string | null;
+    industryLabel?: string;
+    industryCategory?: string;
+    intent?: string;
   }): Promise<{ documentType: string; costSection: string; confidence: number; reasoning: string } | null> {
     if (!this.isConfigured) return null;
 
@@ -194,7 +197,33 @@ export class GroqService {
       ? input.foundSignalLabels.map((l) => `- ${l}`).join('\n')
       : '- Ninguna señal encontrada';
 
+    const industryCtx = input.industryLabel
+      ? `Rubro de la empresa: ${input.industryLabel} (categoría interna: ${input.industryCategory ?? 'DEFAULT'}).`
+      : 'Rubro de la empresa: no especificado.';
+
+    const intentCtx = input.intent && input.intent !== 'DOCUMENTO_FORMAL'
+      ? `Nota: el mensaje fue detectado como "${input.intent}", tener en cuenta al clasificar.`
+      : '';
+
+    // Instrucciones específicas por rubro para evitar errores sistemáticos
+    const industryHints: Record<string, string> = {
+      AGRO:        'En agroindustria: combustible (gasoil) es MATERIA_PRIMA (insumo de tractores/maquinaria), semillas/agroquímicos son MATERIA_PRIMA, flete de granos es COSTOS_INDIRECTOS.',
+      GASTRONOMIA: 'En gastronomía: ingredientes (carne, verdura, lácteos, bebidas) y gas de cocina son MATERIA_PRIMA. Alquiler del local, luz, agua son COSTOS_INDIRECTOS.',
+      MANUFACTURA: 'En manufactura: materias primas del proceso productivo son MATERIA_PRIMA. Energía eléctrica suele ser COSTOS_INDIRECTOS salvo que sea insumo directo del proceso.',
+      CONSTRUCCION:'En construcción: materiales (cemento, hierro, madera) son MATERIA_PRIMA. Alquiler de equipos y transporte son COSTOS_INDIRECTOS.',
+      TEXTIL:      'En textil: telas, hilos, botones, cierres son MATERIA_PRIMA. Electricidad del taller es COSTOS_INDIRECTOS.',
+      SALUD:       'En salud: medicamentos, insumos médicos, reactivos son MATERIA_PRIMA. Equipos y habilitaciones son COSTOS_INDIRECTOS.',
+      TRANSPORTE:  'En transporte: combustible, neumáticos, repuestos son MATERIA_PRIMA (insumos directos del servicio). Seguro y peaje son COSTOS_INDIRECTOS.',
+      COMERCIO:    'En comercio: mercadería para reventa es MATERIA_PRIMA (costo del producto). Logística y alquiler son COSTOS_INDIRECTOS.',
+      SERVICIOS:   'En servicios profesionales: casi no hay MATERIA_PRIMA. Honorarios de personal son MANO_DE_OBRA. Oficina, internet, software son COSTOS_INDIRECTOS.',
+    };
+    const industryHint = input.industryCategory ? (industryHints[input.industryCategory] ?? '') : '';
+
     const prompt = `Contexto: documento contable argentino enviado por un operador de PyME.
+${industryCtx}
+${industryHint}
+${intentCtx}
+
 El clasificador de reglas encontró estas señales:
 ${signalsSummary}
 Confianza acumulada: ${input.accumulatedPts}/100
@@ -211,7 +240,7 @@ Respondé SOLO con JSON:
   "documentType": "...",
   "costSection": "...",
   "confidence": <número 0-100>,
-  "reasoning": "una oración en español explicando la decisión"
+  "reasoning": "una oración en español explicando la decisión, mencionando el rubro si influyó"
 }`;
 
     try {
