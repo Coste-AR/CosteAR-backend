@@ -177,4 +177,73 @@ export class GroqService {
       return null;
     }
   }
+
+  /**
+   * Layer 5 AI Fallback: classifies a document when deterministic rules
+   * couldn't reach the confidence threshold.
+   */
+  async classifyDocument(input: {
+    text: string;
+    accumulatedPts: number;
+    foundSignalLabels: string[];
+    suggestedType: string | null;
+  }): Promise<{ documentType: string; costSection: string; confidence: number; reasoning: string } | null> {
+    if (!this.isConfigured) return null;
+
+    const signalsSummary = input.foundSignalLabels.length > 0
+      ? input.foundSignalLabels.map((l) => `- ${l}`).join('\n')
+      : '- Ninguna señal encontrada';
+
+    const prompt = `Contexto: documento contable argentino enviado por un operador de PyME.
+El clasificador de reglas encontró estas señales:
+${signalsSummary}
+Confianza acumulada: ${input.accumulatedPts}/100
+Clasificación parcial: ${input.suggestedType ?? 'DESCONOCIDO'}
+
+Texto del documento:
+${input.text.slice(0, 3000)}
+
+Tipos posibles: FACTURA_COMPRA, FACTURA_VENTA, REMITO, LIQUIDACION_MOD, PLANILLA_HORAS, NOTA_DEBITO, NOTA_CREDITO, DESCONOCIDO
+Secciones de costo: MATERIA_PRIMA, MANO_DE_OBRA, COSTOS_INDIRECTOS, VENTAS, DESCONOCIDO
+
+Respondé SOLO con JSON:
+{
+  "documentType": "...",
+  "costSection": "...",
+  "confidence": <número 0-100>,
+  "reasoning": "una oración en español explicando la decisión"
+}`;
+
+    try {
+      const res = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: TEXT_MODEL,
+          messages: [
+            { role: 'system', content: 'Sos un clasificador de documentos contables argentinos. Respondé solo con JSON válido.' },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 200,
+          temperature: 0.05,
+          response_format: { type: 'json_object' },
+        }),
+      });
+
+      if (!res.ok) {
+        console.error('[groq] classifyDocument error:', await res.text());
+        return null;
+      }
+
+      const data = await res.json() as GroqResponse;
+      const raw = data.choices[0]?.message.content ?? '';
+      return JSON.parse(raw) as { documentType: string; costSection: string; confidence: number; reasoning: string };
+    } catch (err) {
+      console.error('[groq] classifyDocument unexpected error:', err);
+      return null;
+    }
+  }
 }
