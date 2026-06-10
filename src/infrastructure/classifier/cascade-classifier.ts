@@ -6,6 +6,7 @@ import { runLayer3 } from './layers/layer3-numeric-validation.js';
 import { runLayer4 } from './layers/layer4-business-routing.js';
 import { runLayer5 } from './layers/layer5-ai-fallback.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection } from './types.js';
+import { prisma } from '../database/prisma.js';
 
 const CONFIDENCE_THRESHOLD = 72;
 
@@ -43,6 +44,24 @@ export async function classifyDocument(input: ClassifierInput & {
 
   const confidenceCap = qualityResult.confidenceCap;
 
+  // ── Supplier Fingerprint Lookup (bonus confidence) ──────────────────────────
+  let supplierFingerprintUsed = false;
+  let fingerprintBonus = 0;
+
+  if (input.supplierCuit) {
+    try {
+      const fp = await prisma.supplierFingerprint.findUnique({
+        where: { costistId_supplierCuit: { costistId: input.costistId, supplierCuit: input.supplierCuit } },
+      });
+      if (fp && fp.timesSeenCorrect >= 3) {
+        supplierFingerprintUsed = true;
+        fingerprintBonus = fp.confidenceBonus;
+      }
+    } catch {
+      // DB lookup failure is non-fatal — proceed without bonus
+    }
+  }
+
   // ── Layer 1: Definitive Signals ────────────────────────────────────────────
   const layer1 = runLayer1(text);
 
@@ -50,6 +69,11 @@ export async function classifyDocument(input: ClassifierInput & {
     let confidence = confidenceCap !== null
       ? Math.min(layer1.confidence, confidenceCap)
       : layer1.confidence;
+
+    confidence = Math.min(
+      confidence + fingerprintBonus,
+      confidenceCap !== null ? confidenceCap : 100,
+    );
 
     const l4 = runLayer4(layer1.documentType, text);
 
@@ -64,7 +88,7 @@ export async function classifyDocument(input: ClassifierInput & {
         definitiveSignal: layer1.label,
         signals: [{ label: layer1.label, pts: layer1.confidence, type: layer1.documentType, layer: 1 }],
         aiUsed: false,
-        supplierFingerprintUsed: false,
+        supplierFingerprintUsed,
         confidenceCap,
       };
     }
@@ -92,7 +116,7 @@ export async function classifyDocument(input: ClassifierInput & {
           definitiveSignal: layer1.label,
           signals: [{ label: layer1.label, pts: layer1.confidence, type: layer1.documentType, layer: 1 }],
           aiUsed: true,
-          supplierFingerprintUsed: false,
+          supplierFingerprintUsed,
           confidenceCap,
         };
       }
@@ -130,7 +154,7 @@ export async function classifyDocument(input: ClassifierInput & {
       definitiveSignal: layer1?.label ?? null,
       signals: allSignals,
       aiUsed: false,
-      supplierFingerprintUsed: false,
+      supplierFingerprintUsed,
       confidenceCap,
     };
   }
@@ -153,7 +177,7 @@ export async function classifyDocument(input: ClassifierInput & {
       definitiveSignal: layer1?.label ?? null,
       signals: allSignals,
       aiUsed: true,
-      supplierFingerprintUsed: false,
+      supplierFingerprintUsed,
       confidenceCap,
     };
   }
@@ -169,7 +193,7 @@ export async function classifyDocument(input: ClassifierInput & {
     definitiveSignal: layer1?.label ?? null,
     signals: allSignals,
     aiUsed: false,
-    supplierFingerprintUsed: false,
+    supplierFingerprintUsed,
     confidenceCap,
   };
 }
