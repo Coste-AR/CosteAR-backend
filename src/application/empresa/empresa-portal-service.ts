@@ -289,6 +289,9 @@ export class EmpresaPortalService {
       fileName: input.fileName,
     });
 
+    // Guardamos el JSON completo del AI en reviewNote para que el costista lo use
+    const aiJson = aiAnalysis ? JSON.stringify(aiAnalysis) : null;
+
     return this.db.dataEntry.create({
       data: {
         connectionId: membership.connectionId,
@@ -299,7 +302,7 @@ export class EmpresaPortalService {
         fileName: input.fileName ?? null,
         fileData: input.fileData ?? null,
         fileMimeType: input.fileMimeType ?? null,
-        reviewNote: aiAnalysis || null,
+        reviewNote: aiJson,
       },
     });
   }
