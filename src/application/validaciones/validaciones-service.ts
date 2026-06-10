@@ -1,6 +1,7 @@
 import type { PrismaClient, DataEntryStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
+import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 
 export class ValidacionesService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -103,6 +104,66 @@ export class ValidacionesService {
           note: input.note ?? null,
         },
       });
+
+      // ── Update supplier fingerprint if approved or corrected ───────────────
+      if (input.status === 'APPROVED' || input.status === 'CORRECTED') {
+        const audit = await tx.classificationAudit.findFirst({
+          where: { dataEntryId: entryId },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (audit) {
+          const foundCuits = extractCuits(u.rawContent);
+          const supplierCuit = foundCuits[0];
+          const overrode = input.status === 'CORRECTED';
+
+          await tx.classificationAudit.update({
+            where: { id: audit.id },
+            data: {
+              validatedByCostista: true,
+              costaValidatedAt: new Date(),
+              costaOverrode: overrode,
+            },
+          });
+
+          if (supplierCuit) {
+            const existing = await tx.supplierFingerprint.findUnique({
+              where: { costistId_supplierCuit: { costistId, supplierCuit } },
+            });
+
+            if (existing) {
+              const timesSeenCorrect = overrode ? existing.timesSeenCorrect : existing.timesSeenCorrect + 1;
+              const timesOverridden = overrode ? existing.timesOverridden + 1 : existing.timesOverridden;
+              const total = timesSeenCorrect + timesOverridden;
+              const bonus = total > 0 ? Math.min(25, Math.round((timesSeenCorrect / total) * 30)) : 0;
+
+              await tx.supplierFingerprint.update({
+                where: { id: existing.id },
+                data: {
+                  timesSeenCorrect,
+                  timesOverridden,
+                  confidenceBonus: bonus,
+                  documentType: overrode ? audit.documentType : existing.documentType,
+                  costSection: overrode ? audit.costSection : existing.costSection,
+                },
+              });
+            } else if (!overrode) {
+              await tx.supplierFingerprint.create({
+                data: {
+                  costistId,
+                  supplierCuit,
+                  documentType: audit.documentType,
+                  costSection: audit.costSection,
+                  timesSeenCorrect: 1,
+                  timesOverridden: 0,
+                  confidenceBonus: 5,
+                },
+              });
+            }
+          }
+        }
+      }
+
       return u;
     });
     return updated;
