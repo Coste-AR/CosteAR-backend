@@ -101,9 +101,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));
 
   // --- Rutas de la API (versionadas) ---
-  // Health check — sin autenticación, usado para keep-alive pings
-  app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
-
   const prefix = `/api/${env.API_VERSION}`;
   await app.register(
     async (api) => {
