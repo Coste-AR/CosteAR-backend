@@ -95,6 +95,16 @@ export class EmpresaPortalService {
         throw new ConflictError(`${normalizedEmail} ya es operador activo de esta empresa.`);
       }
 
+      // Cancelar invitaciones anteriores pendientes para evitar acumulación
+      await this.db.operatorInvite.updateMany({
+        where: {
+          connectionId: connection.id,
+          inviteeEmail: normalizedEmail,
+          status: 'PENDING',
+        },
+        data: { status: 'REVOKED' },
+      });
+
       await this.db.operatorInvite.create({
         data: {
           code: inviteCode,
