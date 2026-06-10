@@ -12,8 +12,10 @@ export interface IndecIndicator {
   effectiveDate: Date;
 }
 
-// Serie IPC Nivel general, nacional, variación mensual.
-const IPC_NACIONAL_SERIE = '145.3_INGNACNAL_DICI_M_38';
+// Serie IPC Nivel General Nacional, base dic 2016.
+// :percent_change devuelve variación % vs mes anterior (ej: 0.0338 = 3.38%).
+// ID actualizado jun-2026 — el ID anterior (145.3_INGNACNAL_DICI_M_38) fue discontinuado.
+const IPC_NACIONAL_SERIE = '148.3_INIVELNAL_DICI_M_26:percent_change';
 
 export class IndecClient {
   private readonly baseUrl: string;
@@ -25,7 +27,8 @@ export class IndecClient {
   /** Último valor del IPC nacional (índice nivel general). */
   async fetchIpcNacional(): Promise<IndecIndicator | null> {
     try {
-      const url = `${this.baseUrl}/series?ids=${IPC_NACIONAL_SERIE}&limit=1&sort=desc&format=json`;
+      // Trailing slash evita el 301 que la API emite sin él
+      const url = `${this.baseUrl}/series/?ids=${IPC_NACIONAL_SERIE}&limit=1&sort=desc&format=json`;
       const res = await fetch(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000),
@@ -34,9 +37,10 @@ export class IndecClient {
       const json = (await res.json()) as { data?: Array<[string, number]> };
       const point = json.data?.[0];
       if (!point) return null;
+      // La API devuelve fracción (0.0338 = 3.38%) → multiplicar por 100
       return {
         indicatorCode: 'IPC_NACIONAL',
-        value: point[1],
+        value: Math.round(point[1] * 1000) / 10, // ej: 0.0338 → 3.4
         effectiveDate: new Date(point[0]),
       };
     } catch {
