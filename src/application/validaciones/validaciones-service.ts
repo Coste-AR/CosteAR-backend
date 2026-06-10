@@ -201,7 +201,20 @@ export class ValidacionesService {
       take: limit,
       include: {
         connection: {
-          include: { company: { select: { id: true, name: true } } },
+          include: { company: { select: { id: true, name: true, industry: true } } },
+        },
+        classificationAudits: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            documentType: true,
+            costSection: true,
+            confidence: true,
+            requiresReview: true,
+            aiUsed: true,
+            definitiveSignal: true,
+            explanation: true,
+          },
         },
       },
     });
