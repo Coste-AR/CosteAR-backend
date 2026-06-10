@@ -9,6 +9,7 @@ import { classifyDocument } from '../../infrastructure/classifier/cascade-classi
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
 import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
+import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -382,7 +383,18 @@ export class EmpresaPortalService {
       extractedData: aiAnalysis?.extractedData as Record<string, unknown> | null ?? null,
     });
 
-    // ── Step 5: Save DataEntry ─────────────────────────────────────────────────
+    // ── Step 5: Upload file to Cloudinary (if present) ────────────────────────
+    let fileUrl: string | null = null;
+    if (input.fileData && input.fileMimeType && input.fileName) {
+      try {
+        fileUrl = await uploadToCloudinary(input.fileData, input.fileMimeType, input.fileName);
+      } catch (err) {
+        // No bloqueamos el flujo si Cloudinary falla — el archivo queda sin URL
+        console.error('[Cloudinary] Upload failed:', err);
+      }
+    }
+
+    // ── Step 6: Save DataEntry ─────────────────────────────────────────────────
     const aiJson = aiAnalysis ? JSON.stringify(aiAnalysis) : null;
 
     const entry = await this.db.dataEntry.create({
@@ -393,8 +405,9 @@ export class EmpresaPortalService {
         sourceType: input.sourceType,
         status: 'PENDING',
         fileName: input.fileName ?? null,
-        fileData: input.fileData ?? null,
+        fileData: null,           // ya no guardamos base64 en la DB
         fileMimeType: input.fileMimeType ?? null,
+        fileUrl,
         reviewNote: aiJson,
       },
     });
@@ -472,6 +485,7 @@ export class EmpresaPortalService {
         reviewedAt: true,
         fileName: true,
         fileMimeType: true,
+        fileUrl: true,
         connectionId: true,
         connection: { select: { company: { select: { name: true } } } },
       },

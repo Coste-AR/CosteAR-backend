@@ -21,8 +21,8 @@ export class ValidacionesService {
         select: {
           id: true, rawContent: true, sourceType: true, status: true,
           correctedContent: true, reviewNote: true, reviewedAt: true, createdAt: true,
-          fileName: true, fileMimeType: true,
-          // fileData excluido del listado (performance — se sirve por endpoint separado)
+          fileName: true, fileMimeType: true, fileUrl: true,
+          // fileData excluido del listado (legacy base64 — usar fileUrl)
           connection: {
             include: { company: { select: { id: true, name: true, industry: true } } },
           },

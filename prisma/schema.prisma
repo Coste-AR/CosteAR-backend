@@ -371,10 +371,11 @@ model DataEntry {
   sourceType   DataEntrySourceType @default(TEXT)
   status       DataEntryStatus     @default(PENDING)
 
-  // Adjunto (PDF o imagen) guardado como base64 en la DB
+  // Adjunto (PDF o imagen)
   fileName     String?             // nombre original del archivo
-  fileData     String?             // base64 del archivo (máx ~4MB útil)
+  fileData     String?             // base64 legacy — no se usa para uploads nuevos
   fileMimeType String?             // ej: "application/pdf", "image/jpeg"
+  fileUrl      String?             // URL de Cloudinary (reemplaza fileData)
 
   // Contenido corregido (si el costista modificó antes de aprobar)
   correctedContent String?
