@@ -87,7 +87,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const result = await auth.register(input, auditContext(request));
     setRefreshCookie(reply, result.tokens);
     return reply.status(201).send({
-      data: { user: result.user, accessToken: result.tokens.accessToken },
+      data: { user: result.user, accessToken: result.tokens.accessToken, refreshToken: result.tokens.refreshToken },
     });
   });
 
@@ -96,28 +96,45 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const result = await auth.login(input, auditContext(request));
     setRefreshCookie(reply, result.tokens);
     return reply.send({
-      data: { user: result.user, accessToken: result.tokens.accessToken },
+      data: {
+        user: result.user,
+        accessToken: result.tokens.accessToken,
+        refreshToken: result.tokens.refreshToken,   // para clientes que no pueden usar cookies cross-origin
+      },
     });
   });
 
   app.post('/auth/refresh', async (request, reply) => {
+    // Primero intentar desde cookie firmada; si no, desde body (clientes cross-origin)
     const raw = request.cookies[REFRESH_COOKIE];
     const unsigned = raw ? request.unsignCookie(raw) : null;
-    if (!unsigned || !unsigned.valid || !unsigned.value) {
+    const tokenFromCookie = unsigned?.valid ? unsigned.value : null;
+    const tokenFromBody = (request.body as Record<string, unknown>)?.refreshToken as string | undefined;
+    const refreshTokenValue = tokenFromCookie ?? tokenFromBody ?? null;
+
+    if (!refreshTokenValue) {
       return reply.status(401).send({
         error: { code: 'INVALID_REFRESH_TOKEN', message: 'Sesión inválida' },
       });
     }
-    const tokens = await auth.refresh(unsigned.value, auditContext(request));
+    const tokens = await auth.refresh(refreshTokenValue, auditContext(request));
     setRefreshCookie(reply, tokens);
-    return reply.send({ data: { accessToken: tokens.accessToken } });
+    return reply.send({
+      data: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      },
+    });
   });
 
   app.post('/auth/logout', async (request, reply) => {
     const raw = request.cookies[REFRESH_COOKIE];
     const unsigned = raw ? request.unsignCookie(raw) : null;
-    if (unsigned?.valid && unsigned.value) {
-      await auth.logout(unsigned.value, auditContext(request));
+    const tokenFromCookie = unsigned?.valid ? unsigned.value : null;
+    const tokenFromBody = (request.body as Record<string, unknown>)?.refreshToken as string | undefined;
+    const refreshTokenValue = tokenFromCookie ?? tokenFromBody ?? null;
+    if (refreshTokenValue) {
+      await auth.logout(refreshTokenValue, auditContext(request)).catch(() => {});
     }
     clearRefreshCookie(reply);
     return reply.send({ data: { success: true } });
