@@ -2,6 +2,7 @@ import type { PrismaClient, DataEntryStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
+import { buildLedgerDraft } from './ledger-builder.js';
 
 export class ValidacionesService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -159,6 +160,39 @@ export class ValidacionesService {
             },
           });
 
+          // ── Cerrar el círculo: el documento aprobado entra al libro mayor ──────
+          // Línea de costo trazable (monto, período, sección) linkeada a su
+          // documento de origen. Solo si hay un monto utilizable; si no, queda
+          // para carga manual del costista. La sección es la verdad final.
+          if (truthCostSection && truthCostSection !== 'DESCONOCIDO') {
+            const draft = buildLedgerDraft({
+              aiReviewNote: entry.reviewNote,           // JSON del análisis IA (antes de sobrescribir)
+              documentType: truthDocumentType,
+              fallbackDescription: entry.fileName ?? u.rawContent.slice(0, 120),
+            });
+            if (draft) {
+              await tx.costLedgerEntry.create({
+                data: {
+                  companyId:      entry.connection.companyId,
+                  costistId,
+                  dataEntryId:    entryId,
+                  period:         draft.period,
+                  costSection:    truthCostSection,
+                  documentType:   truthDocumentType,
+                  supplier:       draft.supplier,
+                  description:    draft.description,
+                  amount:         draft.amount,
+                  currency:       draft.currency,
+                  docDate:        draft.docDate,
+                  sourceImageUrl: entry.fileUrl,
+                  confidence:     audit.confidence,
+                  aiUsed:         audit.aiUsed,
+                  wasCorrected:   overrode,
+                },
+              });
+            }
+          }
+
           if (supplierCuit) {
             const companyId = entry.connection.companyId;
 
@@ -304,6 +338,43 @@ export class ValidacionesService {
       confidentAccuracy,        // % acierto cuando NO pedía revisión (lo importante)
       rules: byEngine(false),   // precisión de las reglas deterministas
       ai: byEngine(true),       // precisión del fallback de IA
+    };
+  }
+
+  /**
+   * Libro mayor de costos: líneas respaldadas por documentos aprobados,
+   * agrupadas por sección, con totales por período. Cada línea linkea a su
+   * documento de origen (imagen) para trazabilidad total.
+   */
+  async getLedger(costistId: string, opts: { companyId?: string; period?: string }) {
+    const entries = await this.db.costLedgerEntry.findMany({
+      where: {
+        costistId,
+        ...(opts.companyId ? { companyId: opts.companyId } : {}),
+        ...(opts.period ? { period: opts.period } : {}),
+      },
+      orderBy: [{ period: 'desc' }, { docDate: 'desc' }, { createdAt: 'desc' }],
+      take: 500,
+    });
+
+    // Totales por sección (en ARS; otras monedas se listan aparte sin sumar).
+    const totalsBySection: Record<string, number> = {};
+    for (const e of entries) {
+      if (e.currency === 'ARS') {
+        totalsBySection[e.costSection] = (totalsBySection[e.costSection] ?? 0) + Number(e.amount);
+      }
+    }
+
+    // Períodos disponibles (para el selector del frontend).
+    const periods = [...new Set(entries.map((e) => e.period))].sort().reverse();
+
+    return {
+      entries: entries.map((e) => ({
+        ...e,
+        amount: Number(e.amount),
+      })),
+      totalsBySection,
+      periods,
     };
   }
 

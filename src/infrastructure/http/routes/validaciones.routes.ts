@@ -122,6 +122,13 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: stats });
   });
 
+  // Libro mayor de costos respaldado por documentos (trazabilidad)
+  app.get('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
+    const { companyId, period } = request.query as { companyId?: string; period?: string };
+    const ledger = await svc.getLedger(request.authUser!.id, { companyId, period });
+    return reply.send({ data: ledger });
+  });
+
   // Historial de transiciones de una entrada
   app.get('/validaciones/:entryId/history', { preHandler: authenticate }, async (request, reply) => {
     const { entryId } = request.params as { entryId: string };

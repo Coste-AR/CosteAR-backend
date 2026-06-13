@@ -517,3 +517,37 @@ model ProcessedCAE {
   @@index([companyId])
   @@map("processed_caes")
 }
+
+// Libro mayor de costos respaldado por documentos.
+// Cada documento que el costista aprueba/corrige genera una línea acá:
+// el costo real, su período, su sección y un link a su documento de origen.
+// Es la fuente de verdad trazable de "qué se gastó", separada del modelo
+// parametrizado de la estructura de costos (que no se toca automáticamente).
+model CostLedgerEntry {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      String    @db.Uuid
+  costistId      String    @db.Uuid              // denormalizado para queries rápidas
+  dataEntryId    String?   @db.Uuid              // documento de origen (trazabilidad)
+
+  period         String                          // "YYYY-MM" (del documento, no de la aprobación)
+  costSection    String                          // MATERIA_PRIMA | MANO_DE_OBRA | COSTOS_INDIRECTOS | VENTAS
+  documentType   String
+  supplier       String?
+  description    String
+  amount         Decimal   @db.Decimal(18, 4)
+  currency       String    @default("ARS")
+  docDate        DateTime?
+
+  // Procedencia de la clasificación (para marcar qué mirar con lupa).
+  sourceImageUrl String?                         // foto/PDF del documento original
+  confidence     Int?
+  aiUsed         Boolean   @default(false)
+  wasCorrected   Boolean   @default(false)       // el costista corrigió antes de aprobar
+
+  createdAt      DateTime  @default(now())
+
+  @@index([companyId, period, costSection])
+  @@index([costistId, period])
+  @@index([dataEntryId])
+  @@map("cost_ledger_entries")
+}
