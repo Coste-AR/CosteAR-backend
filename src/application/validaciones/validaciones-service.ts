@@ -363,6 +363,79 @@ export class ValidacionesService {
   }
 
   /**
+   * Panel "qué necesita mi atención hoy" — resumen cruzando todas las empresas
+   * del costista. Por cada empresa: cuántas validaciones esperan, cuántas son
+   * dudosas (requieren revisión por conflicto/baja confianza), y hace cuánto
+   * que no llega nada (para detectar clientes desactualizados).
+   */
+  async getAttentionOverview(costistId: string) {
+    const [companies, pending] = await Promise.all([
+      this.db.company.findMany({
+        where: { userId: costistId, isActive: true },
+        select: { id: true, name: true, industry: true },
+      }),
+      this.db.dataEntry.findMany({
+        where: { costistId, status: 'PENDING' },
+        select: {
+          createdAt: true,
+          connection: { select: { companyId: true } },
+          classificationAudits: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { requiresReview: true },
+          },
+        },
+      }),
+    ]);
+
+    // Última actividad por empresa (cualquier estado), para marcar desactualizadas.
+    const recent = await this.db.dataEntry.findMany({
+      where: { costistId },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      select: { createdAt: true, connection: { select: { companyId: true } } },
+    });
+    const lastActivity: Record<string, string> = {};
+    for (const r of recent) {
+      const cid = r.connection.companyId;
+      if (!lastActivity[cid]) lastActivity[cid] = r.createdAt.toISOString();
+    }
+
+    const byCompany: Record<string, { pending: number; conflicts: number }> = {};
+    for (const e of pending) {
+      const cid = e.connection.companyId;
+      byCompany[cid] ??= { pending: 0, conflicts: 0 };
+      byCompany[cid].pending++;
+      if (e.classificationAudits[0]?.requiresReview) byCompany[cid].conflicts++;
+    }
+
+    const DAY = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const items = companies.map((c) => {
+      const counts = byCompany[c.id] ?? { pending: 0, conflicts: 0 };
+      const last = lastActivity[c.id] ?? null;
+      const daysSince = last ? Math.floor((now - new Date(last).getTime()) / DAY) : null;
+      return {
+        companyId: c.id,
+        companyName: c.name,
+        industry: c.industry,
+        pending: counts.pending,
+        conflicts: counts.conflicts,
+        lastActivity: last,
+        daysSinceActivity: daysSince,
+        // "Necesita atención" si hay conflictos, pendientes acumulados, o lleva
+        // ≥14 días sin novedades teniendo historial.
+        needsAttention: counts.conflicts > 0 || counts.pending >= 5 || (daysSince != null && daysSince >= 14),
+      };
+    });
+
+    // Orden: primero las que más atención piden.
+    items.sort((a, b) => (b.conflicts - a.conflicts) || (b.pending - a.pending));
+    return items;
+  }
+
+  /**
    * Aprobación masiva de las entradas "seguras": las que el clasificador
    * resolvió sin necesidad de revisión (requiresReview = false en su audit).
    * Las dudosas (conflicto / baja confianza) NO se tocan — quedan para revisión

@@ -129,6 +129,12 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: stats });
   });
 
+  // Panel "qué necesita mi atención hoy" cruzando todas las empresas
+  app.get('/validaciones/attention', { preHandler: authenticate }, async (request, reply) => {
+    const items = await svc.getAttentionOverview(request.authUser!.id);
+    return reply.send({ data: items });
+  });
+
   // Libro mayor de costos respaldado por documentos (trazabilidad)
   app.get('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
     const { companyId, period } = request.query as { companyId?: string; period?: string };
