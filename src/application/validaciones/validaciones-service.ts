@@ -342,6 +342,45 @@ export class ValidacionesService {
   }
 
   /**
+   * Aprobación masiva de las entradas "seguras": las que el clasificador
+   * resolvió sin necesidad de revisión (requiresReview = false en su audit).
+   * Las dudosas (conflicto / baja confianza) NO se tocan — quedan para revisión
+   * manual. Devuelve cuántas aprobó. Reusa review() para que cada aprobación
+   * dispare el libro mayor y el aprendizaje, igual que una aprobación individual.
+   */
+  async bulkApproveConfident(costistId: string, companyId?: string): Promise<{ approved: number; skipped: number }> {
+    const pending = await this.db.dataEntry.findMany({
+      where: {
+        costistId,
+        status: 'PENDING',
+        ...(companyId ? { connection: { companyId } } : {}),
+      },
+      select: {
+        id: true,
+        classificationAudits: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { requiresReview: true },
+        },
+      },
+    });
+
+    let approved = 0;
+    let skipped = 0;
+    for (const entry of pending) {
+      const audit = entry.classificationAudits[0];
+      // Solo las que el clasificador marcó como seguras (no requieren revisión).
+      if (audit && !audit.requiresReview) {
+        await this.review(entry.id, costistId, { status: 'APPROVED' });
+        approved++;
+      } else {
+        skipped++;
+      }
+    }
+    return { approved, skipped };
+  }
+
+  /**
    * Libro mayor de costos: líneas respaldadas por documentos aprobados,
    * agrupadas por sección, con totales por período. Cada línea linkea a su
    * documento de origen (imagen) para trazabilidad total.

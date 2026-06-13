@@ -110,6 +110,13 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: updated });
   });
 
+  // Aprobación masiva de las entradas que el clasificador resolvió con confianza
+  app.post('/validaciones/bulk-approve', { preHandler: authenticate }, async (request, reply) => {
+    const { companyId } = (request.body ?? {}) as { companyId?: string };
+    const result = await svc.bulkApproveConfident(request.authUser!.id, companyId);
+    return reply.send({ data: result });
+  });
+
   // Feed unificado para Centro de automatización (todas los estados, reciente primero)
   app.get('/validaciones/feed', { preHandler: authenticate }, async (request, reply) => {
     const result = await svc.listFeed(request.authUser!.id);
