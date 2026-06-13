@@ -14,6 +14,13 @@ import { prisma } from '../database/prisma.js';
 const CONFIDENCE_THRESHOLD = 72;
 
 /**
+ * Puntaje mínimo en Layer 2 para que un tipo DISTINTO al elegido cuente como
+ * competidor real (≈2-3 señales corroborantes fuertes). Por debajo es ruido
+ * normal (ej. el CUIT del empleador en un recibo) y no dispara conflicto.
+ */
+const STRONG_COMPETITOR = 30;
+
+/**
  * Genera una explicación legible para el costista sobre por qué
  * el sistema clasificó el documento de determinada manera.
  */
@@ -157,6 +164,7 @@ export async function classifyDocument(input: ClassifierInput & {
   let supplierFingerprintUsed = false;
   let fingerprintBonus = 0;
   let fingerprintLearnedSection: string | null = null;
+  let fingerprintLearnedType: string | null = null;
 
   if (input.supplierCuit) {
     try {
@@ -169,6 +177,7 @@ export async function classifyDocument(input: ClassifierInput & {
       });
       if (fp && fp.timesSeenCorrect >= 3) {
         fingerprintLearnedSection = fp.costSection;
+        fingerprintLearnedType    = fp.documentType;
         // El bonus se reserva; se aplica condicionalmente después de Layer 4
         fingerprintBonus = fp.confidenceBonus;
       }
@@ -177,144 +186,74 @@ export async function classifyDocument(input: ClassifierInput & {
     }
   }
 
-  // ── Layer 1: Definitive Signals ────────────────────────────────────────────
-  const layer1 = runLayer1(text);
-
-  if (layer1) {
-    let confidence = confidenceCap !== null
-      ? Math.min(layer1.confidence, confidenceCap)
-      : layer1.confidence;
-
-    // Aplicar fingerprint bonus solo si la sección aprendida coincide con la
-    // que Layer 4 sugiere para este texto. Si el proveedor vendió siempre MP
-    // pero ahora el texto habla de algo diferente, no inflamos la confianza.
-    const l4 = runLayer4(layer1.documentType, text, industryCategory);
-    const sectionMatch = !fingerprintLearnedSection
-      || l4.requiresAI                                // sin decisión todavía → aceptamos bonus
-      || fingerprintLearnedSection === l4.costSection; // coincide → bonus válido
-    if (sectionMatch) {
-      confidence = Math.min(confidence + fingerprintBonus, confidenceCap ?? 100);
-      if (fingerprintBonus > 0 && sectionMatch) supplierFingerprintUsed = true;
-    }
-
-    if (confidence >= EFFECTIVE_THRESHOLD && !l4.requiresAI) {
-      return {
-        documentType: layer1.documentType as DocumentType,
-        costSection:  l4.costSection,
-        confidence,
-        requiresReview: false,
-        isDuplicate:  false,
-        qualityGate:  qualityResult.gate,
-        definitiveSignal: layer1.label,
-        signals: [{ label: layer1.label, pts: layer1.confidence, type: layer1.documentType, layer: 1 }],
-        aiUsed: false,
-        supplierFingerprintUsed,
-        confidenceCap,
-        intent,
-        industryCategory,
-        explanation: buildExplanation({
-          intent, documentType: layer1.documentType as DocumentType,
-          costSection: l4.costSection, confidence,
-          definitiveSignal: layer1.label, l4Reasoning: l4.reasoning,
-          aiUsed: false, supplierFingerprintUsed, requiresReview: false,
-          industryCategory, industryLabel: industryProfile.label, signalCount: 1,
-        }),
-      };
-    }
-
-    // Layer 1 encontró doc type pero Layer 4 necesita IA para el cost section
-    if (l4.requiresAI && confidence >= EFFECTIVE_THRESHOLD) {
-      const correctionExamples = await getCorrectionExamples({
-        costistId: input.costistId,
-        industryCategory,
-        foundLabels: [layer1.label],
-      });
-      const aiResult = await runLayer5({
-        text,
-        accumulatedPts: confidence,
-        foundSignalLabels: [layer1.label],
-        suggestedType: layer1.documentType,
-        industryLabel: industryProfile.label,
-        industryCategory,
-        intent,
-        correctionExamples,
-      });
-
-      if (aiResult) {
-        // Aplicar Layer 4 sobre la sección que sugirió Groq para validar con rubro
-        const l4check = runLayer4(layer1.documentType, text, industryCategory);
-        const finalSection = (!l4check.requiresAI) ? l4check.costSection : aiResult.costSection as CostSection;
-        const finalConf = confidenceCap !== null ? Math.min(aiResult.confidence, confidenceCap) : aiResult.confidence;
-
-        return {
-          documentType: layer1.documentType as DocumentType,
-          costSection:  finalSection,
-          confidence:   finalConf,
-          requiresReview: finalConf < EFFECTIVE_THRESHOLD,
-          isDuplicate:  false,
-          qualityGate:  qualityResult.gate,
-          definitiveSignal: layer1.label,
-          signals: [{ label: layer1.label, pts: layer1.confidence, type: layer1.documentType, layer: 1 }],
-          aiUsed: true,
-          supplierFingerprintUsed,
-          confidenceCap,
-          intent,
-          industryCategory,
-          explanation: buildExplanation({
-            intent, documentType: layer1.documentType as DocumentType,
-            costSection: finalSection, confidence: finalConf,
-            definitiveSignal: layer1.label, l4Reasoning: aiResult.reasoning,
-            aiUsed: true, supplierFingerprintUsed, requiresReview: finalConf < CONFIDENCE_THRESHOLD,
-            industryCategory, industryLabel: industryProfile.label, signalCount: 1,
-          }),
-        };
-      }
-    }
-  }
-
-  // ── Layers 2-3: Corroborating + Numeric ───────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // EVIDENCIA COMPLETA: corren SIEMPRE todas las capas deterministas (baratas).
+  // No hay cortocircuito: ninguna capa "gana" sola sin que se mire al resto.
+  // ════════════════════════════════════════════════════════════════════════════
+  const layer1       = runLayer1(text);                     // señal definitiva o null
   const layer1Labels = layer1 ? [layer1.label] : [];
-  const layer2       = runLayer2(text, layer1Labels);
-  const layer3Delta  = runLayer3(text);
-
-  let accumulatedPts = layer2.totalPts + layer3Delta;
-  const suggestedType = layer2.winningType ?? (layer1?.documentType ?? null);
-
-  if (confidenceCap !== null) {
-    accumulatedPts = Math.min(accumulatedPts, confidenceCap);
-  }
+  const layer2       = runLayer2(text, layer1Labels);       // corroborantes + margen
+  const layer3Delta  = runLayer3(text);                     // validación numérica
 
   const allSignals = [
     ...(layer1 ? [{ label: layer1.label, pts: layer1.confidence, type: layer1.documentType, layer: 1 as const }] : []),
     ...layer2.signals,
   ];
+  const foundLabels = allSignals.map((s) => s.label);
 
-  // Ambigüedad de TIPO: solo aplica cuando NO hay señal definitiva (Layer 1).
-  // Una señal definitiva (CAE, "RECIBO DE SUELDO") manda por sobre el margen.
-  // Sin ella, si Layer 2 dejó dos tipos peleados, no confiamos en el puntaje
-  // absoluto: lo desempata la IA y, si no está, va a revisión humana.
+  // ── Opiniones de TIPO de cada fuente independiente ──────────────────────────
+  const definitiveType   = layer1?.documentType ?? null;
+  const corroboratingType = layer2.winningType ?? null;
+
+  // Hipótesis principal: la señal definitiva manda como primera hipótesis; si no,
+  // el ganador de corroborantes; si no, lo aprendido del proveedor.
+  const chosenType = (definitiveType ?? corroboratingType ?? fingerprintLearnedType ?? 'DESCONOCIDO') as DocumentType;
+
+  // ── Conflicto ENTRE capas (el agujero que tapamos) ──────────────────────────
+  // Un competidor fuerte = un tipo distinto al elegido con puntaje sustancial en
+  // Layer 2. Si existe, la evidencia se contradice: NO confiamos en una sola señal.
+  const competingTypes = Object.entries(layer2.scoreByType)
+    .filter(([t, pts]) => t !== chosenType && t !== '' && pts >= STRONG_COMPETITOR)
+    .map(([t]) => t);
+
+  // El fingerprint (verdad aprendida del costista) contradice a la señal definitiva.
+  const fingerprintConflict = Boolean(
+    fingerprintLearnedType && definitiveType && fingerprintLearnedType !== definitiveType,
+  );
+
+  const crossLayerConflict = competingTypes.length > 0 || fingerprintConflict;
+
+  // Ambigüedad interna de Layer 2 (dos tipos pegados) cuando no hay señal definitiva.
   const typeAmbiguous = !layer1 && layer2.ambiguous;
 
-  // ── Layer 4: Business Routing ──────────────────────────────────────────────
-  const l4 = runLayer4(suggestedType ?? 'DESCONOCIDO', text, industryCategory);
+  // ── Layer 4: routing de sección para la hipótesis elegida ───────────────────
+  const l4 = runLayer4(chosenType, text, industryCategory);
 
-  // Aplicar fingerprint bonus sobre el score acumulado (layers 2-3), misma
-  // lógica: solo si el costSection aprendido coincide con lo que Layer 4 sugiere.
-  if (!supplierFingerprintUsed && fingerprintBonus > 0) {
-    const sectionMatch2 = !fingerprintLearnedSection
-      || l4.requiresAI
-      || fingerprintLearnedSection === l4.costSection;
-    if (sectionMatch2) {
-      accumulatedPts = Math.min(accumulatedPts + fingerprintBonus, confidenceCap ?? 100);
-      supplierFingerprintUsed = true;
-    }
+  // ── Confianza a partir de la evidencia ──────────────────────────────────────
+  let confidence = definitiveType
+    ? layer1!.confidence
+    : layer2.totalPts + layer3Delta;
+  if (confidenceCap !== null) confidence = Math.min(confidence, confidenceCap);
+
+  // Bonus de fingerprint solo si la sección aprendida coincide con la ruteada.
+  const sectionMatch = !fingerprintLearnedSection
+    || l4.requiresAI
+    || fingerprintLearnedSection === l4.costSection;
+  if (fingerprintBonus > 0 && sectionMatch) {
+    confidence = Math.min(confidence + fingerprintBonus, confidenceCap ?? 100);
+    supplierFingerprintUsed = true;
   }
 
-  if (accumulatedPts >= EFFECTIVE_THRESHOLD && !l4.requiresAI && !typeAmbiguous) {
+  // ── DECISIÓN ────────────────────────────────────────────────────────────────
+  // Auto-clasifica SOLO si todas las fuentes coinciden, no hay ambigüedad de
+  // sección, y la confianza alcanza. Cualquier duda → IA y/o revisión humana.
+  const blocked = crossLayerConflict || typeAmbiguous || l4.requiresAI;
+
+  if (!blocked && confidence >= EFFECTIVE_THRESHOLD && chosenType !== 'DESCONOCIDO') {
     return {
-      documentType: (suggestedType ?? 'DESCONOCIDO') as DocumentType,
+      documentType: chosenType,
       costSection:  l4.costSection,
-      confidence:   Math.min(accumulatedPts, 100),
+      confidence:   Math.min(confidence, 100),
       requiresReview: false,
       isDuplicate:  false,
       qualityGate:  qualityResult.gate,
@@ -326,8 +265,8 @@ export async function classifyDocument(input: ClassifierInput & {
       intent,
       industryCategory,
       explanation: buildExplanation({
-        intent, documentType: (suggestedType ?? 'DESCONOCIDO') as DocumentType,
-        costSection: l4.costSection, confidence: Math.min(accumulatedPts, 100),
+        intent, documentType: chosenType,
+        costSection: l4.costSection, confidence: Math.min(confidence, 100),
         definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
         aiUsed: false, supplierFingerprintUsed, requiresReview: false,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
@@ -335,13 +274,13 @@ export async function classifyDocument(input: ClassifierInput & {
     };
   }
 
-  // ── Layer 5: AI Fallback ───────────────────────────────────────────────────
-  // Se llama tanto por confianza baja como por ambigüedad (empate de tipos o
-  // de sección): en ese caso la IA actúa de desempate aunque el puntaje fuera alto.
-  const foundLabels = allSignals.map((s) => s.label);
-  const ambiguityHint = typeAmbiguous && layer2.runnerUpType
-    ? `Las reglas dejaron dos tipos empatados: ${layer2.winningType} vs ${layer2.runnerUpType}. Decidí cuál corresponde.`
-    : undefined;
+  // ── Layer 5: IA como desempate (recibe TODO el contexto del conflicto) ──────
+  const conflictHint = crossLayerConflict
+    ? `⚠️ Las reglas se contradicen: la evidencia apunta a ${chosenType} pero también hay señales fuertes de ${[...competingTypes, fingerprintConflict ? `${fingerprintLearnedType} (histórico del proveedor)` : ''].filter(Boolean).join(', ')}. Resolvé con cuidado.`
+    : typeAmbiguous && layer2.runnerUpType
+      ? `Las reglas dejaron dos tipos empatados: ${layer2.winningType} vs ${layer2.runnerUpType}. Decidí cuál corresponde.`
+      : undefined;
+
   const correctionExamples = await getCorrectionExamples({
     costistId: input.costistId,
     industryCategory,
@@ -349,18 +288,17 @@ export async function classifyDocument(input: ClassifierInput & {
   });
   const aiResult = await runLayer5({
     text,
-    accumulatedPts,
+    accumulatedPts: confidence,
     foundSignalLabels: foundLabels,
-    suggestedType,
+    suggestedType: chosenType,
     industryLabel: industryProfile.label,
     industryCategory,
     intent,
-    ambiguityHint,
+    ambiguityHint: conflictHint,
     correctionExamples,
   });
 
   if (aiResult) {
-    // Aplicar Layer 4 con rubro sobre lo que dijo Groq (costSection puede corregirse)
     const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory);
     const finalSection: CostSection = (!l4afterAI.requiresAI)
       ? l4afterAI.costSection
@@ -370,11 +308,16 @@ export async function classifyDocument(input: ClassifierInput & {
       ? Math.min(aiResult.confidence, confidenceCap)
       : aiResult.confidence;
 
+    // Garantía de cero errores silenciosos: si hubo conflicto duro entre capas,
+    // la IA pre-llena su mejor hipótesis pero SIEMPRE pasa por revisión humana.
+    // Sin conflicto, vale el umbral normal de confianza.
+    const requiresReview = crossLayerConflict || finalConf < CONFIDENCE_THRESHOLD;
+
     return {
       documentType: aiResult.documentType as DocumentType,
       costSection:  finalSection,
       confidence:   finalConf,
-      requiresReview: finalConf < CONFIDENCE_THRESHOLD,
+      requiresReview,
       isDuplicate:  false,
       qualityGate:  qualityResult.gate,
       definitiveSignal: layer1?.label ?? null,
@@ -387,18 +330,19 @@ export async function classifyDocument(input: ClassifierInput & {
       explanation: buildExplanation({
         intent, documentType: aiResult.documentType as DocumentType,
         costSection: finalSection, confidence: finalConf,
-        definitiveSignal: layer1?.label ?? null, l4Reasoning: aiResult.reasoning,
-        aiUsed: true, supplierFingerprintUsed, requiresReview: finalConf < CONFIDENCE_THRESHOLD,
+        definitiveSignal: layer1?.label ?? null,
+        l4Reasoning: crossLayerConflict ? `${aiResult.reasoning} (había señales contradictorias → confirmá)` : aiResult.reasoning,
+        aiUsed: true, supplierFingerprintUsed, requiresReview,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
       }),
     };
   }
 
-  // ── Layer 6: Human Escalation ──────────────────────────────────────────────
+  // ── Layer 6: Escalamiento humano (IA no disponible o sin resolución) ────────
   return {
-    documentType: (suggestedType ?? 'DESCONOCIDO') as DocumentType,
+    documentType: chosenType,
     costSection:  l4.costSection,
-    confidence:   Math.min(accumulatedPts, 71),
+    confidence:   Math.min(confidence, 71),
     requiresReview: true,
     isDuplicate:  false,
     qualityGate:  qualityResult.gate,
@@ -410,8 +354,8 @@ export async function classifyDocument(input: ClassifierInput & {
     intent,
     industryCategory,
     explanation: buildExplanation({
-      intent, documentType: (suggestedType ?? 'DESCONOCIDO') as DocumentType,
-      costSection: l4.costSection, confidence: Math.min(accumulatedPts, 71),
+      intent, documentType: chosenType,
+      costSection: l4.costSection, confidence: Math.min(confidence, 71),
       definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
       aiUsed: false, supplierFingerprintUsed, requiresReview: true,
       industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
