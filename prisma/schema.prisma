@@ -377,6 +377,10 @@ model DataEntry {
   fileMimeType String?             // ej: "application/pdf", "image/jpeg"
   fileUrl      String?             // URL de Cloudinary (reemplaza fileData)
 
+  // Clave fuerte de deduplicación (proveedor|nro comprobante normalizado).
+  // Permite detectar reenvíos del mismo documento aunque no tenga CAE.
+  dedupeKey    String?
+
   // Contenido corregido (si el costista modificó antes de aprobar)
   correctedContent String?
 
@@ -393,6 +397,7 @@ model DataEntry {
 
   @@index([connectionId])
   @@index([costistId, status])
+  @@index([connectionId, dedupeKey])
   @@map("data_entries")
 }
 

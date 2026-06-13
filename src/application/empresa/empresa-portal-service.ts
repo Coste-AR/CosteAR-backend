@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { classifyDocument } from '../../infrastructure/classifier/cascade-classifier.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
+import { buildStrongDedupeKey } from '../../infrastructure/classifier/utils/dedupe-key.js';
 import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
 import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
 
@@ -369,6 +370,32 @@ export class EmpresaPortalService {
       }
     }
 
+    // ── Step 5b: Dedup sin CAE — clave fuerte proveedor + nro comprobante ──────
+    // Cubre el caso típico: el operario manda la misma factura (foto) dos veces.
+    // Solo bloquea con clave fuerte (ambos datos presentes) para no rechazar
+    // compras legítimas repetidas. Ignora entradas ya rechazadas.
+    const dedupeKey = buildStrongDedupeKey({
+      supplier:      aiAnalysis?.extractedData?.supplier ?? null,
+      invoiceNumber: aiAnalysis?.extractedData?.invoiceNumber ?? null,
+    });
+    if (dedupeKey) {
+      const existingDup = await this.db.dataEntry.findFirst({
+        where: {
+          connectionId: membership.connectionId,
+          dedupeKey,
+          status: { not: 'REJECTED' },
+        },
+        select: { id: true },
+      });
+      if (existingDup) {
+        return {
+          isDuplicate: true,
+          duplicateEntryId: existingDup.id,
+          message: 'Este comprobante ya fue enviado antes (mismo proveedor y número).',
+        };
+      }
+    }
+
     // ── Step 6: Run cascade classifier v2 ─────────────────────────────────────
     const classification = await classifyDocument({
       text: input.rawContent || (input.fileName ?? ''),
@@ -408,6 +435,7 @@ export class EmpresaPortalService {
         fileData: null,           // ya no guardamos base64 en la DB
         fileMimeType: input.fileMimeType ?? null,
         fileUrl,
+        dedupeKey,
         reviewNote: aiJson,
       },
     });

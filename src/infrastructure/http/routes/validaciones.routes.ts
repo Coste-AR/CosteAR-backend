@@ -116,6 +116,12 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send(result);
   });
 
+  // Métricas de precisión del clasificador
+  app.get('/validaciones/accuracy', { preHandler: authenticate }, async (request, reply) => {
+    const stats = await svc.getAccuracyStats(request.authUser!.id);
+    return reply.send({ data: stats });
+  });
+
   // Historial de transiciones de una entrada
   app.get('/validaciones/:entryId/history', { preHandler: authenticate }, async (request, reply) => {
     const { entryId } = request.params as { entryId: string };

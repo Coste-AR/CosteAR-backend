@@ -255,6 +255,59 @@ export class ValidacionesService {
   }
 
   /**
+   * Métricas de precisión del clasificador para el costista.
+   *
+   * Mide, sobre las validaciones que el costista ya revisó, cuántas estaban
+   * bien clasificadas (las aprobó sin tocar) vs cuántas tuvo que corregir.
+   * Sirve para darle visibilidad y para detectar si el sistema está mejorando.
+   */
+  async getAccuracyStats(costistId: string) {
+    const audits = await this.db.classificationAudit.findMany({
+      where: { costistId, validatedByCostista: true },
+      select: {
+        costaOverrode: true,
+        confidence: true,
+        aiUsed: true,
+        requiresReview: true,
+        documentType: true,
+        createdAt: true,
+      },
+    });
+
+    const total = audits.length;
+    const corrected = audits.filter((a) => a.costaOverrode).length;
+    const correct = total - corrected;
+    const accuracy = total > 0 ? Math.round((correct / total) * 100) : null;
+
+    // Precisión cuando el sistema dijo estar seguro (no requería revisión).
+    const confident = audits.filter((a) => !a.requiresReview);
+    const confidentCorrect = confident.filter((a) => !a.costaOverrode).length;
+    const confidentAccuracy = confident.length > 0
+      ? Math.round((confidentCorrect / confident.length) * 100)
+      : null;
+
+    // Desglose reglas vs IA.
+    const byEngine = (used: boolean) => {
+      const subset = audits.filter((a) => a.aiUsed === used);
+      const ok = subset.filter((a) => !a.costaOverrode).length;
+      return {
+        total: subset.length,
+        accuracy: subset.length > 0 ? Math.round((ok / subset.length) * 100) : null,
+      };
+    };
+
+    return {
+      total,
+      correct,
+      corrected,
+      accuracy,                 // % global aprobado sin tocar
+      confidentAccuracy,        // % acierto cuando NO pedía revisión (lo importante)
+      rules: byEngine(false),   // precisión de las reglas deterministas
+      ai: byEngine(true),       // precisión del fallback de IA
+    };
+  }
+
+  /**
    * Obtiene el historial completo de transiciones de una entrada.
    */
   async getEntryHistory(entryId: string, costistId: string) {
