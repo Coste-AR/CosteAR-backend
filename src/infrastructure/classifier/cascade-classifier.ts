@@ -7,6 +7,7 @@ import { runLayer3 }      from './layers/layer3-numeric-validation.js';
 import { runLayer4 }      from './layers/layer4-business-routing.js';
 import { runLayer5 }      from './layers/layer5-ai-fallback.js';
 import { categorizeIndustry, getIndustryProfile } from './industry/industry-profile.js';
+import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
 import { prisma } from '../database/prisma.js';
 
@@ -223,6 +224,11 @@ export async function classifyDocument(input: ClassifierInput & {
 
     // Layer 1 encontró doc type pero Layer 4 necesita IA para el cost section
     if (l4.requiresAI && confidence >= EFFECTIVE_THRESHOLD) {
+      const correctionExamples = await getCorrectionExamples({
+        costistId: input.costistId,
+        industryCategory,
+        foundLabels: [layer1.label],
+      });
       const aiResult = await runLayer5({
         text,
         accumulatedPts: confidence,
@@ -231,6 +237,7 @@ export async function classifyDocument(input: ClassifierInput & {
         industryLabel: industryProfile.label,
         industryCategory,
         intent,
+        correctionExamples,
       });
 
       if (aiResult) {
@@ -282,6 +289,12 @@ export async function classifyDocument(input: ClassifierInput & {
     ...layer2.signals,
   ];
 
+  // Ambigüedad de TIPO: solo aplica cuando NO hay señal definitiva (Layer 1).
+  // Una señal definitiva (CAE, "RECIBO DE SUELDO") manda por sobre el margen.
+  // Sin ella, si Layer 2 dejó dos tipos peleados, no confiamos en el puntaje
+  // absoluto: lo desempata la IA y, si no está, va a revisión humana.
+  const typeAmbiguous = !layer1 && layer2.ambiguous;
+
   // ── Layer 4: Business Routing ──────────────────────────────────────────────
   const l4 = runLayer4(suggestedType ?? 'DESCONOCIDO', text, industryCategory);
 
@@ -297,7 +310,7 @@ export async function classifyDocument(input: ClassifierInput & {
     }
   }
 
-  if (accumulatedPts >= EFFECTIVE_THRESHOLD && !l4.requiresAI) {
+  if (accumulatedPts >= EFFECTIVE_THRESHOLD && !l4.requiresAI && !typeAmbiguous) {
     return {
       documentType: (suggestedType ?? 'DESCONOCIDO') as DocumentType,
       costSection:  l4.costSection,
@@ -323,7 +336,17 @@ export async function classifyDocument(input: ClassifierInput & {
   }
 
   // ── Layer 5: AI Fallback ───────────────────────────────────────────────────
+  // Se llama tanto por confianza baja como por ambigüedad (empate de tipos o
+  // de sección): en ese caso la IA actúa de desempate aunque el puntaje fuera alto.
   const foundLabels = allSignals.map((s) => s.label);
+  const ambiguityHint = typeAmbiguous && layer2.runnerUpType
+    ? `Las reglas dejaron dos tipos empatados: ${layer2.winningType} vs ${layer2.runnerUpType}. Decidí cuál corresponde.`
+    : undefined;
+  const correctionExamples = await getCorrectionExamples({
+    costistId: input.costistId,
+    industryCategory,
+    foundLabels,
+  });
   const aiResult = await runLayer5({
     text,
     accumulatedPts,
@@ -332,6 +355,8 @@ export async function classifyDocument(input: ClassifierInput & {
     industryLabel: industryProfile.label,
     industryCategory,
     intent,
+    ambiguityHint,
+    correctionExamples,
   });
 
   if (aiResult) {

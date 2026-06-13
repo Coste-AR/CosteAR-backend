@@ -6,7 +6,26 @@ export interface Layer2Result {
   totalPts: number;
   winningType: DocumentType | null;
   scoreByType: Record<string, number>;
+  /** Segundo tipo con más puntaje (si existe). */
+  runnerUpType: DocumentType | null;
+  /** Puntaje del segundo tipo. */
+  runnerUpPts: number;
+  /** Diferencia de puntaje entre el ganador y el segundo. */
+  margin: number;
+  /**
+   * true cuando hay un segundo candidato real y el margen con el ganador
+   * es menor a AMBIGUITY_MARGIN. Señala que el puntaje absoluto del ganador
+   * no alcanza para confiar: dos tipos quedaron peleados.
+   */
+  ambiguous: boolean;
 }
+
+/**
+ * Margen mínimo de puntos entre el tipo ganador y el segundo para considerar
+ * la clasificación inequívoca. Por debajo de esto, dos tipos están demasiado
+ * cerca → es un caso ambiguo que debe desempatar la IA o el humano.
+ */
+export const AMBIGUITY_MARGIN = 15;
 
 /**
  * Layer 2: Corroborating signals with weighted accumulation.
@@ -48,13 +67,28 @@ export function runLayer2(text: string, extraFoundLabels: string[] = []): Layer2
     }
   }
 
-  const entries = Object.entries(scoreByType).filter(([, pts]) => pts > 0);
-  const winner = entries.length > 0
-    ? entries.reduce((best, curr) => curr[1] > best[1] ? curr : best)
-    : null;
+  // Ordenar tipos por puntaje descendente para extraer ganador y segundo.
+  const ranked = Object.entries(scoreByType)
+    .filter(([, pts]) => pts > 0)
+    .sort((a, b) => b[1] - a[1]);
 
-  const winningType = (winner?.[0] ?? null) as DocumentType | null;
-  const totalPts = winner?.[1] ?? 0;
+  const winningType = (ranked[0]?.[0] ?? null) as DocumentType | null;
+  const totalPts = ranked[0]?.[1] ?? 0;
 
-  return { signals: allSignals, totalPts, winningType, scoreByType };
+  const runnerUpType = (ranked[1]?.[0] ?? null) as DocumentType | null;
+  const runnerUpPts = ranked[1]?.[1] ?? 0;
+
+  const margin = winningType ? totalPts - runnerUpPts : 0;
+  const ambiguous = runnerUpType !== null && margin < AMBIGUITY_MARGIN;
+
+  return {
+    signals: allSignals,
+    totalPts,
+    winningType,
+    scoreByType,
+    runnerUpType,
+    runnerUpPts,
+    margin,
+    ambiguous,
+  };
 }

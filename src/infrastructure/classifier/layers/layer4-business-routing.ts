@@ -10,6 +10,14 @@ export interface Layer4Result {
 }
 
 /**
+ * Diferencia mínima de keywords entre dos secciones (MP vs CIP) para rutear
+ * con confianza. Una ventaja de una sola keyword es demasiado débil: el
+ * documento menciona insumos de ambas secciones casi por igual → ambiguo,
+ * lo desempata la IA en vez de adivinar.
+ */
+export const SECTION_MARGIN = 2;
+
+/**
  * Layer 4: Business Routing con conciencia de rubro.
  * Determina a qué sección de costos pertenece un documento.
  *
@@ -136,6 +144,17 @@ function routeFacturaCompra(
       confidence: 80,
       requiresAI: false,
       reasoning: `Factura con indicadores de mano de obra directa (${modScore} señales)`,
+    };
+  }
+
+  // Ambigüedad de sección: si MP y CIP están peleados (ambos con señales y la
+  // ventaja es de una sola keyword), no adivinamos → desempata la IA.
+  if (mpScore >= 1 && cipScore >= 1 && Math.abs(mpScore - cipScore) < SECTION_MARGIN) {
+    return {
+      costSection: 'DESCONOCIDO',
+      confidence: 55,
+      requiresAI: true,
+      reasoning: `Factura con señales parejas de Materia Prima (${mpScore}) y Costos Indirectos (${cipScore}) → ambiguo, requiere análisis por IA`,
     };
   }
 

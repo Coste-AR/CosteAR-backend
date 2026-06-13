@@ -47,11 +47,18 @@ export async function runLayer5(input: {
   industryLabel?: string;
   industryCategory?: string;
   intent?: string;
+  /** Pista de desempate cuando las reglas dejaron dos candidatos peleados. */
+  ambiguityHint?: string;
+  /** Ejemplos few-shot de correcciones previas del costista (memoria). */
+  correctionExamples?: string;
 }): Promise<Layer5Result | null> {
   const service = getGroq();
   if (!service) return null;
   const raw = await service.classifyDocument(input);
   if (!raw) return null;
+
+  // Si Groq devuelve un tipo o sección fuera del set válido, lo tratamos como
+  // DESCONOCIDO (más abajo) — nunca inventamos una categoría que no existe.
 
   const documentType = VALID_DOC_TYPES.has(raw.documentType)
     ? (raw.documentType as DocumentType)

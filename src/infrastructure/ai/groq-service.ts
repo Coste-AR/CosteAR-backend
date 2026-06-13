@@ -25,7 +25,7 @@ El sistema maneja tres grandes áreas:
 - MATERIA_PRIMA: compras de insumos, materiales, facturas de proveedores, ficha de stock
 - MANO_DE_OBRA: liquidaciones de sueldos, horas trabajadas por departamento, cargas sociales
 - COSTOS_INDIRECTOS: alquileres, energía, seguros, mantenimiento, gastos generales de fábrica
-- VENTAS: facturas de venta, remitos de salida, precios unitarios
+- VENTAS: facturas de venta, remitos de salida, precios unitarios 
 
 Tu tarea es:
 1. Detectar qué tipo de documento es
@@ -191,6 +191,8 @@ export class GroqService {
     industryLabel?: string;
     industryCategory?: string;
     intent?: string;
+    ambiguityHint?: string;
+    correctionExamples?: string;
   }): Promise<{ documentType: string; costSection: string; confidence: number; reasoning: string } | null> {
     if (!this.isConfigured) return null;
 
@@ -204,6 +206,16 @@ export class GroqService {
 
     const intentCtx = input.intent && input.intent !== 'DOCUMENTO_FORMAL'
       ? `Nota: el mensaje fue detectado como "${input.intent}", tener en cuenta al clasificar.`
+      : '';
+
+    // Desempate explícito cuando las reglas dejaron dos candidatos peleados.
+    const ambiguityCtx = input.ambiguityHint
+      ? `\n⚠️ CASO AMBIGUO: ${input.ambiguityHint}`
+      : '';
+
+    // Memoria: ejemplos reales de cómo el costista corrigió casos parecidos.
+    const examplesCtx = input.correctionExamples
+      ? `\nEjemplos de clasificaciones que este costista validó/corrigió en casos similares (seguí su criterio):\n${input.correctionExamples}`
       : '';
 
     // Instrucciones específicas por rubro para evitar errores sistemáticos
@@ -223,7 +235,7 @@ export class GroqService {
     const prompt = `Contexto: documento contable argentino enviado por un operador de PyME.
 ${industryCtx}
 ${industryHint}
-${intentCtx}
+${intentCtx}${ambiguityCtx}${examplesCtx}
 
 El clasificador de reglas encontró estas señales:
 ${signalsSummary}

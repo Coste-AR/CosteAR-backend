@@ -4,10 +4,22 @@ import { ValidacionesService } from '../../../application/validaciones/validacio
 import { EmpresaConnectionService } from '../../../application/empresa/empresa-connection-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 
+const DOC_TYPES = [
+  'FACTURA_COMPRA', 'FACTURA_VENTA', 'REMITO', 'LIQUIDACION_MOD',
+  'PLANILLA_HORAS', 'NOTA_DEBITO', 'NOTA_CREDITO', 'DESCONOCIDO',
+] as const;
+const COST_SECTIONS = [
+  'MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS', 'DESCONOCIDO',
+] as const;
+
 const reviewSchema = z.object({
   status: z.enum(['APPROVED', 'REJECTED', 'CORRECTED']),
   note: z.string().max(500).optional(),
   correctedContent: z.string().max(10_000).optional(),
+  // Corrección estructurada: a qué tipo / sección lo reclasificó el costista.
+  // Es la verdad de oro que alimenta el aprendizaje del clasificador.
+  correctedDocumentType: z.enum(DOC_TYPES).optional(),
+  correctedCostSection: z.enum(COST_SECTIONS).optional(),
 });
 
 const submitViaKeySchema = z.object({

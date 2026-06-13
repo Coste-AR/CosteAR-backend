@@ -92,6 +92,8 @@ export class ValidacionesService {
       status: 'APPROVED' | 'REJECTED' | 'CORRECTED';
       note?: string;
       correctedContent?: string;
+      correctedDocumentType?: string;
+      correctedCostSection?: string;
     },
   ) {
     const entry = await this.db.dataEntry.findUnique({
@@ -135,12 +137,25 @@ export class ValidacionesService {
           const supplierCuit = foundCuits[0];
           const overrode = input.status === 'CORRECTED';
 
+          // Verdad de oro: cuando el costista corrige, la clasificación CORRECTA
+          // es la que él eligió, NO la que el sistema había puesto. Si no eligió
+          // explícitamente, caemos a la clasificación original del audit.
+          const truthDocumentType = overrode
+            ? (input.correctedDocumentType ?? audit.documentType)
+            : audit.documentType;
+          const truthCostSection = overrode
+            ? (input.correctedCostSection ?? audit.costSection)
+            : audit.costSection;
+
           await tx.classificationAudit.update({
             where: { id: audit.id },
             data: {
               validatedByCostista: true,
               costaValidatedAt: new Date(),
               costaOverrode: overrode,
+              costaCorrection: overrode
+                ? { type: truthDocumentType, section: truthCostSection }
+                : undefined,
             },
           });
 
@@ -163,8 +178,10 @@ export class ValidacionesService {
                   timesSeenCorrect,
                   timesOverridden,
                   confidenceBonus: bonus,
-                  documentType: overrode ? audit.documentType : existing.documentType,
-                  costSection: overrode ? audit.costSection : existing.costSection,
+                  // Al corregir, el fingerprint aprende la clasificación CORRECTA
+                  // (lo que eligió el costista), no la que el sistema erró.
+                  documentType: overrode ? truthDocumentType : existing.documentType,
+                  costSection: overrode ? truthCostSection : existing.costSection,
                 },
               });
             } else if (!overrode) {
@@ -173,8 +190,24 @@ export class ValidacionesService {
                   costistId,
                   companyId,
                   supplierCuit,
-                  documentType: audit.documentType,
-                  costSection: audit.costSection,
+                  documentType: truthDocumentType,
+                  costSection: truthCostSection,
+                  timesSeenCorrect: 1,
+                  timesOverridden: 0,
+                  confidenceBonus: 5,
+                },
+              });
+            } else {
+              // Primera vez que vemos este proveedor y ya viene corregido:
+              // creamos el fingerprint directamente con la verdad del costista,
+              // así el aprendizaje no se pierde.
+              await tx.supplierFingerprint.create({
+                data: {
+                  costistId,
+                  companyId,
+                  supplierCuit,
+                  documentType: truthDocumentType,
+                  costSection: truthCostSection,
                   timesSeenCorrect: 1,
                   timesOverridden: 0,
                   confidenceBonus: 5,
