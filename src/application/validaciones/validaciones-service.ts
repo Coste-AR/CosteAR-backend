@@ -105,6 +105,18 @@ export class ValidacionesService {
     if (entry.costistId !== costistId) throw new ForbiddenError('No tenés permiso para revisar esta entrada');
     if (entry.status !== 'PENDING') throw new ForbiddenError('Solo se pueden revisar entradas pendientes');
 
+    // El payload del libro mayor se arma dentro de la transacción (necesita la
+    // verdad de la clasificación) pero se INSERTA después de que la aprobación
+    // commitea, de forma no-fatal: una línea de costo mal formada nunca puede
+    // revertir ni bloquear la aprobación de un documento.
+    let ledgerPayload: {
+      companyId: string; costistId: string; dataEntryId: string;
+      period: string; costSection: string; documentType: string;
+      supplier: string | null; description: string; amount: number;
+      currency: string; docDate: Date | null; sourceImageUrl: string | null;
+      confidence: number | null; aiUsed: boolean; wasCorrected: boolean;
+    } | null = null;
+
     const updated = await this.db.$transaction(async (tx) => {
       const u = await tx.dataEntry.update({
         where: { id: entryId },
@@ -171,25 +183,23 @@ export class ValidacionesService {
               fallbackDescription: entry.fileName ?? u.rawContent.slice(0, 120),
             });
             if (draft) {
-              await tx.costLedgerEntry.create({
-                data: {
-                  companyId:      entry.connection.companyId,
-                  costistId,
-                  dataEntryId:    entryId,
-                  period:         draft.period,
-                  costSection:    truthCostSection,
-                  documentType:   truthDocumentType,
-                  supplier:       draft.supplier,
-                  description:    draft.description,
-                  amount:         draft.amount,
-                  currency:       draft.currency,
-                  docDate:        draft.docDate,
-                  sourceImageUrl: entry.fileUrl,
-                  confidence:     audit.confidence,
-                  aiUsed:         audit.aiUsed,
-                  wasCorrected:   overrode,
-                },
-              });
+              ledgerPayload = {
+                companyId:      entry.connection.companyId,
+                costistId,
+                dataEntryId:    entryId,
+                period:         draft.period,
+                costSection:    truthCostSection,
+                documentType:   truthDocumentType,
+                supplier:       draft.supplier,
+                description:    draft.description,
+                amount:         draft.amount,
+                currency:       draft.currency,
+                docDate:        draft.docDate,
+                sourceImageUrl: entry.fileUrl,
+                confidence:     audit.confidence,
+                aiUsed:         audit.aiUsed,
+                wasCorrected:   overrode,
+              };
             }
           }
 
@@ -254,6 +264,17 @@ export class ValidacionesService {
 
       return u;
     });
+
+    // Línea del libro mayor: fuera de la transacción y no-fatal. Si falla, la
+    // aprobación ya quedó firme; solo se loguea (no se pierde el documento).
+    if (ledgerPayload) {
+      try {
+        await this.db.costLedgerEntry.create({ data: ledgerPayload });
+      } catch (err) {
+        console.error('[ledger] No se pudo crear la línea de costo:', err);
+      }
+    }
+
     return updated;
   }
 

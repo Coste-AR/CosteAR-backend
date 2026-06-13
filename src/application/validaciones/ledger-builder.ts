@@ -70,7 +70,13 @@ export function buildLedgerDraft(params: {
       ? Number(ed.netAmount)
       : null;
 
-  if (amount == null || amount <= 0) return null;
+  // Sin monto positivo no hay línea de costo (va a carga manual).
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) return null;
+
+  // Tope de seguridad: la columna es Decimal(18,4) → máximo 14 dígitos enteros.
+  // Un monto absurdo (OCR roto) podría desbordar y romper la inserción; mejor
+  // omitir la línea que arriesgar un error. Lo revisa el costista a mano.
+  if (amount >= 1e14) return null;
 
   const docDate = parseDocDate(ed?.date);
   const period = docDate
