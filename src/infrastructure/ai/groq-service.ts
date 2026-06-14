@@ -97,6 +97,37 @@ export class GroqService {
     return this.apiKey.length > 10;
   }
 
+  /**
+   * Completion genérica que devuelve JSON parseado. Usada por el consejero.
+   * Devuelve null si la API no está configurada o falla (no-fatal).
+   */
+  async completeJSON<T>(systemPrompt: string, userPrompt: string): Promise<T | null> {
+    if (!this.isConfigured) return null;
+    try {
+      const res = await groqFetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: TEXT_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: 500,
+          temperature: 0.2,
+          response_format: { type: 'json_object' },
+        }),
+      });
+      if (!res.ok) { console.error('[groq] completeJSON error:', await res.text()); return null; }
+      const data = await res.json() as GroqResponse;
+      const raw = data.choices[0]?.message.content ?? '';
+      return JSON.parse(raw) as T;
+    } catch (err) {
+      console.error('[groq] completeJSON unexpected error:', err);
+      return null;
+    }
+  }
+
   async analyzeDocument(input: {
     text?: string;
     fileData?: string;
