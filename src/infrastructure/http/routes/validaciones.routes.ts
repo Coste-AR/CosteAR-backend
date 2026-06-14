@@ -142,6 +142,47 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: ledger });
   });
 
+  // Carga manual de una línea del libro mayor
+  const manualLedgerSchema = z.object({
+    companyId: z.string().uuid(),
+    period: z.string().regex(/^\d{4}-\d{2}$/),
+    costSection: z.enum(COST_SECTIONS),
+    description: z.string().min(1).max(200),
+    amount: z.number().finite().positive().max(9_999_999_999_999),
+    supplier: z.string().max(120).optional(),
+    currency: z.string().max(8).optional(),
+    docDate: z.string().optional(),
+  });
+  app.post('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
+    const input = manualLedgerSchema.parse(request.body);
+    const created = await svc.createManualLedgerEntry(request.authUser!.id, input);
+    return reply.status(201).send({ data: created });
+  });
+
+  // Editar una línea del libro mayor
+  const updateLedgerSchema = z.object({
+    costSection: z.enum(COST_SECTIONS).optional(),
+    description: z.string().min(1).max(200).optional(),
+    amount: z.number().finite().positive().max(9_999_999_999_999).optional(),
+    supplier: z.string().max(120).nullable().optional(),
+    period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+    currency: z.string().max(8).optional(),
+    docDate: z.string().nullable().optional(),
+  });
+  app.patch('/validaciones/ledger/:id', { preHandler: authenticate }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const input = updateLedgerSchema.parse(request.body);
+    const updated = await svc.updateLedgerEntry(request.authUser!.id, id, input);
+    return reply.send({ data: updated });
+  });
+
+  // Borrar una línea del libro mayor
+  app.delete('/validaciones/ledger/:id', { preHandler: authenticate }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = await svc.deleteLedgerEntry(request.authUser!.id, id);
+    return reply.send({ data: result });
+  });
+
   // Historial de transiciones de una entrada
   app.get('/validaciones/:entryId/history', { preHandler: authenticate }, async (request, reply) => {
     const { entryId } = request.params as { entryId: string };

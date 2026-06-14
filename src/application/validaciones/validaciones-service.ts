@@ -512,6 +512,85 @@ export class ValidacionesService {
   }
 
   /**
+   * Carga manual de una línea del libro mayor (costo sin documento: efectivo,
+   * estimación, ajuste). El costista es dueño de su libro.
+   */
+  async createManualLedgerEntry(costistId: string, input: {
+    companyId: string;
+    period: string;
+    costSection: string;
+    description: string;
+    amount: number;
+    supplier?: string;
+    currency?: string;
+    docDate?: string;
+  }) {
+    // La empresa tiene que ser del costista.
+    const company = await this.db.company.findFirst({
+      where: { id: input.companyId, userId: costistId },
+      select: { id: true },
+    });
+    if (!company) throw new ForbiddenError('Empresa no encontrada o sin acceso');
+
+    return this.db.costLedgerEntry.create({
+      data: {
+        companyId:    input.companyId,
+        costistId,
+        dataEntryId:  null,
+        period:       input.period,
+        costSection:  input.costSection,
+        documentType: 'CARGA_MANUAL',
+        supplier:     input.supplier?.trim() || null,
+        description:  input.description.trim(),
+        amount:       input.amount,
+        currency:     input.currency?.trim() || 'ARS',
+        docDate:      input.docDate ? new Date(input.docDate) : null,
+        sourceImageUrl: null,
+        confidence:   null,
+        aiUsed:       false,
+        wasCorrected: false,
+      },
+    });
+  }
+
+  /** Edita una línea del libro mayor (corregir monto, sección, etc.). */
+  async updateLedgerEntry(costistId: string, id: string, input: {
+    costSection?: string;
+    description?: string;
+    amount?: number;
+    supplier?: string | null;
+    period?: string;
+    currency?: string;
+    docDate?: string | null;
+  }) {
+    const existing = await this.db.costLedgerEntry.findUnique({ where: { id }, select: { costistId: true } });
+    if (!existing) throw new NotFoundError('Línea no encontrada');
+    if (existing.costistId !== costistId) throw new ForbiddenError('Sin permiso sobre esta línea');
+
+    return this.db.costLedgerEntry.update({
+      where: { id },
+      data: {
+        ...(input.costSection !== undefined ? { costSection: input.costSection } : {}),
+        ...(input.description !== undefined ? { description: input.description.trim() } : {}),
+        ...(input.amount !== undefined ? { amount: input.amount } : {}),
+        ...(input.supplier !== undefined ? { supplier: input.supplier?.trim() || null } : {}),
+        ...(input.period !== undefined ? { period: input.period } : {}),
+        ...(input.currency !== undefined ? { currency: input.currency } : {}),
+        ...(input.docDate !== undefined ? { docDate: input.docDate ? new Date(input.docDate) : null } : {}),
+      },
+    });
+  }
+
+  /** Borra una línea del libro mayor. */
+  async deleteLedgerEntry(costistId: string, id: string) {
+    const existing = await this.db.costLedgerEntry.findUnique({ where: { id }, select: { costistId: true } });
+    if (!existing) throw new NotFoundError('Línea no encontrada');
+    if (existing.costistId !== costistId) throw new ForbiddenError('Sin permiso sobre esta línea');
+    await this.db.costLedgerEntry.delete({ where: { id } });
+    return { success: true };
+  }
+
+  /**
    * Obtiene el historial completo de transiciones de una entrada.
    */
   async getEntryHistory(entryId: string, costistId: string) {
