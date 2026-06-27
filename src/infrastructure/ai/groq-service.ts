@@ -133,18 +133,24 @@ export class GroqService {
     fileData?: string;
     fileMimeType?: string;
     fileName?: string;
+    companyContext?: string | null;
   }): Promise<DocumentAnalysis | null> {
     if (!this.isConfigured) return null;
 
     const isImage = input.fileMimeType?.startsWith('image/') ?? false;
     const isPdf   = input.fileMimeType === 'application/pdf';
 
+    let sysPrompt = SYSTEM_PROMPT;
+    if (input.companyContext) {
+      sysPrompt += `\n\nCONTEXTO DE ESTA EMPRESA CLIENTE (Uso del costeo, rubro y forma de operar):\n${input.companyContext}\nConsiderá este contexto al clasificar y extraer datos del documento.`;
+    }
+
     try {
       let messages: object[];
 
       if (isImage && input.fileData) {
         messages = [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: sysPrompt },
           {
             role: 'user',
             content: [
@@ -168,7 +174,7 @@ export class GroqService {
         ].filter(Boolean).join('\n\n');
 
         messages = [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: sysPrompt },
           { role: 'user', content: content || 'Mensaje vacío — indicalo en el JSON.' },
         ];
       }

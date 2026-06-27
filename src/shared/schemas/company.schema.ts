@@ -21,6 +21,7 @@ export const createCompanySchema = z.object({
   name: z.string().min(2, 'Nombre demasiado corto').max(160).trim(),
   industry: z.string().max(120).trim().optional(),
   cuit: cuitSchema.optional(),
+  description: z.string().max(5000).trim().optional(),
 });
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
 

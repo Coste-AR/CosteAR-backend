@@ -37,6 +37,7 @@ export class CompanyService {
         name: input.name,
         industry: input.industry ?? null,
         cuit: input.cuit ?? null,
+        description: input.description ?? null,
       },
     });
     await recordAudit(
@@ -54,6 +55,7 @@ export class CompanyService {
         name: input.name ?? existing.name,
         industry: input.industry ?? existing.industry,
         cuit: input.cuit ?? existing.cuit,
+        description: input.description ?? existing.description,
         isActive: input.isActive ?? existing.isActive,
       },
     });

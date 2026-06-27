@@ -347,9 +347,10 @@ export class EmpresaPortalService {
     // ── Step 1: Fetch company industry for industry-aware classification ────────
     const company = await this.db.company.findUnique({
       where: { id: companyId },
-      select: { industry: true },
+      select: { industry: true, description: true },
     });
     const industry = company?.industry ?? null;
+    const companyContext = company?.description ?? null;
 
     // ── Step 2: Run Groq document analysis (extraction + quality + OCR) ────────
     const aiAnalysis = await this.groq.analyzeDocument({
@@ -357,6 +358,7 @@ export class EmpresaPortalService {
       fileData: input.fileData,
       fileMimeType: input.fileMimeType,
       fileName: input.fileName,
+      companyContext,
     });
 
     // ── Step 3: Build enriched text (solves image classification problem) ──────
@@ -422,6 +424,13 @@ export class EmpresaPortalService {
       groqQuality: aiAnalysis?.quality ?? null,
       extractedData: aiAnalysis?.extractedData as Record<string, unknown> | null ?? null,
     });
+
+    if (classification.qualityGate === 'FAIL' || classification.costSection === 'DESCONOCIDO') {
+      throw new ConflictError(
+        classification.explanation ||
+        'No se pudo clasificar el documento. Por favor, enviá una foto o archivo más claro.'
+      );
+    }
 
     // ── Step 5: Upload file to Cloudinary (if present) ────────────────────────
     let fileUrl: string | null = null;
@@ -522,6 +531,7 @@ export class EmpresaPortalService {
         sourceType: true,
         status: true,
         reviewNote: true,
+        costistaNote: true,
         createdAt: true,
         reviewedAt: true,
         fileName: true,

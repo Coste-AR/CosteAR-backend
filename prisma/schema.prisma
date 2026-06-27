@@ -121,6 +121,7 @@ model Company {
   name      String
   industry  String?
   cuit      String?
+  description String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -392,6 +393,7 @@ model DataEntry {
 
   // Nota interna del costista al aprobar / rechazar
   reviewNote   String?
+  costistaNote String?
   reviewedAt   DateTime?
   reviewedBy   String?   @db.Uuid
 

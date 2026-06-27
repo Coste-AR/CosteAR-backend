@@ -123,7 +123,7 @@ export class ValidacionesService {
         where: { id: entryId },
         data: {
           status: input.status as DataEntryStatus,
-          reviewNote: input.note ?? null,
+          costistaNote: input.note ?? null,
           correctedContent: input.correctedContent ?? null,
           reviewedAt: new Date(),
           reviewedBy: costistId,
