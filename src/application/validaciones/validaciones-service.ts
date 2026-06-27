@@ -3,6 +3,7 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { buildLedgerDraft } from './ledger-builder.js';
+import { populateCostStructureFromApproval } from './cost-structure-populator.js';
 
 export class ValidacionesService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -273,6 +274,36 @@ export class ValidacionesService {
         await this.db.costLedgerEntry.create({ data: ledgerPayload });
       } catch (err) {
         console.error('[ledger] No se pudo crear la línea de costo:', err);
+      }
+    }
+
+    // Populación automática de CostStructure: no-fatal, fuera de transacción.
+    // Solo se ejecuta cuando se aprueba/corrige (no en rechazo).
+    if (input.status === 'APPROVED' || input.status === 'CORRECTED') {
+      // Leer el audit actualizado para obtener la sección verdadera
+      try {
+        const latestAudit = await this.db.classificationAudit.findFirst({
+          where: { dataEntryId: entryId },
+          orderBy: { createdAt: 'desc' },
+          select: { costSection: true, costaCorrection: true },
+        });
+        const correctionSection = latestAudit?.costaCorrection
+          ? (latestAudit.costaCorrection as Record<string, string>)['section']
+          : undefined;
+        const lp = ledgerPayload as { costSection?: string; supplier?: string | null } | null;
+        const finalSection = correctionSection ?? latestAudit?.costSection ?? lp?.costSection;
+
+        if (finalSection && finalSection !== 'DESCONOCIDO') {
+          await populateCostStructureFromApproval(this.db, {
+            companyId:   entry.connection.companyId,
+            costistId,
+            costSection: finalSection,
+            reviewNote:  entry.reviewNote,
+            supplier:    lp?.supplier ?? null,
+          });
+        }
+      } catch (err) {
+        console.error('[populator] Error al poblar CostStructure:', err);
       }
     }
 
