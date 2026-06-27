@@ -425,10 +425,10 @@ export class EmpresaPortalService {
       extractedData: aiAnalysis?.extractedData as Record<string, unknown> | null ?? null,
     });
 
-    if (classification.qualityGate === 'FAIL' || classification.costSection === 'DESCONOCIDO') {
+    if (classification.qualityGate === 'FAIL') {
       throw new ConflictError(
         classification.explanation ||
-        'No se pudo clasificar el documento. Por favor, enviá una foto o archivo más claro.'
+        'El documento es ilegible o no se pudo leer bien. Por favor, enviá una foto o archivo más claro y con mejor iluminación.'
       );
     }
 
