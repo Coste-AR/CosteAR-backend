@@ -143,14 +143,20 @@ enum CostStructureStatus {
   ARCHIVED
 }
 
+enum CostingSystem {
+  ORDERS
+  PROCESSES
+}
+
 model CostStructure {
-  id          String              @id @default(uuid()) @db.Uuid
-  companyId   String              @db.Uuid
-  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId      String              @db.Uuid // denormalizado para RLS
-  productName String
-  period      String              // "YYYY-MM"
-  status      CostStructureStatus @default(DRAFT)
+  id            String              @id @default(uuid()) @db.Uuid
+  companyId     String              @db.Uuid
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId        String              @db.Uuid // denormalizado para RLS
+  productName   String
+  period        String              // "YYYY-MM"
+  status        CostStructureStatus @default(DRAFT)
+  costingSystem CostingSystem       @default(ORDERS)
 
   // Configuración de los tres elementos del costo (JSONB tipado en la app).
   rawMaterialConfig   Json?

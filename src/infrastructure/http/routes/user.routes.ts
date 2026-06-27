@@ -53,4 +53,49 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     await recordAudit({ ...auditContext(request), userId: user.id, action: 'user.password.change' });
     return { data: { success: true } };
   });
+
+  app.delete('/user/account', { preHandler: authenticate }, async (request) => {
+    const userId = request.authUser!.id;
+    
+    // Obtener todas las empresas del costista
+    const companies = await prisma.company.findMany({
+      where: { userId },
+      select: { id: true },
+    });
+    const companyIds = companies.map((c) => c.id);
+
+    await prisma.$transaction([
+      // Borrar CAEs procesados de sus empresas
+      prisma.processedCAE.deleteMany({
+        where: { companyId: { in: companyIds } },
+      }),
+      // Borrar fingerprints de proveedores
+      prisma.supplierFingerprint.deleteMany({
+        where: { costistId: userId },
+      }),
+      // Borrar auditorías del clasificador
+      prisma.classificationAudit.deleteMany({
+        where: { costistId: userId },
+      }),
+      // Borrar libro de costos
+      prisma.costLedgerEntry.deleteMany({
+        where: { costistId: userId },
+      }),
+      // Borrar alertas del usuario
+      prisma.alert.deleteMany({
+        where: { userId },
+      }),
+      // Borrar configuraciones de alertas
+      prisma.alertSetting.deleteMany({
+        where: { userId },
+      }),
+      // Borrar el usuario (dispara Cascade en Company, connection, memberships, refreshTokens, etc.)
+      prisma.user.delete({
+        where: { id: userId },
+      }),
+    ]);
+
+    await recordAudit({ ...auditContext(request), userId, action: 'user.account.delete' });
+    return { data: { success: true } };
+  });
 }

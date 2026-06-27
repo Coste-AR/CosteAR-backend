@@ -21,10 +21,10 @@ export const stockMovementSchema = z.object({
 
 export const rawMaterialConfigSchema = z.object({
   wilson: z.object({
-    annualDemand: positive,
+    annualDemand: nonNeg,
     orderCost: nonNeg,
     holdingRate: z.number().finite().min(0).max(10), // fracción (0.30 = 30%)
-    unitCost: positive,
+    unitCost: nonNeg,
   }),
   stockPolicy: z.object({
     minConsumption: nonNeg,
@@ -73,8 +73,8 @@ export const directLaborConfigSchema = z.object({
     .array(
       z.object({
         name: z.string().min(1).max(120),
-        basicRemuneration: positive,
-        hoursWorked: positive,
+        basicRemuneration: nonNeg,
+        hoursWorked: nonNeg,
       }),
     )
     .max(100),
@@ -109,7 +109,9 @@ export const indirectCostConfigSchema = z.object({
     .array(
       z.object({
         serviceCenterId: z.string().min(1),
-        toProductive: z.record(z.string(), nonNeg),
+        toProductive: z.record(z.string(), nonNeg).optional().default({}),
+        toProductiveFixed: z.record(z.string(), nonNeg).optional().default({}),
+        toProductiveVariable: z.record(z.string(), nonNeg).optional().default({}),
       }),
     )
     .max(100),
@@ -119,7 +121,7 @@ export const indirectCostConfigSchema = z.object({
       z.object({
         centerId: z.string().min(1),
         budget: fixedVariableSchema,
-        normalCapacity: positive,
+        normalCapacity: nonNeg,
         actualActivity: nonNeg,
         actualCip: nonNeg,
       }),
@@ -133,6 +135,7 @@ export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
 export const createCostStructureSchema = z.object({
   productName: z.string().min(1).max(160).trim(),
   period: z.string().regex(/^\d{4}-\d{2}$/, 'Formato de período: YYYY-MM'),
+  costingSystem: z.enum(['ORDERS', 'PROCESSES']).default('ORDERS'),
 });
 export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>;
 

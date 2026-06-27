@@ -93,11 +93,12 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
 
   // Historial de entradas resueltas
   app.get('/validaciones/historial', { preHandler: authenticate }, async (request, reply) => {
-    const { page, limit } = request.query as { page?: string; limit?: string };
+    const { page, limit, companyId } = request.query as { page?: string; limit?: string; companyId?: string };
     const result = await svc.listHistorial(
       request.authUser!.id,
       Number(page ?? 1),
       Number(limit ?? 20),
+      companyId,
     );
     return reply.send({ data: result });
   });

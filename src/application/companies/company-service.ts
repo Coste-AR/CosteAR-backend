@@ -66,7 +66,12 @@ export class CompanyService {
 
   async remove(userId: string, id: string, ctx: AuditContext) {
     await this.getById(userId, id); // valida pertenencia
-    await this.db.company.delete({ where: { id } });
+    await this.db.$transaction([
+      this.db.processedCAE.deleteMany({ where: { companyId: id } }),
+      this.db.costLedgerEntry.deleteMany({ where: { companyId: id } }),
+      this.db.supplierFingerprint.deleteMany({ where: { companyId: id } }),
+      this.db.company.delete({ where: { id } }),
+    ]);
     await recordAudit(
       { ...ctx, userId, action: 'company.delete', entityType: 'Company', entityId: id },
       this.db,

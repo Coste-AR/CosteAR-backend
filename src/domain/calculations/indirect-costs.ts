@@ -105,6 +105,8 @@ export interface ServiceDistribution {
   serviceCenterId: string;
   /** Reparto hacia centros productivos (productiveId → unidades de base). */
   toProductive: Record<string, Decimal.Value>;
+  toProductiveFixed?: Record<string, Decimal.Value>;
+  toProductiveVariable?: Record<string, Decimal.Value>;
 }
 
 /**
@@ -131,28 +133,42 @@ export function secondaryProration(
       throw new Error(`Servicio inexistente en prorrateo: ${dist.serviceCenterId}`);
     }
 
-    const totalBase = Object.values(dist.toProductive).reduce(
+    // Distribuir costo Fijo
+    const fixedDist = dist.toProductiveFixed && Object.keys(dist.toProductiveFixed).length > 0
+      ? dist.toProductiveFixed
+      : dist.toProductive;
+    const totalBaseFixed = Object.values(fixedDist).reduce(
       (acc: Decimal, v) => acc.plus(v),
       new Decimal(0),
     );
-    if (totalBase.isZero()) {
-      throw new Error(
-        `Servicio "${dist.serviceCenterId}": base de reparto secundario = 0`,
-      );
+
+    // Distribuir costo Variable
+    const variableDist = dist.toProductiveVariable && Object.keys(dist.toProductiveVariable).length > 0
+      ? dist.toProductiveVariable
+      : dist.toProductive;
+    const totalBaseVariable = Object.values(variableDist).reduce(
+      (acc: Decimal, v) => acc.plus(v),
+      new Decimal(0),
+    );
+
+    // Repartir fijo
+    if (!totalBaseFixed.isZero() && !serviceCost.fixed.isZero()) {
+      for (const [productiveId, baseUnits] of Object.entries(fixedDist)) {
+        const share = new Decimal(baseUnits).dividedBy(totalBaseFixed);
+        if (result[productiveId]) {
+          result[productiveId]!.fixed = result[productiveId]!.fixed.add(serviceCost.fixed.applyRate(share));
+        }
+      }
     }
 
-    for (const [productiveId, baseUnits] of Object.entries(dist.toProductive)) {
-      const share = new Decimal(baseUnits).dividedBy(totalBase);
-      const current = result[productiveId];
-      if (!current) {
-        throw new Error(
-          `Prorrateo secundario hacia centro no productivo: ${productiveId}`,
-        );
+    // Repartir variable
+    if (!totalBaseVariable.isZero() && !serviceCost.variable.isZero()) {
+      for (const [productiveId, baseUnits] of Object.entries(variableDist)) {
+        const share = new Decimal(baseUnits).dividedBy(totalBaseVariable);
+        if (result[productiveId]) {
+          result[productiveId]!.variable = result[productiveId]!.variable.add(serviceCost.variable.applyRate(share));
+        }
       }
-      result[productiveId] = fvAdd(current, {
-        fixed: serviceCost.fixed.applyRate(share),
-        variable: serviceCost.variable.applyRate(share),
-      });
     }
   }
 
@@ -183,7 +199,11 @@ export function calcPredeterminedQuota(
 ): PredeterminedQuota {
   const bp = new Decimal(normalCapacity);
   if (bp.isZero()) {
-    throw new Error('Cuota predeterminada: capacidad normal (bp) = 0');
+    return {
+      fixedQuota: Money.zero(),
+      variableQuota: Money.zero(),
+      totalQuota: Money.zero(),
+    };
   }
   const fixedQuota = cipBudget.fixed.divide(bp);
   const variableQuota = cipBudget.variable.divide(bp);

@@ -48,14 +48,18 @@ export class ValidacionesService {
   /**
    * Lista el historial de entradas ya resueltas (APPROVED / REJECTED / CORRECTED).
    */
-  async listHistorial(costistId: string, page = 1, limit = 20) {
+  async listHistorial(costistId: string, page = 1, limit = 20, companyId?: string) {
     const skip = (page - 1) * limit;
+    const whereClause: any = {
+      costistId,
+      status: { in: ['APPROVED', 'REJECTED', 'CORRECTED'] },
+    };
+    if (companyId) {
+      whereClause.connection = { companyId };
+    }
     const [items, total] = await Promise.all([
       this.db.dataEntry.findMany({
-        where: {
-          costistId,
-          status: { in: ['APPROVED', 'REJECTED', 'CORRECTED'] },
-        },
+        where: whereClause,
         orderBy: { reviewedAt: 'desc' },
         skip,
         take: limit,
@@ -66,10 +70,7 @@ export class ValidacionesService {
         },
       }),
       this.db.dataEntry.count({
-        where: {
-          costistId,
-          status: { in: ['APPROVED', 'REJECTED', 'CORRECTED'] },
-        },
+        where: whereClause,
       }),
     ]);
     return { items, total, page, limit };

@@ -57,8 +57,8 @@ export function calcOptimalLot(p: WilsonParams): Decimal {
   const C = new Decimal(p.unitCost);
 
   const denominator = K.times(C);
-  if (denominator.isZero()) {
-    throw new Error('Wilson: K·C no puede ser cero (división por cero)');
+  if (denominator.isZero() || R.isZero() || S.isZero()) {
+    return new Decimal(0);
   }
   return R.times(S).times(2).dividedBy(denominator).sqrt();
 }

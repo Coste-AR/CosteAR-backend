@@ -80,9 +80,6 @@ function buildExplanation(params: {
   if (supplierFingerprintUsed) {
     parts.push('Proveedor reconocido por historial de validaciones anteriores.');
   }
-  if (aiUsed) {
-    parts.push('Clasificación asistida por inteligencia artificial (Groq).');
-  }
 
   // Confianza
   parts.push(`Confianza: ${confidence}%.`);

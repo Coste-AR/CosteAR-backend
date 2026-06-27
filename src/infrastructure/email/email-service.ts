@@ -1,31 +1,75 @@
 import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { getEnv } from '../config/env.js';
 
 /**
- * Envío de emails transaccionales vía Resend. En test y development (sin API
- * key real) cae a un modo "log only" que no hace llamadas de red.
+ * Envío de emails transaccionales vía Resend o SMTP. En test y development (sin API
+ * key o SMTP real) cae a un modo "log only" que no hace llamadas de red.
  */
 export class EmailService {
-  private readonly resend: Resend | null;
+  private readonly resend: Resend | null = null;
+  private readonly transporter: nodemailer.Transporter | null = null;
   private readonly from: string;
 
   constructor() {
     const env = getEnv();
     this.from = env.EMAIL_FROM;
-    const usable =
-      env.NODE_ENV === 'production' || env.RESEND_API_KEY.startsWith('re_') === true;
-    this.resend = usable && env.RESEND_API_KEY !== 're_test_placeholder'
-      ? new Resend(env.RESEND_API_KEY)
-      : null;
+
+    if (env.SMTP_HOST) {
+      this.transporter = nodemailer.createTransport({
+        host: env.SMTP_HOST,
+        port: env.SMTP_PORT || 587,
+        secure: env.SMTP_SECURE === 'true',
+        auth: env.SMTP_USER && env.SMTP_PASS ? {
+          user: env.SMTP_USER,
+          pass: env.SMTP_PASS,
+        } : undefined,
+      });
+    } else {
+      const usable =
+        env.NODE_ENV === 'production' || env.RESEND_API_KEY.startsWith('re_') === true;
+      this.resend = usable && env.RESEND_API_KEY !== 're_test_placeholder'
+        ? new Resend(env.RESEND_API_KEY)
+        : null;
+    }
   }
 
   private async send(to: string, subject: string, html: string): Promise<void> {
+    if (this.transporter) {
+      try {
+        await this.transporter.sendMail({
+          from: this.from,
+          to,
+          subject,
+          html,
+        });
+      } catch (err) {
+        console.error(`[email:smtp] Error al enviar a ${to}:`, err);
+      }
+      return;
+    }
+
     if (!this.resend) {
       // Modo desarrollo/test: no enviamos, dejamos rastro en consola.
       console.info(`[email:dev] → ${to} · ${subject}`);
       return;
     }
-    await this.resend.emails.send({ from: this.from, to, subject, html });
+    try {
+      const response = await this.resend.emails.send({ from: this.from, to, subject, html });
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+    } catch (err) {
+      console.warn(`[email] Error al enviar desde ${this.from}, reintentando con onboarding@resend.dev:`, err);
+      try {
+        const responseFallback = await this.resend.emails.send({ from: 'onboarding@resend.dev', to, subject, html });
+        if (responseFallback.error) {
+          console.error(`[email] También falló envío fallback:`, responseFallback.error);
+        }
+      } catch (fallbackErr) {
+        console.error(`[email] Excepción en envío fallback:`, fallbackErr);
+      }
+    }
   }
 
   async sendPasswordReset(to: string, token: string): Promise<void> {

@@ -23,6 +23,13 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().min(1).default('re_placeholder'),
   EMAIL_FROM: z.string().default('noreply@costear.app'),
 
+  // SMTP Configuration (alternative to Resend)
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_SECURE: z.string().optional(), // 'true' or 'false'
+
   GROQ_API_KEY: z.string().min(1).default(''),
 
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),

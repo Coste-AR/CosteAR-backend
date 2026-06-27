@@ -53,7 +53,16 @@ export interface CalculationOutput {
     indirectCosts: {
       perDepartment: Record<
         string,
-        { cipTotal: number; appliedCip: number; budgetVariance: number; volumeVariance: number }
+        {
+          cipTotal: number;
+          appliedCip: number;
+          budgetVariance: number;
+          volumeVariance: number;
+          normalCapacity: number;
+          actualActivity: number;
+          quota: number;
+          actualCip: number;
+        }
       >;
     };
   };
@@ -112,6 +121,10 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       appliedCip: variance.cipApplied.toNumber(),
       budgetVariance: variance.budgetVariance.toNumber(),
       volumeVariance: variance.volumeVariance.toNumber(),
+      normalCapacity: setting.normalCapacity,
+      actualActivity: setting.actualActivity,
+      quota: quota.totalQuota.toNumber(),
+      actualCip: setting.actualCip,
     };
   }
 

@@ -82,14 +82,7 @@ export class EmpresaPortalService {
     const existingUser = await this.db.user.findUnique({ where: { email: normalizedEmail } });
 
     if (existingUser) {
-      if (existingUser.role === 'COSTISTA') {
-        throw new ConflictError(
-          `El email ${normalizedEmail} pertenece a una cuenta de costista. ` +
-          `No puede ser invitado como operador.`,
-        );
-      }
-
-      // CASO B: ya es EMPRESA_OPERATOR — solo crear invitación + membership
+      // CASO B: ya existe — solo crear invitación + membership
       const alreadyMember = await this.db.operatorMembership.findUnique({
         where: { operatorId_connectionId: { operatorId: existingUser.id, connectionId: connection.id } },
       });
@@ -247,10 +240,30 @@ export class EmpresaPortalService {
     });
     if (!membership) throw new NotFoundError('Operador no encontrado en ninguna de tus empresas');
 
-    await this.db.operatorMembership.update({
+    // Eliminar la membresía para liberar la relación
+    await this.db.operatorMembership.delete({
       where: { id: membership.id },
-      data: { isActive: false },
     });
+
+    // Verificar si queda alguna membresía para este usuario
+    const remaining = await this.db.operatorMembership.count({
+      where: { operatorId },
+    });
+
+    if (remaining === 0) {
+      const user = await this.db.user.findUnique({
+        where: { id: operatorId },
+        select: { role: true },
+      });
+      // Si era solo operador y ya no tiene empresas, borrar la cuenta completamente para liberar el email
+      if (user && user.role === 'EMPRESA_OPERATOR') {
+        await this.db.refreshToken.deleteMany({ where: { userId: operatorId } });
+        await this.db.passwordReset.deleteMany({ where: { userId: operatorId } });
+        await this.db.user.delete({
+          where: { id: operatorId },
+        });
+      }
+    }
   }
 
   // ── Costista: resetear contraseña de un operador ──────────────────────────
