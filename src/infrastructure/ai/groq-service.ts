@@ -17,55 +17,105 @@ const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 const TEXT_MODEL   = 'llama-3.3-70b-versatile';
 
 const SYSTEM_PROMPT = `Sos un asistente experto en contabilidad de costos para PyMEs argentinas.
-Los operadores de empresas te envían documentos (facturas, remitos, liquidaciones de sueldos,
-planillas de horas, notas de débito, recibos, fotos de comprobantes, etc.) para que los analices
-y extraigas la información relevante para el sistema de costeo.
+Los operadores de empresas te envían documentos (facturas, liquidaciones, planillas, o texto libre)
+para que los analices y extraigas información para el sistema de costeo.
 
-El sistema maneja tres grandes áreas:
-- MATERIA_PRIMA: compras de insumos, materiales, facturas de proveedores, ficha de stock
-- MANO_DE_OBRA: liquidaciones de sueldos, horas trabajadas por departamento, cargas sociales
-- COSTOS_INDIRECTOS: alquileres, energía, seguros, mantenimiento, gastos generales de fábrica
-- VENTAS: facturas de venta, remitos de salida, precios unitarios 
+El sistema maneja cuatro áreas:
+- MATERIA_PRIMA: compras de insumos, materiales, facturas de proveedores, Wilson, ficha PPP
+- MANO_DE_OBRA: liquidaciones de sueldos, horas, departamentos, ITCS, cargas sociales
+- COSTOS_INDIRECTOS: alquileres, energía, seguros, mantenimiento, CIF, prorrateo
+- VENTAS: precio de venta unitario, cantidad producida/vendida
 
-Tu tarea es:
-1. Detectar qué tipo de documento es
-2. Evaluar si se puede leer bien
-3. Extraer los datos numéricos y de texto relevantes
-4. Indicar a qué sección del sistema de costos aplica
+IMPORTANTE: Un mismo mensaje puede contener datos de VARIAS secciones a la vez.
+Cuando eso ocurra, extraé TODOS los datos de TODAS las secciones presentes.
 
-Respondé SIEMPRE con un JSON válido con esta estructura exacta (sin texto antes ni después):
+Respondé SIEMPRE con un JSON válido (sin texto fuera del JSON):
 {
-  "documentType": "factura_compra | factura_venta | remito | liquidacion_sueldos | planilla_horas | nota_debito | recibo | otro",
+  "documentType": "factura_compra | factura_venta | liquidacion_sueldos | planilla_horas | datos_costeo | otro",
   "quality": "legible | parcial | ilegible",
-  "qualityNote": "string — solo si quality es parcial o ilegible, explicá qué falla (borroso, cortado, luz, etc.)",
-  "costSection": "MATERIA_PRIMA | MANO_DE_OBRA | COSTOS_INDIRECTOS | VENTAS | DESCONOCIDO",
-  "message": "string — 2 a 4 oraciones en español argentino para el operador: qué detectaste, qué falta, qué está bien",
+  "qualityNote": "string o null",
+  "costSection": "MATERIA_PRIMA | MANO_DE_OBRA | COSTOS_INDIRECTOS | VENTAS | MULTIPLE | DESCONOCIDO",
+  "message": "2 a 4 oraciones en español argentino para el operador",
   "extractedData": {
     "date": "YYYY-MM-DD o null",
-    "supplier": "nombre del proveedor o null",
-    "invoiceNumber": "número de comprobante o null",
+    "supplier": "string o null",
+    "invoiceNumber": "string o null",
     "totalAmount": número o null,
-    "taxAmount": número o null,
     "netAmount": número o null,
     "currency": "ARS | USD | null",
-    "items": [
-      { "description": "string", "quantity": número o null, "unitCost": número o null, "total": número o null }
-    ],
-    "department": "nombre del departamento si aplica o null",
+    "items": [{ "description": "string", "quantity": número o null, "unitCost": número o null, "total": número o null }],
+    "department": "string o null",
     "hoursWorked": número o null,
     "employeeCount": número o null
+  },
+  "sections": {
+    "rawMaterial": {
+      "present": true,
+      "wilson": { "annualDemand": número o null, "orderCost": número o null, "holdingRate": número o null, "unitCost": número o null },
+      "stockPolicy": { "minConsumption": número o null, "maxConsumption": número o null, "minLeadTime": número o null, "maxLeadTime": número o null, "safetyStock": número o null },
+      "initialStock": { "quantity": número o null, "unitCost": número o null },
+      "movements": [{ "date": "YYYY-MM-DD", "type": "purchase | consumption", "detail": "string", "quantity": número, "unitCost": número }]
+    },
+    "directLabor": {
+      "present": true,
+      "workingDays": { "totalDaysPerYear": número o null, "sundays": número o null, "saturdays": número o null, "holidays": número o null, "vacations": número o null, "sickness": número o null, "specialLeaves": número o null, "workAccidents": número o null, "unjustifiedAbsences": número o null, "holidaysOnWeekend": número o null },
+      "itcs": { "derivationBase": número o null, "fixedArt": número o null, "uncertainRemunerative": [{ "name": "string", "coefficient": número }] },
+      "departments": [{ "name": "string", "basicRemuneration": número, "hoursWorked": número }]
+    },
+    "indirectCosts": {
+      "present": true,
+      "centers": [{ "id": "string", "name": "string", "type": "productive | service" }],
+      "concepts": [{ "name": "string", "amountFixed": número, "amountVariable": número, "distribution": {} }]
+    },
+    "sales": {
+      "present": true,
+      "unitPrice": número o null,
+      "quantity": número o null
+    }
   }
 }
 
-Si el documento está ilegible, ponés extractedData con todos los campos en null.
-Si es texto libre sin documento adjunto, analizá el texto como descripción y extraé lo que puedas.
-Nunca rompas el formato JSON. Nunca agregues explicaciones fuera del JSON.`;
+Si una sección NO está presente en el documento, ponés "present": false y omitís los demás campos de esa sección.
+Si el documento está ilegible, todos los "present" van en false.
+Nunca rompas el formato JSON.`;
+
+export interface RawMaterialSectionData {
+  present: boolean;
+  wilson?: { annualDemand?: number | null; orderCost?: number | null; holdingRate?: number | null; unitCost?: number | null };
+  stockPolicy?: { minConsumption?: number | null; maxConsumption?: number | null; minLeadTime?: number | null; maxLeadTime?: number | null; safetyStock?: number | null };
+  initialStock?: { quantity?: number | null; unitCost?: number | null };
+  movements?: { date: string; type: 'purchase' | 'consumption'; detail: string; quantity: number; unitCost: number }[];
+}
+
+export interface DirectLaborSectionData {
+  present: boolean;
+  workingDays?: {
+    totalDaysPerYear?: number | null; sundays?: number | null; saturdays?: number | null;
+    holidays?: number | null; vacations?: number | null; sickness?: number | null;
+    specialLeaves?: number | null; workAccidents?: number | null;
+    unjustifiedAbsences?: number | null; holidaysOnWeekend?: number | null;
+  };
+  itcs?: { derivationBase?: number | null; fixedArt?: number | null; uncertainRemunerative?: { name: string; coefficient: number }[] };
+  departments?: { name: string; basicRemuneration: number; hoursWorked: number }[];
+}
+
+export interface IndirectCostsSectionData {
+  present: boolean;
+  centers?: { id: string; name: string; type: 'productive' | 'service' }[];
+  concepts?: { name: string; amountFixed: number; amountVariable: number; distribution?: Record<string, number> }[];
+}
+
+export interface SalesSectionData {
+  present: boolean;
+  unitPrice?: number | null;
+  quantity?: number | null;
+}
 
 export interface DocumentAnalysis {
   documentType: string;
   quality: 'legible' | 'parcial' | 'ilegible';
   qualityNote?: string;
-  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'DESCONOCIDO';
+  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'MULTIPLE' | 'DESCONOCIDO';
   message: string;
   extractedData: {
     date?: string | null;
@@ -79,6 +129,12 @@ export interface DocumentAnalysis {
     department?: string | null;
     hoursWorked?: number | null;
     employeeCount?: number | null;
+  };
+  sections?: {
+    rawMaterial?: RawMaterialSectionData;
+    directLabor?: DirectLaborSectionData;
+    indirectCosts?: IndirectCostsSectionData;
+    sales?: SalesSectionData;
   };
 }
 
@@ -190,7 +246,7 @@ export class GroqService {
         body: JSON.stringify({
           model,
           messages,
-          max_tokens: 600,
+          max_tokens: 2500,
           temperature: 0.1, // Baja temperatura para JSON consistente
           response_format: { type: 'json_object' },
         }),
@@ -283,7 +339,7 @@ Texto del documento:
 ${input.text.slice(0, 3000)}
 
 Tipos posibles: FACTURA_COMPRA, FACTURA_VENTA, REMITO, LIQUIDACION_MOD, PLANILLA_HORAS, NOTA_DEBITO, NOTA_CREDITO, DESCONOCIDO
-Secciones de costo: MATERIA_PRIMA, MANO_DE_OBRA, COSTOS_INDIRECTOS, VENTAS, DESCONOCIDO
+Secciones de costo: MATERIA_PRIMA, MANO_DE_OBRA, COSTOS_INDIRECTOS, VENTAS, MULTIPLE, DESCONOCIDO
 
 Respondé SOLO con JSON:
 {

@@ -24,8 +24,9 @@ describe('Hoja 1 — Materia Prima', () => {
       expect(le.toDecimalPlaces(2).toNumber()).toBe(836.66);
     });
 
-    it('lanza error si K·C es cero', () => {
-      expect(() => calcOptimalLot({ ...wilson, unitCost: 0 })).toThrow(/cero/);
+    it('retorna 0 si K·C es cero', () => {
+      const le = calcOptimalLot({ ...wilson, unitCost: 0 });
+      expect(le.toNumber()).toBe(0);
     });
   });
 

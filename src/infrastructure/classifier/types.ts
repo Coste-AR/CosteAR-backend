@@ -15,6 +15,7 @@ export type CostSection =
   | 'MANO_DE_OBRA'
   | 'COSTOS_INDIRECTOS'
   | 'VENTAS'
+  | 'MULTIPLE'
   | 'DESCONOCIDO';
 
 /**

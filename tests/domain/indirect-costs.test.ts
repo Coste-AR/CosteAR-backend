@@ -96,10 +96,11 @@ describe('Hoja 3 — Costos Indirectos de Producción (CIP)', () => {
       expect(quota.totalQuota.toNumber()).toBe(200);
     });
 
-    it('lanza error si bp es cero', () => {
-      expect(() =>
-        calcPredeterminedQuota({ fixed: Money.of(1), variable: Money.of(1) }, 0),
-      ).toThrow(/capacidad normal/);
+    it('retorna cuotas en cero si bp es cero', () => {
+      const quota = calcPredeterminedQuota({ fixed: Money.of(1), variable: Money.of(1) }, 0);
+      expect(quota.fixedQuota.toNumber()).toBe(0);
+      expect(quota.variableQuota.toNumber()).toBe(0);
+      expect(quota.totalQuota.toNumber()).toBe(0);
     });
   });
 

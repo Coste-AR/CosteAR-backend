@@ -2,43 +2,20 @@
 //
 // Cuando el costista aprueba un DataEntry, este módulo toma los datos extraídos
 // por la IA (reviewNote) y los inserta/mergea en la CostStructure activa de la
-// empresa según la sección (MATERIA_PRIMA, MANO_DE_OBRA, COSTOS_INDIRECTOS).
+// empresa. Soporta documentos con MÚLTIPLES secciones simultáneamente.
 //
 // Principio: NUNCA pisa datos ya ingresados por el costista manualmente.
-// Solo AGREGA movimientos o registros nuevos con un tag "from_document".
+// Solo AGREGA movimientos o registros nuevos con un tag "fromDocument: true".
 
 import type { PrismaClient } from '@prisma/client';
+import type {
+  RawMaterialSectionData,
+  DirectLaborSectionData,
+  IndirectCostsSectionData,
+  SalesSectionData,
+} from '../../infrastructure/ai/groq-service.js';
 
-// ─── Tipos extraídos de la IA ─────────────────────────────────────────────────
-
-interface AiItem {
-  description: string;
-  quantity?: number | null;
-  unitCost?: number | null;
-  total?: number | null;
-}
-
-interface AiExtractedData {
-  date?: string | null;
-  supplier?: string | null;
-  invoiceNumber?: string | null;
-  totalAmount?: number | null;
-  netAmount?: number | null;
-  currency?: string | null;
-  items?: AiItem[] | null;
-  department?: string | null;
-  hoursWorked?: number | null;
-  employeeCount?: number | null;
-}
-
-interface AiReviewNote {
-  extractedData?: AiExtractedData | null;
-  documentType?: string;
-  costSection?: string;
-  message?: string;
-}
-
-// ─── Tipos de las configs de CostStructure (espejo de cost-structure-types.ts) ─
+// ─── Tipos internos de CostStructure ─────────────────────────────────────────
 
 interface Movement {
   date: string;
@@ -46,23 +23,12 @@ interface Movement {
   detail: string;
   quantity: number;
   unitCost: number;
-  fromDocument?: boolean; // tag de trazabilidad
+  fromDocument?: boolean;
 }
 
 interface RawMaterialConfig {
-  wilson?: {
-    annualDemand?: number;
-    orderCost?: number;
-    holdingRate?: number;
-    unitCost?: number;
-  };
-  stockPolicy?: {
-    minConsumption?: number;
-    maxConsumption?: number;
-    minLeadTime?: number;
-    maxLeadTime?: number;
-    safetyStock?: number;
-  };
+  wilson?: { annualDemand?: number; orderCost?: number; holdingRate?: number; unitCost?: number };
+  stockPolicy?: { minConsumption?: number; maxConsumption?: number; minLeadTime?: number; maxLeadTime?: number; safetyStock?: number };
   initialStock?: { quantity?: number; unitCost?: number };
   movements?: Movement[];
 }
@@ -77,8 +43,8 @@ interface Department {
 interface DirectLaborConfig {
   workingDays?: {
     totalDaysPerYear?: number;
-    unpaidAbsence?: Record<string, number>;
-    paidAbsence?: Record<string, number>;
+    unpaidAbsence?: { sundays?: number; saturdays?: number; unjustifiedAbsences?: number; holidaysOnWeekend?: number };
+    paidAbsence?: { holidays?: number; vacations?: number; sickness?: number; specialLeaves?: number; workAccidents?: number };
   };
   itcs?: {
     derivationBase?: number;
@@ -96,8 +62,15 @@ interface CifConcept {
   fromDocument?: boolean;
 }
 
+interface CifCenter {
+  id: string;
+  name: string;
+  type: 'productive' | 'service';
+  fromDocument?: boolean;
+}
+
 interface IndirectCostConfig {
-  centers?: { id: string; name: string; type: 'productive' | 'service' }[];
+  centers?: CifCenter[];
   concepts?: CifConcept[];
   serviceDistributions?: unknown[];
   productiveSettings?: unknown[];
@@ -105,15 +78,38 @@ interface IndirectCostConfig {
 
 // ─── Parser del reviewNote ────────────────────────────────────────────────────
 
-function parseReviewNote(raw: string | null): AiReviewNote | null {
+interface ReviewNoteShape {
+  sections?: {
+    rawMaterial?: RawMaterialSectionData;
+    directLabor?: DirectLaborSectionData;
+    indirectCosts?: IndirectCostsSectionData;
+    sales?: SalesSectionData;
+  };
+  extractedData?: {
+    date?: string | null;
+    supplier?: string | null;
+    totalAmount?: number | null;
+    netAmount?: number | null;
+    items?: { description: string; quantity?: number | null; unitCost?: number | null; total?: number | null }[];
+    department?: string | null;
+    hoursWorked?: number | null;
+  };
+  costSection?: string;
+}
+
+function parseReviewNote(raw: string | null): ReviewNoteShape | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed as AiReviewNote;
-    return null;
+    const p = JSON.parse(raw);
+    return (p && typeof p === 'object') ? p as ReviewNoteShape : null;
   } catch {
     return null;
   }
+}
+
+function n(val: number | null | undefined, def = 0): number {
+  if (val == null || !Number.isFinite(Number(val))) return def;
+  return Number(val);
 }
 
 function formatDate(raw?: string | null): string {
@@ -124,11 +120,10 @@ function formatDate(raw?: string | null): string {
 
 // ─── Populadores por sección ──────────────────────────────────────────────────
 
-/**
- * MATERIA_PRIMA: agrega cada ítem del documento como un movimiento de compra
- * en la ficha PPP de la estructura. No pisa movimientos previos.
- */
-function populateRawMaterial(current: RawMaterialConfig | null, ai: AiExtractedData): RawMaterialConfig {
+function populateRawMaterial(
+  current: RawMaterialConfig | null,
+  sec: RawMaterialSectionData,
+): RawMaterialConfig {
   const cfg: RawMaterialConfig = current ? JSON.parse(JSON.stringify(current)) : {
     wilson: { annualDemand: 0, orderCost: 0, holdingRate: 0.3, unitCost: 0 },
     stockPolicy: { minConsumption: 0, maxConsumption: 0, minLeadTime: 0, maxLeadTime: 0, safetyStock: 0 },
@@ -136,197 +131,239 @@ function populateRawMaterial(current: RawMaterialConfig | null, ai: AiExtractedD
     movements: [],
   };
 
+  // Wilson: solo sobrescribe campos que el costista no haya puesto (valor 0)
+  if (sec.wilson) {
+    cfg.wilson = cfg.wilson ?? {};
+    if (!cfg.wilson.annualDemand && sec.wilson.annualDemand) cfg.wilson.annualDemand = n(sec.wilson.annualDemand);
+    if (!cfg.wilson.orderCost    && sec.wilson.orderCost)    cfg.wilson.orderCost    = n(sec.wilson.orderCost);
+    if (!cfg.wilson.holdingRate  && sec.wilson.holdingRate)  cfg.wilson.holdingRate  = n(sec.wilson.holdingRate);
+    if (!cfg.wilson.unitCost     && sec.wilson.unitCost)     cfg.wilson.unitCost     = n(sec.wilson.unitCost);
+  }
+
+  // Política de stock
+  if (sec.stockPolicy) {
+    cfg.stockPolicy = cfg.stockPolicy ?? {};
+    const sp = sec.stockPolicy;
+    if (!cfg.stockPolicy.minConsumption && sp.minConsumption) cfg.stockPolicy.minConsumption = n(sp.minConsumption);
+    if (!cfg.stockPolicy.maxConsumption && sp.maxConsumption) cfg.stockPolicy.maxConsumption = n(sp.maxConsumption);
+    if (!cfg.stockPolicy.minLeadTime    && sp.minLeadTime)    cfg.stockPolicy.minLeadTime    = n(sp.minLeadTime);
+    if (!cfg.stockPolicy.maxLeadTime    && sp.maxLeadTime)    cfg.stockPolicy.maxLeadTime    = n(sp.maxLeadTime);
+    if (!cfg.stockPolicy.safetyStock    && sp.safetyStock)    cfg.stockPolicy.safetyStock    = n(sp.safetyStock);
+  }
+
+  // Stock inicial
+  if (sec.initialStock) {
+    cfg.initialStock = cfg.initialStock ?? {};
+    if (!cfg.initialStock.quantity && sec.initialStock.quantity) cfg.initialStock.quantity = n(sec.initialStock.quantity);
+    if (!cfg.initialStock.unitCost && sec.initialStock.unitCost) cfg.initialStock.unitCost = n(sec.initialStock.unitCost);
+  }
+
+  // Movimientos: siempre se agregan (no pisan ninguno existente)
   if (!Array.isArray(cfg.movements)) cfg.movements = [];
-
-  const docDate = formatDate(ai.date);
-  const supplier = ai.supplier?.trim() ?? 'Proveedor s/d';
-
-  if (ai.items && ai.items.length > 0) {
-    // Un movimiento de compra por cada ítem del documento
-    for (const item of ai.items) {
-      const qty   = Number(item.quantity ?? 1);
-      const price = Number(item.unitCost ?? (item.total && qty ? item.total / qty : 0));
-      if (price > 0 || qty > 0) {
-        cfg.movements.push({
-          date:     docDate,
-          type:     'purchase',
-          detail:   `${supplier} — ${item.description ?? 'Ítem'}`,
-          quantity: qty,
-          unitCost: price,
-          fromDocument: true,
-        });
-      }
+  if (sec.movements && sec.movements.length > 0) {
+    for (const m of sec.movements) {
+      cfg.movements.push({
+        date:         formatDate(m.date),
+        type:         m.type === 'consumption' ? 'consumption' : 'purchase',
+        detail:       m.detail ?? 'Mov. desde documento',
+        quantity:     n(m.quantity),
+        unitCost:     m.type === 'consumption' ? 0 : n(m.unitCost), // consumo: PPP lo calcula el sistema
+        fromDocument: true,
+      });
     }
-  } else if ((ai.totalAmount ?? 0) > 0) {
-    // Sin ítems: un solo movimiento por el total
-    cfg.movements.push({
-      date:     docDate,
-      type:     'purchase',
-      detail:   `${supplier} — Compra desde documento`,
-      quantity: 1,
-      unitCost: Number(ai.totalAmount ?? ai.netAmount ?? 0),
-      fromDocument: true,
-    });
   }
 
   return cfg;
 }
 
-/**
- * MANO_DE_OBRA: agrega (o actualiza) el departamento especificado en el
- * documento. Si el departamento ya existe, NO lo pisa.
- */
-function populateDirectLabor(current: DirectLaborConfig | null, ai: AiExtractedData): DirectLaborConfig {
+function populateDirectLabor(
+  current: DirectLaborConfig | null,
+  sec: DirectLaborSectionData,
+): DirectLaborConfig {
   const cfg: DirectLaborConfig = current ? JSON.parse(JSON.stringify(current)) : {
     workingDays: {
-      totalDaysPerYear: 365,
-      unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 0, holidaysOnWeekend: 0 },
+      totalDaysPerYear: 0,
+      unpaidAbsence: { sundays: 0, saturdays: 0, unjustifiedAbsences: 0, holidaysOnWeekend: 0 },
       paidAbsence: { holidays: 0, vacations: 0, sickness: 0, specialLeaves: 0, workAccidents: 0 },
     },
     itcs: { derivationBase: 0.27, fixedArt: 0.015, uncertainRemunerative: [], uncertainNonRemunerative: [] },
     departments: [],
   };
 
+  if (sec.workingDays) {
+    cfg.workingDays = cfg.workingDays ?? {};
+    const wd = sec.workingDays;
+    if (!cfg.workingDays.totalDaysPerYear && wd.totalDaysPerYear)
+      cfg.workingDays.totalDaysPerYear = n(wd.totalDaysPerYear);
+
+    cfg.workingDays.unpaidAbsence = cfg.workingDays.unpaidAbsence ?? {};
+    if (!cfg.workingDays.unpaidAbsence.sundays && wd.sundays) cfg.workingDays.unpaidAbsence.sundays = n(wd.sundays);
+    if (!cfg.workingDays.unpaidAbsence.saturdays && wd.saturdays) cfg.workingDays.unpaidAbsence.saturdays = n(wd.saturdays);
+    if (wd.unjustifiedAbsences != null) cfg.workingDays.unpaidAbsence.unjustifiedAbsences = n(wd.unjustifiedAbsences);
+    if (wd.holidaysOnWeekend  != null) cfg.workingDays.unpaidAbsence.holidaysOnWeekend  = n(wd.holidaysOnWeekend);
+
+    cfg.workingDays.paidAbsence = cfg.workingDays.paidAbsence ?? {};
+    if (wd.holidays      != null) cfg.workingDays.paidAbsence.holidays      = n(wd.holidays);
+    if (wd.vacations     != null) cfg.workingDays.paidAbsence.vacations     = n(wd.vacations);
+    if (wd.sickness      != null) cfg.workingDays.paidAbsence.sickness      = n(wd.sickness);
+    if (wd.specialLeaves != null) cfg.workingDays.paidAbsence.specialLeaves = n(wd.specialLeaves);
+    if (wd.workAccidents != null) cfg.workingDays.paidAbsence.workAccidents = n(wd.workAccidents);
+  }
+
+  if (sec.itcs) {
+    cfg.itcs = cfg.itcs ?? { derivationBase: 0.27, fixedArt: 0.015, uncertainRemunerative: [], uncertainNonRemunerative: [] };
+    if (sec.itcs.derivationBase != null) cfg.itcs.derivationBase = n(sec.itcs.derivationBase, 0.27);
+    if (sec.itcs.fixedArt       != null) cfg.itcs.fixedArt       = n(sec.itcs.fixedArt, 0.015);
+
+    if (!Array.isArray(cfg.itcs.uncertainRemunerative)) cfg.itcs.uncertainRemunerative = [];
+    for (const item of sec.itcs.uncertainRemunerative ?? []) {
+      const exists = cfg.itcs.uncertainRemunerative.some(
+        (r) => r.name.toLowerCase().startsWith(item.name.slice(0, 3).toLowerCase())
+      );
+      if (!exists) {
+        cfg.itcs.uncertainRemunerative.push({ name: item.name, coefficient: n(item.coefficient) });
+      }
+    }
+  }
+
   if (!Array.isArray(cfg.departments)) cfg.departments = [];
-
-  const deptName = ai.department?.trim() ?? 'Departamento s/d';
-  const remuneration = Number(ai.totalAmount ?? ai.netAmount ?? 0);
-  const hours = Number(ai.hoursWorked ?? 0);
-
-  // Solo agregar si no existe un departamento con ese nombre
-  const exists = cfg.departments.some(
-    (d) => d.name.toLowerCase() === deptName.toLowerCase()
-  );
-
-  if (!exists && (remuneration > 0 || hours > 0)) {
-    cfg.departments.push({
-      name:              deptName,
-      basicRemuneration: remuneration,
-      hoursWorked:       hours,
-      fromDocument:      true,
-    });
+  for (const dept of sec.departments ?? []) {
+    const exists = cfg.departments.some((d) => d.name.toLowerCase() === dept.name.toLowerCase());
+    if (!exists) {
+      cfg.departments.push({
+        name:              dept.name,
+        basicRemuneration: n(dept.basicRemuneration),
+        hoursWorked:       n(dept.hoursWorked),
+        fromDocument:      true,
+      });
+    }
   }
 
   return cfg;
 }
 
-/**
- * COSTOS_INDIRECTOS: agrega el documento como un concepto nuevo de CIF
- * con su monto fijo. No pisa conceptos previos.
- */
-function populateIndirectCosts(current: IndirectCostConfig | null, ai: AiExtractedData, supplier?: string | null): IndirectCostConfig {
+function populateIndirectCosts(
+  current: IndirectCostConfig | null,
+  sec: IndirectCostsSectionData,
+): IndirectCostConfig {
   const cfg: IndirectCostConfig = current ? JSON.parse(JSON.stringify(current)) : {
-    centers: [],
-    concepts: [],
-    serviceDistributions: [],
-    productiveSettings: [],
+    centers: [], concepts: [], serviceDistributions: [], productiveSettings: [],
   };
 
-  if (!Array.isArray(cfg.concepts)) cfg.concepts = [];
+  if (!Array.isArray(cfg.centers))  cfg.centers  = [];
+  if (!Array.isArray(cfg.concepts)) cfg.concepts  = [];
 
-  const amount = Number(ai.totalAmount ?? ai.netAmount ?? 0);
-  if (amount <= 0) return cfg; // sin monto no hay concepto útil
+  // Centros de costo
+  for (const center of sec.centers ?? []) {
+    const exists = cfg.centers.some((c) => c.id === center.id || c.name.toLowerCase() === center.name.toLowerCase());
+    if (!exists) {
+      cfg.centers.push({ id: center.id, name: center.name, type: center.type, fromDocument: true });
+    }
+  }
 
-  const name = supplier?.trim() ?? ai.items?.[0]?.description ?? 'CIF desde documento';
+  // Conceptos CIF — construir un mapa de IDs de centros ya existentes para la distribución
+  const centerMap: Record<string, string> = {};
+  for (const c of cfg.centers) { centerMap[c.name.toLowerCase()] = c.id; }
 
-  cfg.concepts.push({
-    name,
-    amount:       { fixed: amount, variable: 0 },
-    distribution: {}, // El costista distribuye entre centros manualmente
-    fromDocument: true,
-  });
+  for (const concept of sec.concepts ?? []) {
+    const exists = cfg.concepts.some((c) => c.name.toLowerCase() === concept.name.toLowerCase());
+    if (!exists) {
+      // Resolver la distribución: las claves pueden venir como nombre del centro
+      const dist: Record<string, number> = {};
+      for (const [k, v] of Object.entries(concept.distribution ?? {})) {
+        const resolvedId = centerMap[k.toLowerCase()] ?? k;
+        dist[resolvedId] = Number(v);
+      }
+      cfg.concepts.push({
+        name: concept.name,
+        amount: { fixed: n(concept.amountFixed), variable: n(concept.amountVariable) },
+        distribution: dist,
+        fromDocument: true,
+      });
+    }
+  }
 
   return cfg;
 }
 
 // ─── Función principal ────────────────────────────────────────────────────────
 
-/**
- * Encuentra la CostStructure activa (ACTIVE o la más reciente en DRAFT) de
- * la empresa, y la actualiza con los datos aprobados del documento.
- *
- * Es no-fatal: si no hay estructura o el mapeo falla, se loguea y se continúa.
- */
 export async function populateCostStructureFromApproval(
   db: PrismaClient,
   params: {
-    companyId:    string;
-    costistId:    string;
-    costSection:  string;
-    reviewNote:   string | null;
-    supplier:     string | null;
+    companyId:   string;
+    costistId:   string;
+    costSection: string;
+    reviewNote:  string | null;
+    supplier:    string | null;
   },
 ): Promise<void> {
-  const { companyId, costistId, costSection, reviewNote, supplier } = params;
+  const { companyId, costistId, reviewNote } = params;
 
-  // 1. Parsear el análisis de la IA
   const ai = parseReviewNote(reviewNote);
-  const extracted = ai?.extractedData;
-  if (!extracted) {
-    console.log('[populator] Sin extractedData en reviewNote — nada que poblar.');
+  if (!ai) {
+    console.log('[populator] reviewNote vacío o inválido — nada que poblar.');
     return;
   }
 
-  // 2. Buscar la estructura activa de la empresa (la más reciente ACTIVE o DRAFT)
+  // Buscar la CostStructure activa (ACTIVE > DRAFT más reciente)
   const structure = await db.costStructure.findFirst({
-    where: {
-      companyId,
-      userId: costistId,
-      status: { in: ['ACTIVE', 'DRAFT'] },
-    },
-    orderBy: [
-      { status: 'asc' }, // ACTIVE antes que DRAFT (asc ordena A antes que D)
-      { updatedAt: 'desc' },
-    ],
+    where: { companyId, userId: costistId, status: { in: ['ACTIVE', 'DRAFT'] } },
+    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
   });
 
   if (!structure) {
-    console.log(`[populator] No se encontró CostStructure para company=${companyId}. El costista debe crearla primero.`);
+    console.log(`[populator] No hay CostStructure para company=${companyId}. Crear primero.`);
     return;
   }
 
-  // 3. Mergear según la sección de costo
-  let updateData: Record<string, unknown> = {};
+  const secs = ai.sections ?? {};
+  const updateData: Record<string, unknown> = {};
 
   try {
-    if (costSection === 'MATERIA_PRIMA') {
-      const updated = populateRawMaterial(
+    // ── Materia Prima ──────────────────────────────────────────────────────────
+    if (secs.rawMaterial?.present) {
+      updateData.rawMaterialConfig = populateRawMaterial(
         structure.rawMaterialConfig as RawMaterialConfig | null,
-        extracted,
+        secs.rawMaterial,
       );
-      updateData = { rawMaterialConfig: updated };
+    }
 
-    } else if (costSection === 'MANO_DE_OBRA') {
-      const updated = populateDirectLabor(
+    // ── Mano de Obra ──────────────────────────────────────────────────────────
+    if (secs.directLabor?.present) {
+      updateData.directLaborConfig = populateDirectLabor(
         structure.directLaborConfig as DirectLaborConfig | null,
-        extracted,
+        secs.directLabor,
       );
-      updateData = { directLaborConfig: updated };
+    }
 
-    } else if (costSection === 'COSTOS_INDIRECTOS') {
-      const updated = populateIndirectCosts(
+    // ── Costos Indirectos ─────────────────────────────────────────────────────
+    if (secs.indirectCosts?.present) {
+      updateData.indirectCostConfig = populateIndirectCosts(
         structure.indirectCostConfig as IndirectCostConfig | null,
-        extracted,
-        supplier,
+        secs.indirectCosts,
       );
-      updateData = { indirectCostConfig: updated };
+    }
 
-    } else {
-      // VENTAS, DESCONOCIDO: no hay campo de config que poblar automáticamente
-      console.log(`[populator] Sección ${costSection} no requiere populación automática de CostStructure.`);
+    // ── Ventas ────────────────────────────────────────────────────────────────
+    if (secs.sales?.present) {
+      if (secs.sales.unitPrice != null && Number(secs.sales.unitPrice) > 0) {
+        updateData.salesUnitPrice = Number(secs.sales.unitPrice);
+      }
+      if (secs.sales.quantity != null && Number(secs.sales.quantity) > 0) {
+        updateData.salesQuantity = Number(secs.sales.quantity);
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      console.log('[populator] El documento no contenía secciones con present:true — nada que poblar.');
       return;
     }
 
-    // 4. Guardar
-    await db.costStructure.update({
-      where: { id: structure.id },
-      data:  updateData,
-    });
-
-    console.log(`[populator] CostStructure ${structure.id} actualizada con datos de ${costSection}.`);
+    await db.costStructure.update({ where: { id: structure.id }, data: updateData });
+    console.log(`[populator] CostStructure ${structure.id} actualizada. Secciones: ${Object.keys(updateData).join(', ')}`);
 
   } catch (err) {
-    // No fatal: la aprobación ya está firme, solo se loguea el error
     console.error('[populator] Error al poblar CostStructure:', err);
   }
 }
