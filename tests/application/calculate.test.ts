@@ -98,4 +98,35 @@ describe('runCalculation — orquestación completa del motor', () => {
     expect(r.detail.directLabor.itcsPercent).toBeCloseTo(79.99, 1);
     expect(r.detail.indirectCosts.perDepartment.prod1!.appliedCip).toBe(180000);
   });
+
+  // ── Bug #1: ITCS se expone como PORCENTAJE (no fracción) ───────────────────
+  it('itcsPercent es un porcentaje (~80), no una fracción (~0,8)', () => {
+    const r = runCalculation(input);
+    expect(r.detail.directLabor.itcsPercent).toBeGreaterThan(1);
+    expect(r.detail.directLabor.itcsPercent).toBeCloseTo(79.99, 1);
+  });
+
+  // ── Bug #2: el CIP real del centro sale del prorrateo (primario+secundario),
+  //    de forma automática, NO del actualCip manual del input ─────────────────
+  it('el CIP real del centro productivo viene del prorrateo secundario, no del input manual', () => {
+    const r = runCalculation(input);
+    // Alquiler 100.000 → prod1 70% (70.000) + serv1 30% (30.000).
+    // Secundario: serv1 (30.000) se vuelca 100% a prod1 → real prod1 = 100.000.
+    // El input traía actualCip: 195.000 (manual), que ya NO se usa.
+    expect(r.detail.indirectCosts.perDepartment.prod1!.actualCip).toBeCloseTo(100000, 0);
+    expect(r.detail.indirectCosts.perDepartment.prod1!.cipTotal).toBeCloseTo(100000, 0);
+  });
+
+  // ── Bug #3: el costo de producción suma SIEMPRE los tres elementos ─────────
+  it('el costo de producción = MP consumida + MOD + CIP aplicado (sin omitir ninguno)', () => {
+    const r = runCalculation(input);
+    expect(r.productionCost).toBeCloseTo(
+      r.rawMaterialConsumed + r.directLaborTotal + r.indirectCostsApplied,
+      0,
+    );
+    // Y cada elemento aporta de verdad (ninguno quedó en cero por error).
+    expect(r.rawMaterialConsumed).toBeGreaterThan(0);
+    expect(r.directLaborTotal).toBeGreaterThan(0);
+    expect(r.indirectCostsApplied).toBeGreaterThan(0);
+  });
 });

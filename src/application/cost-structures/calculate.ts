@@ -105,26 +105,32 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       variable: Money.of(setting.budget.variable),
     };
     const quota = calcPredeterminedQuota(budget, setting.normalCapacity);
+
+    // CIP REAL del centro = lo que recibió por prorrateo primario + secundario
+    // (los centros de servicio ya se volcaron a los productivos). Esto se calcula
+    // SOLO en el backend, sin intervención manual. Si por algún motivo no hay
+    // datos de prorrateo para el centro, se usa el valor manual como respaldo.
+    const cip = productiveCip[setting.centerId];
+    const actualCip = cip ? cip.fixed.add(cip.variable) : Money.of(setting.actualCip);
+
     const variance = calcVarianceAnalysis(
       quota,
       budget,
       setting.normalCapacity,
       setting.actualActivity,
-      Money.of(setting.actualCip),
+      actualCip,
     );
     indirectCostsApplied = indirectCostsApplied.add(variance.cipApplied);
 
-    const cip = productiveCip[setting.centerId];
-    const cipTotal = cip ? cip.fixed.add(cip.variable) : Money.zero();
     perDepartment[setting.centerId] = {
-      cipTotal: cipTotal.toNumber(),
+      cipTotal: actualCip.toNumber(),
       appliedCip: variance.cipApplied.toNumber(),
       budgetVariance: variance.budgetVariance.toNumber(),
       volumeVariance: variance.volumeVariance.toNumber(),
       normalCapacity: setting.normalCapacity,
       actualActivity: setting.actualActivity,
       quota: quota.totalQuota.toNumber(),
-      actualCip: setting.actualCip,
+      actualCip: actualCip.toNumber(),
     };
   }
 
