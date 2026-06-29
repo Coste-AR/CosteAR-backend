@@ -33,12 +33,40 @@ export class CostStructureService {
     return structure;
   }
 
-  async listByCompany(userId: string, companyId: string) {
+  async listByCompany(userId: string, companyId: string, includeDeleted = false) {
     await this.requireCompany(userId, companyId);
     return this.db.costStructure.findMany({
-      where: { companyId, userId },
-      orderBy: { period: 'desc' },
+      where: { companyId, userId, ...(includeDeleted ? {} : { deletedAt: null }) },
+      orderBy: [{ deletedAt: 'asc' }, { period: 'desc' }],
     });
+  }
+
+  /** Soft-delete: manda la estructura a la papelera (recuperable). */
+  async softDelete(userId: string, id: string, ctx: AuditContext) {
+    await this.requireStructure(userId, id);
+    const updated = await this.db.costStructure.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+    await recordAudit(
+      { ...ctx, userId, action: 'cost_structure.delete', entityType: 'CostStructure', entityId: id },
+      this.db,
+    );
+    return updated;
+  }
+
+  /** Recupera una estructura que estaba en la papelera. */
+  async restore(userId: string, id: string, ctx: AuditContext) {
+    await this.requireStructure(userId, id);
+    const updated = await this.db.costStructure.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    await recordAudit(
+      { ...ctx, userId, action: 'cost_structure.restore', entityType: 'CostStructure', entityId: id },
+      this.db,
+    );
+    return updated;
   }
 
   async getById(userId: string, id: string) {

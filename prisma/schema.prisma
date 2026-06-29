@@ -170,6 +170,9 @@ model CostStructure {
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  // Soft-delete: si está seteado, la estructura está "en la papelera" y puede
+  // recuperarse. Las listas la excluyen por defecto.
+  deletedAt   DateTime?
 
   calculations CostCalculation[]
   alerts       Alert[]

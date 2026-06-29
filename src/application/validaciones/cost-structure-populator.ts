@@ -308,7 +308,7 @@ export async function populateCostStructureFromApproval(
 
   // Buscar la CostStructure activa (ACTIVE > DRAFT más reciente)
   const structure = await db.costStructure.findFirst({
-    where: { companyId, userId: costistId, status: { in: ['ACTIVE', 'DRAFT'] } },
+    where: { companyId, userId: costistId, status: { in: ['ACTIVE', 'DRAFT'] }, deletedAt: null },
     orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
   });
 
