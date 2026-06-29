@@ -9,7 +9,11 @@ import {
   inventorySchema,
   type CreateCostStructureInput,
 } from '../../shared/schemas/cost.schema.js';
-import { runCalculation, type CalculationInput } from './calculate.js';
+import {
+  runCalculation,
+  computeProductiveBudgets,
+  type CalculationInput,
+} from './calculate.js';
 
 /**
  * Gestión de estructuras de costos y ejecución de cálculos.
@@ -101,7 +105,21 @@ export class CostStructureService {
     } else if (section === 'directLabor') {
       data.directLaborConfig = directLaborConfigSchema.parse(rawConfig) as object;
     } else {
-      data.indirectCostConfig = indirectCostConfigSchema.parse(rawConfig) as object;
+      const parsed = indirectCostConfigSchema.parse(rawConfig);
+      // Auto-completar el PRESUPUESTO de cada centro productivo con el resultado
+      // del prorrateo (primario + cierre del secundario). El usuario nunca lo
+      // tipea: queda en solo lectura en la UI. Si la config aún está incompleta
+      // (p. ej. sin conceptos), se persiste tal cual y se completará al re-guardar.
+      try {
+        const budgets = computeProductiveBudgets(parsed);
+        parsed.productiveSettings = parsed.productiveSettings.map((p) => ({
+          ...p,
+          budget: budgets[p.centerId] ?? p.budget ?? { fixed: 0, variable: 0 },
+        }));
+      } catch {
+        /* config incompleta: se persiste sin recalcular el presupuesto */
+      }
+      data.indirectCostConfig = parsed as object;
     }
 
     const updated = await this.db.costStructure.update({ where: { id }, data });
