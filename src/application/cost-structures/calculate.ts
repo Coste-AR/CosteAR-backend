@@ -68,6 +68,31 @@ export interface CalculationOutput {
   };
 }
 
+/**
+ * Calcula el PRESUPUESTO (fijo/variable) de cada centro PRODUCTIVO a partir del
+ * prorrateo primario + cierre del secundario. Es la "auto-carga" del presupuesto
+ * que pide la metodología: el usuario nunca lo tipea a mano. Se usa al guardar la
+ * sección de Costos Indirectos para persistir el valor y mostrarlo (solo lectura).
+ */
+export function computeProductiveBudgets(
+  indirectCosts: IndirectCostConfig,
+): Record<string, { fixed: number; variable: number }> {
+  const centers: CostCenter[] = indirectCosts.centers;
+  const concepts: IndirectCostConcept[] = indirectCosts.concepts.map((c) => ({
+    name: c.name,
+    amount: { fixed: Money.of(c.amount.fixed), variable: Money.of(c.amount.variable) },
+    distribution: c.distribution,
+  }));
+  const primary = primaryProration(centers, concepts);
+  const productiveCip = secondaryProration(centers, primary, indirectCosts.serviceDistributions);
+
+  const out: Record<string, { fixed: number; variable: number }> = {};
+  for (const [centerId, fv] of Object.entries(productiveCip)) {
+    out[centerId] = { fixed: fv.fixed.toNumber(), variable: fv.variable.toNumber() };
+  }
+  return out;
+}
+
 export function runCalculation(input: CalculationInput): CalculationOutput {
   // --- Hoja 1: Materia Prima ---
   const optimalLot = calcOptimalLot(input.rawMaterial.wilson);
@@ -100,18 +125,19 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   let indirectCostsApplied = Money.zero();
 
   for (const setting of input.indirectCosts.productiveSettings) {
-    const budget: FixedVariable = {
-      fixed: Money.of(setting.budget.fixed),
-      variable: Money.of(setting.budget.variable),
+    // PRESUPUESTO del centro = resultado del prorrateo (primario + cierre del
+    // secundario). NO es un dato manual: se deriva automáticamente. Si el centro
+    // no figura en el prorrateo, se cae al valor manual persistido como respaldo.
+    const prorated = productiveCip[setting.centerId];
+    const budget: FixedVariable = prorated ?? {
+      fixed: Money.of(setting.budget?.fixed ?? 0),
+      variable: Money.of(setting.budget?.variable ?? 0),
     };
     const quota = calcPredeterminedQuota(budget, setting.normalCapacity);
 
-    // CIP REAL del centro = lo que recibió por prorrateo primario + secundario
-    // (los centros de servicio ya se volcaron a los productivos). Esto se calcula
-    // SOLO en el backend, sin intervención manual. Si por algún motivo no hay
-    // datos de prorrateo para el centro, se usa el valor manual como respaldo.
-    const cip = productiveCip[setting.centerId];
-    const actualCip = cip ? cip.fixed.add(cip.variable) : Money.of(setting.actualCip);
+    // CIP REAL = dato de cierre de mes ingresado por el usuario. Es lo que se
+    // compara contra el presupuesto para obtener la variación de presupuesto.
+    const actualCip = Money.of(setting.actualCip);
 
     const variance = calcVarianceAnalysis(
       quota,

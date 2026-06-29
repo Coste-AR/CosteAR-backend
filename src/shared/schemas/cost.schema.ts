@@ -115,12 +115,14 @@ export const indirectCostConfigSchema = z.object({
       }),
     )
     .max(100),
-  // Por depto productivo: presupuesto y capacidad normal para cuotas/variaciones.
+  // Por depto productivo: capacidad normal, actividad real y CIP real (datos
+  // manuales de fin de mes). El PRESUPUESTO no es manual: se deriva del prorrateo
+  // y se persiste automáticamente (solo lectura en la UI).
   productiveSettings: z
     .array(
       z.object({
         centerId: z.string().min(1),
-        budget: fixedVariableSchema,
+        budget: fixedVariableSchema.optional().default({ fixed: 0, variable: 0 }),
         normalCapacity: nonNeg,
         actualActivity: nonNeg,
         actualCip: nonNeg,
