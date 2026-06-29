@@ -304,7 +304,11 @@ export class EmpresaPortalService {
       where: { operatorId, isActive: true },
       include: {
         connection: {
-          include: { company: { select: { id: true, name: true, industry: true } } },
+          include: {
+            company: { select: { id: true, name: true, industry: true } },
+            // Costista que invitó / es dueño de la empresa: se muestra en el portal.
+            costist: { select: { id: true, name: true } },
+          },
         },
       },
     });
