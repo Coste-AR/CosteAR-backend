@@ -295,11 +295,12 @@ export class ValidacionesService {
 
         if (finalSection && finalSection !== 'DESCONOCIDO') {
           await populateCostStructureFromApproval(this.db, {
-            companyId:   entry.connection.companyId,
+            companyId:       entry.connection.companyId,
             costistId,
-            costSection: finalSection,
-            reviewNote:  entry.reviewNote,
-            supplier:    lp?.supplier ?? null,
+            costSection:     finalSection,
+            reviewNote:      entry.reviewNote,
+            supplier:        lp?.supplier ?? null,
+            costStructureId: entry.costStructureId,
           });
         }
       } catch (err) {

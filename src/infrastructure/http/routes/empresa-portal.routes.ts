@@ -12,6 +12,7 @@ const submitDocSchema = z.object({
   rawContent: z.string().max(10_000).default(''),
   sourceType: z.enum(['TEXT', 'PDF', 'IMAGE']).default('TEXT'),
   connectionId: z.string().uuid().optional(),
+  costStructureId: z.string().uuid().optional(),
   fileName: z.string().max(255).optional(),
   fileData: z.string().max(6_000_000).optional(),
   fileMimeType: z.string().max(100).optional(),
@@ -100,13 +101,29 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
     },
   );
 
+  // ── Operador: productos/estructuras de una empresa (desplegable) ───────────
+  app.get(
+    '/empresa-portal/connections/:connectionId/structures',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { connectionId } = z
+        .object({ connectionId: z.string().uuid() })
+        .parse(request.params);
+      const structures = await svc.listCompanyStructures(request.authUser!.id, connectionId);
+      return reply.send({ data: structures });
+    },
+  );
+
   // ── Operador: historial de envíos ──────────────────────────────────────────
   app.get(
     '/empresa-portal/my-submissions',
     { preHandler: authenticate },
     async (request, reply) => {
-      const { connectionId } = (request.query ?? {}) as { connectionId?: string };
-      const items = await svc.listMySubmissions(request.authUser!.id, connectionId);
+      const { connectionId, costStructureId } = (request.query ?? {}) as {
+        connectionId?: string;
+        costStructureId?: string;
+      };
+      const items = await svc.listMySubmissions(request.authUser!.id, connectionId, costStructureId);
       return reply.send({ data: items });
     },
   );
