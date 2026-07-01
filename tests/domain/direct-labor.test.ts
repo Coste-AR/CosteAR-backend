@@ -81,6 +81,68 @@ describe('Hoja 2 — Mano de Obra Directa', () => {
     });
   });
 
+  describe('Caso 2 — Solo IAP (sin premios ni antigüedad)', () => {
+    // Premios productividad/antigüedad/asistencia = 0; resto igual al Caso 1.
+    const itcs2 = calcITCS(
+      {
+        derivationBase: 0.27,
+        fixedArt: 0.015,
+        uncertainRemunerative: [],
+        uncertainNonRemunerative: [
+          { name: 'Ropa de trabajo', coefficient: 0.01 },
+          { name: 'Viandas / comedor', coefficient: 0.015 },
+          { name: 'Medicamentos', coefficient: 0.005 },
+        ],
+      },
+      calcWorkingDays(example.workingDays).iap,
+    );
+
+    it('B40 = solo IAP ≈ 18,55 %', () => {
+      expect(itcs2.uncertainRemunerativeCoefs.toPercent()).toBeCloseTo(18.552, 2);
+    });
+
+    it('F40 = IAP × 0,375833 ≈ 6,97 %', () => {
+      expect(itcs2.derivedCharges.toPercent()).toBeCloseTo(6.9725, 2);
+    });
+
+    it('ITCS ≈ 67,61 %', () => {
+      expect(itcs2.itcs.toPercent()).toBeCloseTo(67.6078, 2);
+    });
+  });
+
+  describe('Caso 3 — Mínimo (sin ausentismo pago, sin inciertas)', () => {
+    // IAP = 0 porque ausentismo pago = 0; todos los premios y no remun. = 0.
+    const minDays = calcWorkingDays({
+      totalDaysPerYear: 365,
+      unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 3, holidaysOnWeekend: 4 },
+      paidAbsence: { holidays: 0, vacations: 0, sickness: 0, specialLeaves: 0, workAccidents: 0 },
+    });
+
+    const itcs3 = calcITCS(
+      {
+        derivationBase: 0.27,
+        fixedArt: 0.015,
+        uncertainRemunerative: [],
+        uncertainNonRemunerative: [],
+      },
+      minDays.iap,
+    );
+
+    it('IAP = 0 cuando ausentismo pago = 0', () => {
+      expect(minDays.iap.toPercent()).toBe(0);
+    });
+
+    it('ITCS = solo cargas ciertas ≈ 39,08 % (piso del índice)', () => {
+      expect(itcs3.itcs.toPercent()).toBeCloseTo(39.083, 2);
+    });
+
+    it('B40 = F40 = B47 = 0', () => {
+      expect(itcs3.uncertainRemunerativeCoefs.toPercent()).toBe(0);
+      expect(itcs3.derivedCharges.toPercent()).toBe(0);
+      expect(itcs3.uncertainNonRemunerative.toPercent()).toBe(0);
+    });
+  });
+
   describe('D) Costo y tarifa por departamento', () => {
     const r = calcDirectLabor(example);
 
