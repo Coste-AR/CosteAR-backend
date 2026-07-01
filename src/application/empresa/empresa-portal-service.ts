@@ -304,7 +304,11 @@ export class EmpresaPortalService {
       where: { operatorId, isActive: true },
       include: {
         connection: {
-          include: { company: { select: { id: true, name: true, industry: true } } },
+          include: {
+            company: { select: { id: true, name: true, industry: true } },
+            // Costista que invitó / es dueño de la empresa: se muestra en el portal.
+            costist: { select: { id: true, name: true } },
+          },
         },
       },
     });
@@ -318,6 +322,7 @@ export class EmpresaPortalService {
       rawContent: string;
       sourceType: 'TEXT' | 'PDF' | 'IMAGE';
       connectionId?: string;
+      costStructureId?: string;
       fileName?: string;
       fileData?: string;
       fileMimeType?: string;
@@ -343,6 +348,21 @@ export class EmpresaPortalService {
 
     const costistId = membership.connection.costistId;
     const companyId = membership.connection.companyId;
+
+    // ── Validar el producto destino (aislamiento de datos) ─────────────────────
+    // Si el operador eligió una estructura/producto, debe pertenecer a ESTA empresa
+    // y no estar borrada. El dato quedará atado a ese producto.
+    let costStructureId: string | null = null;
+    if (input.costStructureId) {
+      const structure = await this.db.costStructure.findFirst({
+        where: { id: input.costStructureId, companyId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!structure) {
+        throw new ForbiddenError('El producto seleccionado no pertenece a esta empresa.');
+      }
+      costStructureId = structure.id;
+    }
 
     // ── Step 1: Fetch company industry for industry-aware classification ────────
     const company = await this.db.company.findUnique({
@@ -450,6 +470,7 @@ export class EmpresaPortalService {
       data: {
         connectionId: membership.connectionId,
         costistId,
+        costStructureId,
         rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
         sourceType: input.sourceType,
         status: 'PENDING',
@@ -510,7 +531,23 @@ export class EmpresaPortalService {
 
   // ── Operador: historial de envíos ──────────────────────────────────────────
 
-  async listMySubmissions(operatorId: string, connectionId?: string) {
+  /** Estructuras de costos (productos) de la empresa de una conexión a la que el
+   *  operador tiene acceso activo. Para el desplegable del portal. */
+  async listCompanyStructures(operatorId: string, connectionId: string) {
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId, connectionId, isActive: true },
+      include: { connection: { select: { companyId: true } } },
+    });
+    if (!membership) throw new ForbiddenError('No tenés acceso a esa empresa.');
+
+    return this.db.costStructure.findMany({
+      where: { companyId: membership.connection.companyId, deletedAt: null },
+      orderBy: { period: 'desc' },
+      select: { id: true, productName: true, period: true, status: true },
+    });
+  }
+
+  async listMySubmissions(operatorId: string, connectionId?: string, costStructureId?: string) {
     const memberships = await this.db.operatorMembership.findMany({
       where: { operatorId, isActive: true },
       select: { connectionId: true },
@@ -522,7 +559,10 @@ export class EmpresaPortalService {
       : memberships.map((m) => m.connectionId);
 
     return this.db.dataEntry.findMany({
-      where: { connectionId: { in: connectionIds } },
+      where: {
+        connectionId: { in: connectionIds },
+        ...(costStructureId ? { costStructureId } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
       select: {

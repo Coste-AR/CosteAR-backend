@@ -170,9 +170,13 @@ model CostStructure {
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  // Soft-delete: si está seteado, la estructura está "en la papelera" y puede
+  // recuperarse. Las listas la excluyen por defecto.
+  deletedAt   DateTime?
 
   calculations CostCalculation[]
   alerts       Alert[]
+  dataEntries  DataEntry[]
 
   @@index([companyId])
   @@index([userId])
@@ -397,6 +401,12 @@ model DataEntry {
   reviewedAt   DateTime?
   reviewedBy   String?   @db.Uuid
 
+  // Producto/estructura de costos al que apunta este dato. Si está seteado, la
+  // auto-población al aprobar va EXACTAMENTE a esa estructura (aislamiento por
+  // producto). Si es null, se cae al comportamiento anterior (estructura activa).
+  costStructureId String?        @db.Uuid
+  costStructure   CostStructure? @relation(fields: [costStructureId], references: [id], onDelete: SetNull)
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -406,6 +416,7 @@ model DataEntry {
   @@index([connectionId])
   @@index([costistId, status])
   @@index([connectionId, dedupeKey])
+  @@index([costStructureId])
   @@map("data_entries")
 }
 

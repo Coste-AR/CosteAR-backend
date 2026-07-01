@@ -18,7 +18,10 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     { preHandler: authenticate },
     async (request) => {
       const { companyId } = companyIdParam.parse(request.params);
-      const list = await service.listByCompany(request.authUser!.id, companyId);
+      const { includeDeleted } = z
+        .object({ includeDeleted: z.coerce.boolean().optional() })
+        .parse(request.query);
+      const list = await service.listByCompany(request.authUser!.id, companyId, includeDeleted);
       return { data: list };
     },
   );
@@ -38,6 +41,19 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     const { id } = idParam.parse(request.params);
     const structure = await service.getById(request.authUser!.id, id);
     return { data: structure };
+  });
+
+  // Borrar (soft-delete) y recuperar — ambas requieren confirmación en el front.
+  app.delete('/cost-structures/:id', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const deleted = await service.softDelete(request.authUser!.id, id, auditContext(request));
+    return { data: deleted };
+  });
+
+  app.post('/cost-structures/:id/restore', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const restored = await service.restore(request.authUser!.id, id, auditContext(request));
+    return { data: restored };
   });
 
   // Exportar a Excel (.xlsx) — el costista se lleva su planilla.

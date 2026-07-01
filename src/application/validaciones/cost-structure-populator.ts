@@ -341,14 +341,17 @@ function populateIndirectCosts(
 export async function populateCostStructureFromApproval(
   db: PrismaClient,
   params: {
-    companyId:   string;
-    costistId:   string;
-    costSection: string;
-    reviewNote:  string | null;
-    supplier:    string | null;
+    companyId:        string;
+    costistId:        string;
+    costSection:      string;
+    reviewNote:       string | null;
+    supplier:         string | null;
+    /** Producto destino elegido por el cargador. Si viene, la población va
+     *  EXACTAMENTE a esa estructura (aislamiento por producto). */
+    costStructureId?: string | null;
   },
 ): Promise<void> {
-  const { companyId, costistId, reviewNote } = params;
+  const { companyId, costistId, reviewNote, costStructureId } = params;
 
   const ai = parseReviewNote(reviewNote);
   if (!ai) {
@@ -356,14 +359,19 @@ export async function populateCostStructureFromApproval(
     return;
   }
 
-  // Buscar la CostStructure activa (ACTIVE > DRAFT más reciente)
-  const structure = await db.costStructure.findFirst({
-    where: { companyId, userId: costistId, status: { in: ['ACTIVE', 'DRAFT'] } },
-    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
-  });
+  // Si el dato apunta a un producto específico, se usa ESE (aislamiento).
+  // Si no, se cae al comportamiento previo: la CostStructure activa más reciente.
+  const structure = costStructureId
+    ? await db.costStructure.findFirst({
+        where: { id: costStructureId, companyId, userId: costistId, deletedAt: null },
+      })
+    : await db.costStructure.findFirst({
+        where: { companyId, userId: costistId, status: { in: ['ACTIVE', 'DRAFT'] }, deletedAt: null },
+        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+      });
 
   if (!structure) {
-    console.log(`[populator] No hay CostStructure para company=${companyId}. Crear primero.`);
+    console.log(`[populator] No hay CostStructure destino para company=${companyId}. Crear primero.`);
     return;
   }
 
