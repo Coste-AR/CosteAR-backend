@@ -210,26 +210,37 @@ function populateDirectLabor(
     if (wd.workAccidents != null) cfg.workingDays.paidAbsence.workAccidents = n(wd.workAccidents);
   }
 
+  const normPercent = (val: number) => {
+    return val > 1 ? val / 100 : val;
+  };
+
   if (sec.itcs) {
     cfg.itcs = cfg.itcs ?? { derivationBase: 0.27, fixedArt: 0.015, uncertainRemunerative: [], uncertainNonRemunerative: [] };
-    if (sec.itcs.derivationBase != null) cfg.itcs.derivationBase = n(sec.itcs.derivationBase, 0.27);
-    if (sec.itcs.fixedArt       != null) cfg.itcs.fixedArt       = n(sec.itcs.fixedArt, 0.015);
+    if (sec.itcs.derivationBase != null) cfg.itcs.derivationBase = normPercent(n(sec.itcs.derivationBase, 0.27));
+    if (sec.itcs.fixedArt       != null) cfg.itcs.fixedArt       = normPercent(n(sec.itcs.fixedArt, 0.015));
 
     if (!Array.isArray(cfg.itcs.uncertainRemunerative)) cfg.itcs.uncertainRemunerative = [];
     for (const item of sec.itcs.uncertainRemunerative ?? []) {
-      const exists = cfg.itcs.uncertainRemunerative.some(
+      const existing = cfg.itcs.uncertainRemunerative.find(
         (r) => r.name.toLowerCase().startsWith(item.name.slice(0, 3).toLowerCase())
       );
-      if (!exists) {
-        cfg.itcs.uncertainRemunerative.push({ name: item.name, coefficient: n(item.coefficient) });
+      if (existing) {
+        if (!existing.coefficient) {
+          existing.coefficient = normPercent(n(item.coefficient));
+        }
+      } else {
+        cfg.itcs.uncertainRemunerative.push({ name: item.name, coefficient: normPercent(n(item.coefficient)) });
       }
     }
   }
 
   if (!Array.isArray(cfg.departments)) cfg.departments = [];
   for (const dept of sec.departments ?? []) {
-    const exists = cfg.departments.some((d) => d.name.toLowerCase() === dept.name.toLowerCase());
-    if (!exists) {
+    const existing = cfg.departments.find((d) => d.name.toLowerCase() === dept.name.toLowerCase());
+    if (existing) {
+      if (!existing.basicRemuneration) existing.basicRemuneration = n(dept.basicRemuneration);
+      if (!existing.hoursWorked) existing.hoursWorked = n(dept.hoursWorked);
+    } else {
       cfg.departments.push({
         name:              dept.name,
         basicRemuneration: n(dept.basicRemuneration),
@@ -266,19 +277,58 @@ function populateIndirectCosts(
   for (const c of cfg.centers) { centerMap[c.name.toLowerCase()] = c.id; }
 
   for (const concept of sec.concepts ?? []) {
-    const exists = cfg.concepts.some((c) => c.name.toLowerCase() === concept.name.toLowerCase());
-    if (!exists) {
-      // Resolver la distribución: las claves pueden venir como nombre del centro
-      const dist: Record<string, number> = {};
-      for (const [k, v] of Object.entries(concept.distribution ?? {})) {
-        const resolvedId = centerMap[k.toLowerCase()] ?? k;
-        dist[resolvedId] = Number(v);
+    const dist: Record<string, number> = {};
+    for (const [k, v] of Object.entries(concept.distribution ?? {})) {
+      const resolvedId = centerMap[k.toLowerCase()] ?? k;
+      dist[resolvedId] = Number(v);
+    }
+
+    const existing = cfg.concepts.find((c) => c.name.toLowerCase() === concept.name.toLowerCase());
+    if (existing) {
+      if (!existing.amount.fixed) existing.amount.fixed = n(concept.amountFixed);
+      if (!existing.amount.variable) existing.amount.variable = n(concept.amountVariable);
+      for (const [centerId, val] of Object.entries(dist)) {
+        if (!existing.distribution[centerId]) {
+          existing.distribution[centerId] = val;
+        }
       }
+    } else {
       cfg.concepts.push({
         name: concept.name,
         amount: { fixed: n(concept.amountFixed), variable: n(concept.amountVariable) },
         distribution: dist,
         fromDocument: true,
+      });
+    }
+  }
+
+  // Sincronizar productiveSettings para que los nuevos centros productivos no queden fuera del cálculo
+  if (!Array.isArray(cfg.productiveSettings)) cfg.productiveSettings = [];
+  const productiveCenters = cfg.centers.filter(c => c.type === 'productive');
+  for (const pc of productiveCenters) {
+    const hasSetting = cfg.productiveSettings.some((ps: any) => ps?.centerId === pc.id);
+    if (!hasSetting) {
+      cfg.productiveSettings.push({
+        centerId: pc.id,
+        budget: { fixed: 0, variable: 0 },
+        normalCapacity: 0,
+        actualActivity: 0,
+        actualCip: 0
+      });
+    }
+  }
+
+  // Sincronizar serviceDistributions para que los nuevos centros de servicio no queden vacíos
+  if (!Array.isArray(cfg.serviceDistributions)) cfg.serviceDistributions = [];
+  const serviceCenters = cfg.centers.filter(c => c.type === 'service');
+  for (const sc of serviceCenters) {
+    const hasDist = cfg.serviceDistributions.some((sd: any) => sd?.serviceCenterId === sc.id);
+    if (!hasDist) {
+      cfg.serviceDistributions.push({
+        serviceCenterId: sc.id,
+        toProductive: {},
+        toProductiveFixed: {},
+        toProductiveVariable: {}
       });
     }
   }

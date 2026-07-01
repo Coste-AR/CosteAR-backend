@@ -133,10 +133,12 @@ export function calcITCS(config: ItcsConfig, iap: Percentage): ItcsResult {
   const chargesOnSac = base.times(sac);
   const certain = base.plus(art).plus(sac).plus(chargesOnSac);
 
-  // 2) Inciertas remunerativas: IAP + las configuradas.
+  // 2) Inciertas remunerativas: IAP + las configuradas (filtrando duplicados de IAP).
   const remunerative: NamedCoefficient[] = [
     { name: 'IAP', coefficient: iap.toFraction() },
-    ...config.uncertainRemunerative,
+    ...config.uncertainRemunerative.filter(
+      (item) => !item.name.toLowerCase().startsWith('iap')
+    ),
   ];
   // Factor de derivación por unidad de coeficiente.
   const derivationFactor = base.plus(sac).plus(base.times(sac));
