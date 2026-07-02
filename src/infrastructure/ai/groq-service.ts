@@ -23,7 +23,7 @@ para que los analices y extraigas información para el sistema de costeo.
 El sistema maneja cuatro áreas:
 - MATERIA_PRIMA: compras de insumos, materiales, facturas de proveedores, Wilson, ficha PPP
 - MANO_DE_OBRA: liquidaciones de sueldos, horas, departamentos, ITCS, cargas sociales
-- COSTOS_INDIRECTOS: alquileres, energía, seguros, mantenimiento, CIF, prorrateo
+- COSTOS_INDIRECTOS: alquileres, energía, seguros, mantenimiento, CIF, prorrateo, capacidad normal / actividad real / CIP real por centro productivo
 - VENTAS: precio de venta unitario, cantidad producida/vendida
 
 IMPORTANTE: Un mismo mensaje puede contener datos de VARIAS secciones a la vez.
@@ -65,7 +65,8 @@ Respondé SIEMPRE con un JSON válido (sin texto fuera del JSON):
     "indirectCosts": {
       "present": true,
       "centers": [{ "id": "string", "name": "string", "type": "productive | service" }],
-      "concepts": [{ "name": "string", "amountFixed": número, "amountVariable": número, "distribution": {} }]
+      "concepts": [{ "name": "string", "amountFixed": número, "amountVariable": número, "distribution": {} }],
+      "productiveSettings": [{ "center": "nombre o id del centro productivo", "normalCapacity": número o null, "actualActivity": número o null, "actualCip": número o null }]
     },
     "sales": {
       "present": true,
@@ -103,6 +104,14 @@ export interface IndirectCostsSectionData {
   present: boolean;
   centers?: { id: string; name: string; type: 'productive' | 'service' }[];
   concepts?: { name: string; amountFixed: number; amountVariable: number; distribution?: Record<string, number> }[];
+  /** Datos de fin de mes por centro productivo (capacidad normal, actividad real, CIP real).
+   *  El presupuesto NO se incluye: se deriva del prorrateo al guardar. */
+  productiveSettings?: {
+    center: string;
+    normalCapacity?: number | null;
+    actualActivity?: number | null;
+    actualCip?: number | null;
+  }[];
 }
 
 export interface SalesSectionData {

@@ -318,6 +318,23 @@ function populateIndirectCosts(
     }
   }
 
+  // Cargar los datos de fin de mes por centro productivo que la IA haya extraído
+  // (capacidad normal, actividad real, CIP real). El PRESUPUESTO no se toca: se deriva
+  // del prorrateo al guardar. Solo se completan campos en 0 → nunca se pisa lo que ya
+  // cargó el costista. El centro se matchea por nombre (centerMap) o por id.
+  for (const src of sec.productiveSettings ?? []) {
+    const ref = String(src.center ?? '').trim().toLowerCase();
+    const centerId = centerMap[ref] ?? cfg.centers.find((c) => c.id === src.center)?.id;
+    if (!centerId) continue;
+    const setting = cfg.productiveSettings.find((ps: any) => ps?.centerId === centerId) as
+      | { normalCapacity?: number; actualActivity?: number; actualCip?: number }
+      | undefined;
+    if (!setting) continue;
+    if (!setting.normalCapacity && src.normalCapacity != null) setting.normalCapacity = n(src.normalCapacity);
+    if (!setting.actualActivity && src.actualActivity != null) setting.actualActivity = n(src.actualActivity);
+    if (!setting.actualCip && src.actualCip != null) setting.actualCip = n(src.actualCip);
+  }
+
   // Sincronizar serviceDistributions para que los nuevos centros de servicio no queden vacíos
   if (!Array.isArray(cfg.serviceDistributions)) cfg.serviceDistributions = [];
   const serviceCenters = cfg.centers.filter(c => c.type === 'service');
