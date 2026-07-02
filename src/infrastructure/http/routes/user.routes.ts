@@ -5,9 +5,16 @@ import { authenticate, auditContext } from '../plugins/authenticate.js';
 import { hashPassword, verifyPassword } from '../../crypto/password.js';
 import { changePasswordSchema } from '../../../shared/schemas/auth.schema.js';
 import { recordAudit } from '../../../application/audit/audit-logger.js';
-import { NotFoundError, UnauthorizedError } from '../../../domain/errors/domain-error.js';
+import { NotFoundError, UnauthorizedError, ValidationError } from '../../../domain/errors/domain-error.js';
+import { uploadToCloudinary } from '../../cloudinary/cloudinary-upload.js';
 
 const updateProfileSchema = z.object({ name: z.string().min(2).max(120).trim() });
+
+// La imagen llega ya RECORTADA desde el front (base64, sin el prefijo data:).
+const avatarSchema = z.object({
+  imageData: z.string().min(1).max(8_000_000),
+  mimeType: z.string().regex(/^image\/(png|jpe?g|webp)$/, 'Formato de imagen no soportado'),
+});
 
 export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   app.get('/user/profile', { preHandler: authenticate }, async (request) => {
@@ -19,9 +26,27 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
         email: user.email,
         name: user.name,
         role: user.role,
+        avatarUrl: user.avatarUrl,
         twoFactorEnabled: user.twoFactorEnabled,
       },
     };
+  });
+
+  // Subir/actualizar foto de perfil (ya recortada en el cliente) → Cloudinary.
+  app.post('/user/avatar', { preHandler: authenticate }, async (request) => {
+    const { imageData, mimeType } = avatarSchema.parse(request.body);
+    let avatarUrl: string;
+    try {
+      avatarUrl = await uploadToCloudinary(imageData, mimeType, `avatar-${request.authUser!.id}`, 'costear/avatars');
+    } catch {
+      throw new ValidationError('No se pudo subir la imagen. Intentá de nuevo en unos segundos.');
+    }
+    const user = await prisma.user.update({
+      where: { id: request.authUser!.id },
+      data: { avatarUrl },
+    });
+    await recordAudit({ ...auditContext(request), userId: user.id, action: 'user.avatar.update' });
+    return { data: { avatarUrl: user.avatarUrl } };
   });
 
   app.put('/user/profile', { preHandler: authenticate }, async (request) => {

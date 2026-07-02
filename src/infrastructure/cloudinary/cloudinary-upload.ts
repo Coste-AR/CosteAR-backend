@@ -28,6 +28,7 @@ export async function uploadToCloudinary(
   base64Data: string,
   mimeType: string,
   fileName: string,
+  folder = 'costear/entries',
 ): Promise<string> {
   if (!isConfigured) {
     throw new Error('Cloudinary no está configurado (faltan CLOUDINARY_* en el entorno).');
@@ -37,7 +38,7 @@ export async function uploadToCloudinary(
   const resourceType = mimeType.startsWith('image/') ? 'image' : 'raw';
 
   const result = await cloudinary.uploader.upload(dataUri, {
-    folder: 'costear/entries',
+    folder,
     resource_type: resourceType,
     public_id: `${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
     overwrite: false,
