@@ -7,6 +7,7 @@ import { Redis } from 'ioredis';
 import { getEnv } from '../config/env.js';
 import { errorHandler } from './error-handler.js';
 import { registerAuthRoutes } from './routes/auth.routes.js';
+import { registerAccessGateRoutes } from './routes/access-gate.routes.js';
 import { registerCompanyRoutes } from './routes/company.routes.js';
 import { registerCostStructureRoutes } from './routes/cost-structure.routes.js';
 import { registerMacroRoutes } from './routes/macro.routes.js';
@@ -115,6 +116,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   const prefix = `/api/${env.API_VERSION}`;
   await app.register(
     async (api) => {
+      await registerAccessGateRoutes(api);
       await registerAuthRoutes(api);
       await registerCompanyRoutes(api);
       await registerCostStructureRoutes(api);
