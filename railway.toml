@@ -2,6 +2,9 @@
 builder = "nixpacks"
 
 [deploy]
+# Aplica las migraciones Prisma pendientes ANTES de que el deploy salga vivo.
+# Si falla, Railway mantiene la versión anterior (no deja el server sin su schema).
+preDeployCommand = "node scripts/migrate-deploy.mjs"
 startCommand = "node dist/infrastructure/http/entry.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
