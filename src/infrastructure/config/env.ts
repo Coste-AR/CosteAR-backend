@@ -37,6 +37,13 @@ const envSchema = z.object({
 
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   MACRO_SYNC_CRON: z.string().default('0 18 * * 1-5'),
+
+  // Gate de acceso previo al login (mientras el producto está en construcción).
+  // Es un HASH Argon2id de la contraseña del equipo — el texto plano nunca se
+  // guarda. Se puede sobrescribir por env var en el deploy para rotarla.
+  ACCESS_GATE_HASH: z
+    .string()
+    .default('$argon2id$v=19$m=65536,t=3,p=4$MPvy55gNDLwuV9DhPoRgbw$Z4Ag/77XbyG1OBrNA7rMiEG9dYt0/jkHwDRAEfplvVw'),
 });
 
 export type Env = z.infer<typeof envSchema>;
