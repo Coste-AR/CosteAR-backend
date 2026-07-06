@@ -58,11 +58,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // --- CORS: lista blanca explícita, nunca '*' con credenciales ---
   // CORS_ORIGIN puede ser una lista separada por comas: "https://foo.vercel.app,http://localhost:5173"
   const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
-  // Dominios de Vercel del frontend (producción + previews del proyecto) y localhost:
-  // se permiten SIEMPRE, para no depender de que CORS_ORIGIN esté bien seteado en el deploy.
-  // Ej: https://costear-frontend.vercel.app y https://costear-frontend-git-xxx.vercel.app
+  // Dominios de Vercel del frontend (producción + previews) y localhost: se permiten
+  // SIEMPRE, para no depender de que CORS_ORIGIN esté bien seteado en el deploy.
+  // Cubre los dos nombres del proyecto ("costear-frontend" y "coste-ar-frontend")
+  // y sus URLs de preview. Ej: coste-ar-frontend.vercel.app, coste-ar-frontend-xxx.vercel.app
   const alwaysAllowed = [
     /^https:\/\/costear-frontend[a-z0-9-]*\.vercel\.app$/,
+    /^https:\/\/coste-ar-frontend[a-z0-9-]*\.vercel\.app$/,
     /^http:\/\/localhost:\d+$/,
   ];
   const isAllowed = (origin: string) =>
