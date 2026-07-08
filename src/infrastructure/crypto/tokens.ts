@@ -21,9 +21,17 @@ export interface AccessTokenPayload {
   role: string;
 }
 
+function parsePemKey(rawKey: string): string {
+  const trimmed = rawKey.trim();
+  if (trimmed.startsWith('-----BEGIN')) {
+    return trimmed.replace(/\\n/g, '\n');
+  }
+  return Buffer.from(trimmed, 'base64').toString('utf-8');
+}
+
 export function signAccessToken(payload: AccessTokenPayload): string {
   const env = getEnv();
-  const privateKey = Buffer.from(env.JWT_PRIVATE_KEY, 'base64').toString('utf-8');
+  const privateKey = parsePemKey(env.JWT_PRIVATE_KEY);
   return jwt.sign(payload, privateKey, {
     algorithm: 'RS256',
     expiresIn: env.JWT_ACCESS_EXPIRY,
@@ -33,7 +41,7 @@ export function signAccessToken(payload: AccessTokenPayload): string {
 
 export function verifyAccessToken(token: string): AccessTokenPayload {
   const env = getEnv();
-  const publicKey = Buffer.from(env.JWT_PUBLIC_KEY, 'base64').toString('utf-8');
+  const publicKey = parsePemKey(env.JWT_PUBLIC_KEY);
   const decoded = jwt.verify(token, publicKey, {
     algorithms: ['RS256'],
     issuer: 'costear',

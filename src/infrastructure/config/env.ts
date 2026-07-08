@@ -30,7 +30,7 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_SECURE: z.string().optional(), // 'true' or 'false'
 
-  GROQ_API_KEY: z.string().min(1).default(''),
+  GROQ_API_KEY: z.string().min(1).default('groq_placeholder'),
 
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),
   INDEC_API_URL: z.string().url().default('https://apis.datos.gob.ar/series/api'),
