@@ -25,6 +25,10 @@ export class EmailService {
           user: env.SMTP_USER,
           pass: env.SMTP_PASS,
         } : undefined,
+        // Timeouts para que un envío nunca quede colgado indefinidamente.
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 15_000,
       });
       // Gmail/SMTP exige que el "from" sea la casilla autenticada. Si EMAIL_FROM
       // no la contiene, usamos SMTP_USER para no ser rechazados (mantenemos el

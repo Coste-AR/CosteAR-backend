@@ -144,7 +144,12 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const input = forgotPasswordSchema.parse(request.body);
     const token = await auth.createPasswordReset(input.email);
     if (token) {
-      await email.sendPasswordReset(input.email, token);
+      // Fire-and-forget: NO bloqueamos la respuesta esperando al SMTP. Si el envío
+      // es lento o falla, la request igual responde al instante (no deja colgado el
+      // botón del front). Los errores quedan logueados.
+      void email.sendPasswordReset(input.email, token).catch((err) => {
+        request.log.error({ err }, 'Error al enviar el email de reset de contraseña');
+      });
     }
     // Respuesta idéntica exista o no el email (anti-enumeración).
     return reply.send({
