@@ -140,6 +140,11 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ data: { success: true } });
   });
 
+  // Diagnóstico temporal del SMTP (verifica conexión/credenciales, no envía nada).
+  app.get('/auth/email-health', async () => {
+    return { data: await email.verifyConnection() };
+  });
+
   app.post('/auth/forgot-password', { config: registerLimit }, async (request, reply) => {
     const input = forgotPasswordSchema.parse(request.body);
     const token = await auth.createPasswordReset(input.email);

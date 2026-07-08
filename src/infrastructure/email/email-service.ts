@@ -46,6 +46,20 @@ export class EmailService {
     }
   }
 
+  /** Diagnóstico: verifica la conexión/credenciales SMTP sin enviar nada. */
+  async verifyConnection(): Promise<{ mode: string; from: string; ok: boolean; error?: string }> {
+    if (this.transporter) {
+      try {
+        await this.transporter.verify();
+        return { mode: 'smtp', from: this.from, ok: true };
+      } catch (err) {
+        const e = err as { code?: string; message?: string };
+        return { mode: 'smtp', from: this.from, ok: false, error: `${e.code ?? ''} ${e.message ?? String(err)}`.trim() };
+      }
+    }
+    return { mode: this.resend ? 'resend' : 'dev-log', from: this.from, ok: false, error: 'Sin transporter SMTP (SMTP_HOST no seteado)' };
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     if (this.transporter) {
       try {
