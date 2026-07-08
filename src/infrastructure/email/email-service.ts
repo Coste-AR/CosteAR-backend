@@ -60,6 +60,30 @@ export class EmailService {
     return { mode: this.resend ? 'resend' : 'dev-log', from: this.from, ok: false, error: 'Sin transporter SMTP (SMTP_HOST no seteado)' };
   }
 
+  /** Diagnóstico: envía un email de prueba REAL y devuelve el resultado exacto. */
+  async sendTest(to: string): Promise<{ mode: string; from: string; ok: boolean; id?: string; error?: string }> {
+    const html = emailLayout({
+      heading: 'Prueba de envío',
+      bodyHtml: '<p style="margin:0">Si estás viendo este mail, el envío de CosteAR funciona correctamente. 🎉</p>',
+    });
+    const subject = 'CosteAR — Prueba de email';
+    if (this.transporter) {
+      try {
+        const info = await this.transporter.sendMail({ from: this.from, to, subject, html });
+        return { mode: 'smtp', from: this.from, ok: true, id: info.messageId };
+      } catch (err) {
+        const e = err as { code?: string; message?: string };
+        return { mode: 'smtp', from: this.from, ok: false, error: `${e.code ?? ''} ${e.message ?? String(err)}`.trim() };
+      }
+    }
+    if (this.resend) {
+      const r = await this.resend.emails.send({ from: this.from, to, subject, html });
+      if (r.error) return { mode: 'resend', from: this.from, ok: false, error: `${r.error.name}: ${r.error.message}` };
+      return { mode: 'resend', from: this.from, ok: true, id: r.data?.id };
+    }
+    return { mode: 'dev-log', from: this.from, ok: false, error: 'No hay transporter ni Resend configurados' };
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     if (this.transporter) {
       try {

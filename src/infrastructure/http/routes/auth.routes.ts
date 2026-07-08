@@ -140,8 +140,11 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ data: { success: true } });
   });
 
-  // Diagnóstico temporal del SMTP (verifica conexión/credenciales, no envía nada).
-  app.get('/auth/email-health', async () => {
+  // Diagnóstico temporal del email. Sin query → verifica config. Con ?to=email
+  // → envía un mail de prueba REAL y devuelve el resultado (id o error exacto).
+  app.get('/auth/email-health', async (request) => {
+    const { to } = (request.query ?? {}) as { to?: string };
+    if (to) return { data: await email.sendTest(to) };
     return { data: await email.verifyConnection() };
   });
 
