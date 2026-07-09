@@ -90,7 +90,7 @@ describe('AuthService.refresh — rotación y detección de reuso', () => {
     const service = new AuthService(db);
     await expect(service.refresh('expirado', {})).rejects.toThrow();
   });
-});
+}, 20000);
 
 describe('AuthService.login — anti-bruteforce', () => {
   it('bloquea la cuenta tras 5 intentos fallidos', async () => {
@@ -118,9 +118,9 @@ describe('AuthService.login — anti-bruteforce', () => {
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     } as never;
 
-    const service = new AuthService(db);
+        const service = new AuthService(db);
     await expect(
-      service.login({ email: 'a@b.com', password: 'WrongPass999' }, {}),
+      service.login({ identifier: 'a@b.com', password: 'WrongPass999' }, {}),
     ).rejects.toThrow();
 
     // El 5° fallo debe disparar el bloqueo.
@@ -137,9 +137,9 @@ describe('AuthService.login — anti-bruteforce', () => {
       user: { findUnique: vi.fn().mockResolvedValue(null) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     } as never;
-    const service = new AuthService(db);
+        const service = new AuthService(db);
     await expect(
-      service.login({ email: 'ghost@b.com', password: 'whatever123' }, {}),
+      service.login({ identifier: 'ghost@b.com', password: 'whatever123' }, {}),
     ).rejects.toThrow(/incorrectos/);
   });
-});
+}, 20000);

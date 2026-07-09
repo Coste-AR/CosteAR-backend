@@ -54,10 +54,8 @@ export function parseEnv(source: NodeJS.ProcessEnv | Record<string, unknown>): E
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
       .join('\n');
-    // Log pero NO crash: el servidor intenta arrancar de todas formas
     console.error(`[env] Variables de entorno con problemas:\n${issues}`);
-    // Intentar con defaults forzados
-    return envSchema.parse({ ...source });
+    throw new Error(`Configuración de entorno inválida:\n${issues}`);
   }
   // Normalizar TOTP_ENCRYPTION_KEY a exactamente 32 chars
   const data = result.data;

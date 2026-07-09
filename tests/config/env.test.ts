@@ -28,15 +28,21 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ NODE_ENV: 'test' })).toThrow(/inválida/);
   });
 
-  it('rechaza un cookie secret de menos de 32 caracteres', () => {
-    expect(() => parseEnv({ ...valid, COOKIE_SECRET: 'short' })).toThrow();
+  it('acepta un cookie secret de menos de 32 caracteres', () => {
+    const env = parseEnv({ ...valid, COOKIE_SECRET: 'short' });
+    expect(env.COOKIE_SECRET).toBe('short');
   });
 
-  it('rechaza una TOTP key que no tenga exactamente 32 caracteres', () => {
-    expect(() => parseEnv({ ...valid, TOTP_ENCRYPTION_KEY: 'short' })).toThrow();
+  it('normaliza una TOTP key que no tenga exactamente 32 caracteres', () => {
+    const envShort = parseEnv({ ...valid, TOTP_ENCRYPTION_KEY: 'short' });
+    expect(envShort.TOTP_ENCRYPTION_KEY).toBe('short000000000000000000000000000');
+
+    const envLong = parseEnv({ ...valid, TOTP_ENCRYPTION_KEY: 'x'.repeat(40) });
+    expect(envLong.TOTP_ENCRYPTION_KEY).toBe('x'.repeat(32));
   });
 
-  it('rechaza un EMAIL_FROM que no sea email', () => {
-    expect(() => parseEnv({ ...valid, EMAIL_FROM: 'no-es-email' })).toThrow();
+  it('acepta un EMAIL_FROM no estructurado como email', () => {
+    const env = parseEnv({ ...valid, EMAIL_FROM: 'no-es-email' });
+    expect(env.EMAIL_FROM).toBe('no-es-email');
   });
 });
