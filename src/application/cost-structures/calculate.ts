@@ -49,7 +49,7 @@ export interface CalculationOutput {
   grossMarginPct: number;
   detail: {
     rawMaterial: { optimalLot: number; finalStockQty: number; finalStockValue: number };
-    directLabor: { workingDays: number; itcsPercent: number; hourlyRates: Record<string, number> };
+    directLabor: { workingDays: number; itcsPercent: number; iapPercent: number; hourlyRates: Record<string, number> };
     indirectCosts: {
       perDepartment: Record<
         string,
@@ -210,6 +210,9 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       directLabor: {
         workingDays: labor.workingDays.effectiveWorkDays.toNumber(),
         itcsPercent: labor.itcs.itcs.toPercent(),
+        // IAP — Índice de Ausentismo Pago (ya calculado en calcWorkingDays, se expone
+        // para mostrarlo en el resultado). No cambia ninguna fórmula.
+        iapPercent: labor.workingDays.iap.toPercent(),
         hourlyRates,
       },
       indirectCosts: { perDepartment },
