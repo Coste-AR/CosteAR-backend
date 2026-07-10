@@ -67,6 +67,24 @@ arriesgar pérdida de datos.
   tenant es indirecto u opcional); se protegen en la capa de aplicación con el
   mismo patrón `requireStructure`/`requireDataPoint` que usa el resto del
   código.
+- **Demo estática servida por el propio backend** (`public/demo/`, rutas
+  `/demo`, `/demo/style.css`, `/demo/app.js` en `app.ts`): se sirve
+  same-origin en vez de como archivo `file://` o servidor aparte porque el
+  CSP (`helmet`) y el CORS del backend solo permiten `http://localhost:*` con
+  origin explícito — abrir el HTML directamente desde el disco manda
+  `Origin: null` y el fetch a la API fallaría. HTML/CSS/JS están en archivos
+  separados (no inline) para respetar el CSP existente (`script-src 'self'`,
+  `style-src 'self'`) tal cual está configurado para el resto de la API — no
+  se relajó ninguna política de seguridad para esto.
+- **No pude levantar el backend completo en este sandbox** para probar la
+  demo en vivo: no hay Docker/Postgres (ver arriba) y además los workers de
+  BullMQ (`src/infrastructure/workers/queues.ts`, código preexistente, no
+  tocado en esta tarea) tiran una excepción no controlada si Redis no está
+  disponible, lo que mata el proceso a los pocos segundos de arrancar — no es
+  un bug introducido acá, pero significa que `npm run dev` necesita
+  `docker-compose up -d` (Postgres Y Redis) para quedarse arriba. Typecheck
+  limpio y 108 tests corridos como verificación alternativa; probar en Chrome
+  contra un server real queda para el usuario (pasos exactos al final).
 - **Endpoint adicional no listado en la spec**: `POST /structures/:id/data-points`
   (crear un data point nuevo). La spec no lo incluye en la lista de la sección
   C, pero sin él `POST /data-points/:id/versions` no tiene sobre qué actuar —

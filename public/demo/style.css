@@ -1,0 +1,119 @@
+:root {
+  --granate: #6E1423;
+  --granate-bg: #fbeef0;
+  --gris: #6b7280;
+  --borde: #e5e7eb;
+  --verde: #15803d;
+  --verde-bg: #ecfdf3;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: var(--font);
+  margin: 0;
+  background: #f9fafb;
+  color: #1f2937;
+  line-height: 1.5;
+}
+header {
+  background: var(--granate);
+  color: white;
+  padding: 20px 28px;
+}
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+section {
+  background: white;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+section h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gris);
+  margin: 0 0 12px;
+}
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+input, button, select {
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--borde);
+}
+input { min-width: 200px; }
+button {
+  background: var(--granate);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+button:hover { opacity: 0.9; }
+button.secondary { background: white; color: #1f2937; border: 1px solid var(--borde); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.status { font-size: 12px; color: var(--gris); margin-top: 8px; white-space: pre-wrap; }
+.status.err { color: var(--granate); font-weight: 600; }
+.status.ok { color: var(--verde); }
+
+/* Árbol de cálculo */
+.tree-node { border-bottom: 1px solid #f1f1f1; }
+.tree-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.tree-row:hover { background: #fafafa; }
+.chevron { width: 14px; color: var(--gris); font-size: 11px; }
+.tree-label { font-weight: 500; flex: 1; }
+.tree-formula { font-family: var(--mono); font-size: 11px; color: var(--gris); }
+.tree-value { font-family: var(--mono); font-weight: 600; }
+.tree-children { padding-left: 22px; display: none; }
+.tree-children.open { display: block; }
+
+/* Pills de estado */
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.pill-borrador { background: #f3f4f6; color: #4b5563; }
+.pill-validado { background: var(--verde-bg); color: var(--verde); }
+.pill-aplicado { background: var(--granate); color: white; }
+.pill-anulado { background: #fef2f2; color: #991b1b; }
+
+/* TraceCard */
+.trace-card {
+  border-left: 3px solid var(--granate);
+  background: var(--granate-bg);
+  border-radius: 0 8px 8px 0;
+  padding: 14px 16px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.trace-card .display { font-family: var(--mono); font-size: 15px; margin: 4px 0 10px; }
+.fields-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.field-cell { background: white; border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+.field-cell .k { color: var(--gris); text-transform: uppercase; font-size: 10px; letter-spacing: 0.03em; }
+.field-cell .v { font-family: var(--mono); font-weight: 600; margin: 2px 0; }
+.field-cell .meta { color: var(--gris); font-size: 11px; }
+.versions-list { font-size: 12px; margin-top: 8px; }
+.versions-list .v-row { padding: 4px 0; border-top: 1px dashed #ddd; }
+.versions-list .v-row.old .val { text-decoration: line-through; color: var(--gris); }
+.impacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--gris); }
+.impacts span:not(:last-child)::after { content: ' → '; }
+code.id { font-size: 10px; color: #aaa; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+.subheading { font-size: 12px; color: var(--gris); }
+.subheading.spaced { margin-top: 16px; }
