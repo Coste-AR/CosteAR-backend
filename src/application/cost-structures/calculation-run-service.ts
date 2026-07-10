@@ -42,6 +42,23 @@ export class CalculationRunService {
       throw new MissingInputError('indirectCosts', 'Falta cargar la sección de Costos Indirectos antes de calcular.');
     }
 
+    // Doble período (spec D.3): un dato sin decisión de imputación queda
+    // pendiente y el cálculo NO puede correr hasta que se decida a qué
+    // período pertenece — evita que un dato de otro mes se cuele sin que
+    // nadie lo haya decidido explícitamente.
+    const pending = await this.db.dataPoint.findMany({
+      where: { structureId, periodoImputado: null, voidedAt: null, status: { not: 'anulado' } },
+      select: { id: true, label: true },
+      take: 20,
+    });
+    if (pending.length > 0) {
+      throw new MissingInputError(
+        'periodoImputado',
+        `Hay ${pending.length} dato(s) sin decisión de imputación de período (ej. "${pending[0]!.label}") — ` +
+          'resolvé con POST /data-points/:id/imputacion antes de calcular.',
+      );
+    }
+
     const input: CalculationInput = {
       rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),

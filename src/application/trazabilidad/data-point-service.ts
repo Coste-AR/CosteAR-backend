@@ -456,6 +456,35 @@ export class DataPointService {
         comment: e.comment,
         at: e.at.toISOString(),
       })),
+      latencyByArea: await this.getCaptureLatency(structureId),
     };
+  }
+
+  /**
+   * Latencia de captación = fecha_captación − fecha_hecho, promedio en días
+   * por área (spec F4). Solo considera data points con `fechaHecho` cargado
+   * (si no se sabe cuándo pasó el hecho, no hay latencia que medir).
+   */
+  private async getCaptureLatency(structureId: string): Promise<Array<{ area: string; avgDays: number; count: number }>> {
+    const points = await this.db.dataPoint.findMany({
+      where: { structureId, fechaHecho: { not: null } },
+      select: { sourceArea: true, fechaHecho: true, fechaCaptacion: true },
+    });
+
+    const byArea = new Map<string, { totalDays: number; count: number }>();
+    for (const p of points) {
+      if (!p.fechaHecho) continue;
+      const days = (p.fechaCaptacion.getTime() - p.fechaHecho.getTime()) / (1000 * 60 * 60 * 24);
+      const bucket = byArea.get(p.sourceArea) ?? { totalDays: 0, count: 0 };
+      bucket.totalDays += days;
+      bucket.count += 1;
+      byArea.set(p.sourceArea, bucket);
+    }
+
+    return Array.from(byArea.entries()).map(([area, { totalDays, count }]) => ({
+      area,
+      avgDays: Math.round((totalDays / count) * 100) / 100,
+      count,
+    }));
   }
 }
