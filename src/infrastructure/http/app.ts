@@ -14,6 +14,7 @@ import { registerMacroRoutes } from './routes/macro.routes.js';
 import { registerAlertRoutes } from './routes/alert.routes.js';
 import { registerUserRoutes } from './routes/user.routes.js';
 import { registerValidacionesRoutes } from './routes/validaciones.routes.js';
+import { registerDataPointRoutes } from './routes/data-point.routes.js';
 import { registerEmpresaPortalRoutes } from './routes/empresa-portal.routes.js';
 import { registerCostitaChatRoutes } from './routes/costista-chat.routes.js';
 import { registerAdvisorRoutes } from './routes/advisor.routes.js';
@@ -126,6 +127,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerAlertRoutes(api);
       await registerUserRoutes(api);
       await registerValidacionesRoutes(api);
+      await registerDataPointRoutes(api);
       await registerEmpresaPortalRoutes(api);
       await registerCostitaChatRoutes(api);
       await registerAdvisorRoutes(api);

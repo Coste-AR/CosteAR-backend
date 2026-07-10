@@ -12,7 +12,9 @@ import {
 import {
   runCalculation,
   computeProductiveBudgets,
+  buildCalculationTree,
   type CalculationInput,
+  type CalcNode,
 } from './calculate.js';
 
 /**
@@ -196,19 +198,79 @@ export class CostStructureService {
     };
 
     const result = runCalculation(input);
+    const tree = buildCalculationTree(input, result);
 
-    const calculation = await this.db.costCalculation.create({
+    const lastRun = await this.db.calculationRun.findFirst({
+      where: { structureId: id },
+      orderBy: { runN: 'desc' }
+    });
+    const runN = (lastRun?.runN ?? 0) + 1;
+
+    // Flatten tree for Prisma createMany
+    type FlatNode = {
+      id: string;
+      runId: string;
+      parentId: string | null;
+      ord: number;
+      label: string;
+      formula: string | null;
+      valueNum: number | null;
+      unit: string | null;
+      sourceDpVersionIds: string[];
+    };
+    
+    // We will save CalculationRun and then CalculationNodes.
+    // However, nodes have parentId referencing other nodes, so we need to save them in order or generate UUIDs here.
+    const { v4: uuidv4 } = await import('uuid');
+    
+    const runId = uuidv4();
+    const flatNodes: FlatNode[] = [];
+    
+    function flatten(nodes: CalcNode[], parentId: string | null) {
+      for (const node of nodes) {
+        const nodeId = uuidv4();
+        flatNodes.push({
+          id: nodeId,
+          runId,
+          parentId,
+          ord: node.ord,
+          label: node.label,
+          formula: node.formula || null,
+          valueNum: node.valueNum || null,
+          unit: node.unit || null,
+          sourceDpVersionIds: node.sourceDpVersionIds || []
+        });
+        if (node.children && node.children.length > 0) {
+          flatten(node.children, nodeId);
+        }
+      }
+    }
+    
+    flatten(tree, null);
+
+    const calculation = await this.db.calculationRun.create({
       data: {
-        costStructureId: id,
-        userId,
-        rawMaterialConsumed: result.rawMaterialConsumed,
-        directLaborTotal: result.directLaborTotal,
-        indirectCostsApplied: result.indirectCostsApplied,
-        productionCost: result.productionCost,
-        costOfGoodsSold: result.costOfGoodsSold,
-        grossMargin: result.grossMargin,
-        grossMarginPct: result.grossMarginPct,
-        detail: result.detail as object,
+        id: runId,
+        structureId: id,
+        runN,
+        engineVersion: 'v1.1',
+        executedBy: userId,
+        inputsSnapshot: input as object,
+        results: result as object,
+        nodes: {
+          createMany: {
+            data: flatNodes.map(n => ({
+              id: n.id,
+              parentId: n.parentId,
+              ord: n.ord,
+              label: n.label,
+              formula: n.formula,
+              valueNum: n.valueNum,
+              unit: n.unit,
+              sourceDpVersionIds: n.sourceDpVersionIds
+            }))
+          }
+        }
       },
     });
 
@@ -222,18 +284,50 @@ export class CostStructureService {
 
   async latestCalculation(userId: string, id: string) {
     await this.requireStructure(userId, id);
-    return this.db.costCalculation.findFirst({
-      where: { costStructureId: id, userId },
-      orderBy: { calculatedAt: 'desc' },
+    return this.db.calculationRun.findFirst({
+      where: { structureId: id },
+      orderBy: { executedAt: 'desc' },
     });
   }
 
   async calculationHistory(userId: string, id: string) {
     await this.requireStructure(userId, id);
-    return this.db.costCalculation.findMany({
-      where: { costStructureId: id, userId },
-      orderBy: { calculatedAt: 'desc' },
+    return this.db.calculationRun.findMany({
+      where: { structureId: id },
+      orderBy: { executedAt: 'desc' },
       take: 50,
     });
+  }
+
+  async getCalculationTree(userId: string, id: string, runId: string) {
+    await this.requireStructure(userId, id);
+    const run = await this.db.calculationRun.findFirst({
+      where: { id: runId, structureId: id }
+    });
+    if (!run) throw new NotFoundError('Ejecución no encontrada');
+
+    const flatNodes = await this.db.calculationNode.findMany({
+      where: { runId },
+      orderBy: { ord: 'asc' }
+    });
+    
+    // Un-flatten
+    const map = new Map<string, any>();
+    const roots: any[] = [];
+    
+    for (const n of flatNodes) {
+      map.set(n.id, { ...n, children: [] });
+    }
+    
+    for (const n of flatNodes) {
+      const node = map.get(n.id);
+      if (n.parentId) {
+        map.get(n.parentId)?.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+    
+    return { run, tree: roots };
   }
 }

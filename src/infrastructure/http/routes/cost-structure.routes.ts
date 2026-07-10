@@ -144,4 +144,15 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
       return { data: latest };
     },
   );
+
+  const runIdParam = z.object({ id: z.string().uuid(), runId: z.string().uuid() });
+  app.get(
+    '/cost-structures/:id/calculations/:runId/tree',
+    { preHandler: authenticate },
+    async (request) => {
+      const { id, runId } = runIdParam.parse(request.params);
+      const data = await service.getCalculationTree(request.authUser!.id, id, runId);
+      return { data };
+    },
+  );
 }

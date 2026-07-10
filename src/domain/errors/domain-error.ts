@@ -48,3 +48,8 @@ export class TooManyRequestsError extends DomainError {
   readonly statusCode: number = 429;
   readonly code: string = 'TOO_MANY_REQUESTS';
 }
+
+export class CalcError extends DomainError {
+  readonly statusCode: number = 422;
+  readonly code: string = 'CALC_ERROR';
+}

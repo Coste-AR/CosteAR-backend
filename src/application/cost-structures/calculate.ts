@@ -219,3 +219,63 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     },
   };
 }
+
+export interface CalcNode {
+  ord: number;
+  label: string;
+  formula?: string;
+  valueNum?: number;
+  unit?: string;
+  sourceDpVersionIds?: string[];
+  children: CalcNode[];
+}
+
+export function buildCalculationTree(input: CalculationInput, output: CalculationOutput): CalcNode[] {
+  let ord = 1;
+  const nextOrd = () => ord++;
+
+  return [
+    {
+      ord: nextOrd(),
+      label: 'Materia Prima Consumida',
+      valueNum: output.rawMaterialConsumed,
+      formula: 'Inventario Inicial + Compras - Inventario Final',
+      children: [
+        { ord: nextOrd(), label: 'Inventario Inicial MP', valueNum: input.rawMaterial.initialStock.quantity * input.rawMaterial.initialStock.unitCost, children: [] },
+        { ord: nextOrd(), label: 'Inventario Final MP', valueNum: output.detail.rawMaterial.finalStockValue, children: [] }
+      ]
+    },
+    {
+      ord: nextOrd(),
+      label: 'Mano de Obra Directa (MOD)',
+      valueNum: output.directLaborTotal,
+      children: []
+    },
+    {
+      ord: nextOrd(),
+      label: 'Costos Indirectos de Producción (CIP)',
+      valueNum: output.indirectCostsApplied,
+      children: Object.values(output.detail.indirectCosts.perDepartment).map(d => ({
+        ord: nextOrd(),
+        label: 'CIP Aplicado Departamento',
+        valueNum: d.appliedCip,
+        formula: 'Actividad Real * Cuota Predeterminada',
+        children: []
+      }))
+    },
+    {
+      ord: nextOrd(),
+      label: 'Costo de Producción',
+      valueNum: output.productionCost,
+      formula: 'MP + MOD + CIP',
+      children: []
+    },
+    {
+      ord: nextOrd(),
+      label: 'Costo de Productos Vendidos',
+      valueNum: output.costOfGoodsSold,
+      formula: 'Producción + Inv Inicial - Inv Final',
+      children: []
+    }
+  ];
+}

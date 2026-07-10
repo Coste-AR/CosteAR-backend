@@ -27,14 +27,15 @@ export async function recordAudit(
 ): Promise<void> {
   await client.auditLog.create({
     data: {
-      userId: entry.userId ?? null,
+      actorId: entry.userId ?? null,
       action: entry.action,
-      entityType: entry.entityType ?? null,
-      entityId: entry.entityId ?? null,
-      oldValue: entry.oldValue === undefined ? undefined : (entry.oldValue as object),
-      newValue: entry.newValue === undefined ? undefined : (entry.newValue as object),
-      ipAddress: entry.ipAddress ?? null,
-      userAgent: entry.userAgent ?? null,
+      entityType: entry.entityType ?? '',
+      entityId: entry.entityId ?? '',
+      before: entry.oldValue === undefined ? undefined : (entry.oldValue as object),
+      after: entry.newValue === undefined ? undefined : (entry.newValue as object),
+      deviceInfo: `IP: ${entry.ipAddress ?? 'unknown'} | UA: ${entry.userAgent ?? 'unknown'}`,
+      actorRole: 'SYSTEM',
+      actorArea: 'ADMINISTRATION'
     },
   });
 }
