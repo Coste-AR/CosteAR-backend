@@ -91,6 +91,26 @@ arriesgar pérdida de datos.
   algún endpoint tiene que crear la versión 1. Se agregó siguiendo el mismo
   contrato de auditoría/transacción que el resto.
 
+## F5 — Pulido (D.5)
+
+De los 4 puntos de la spec, dos ya estaban resueltos por el código existente
+y dos son exclusivamente de la UI React (fuera de alcance sin ese repo):
+
+- **(a) IAP de solo lectura, derivado**: YA estaba así antes de esta tarea.
+  `calcWorkingDays` calcula el IAP a partir de los días (nunca es un input
+  manual) y `calculate.ts` lo expone como `iapPercent` separado de los
+  conceptos inciertos editables (PAP/PPP). No hizo falta tocar nada.
+- **(c) Keys estables por ID de centro, no por nombre**: YA estaba así. Todo
+  el modelo de Costos Indirectos (`CostCenter.id`, `distribution` de cada
+  concepto, `productiveSettings`) usa `centerId` como clave — renombrar un
+  centro no mueve ni borra ningún porcentaje cargado, porque el nombre nunca
+  fue la clave.
+- **(b) Flag "cambios sin guardar"** y **(d) placeholders + botón "Cargar
+  ejemplo de la cátedra" en el formulario MOD**: son estado y componentes de
+  la UI React real, que no está disponible en este checkout. No hay nada que
+  implementar del lado del backend — quedan pendientes para cuando se porte
+  la demo al frontend de producción.
+
 ## Motor de cálculo
 
 - **No se reescriben las funciones puras existentes** (`raw-material.ts`,
