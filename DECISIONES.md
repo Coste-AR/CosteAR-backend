@@ -111,6 +111,44 @@ y dos son exclusivamente de la UI React (fuera de alcance sin ese repo):
   implementar del lado del backend — quedan pendientes para cuando se porte
   la demo al frontend de producción.
 
+## Addendum — integración con el frontend real (sesión posterior)
+
+El repo de frontend de CosteAR ya está disponible en esta sesión (no lo estaba
+cuando se escribió lo de arriba). Al conectar el drill-down real encontré que
+`buildCalculationTree`/`persistTree` declaraban `sourceDpVersionIds` en el
+schema de `calculation_nodes` pero **nunca lo poblaban** — el `TreeNode`
+interno ni siquiera tenía ese campo. Resultado: ningún nodo del árbol tenía
+`sources`, así que la regla "toda hoja con sources es clickeable" (D.2) no se
+podía ejercitar nunca, ni siquiera con la estructura semilla del `db:seed`.
+Esto rompía el criterio de aceptación F3 en la práctica, no por un bug de
+cálculo sino por un campo que quedó sin cablear.
+
+Arreglo aditivo, sin tocar matemática (R5 intacto — los 193 tests siguen en
+verde, incluido el fixture de regresión):
+
+- `tree-builder.ts`: agregué `sourceDataPointId?: string` opcional a
+  `TreeNode`. El builder sigue sin tocar la DB.
+- `calculation-run-service.ts`, método nuevo `attachDataPointSources()`: tras
+  construir el árbol en memoria, busca los `DataPoint` no anulados de la
+  estructura y les pega el id a los nodos que matchean — las 4 raíces por
+  `fieldKey` (`mp.config`/`mod.config`/`cip.config`/`venta.config`, los
+  bloques que crea `db:backfill-trazabilidad`) y cualquier nodo del árbol por
+  `label` exacto (cubre los movimientos de MP "Compra — X"/"Consumo — X" que
+  ahora crea el frontend como `DataPoint`s reales con ese mismo label).
+- `persistTree()`: guarda `sourceDpVersionIds: [sourceDataPointId]` si hay
+  match, `[]` si no (comportamiento previo intacto).
+
+**Nota de nombres**: la columna/campo se llama `sourceDpVersionIds` (heredado
+del manual, que la definía como ids de *versión*). En la práctica, dado que
+el motor de cálculo trabaja sobre el JSON de configuración ya resuelto (no
+sobre `DataPointVersion` individuales), lo que se guarda ahí es el id del
+**DataPoint** (no de una versión puntual) — es la granularidad que existe
+hoy. El frontend trata cualquier entrada de ese array como un id de
+DataPoint válido para `GET /data-points/:id/trace`. Si en el futuro el motor
+empieza a resolver inputs directamente desde `DataPointVersion`, este campo
+puede pasar a llevar ids de versión reales sin romper el contrato (la
+resolución versión→data point ya existe en `getTrace`).
+
 ## Motor de cálculo
 
 - **No se reescriben las funciones puras existentes** (`raw-material.ts`,

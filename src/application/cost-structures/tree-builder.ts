@@ -16,6 +16,13 @@ export interface TreeNode {
   value: number | null;
   unit?: string;
   children: TreeNode[];
+  /**
+   * DataPoint (no versión) que respalda este nodo, si existe uno trazado con
+   * el mismo `label` para la estructura. Se completa después de construir el
+   * árbol (ver `calculation-run-service.ts`) — el builder en sí no conoce la
+   * DB. No participa del cálculo: es puramente de trazabilidad (D.1/D.2).
+   */
+  sourceDataPointId?: string;
 }
 
 export function buildCalculationTree(input: CalculationInput, output: CalculationOutput): TreeNode[] {

@@ -85,6 +85,16 @@ export class CalculationRunService {
       throw toMissingInputError(err);
     }
 
+    // Enriquecimiento de trazabilidad (D.1/D.2): no toca ningún valor
+    // calculado, solo anota qué DataPoint respalda cada nodo, para que el
+    // frontend pueda ofrecer "click en la hoja → ficha del dato". Matchea
+    // por fieldKey en las 4 raíces (mp.config/mod.config/cip.config/
+    // venta.config, los bloques que crea `db:backfill-trazabilidad`) y por
+    // label exacto en el resto del árbol (cubre p.ej. los movimientos de MP
+    // "Compra — X" / "Consumo — X" creados vía POST /data-points cuando
+    // tienen el mismo label que ya arma `tree-builder.ts`).
+    await this.attachDataPointSources(structureId, tree);
+
     return withTenant(userId, async (tx) => {
       const last = await tx.calculationRun.findFirst({
         where: { structureId },
@@ -120,6 +130,34 @@ export class CalculationRunService {
 
       return { run, results: output, tree };
     });
+  }
+
+  private static readonly ROOT_FIELD_KEYS = ['mp.config', 'mod.config', 'cip.config', 'venta.config'];
+
+  private async attachDataPointSources(structureId: string, tree: TreeNode[]): Promise<void> {
+    const existing = await this.db.dataPoint.findMany({
+      where: { structureId, voidedAt: null },
+      select: { id: true, label: true, fieldKey: true },
+    });
+    if (existing.length === 0) return;
+
+    const byFieldKey = new Map(existing.map((d) => [d.fieldKey, d.id]));
+    const byLabel = new Map(existing.map((d) => [d.label, d.id]));
+
+    tree.forEach((root, i) => {
+      const fieldKey = CalculationRunService.ROOT_FIELD_KEYS[i];
+      const dpId = fieldKey ? byFieldKey.get(fieldKey) : undefined;
+      if (dpId) root.sourceDataPointId = dpId;
+    });
+
+    const walk = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        const dpId = byLabel.get(node.label);
+        if (dpId) node.sourceDataPointId = dpId;
+        if (node.children.length > 0) walk(node.children);
+      }
+    };
+    walk(tree);
   }
 
   async getTree(userId: string, runId: string) {
@@ -198,6 +236,7 @@ async function persistTree(
         formula: node.formula,
         valueNum: node.value,
         unit: node.unit,
+        sourceDpVersionIds: node.sourceDataPointId ? [node.sourceDataPointId] : [],
       },
     });
     if (node.children.length > 0) {
