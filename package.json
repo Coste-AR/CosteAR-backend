@@ -21,6 +21,7 @@
     "prisma:deploy": "node scripts/migrate-deploy.mjs",
     "db:rls": "node scripts/apply-rls.mjs",
     "db:seed": "node prisma/seed.mjs",
+    "db:backfill-trazabilidad": "node scripts/backfill-trazabilidad.mjs",
     "db:setup": "prisma migrate dev --name init && node scripts/apply-rls.mjs",
     "worker": "tsx --env-file=.env src/infrastructure/workers/index.ts",
     "keys:generate": "node scripts/generate-keys.mjs"

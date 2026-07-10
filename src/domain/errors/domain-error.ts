@@ -48,3 +48,14 @@ export class TooManyRequestsError extends DomainError {
   readonly statusCode: number = 429;
   readonly code: string = 'TOO_MANY_REQUESTS';
 }
+
+/**
+ * Error de negocio no destructivo pero que impide procesar la solicitud tal
+ * como llegó (falta un insumo, un cálculo no puede correr todavía, etc.).
+ * Nunca es un 500: es información accionable para que el usuario sepa qué
+ * cargar. `details` puede incluir `{ field }` para apuntar al campo puntual.
+ */
+export class UnprocessableEntityError extends DomainError {
+  readonly statusCode: number = 422;
+  readonly code: string = 'UNPROCESSABLE_ENTITY';
+}

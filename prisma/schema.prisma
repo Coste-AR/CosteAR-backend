@@ -73,6 +73,12 @@ model User {
   sentInvites         OperatorInvite[]    @relation("invite_sender")
   receivedInvites     OperatorInvite[]    @relation("invite_receiver")
 
+  // Trazabilidad Total v1 (ver sección al final del archivo)
+  dataPointVersions   DataPointVersion[]
+  evidenceUploads     Evidence[]
+  traceAuditLogs      TraceAuditLog[]
+  calculationRuns     CalculationRun[]
+
   @@map("users")
 }
 
@@ -178,6 +184,10 @@ model CostStructure {
   calculations CostCalculation[]
   alerts       Alert[]
   dataEntries  DataEntry[]
+
+  // Trazabilidad Total v1 (ver sección al final del archivo)
+  dataPoints      DataPoint[]
+  calculationRuns CalculationRun[]
 
   @@index([companyId])
   @@index([userId])
@@ -570,4 +580,179 @@ model CostLedgerEntry {
   @@index([costistId, period])
   @@index([dataEntryId])
   @@map("cost_ledger_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Trazabilidad Total v1
+//
+// Modelo append-only para el origen de cada dato de costeo (quién, cuándo,
+// desde dónde) y el árbol de derivación de cada cálculo. No reemplaza ni
+// altera las tablas de arriba: es una capa adicional. `CostCalculation` y el
+// audit log legado (`AuditLog`) se mantienen intactos para no romper nada que
+// ya los use; ver DECISIONES.md para el razonamiento.
+// ---------------------------------------------------------------------------
+
+enum SourceArea {
+  deposito
+  contaduria
+  planta
+  comercial
+  costista
+  sistema
+}
+
+enum CaptureMethod {
+  manual
+  portal_operador
+  ia_sugerido
+  excel_import
+  calculado
+}
+
+enum DataStatus {
+  borrador
+  validado
+  aplicado
+  anulado
+}
+
+enum CostElement {
+  MP
+  MOD
+  CIP
+  VENTA
+}
+
+// Un "dato" trazable dentro de una estructura de costos (ej. el precio de una
+// compra, las horas de un depto, un concepto de CIF). Su valor vive en
+// `DataPointVersion` — este modelo es el contenedor estable que agrupa todas
+// las versiones de ese dato a lo largo del tiempo.
+model DataPoint {
+  id              String        @id @default(uuid()) @db.Uuid
+  structureId     String        @db.Uuid
+  structure       CostStructure @relation(fields: [structureId], references: [id])
+  element         CostElement
+  fieldKey        String // ej 'mp.compra.precio', 'mod.dpto.horas', 'cip.concepto.importe'
+  label           String // ej 'Compra — Proveedor Central'
+  unit            String? // '$','hs','%','u'
+  sourceArea      SourceArea
+  status          DataStatus    @default(borrador)
+  fechaHecho      DateTime?     @db.Date
+  fechaCaptacion  DateTime      @default(now()) @db.Timestamptz
+  periodoImputado String? // 'YYYY-MM'; NULL = pendiente de decisión
+  voidedAt        DateTime?     @db.Timestamptz
+  createdAt       DateTime      @default(now()) @db.Timestamptz
+
+  versions DataPointVersion[]
+
+  @@index([structureId])
+  @@index([structureId, element])
+  @@index([periodoImputado])
+  @@map("data_points")
+}
+
+// Cada versión de un DataPoint. INMUTABLE (trigger BEFORE UPDATE/DELETE en la
+// migración de abajo): una corrección SIEMPRE crea una fila nueva con
+// version_n + 1, nunca pisa la anterior.
+model DataPointVersion {
+  id            String         @id @default(uuid()) @db.Uuid
+  dataPointId   String         @db.Uuid
+  dataPoint     DataPoint      @relation(fields: [dataPointId], references: [id])
+  versionN      Int
+  valueNum      Decimal?       @db.Decimal(18, 4)
+  valueJson     Json? // compuestos (cantidad+precio comparten movement_id acá)
+  reason        String? // obligatorio si version_n > 1 (validado en la app)
+  evidenceId    String?        @db.Uuid
+  evidence      Evidence?      @relation(fields: [evidenceId], references: [id])
+  method        CaptureMethod
+  createdBy     String         @db.Uuid
+  createdByUser User           @relation(fields: [createdBy], references: [id])
+  actorRole     String
+  actorArea     SourceArea
+  deviceInfo    String?
+  createdAt     DateTime       @default(now()) @db.Timestamptz
+
+  @@unique([dataPointId, versionN])
+  @@index([dataPointId])
+  @@map("data_point_versions")
+}
+
+model Evidence {
+  id             String    @id @default(uuid()) @db.Uuid
+  kind           String
+  reference      String
+  counterparty   String?
+  fileUrl        String?
+  uploadedBy     String?   @db.Uuid
+  uploadedByUser User?     @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  uploadedAt     DateTime  @default(now()) @db.Timestamptz
+
+  versions DataPointVersion[]
+
+  @@map("evidence")
+}
+
+// Bitácora append-only dedicada a las acciones de trazabilidad (crear,
+// versionar, validar, aplicar, anular, calcular, imputar, pedir_revision...).
+// Nombre distinto de `AuditLog` (audit_logs) a propósito: esa tabla legada ya
+// tiene su propio esquema y consumidores; no se toca (R1).
+model TraceAuditLog {
+  id         BigInt         @id @default(autoincrement())
+  entityType String
+  entityId   String
+  action     String // crear|versionar|validar|aplicar|anular|calcular|imputar|proponer_ia|confirmar_ia|pedir_revision
+  actorId    String?        @db.Uuid
+  actor      User?          @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole  String
+  actorArea  SourceArea
+  method     CaptureMethod?
+  deviceInfo String?
+  before     Json?
+  after      Json?
+  comment    String?
+  at         DateTime       @default(now()) @db.Timestamptz
+
+  @@index([entityType, entityId, at(sort: Desc)])
+  @@map("trace_audit_log")
+}
+
+// Una corrida del motor de cálculo. Inmutable — cada recálculo es un run
+// nuevo con su propio árbol de nodos.
+model CalculationRun {
+  id             String        @id @default(uuid()) @db.Uuid
+  structureId    String        @db.Uuid
+  structure      CostStructure @relation(fields: [structureId], references: [id])
+  runN           Int
+  engineVersion  String
+  executedBy     String        @db.Uuid
+  executedByUser User          @relation(fields: [executedBy], references: [id])
+  executedAt     DateTime      @default(now()) @db.Timestamptz
+  inputsSnapshot Json
+  results        Json
+
+  nodes CalculationNode[]
+
+  @@unique([structureId, runN])
+  @@map("calculation_runs")
+}
+
+// Un nodo del árbol de derivación de un run (raíz = elemento MP/MOD/CIP/VENTA
+// o el resultado final; hijos = sub-cálculos). El frontend hace drill-down
+// leyendo este árbol persistido — nunca recalcula por su cuenta.
+model CalculationNode {
+  id                 String           @id @default(uuid()) @db.Uuid
+  runId              String           @db.Uuid
+  run                CalculationRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  parentId           String?          @db.Uuid
+  parent             CalculationNode? @relation("NodeChildren", fields: [parentId], references: [id])
+  children           CalculationNode[] @relation("NodeChildren")
+  ord                Int
+  label              String
+  formula            String?
+  valueNum           Decimal?         @db.Decimal(18, 4)
+  unit               String?
+  sourceDpVersionIds String[]         @default([])
+
+  @@index([runId, parentId, ord])
+  @@map("calculation_nodes")
 }

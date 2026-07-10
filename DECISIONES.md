@@ -46,12 +46,32 @@ arriesgar pérdida de datos.
   opción más simple que no requiere tocar el esquema de autenticación ni
   reemitir tokens existentes.
 - **Migración de datos existentes** (data_points para lo ya cargado): se
-  implementa como migración idempotente que recorre `CostStructure` con
-  configuración cargada y crea un `data_point`+`version 1` por campo relevante
-  de MP/MOD/CIP/Venta, con `method='manual'`,
-  `reason='migración: dato pre-trazabilidad'`, `actorRole='desconocido (migrado)'`
-  cuando no se puede determinar el autor real (el modelo legado no guarda
-  quién cargó cada campo individual, solo quién es dueño de la estructura).
+  implementa como script idempotente (`scripts/backfill-trazabilidad.mjs`,
+  `npm run db:backfill-trazabilidad`) que recorre `CostStructure` con
+  configuración cargada y crea un `data_point`+`version 1` **por bloque**
+  (MP/MOD/CIP/VENTA completo, no campo por campo) con `method='manual'`,
+  `reason='migración: dato pre-trazabilidad'`, `actorRole='desconocido (migrado)'`.
+  Granularidad por bloque (no por campo individual) porque el modelo legado no
+  guarda quién cargó cada campo particular — inventar esa granularidad sería
+  fabricar información que no existe. Los datos NUEVOS cargados a través de
+  los endpoints nuevos sí son por campo (ver `field_key` tipo
+  `mp.compra.precio`). No corre como parte de la migración de Prisma (las
+  migraciones SQL no deberían tener lógica de negocio ni loops sobre JSON):
+  es un paso manual documentado en las instrucciones finales.
+- **RLS**: las tablas nuevas no tienen columna `userId` propia (se relacionan
+  vía `structureId`/`runId` a `cost_structures`). Se agregaron políticas RLS
+  en `prisma/rls.sql` para `data_points`, `data_point_versions`,
+  `calculation_runs` y `calculation_nodes` vía subquery/join al dueño de la
+  estructura, siguiendo el mismo patrón que las tablas existentes.
+  `evidence` y `trace_audit_log` no tienen RLS directo (su vínculo con el
+  tenant es indirecto u opcional); se protegen en la capa de aplicación con el
+  mismo patrón `requireStructure`/`requireDataPoint` que usa el resto del
+  código.
+- **Endpoint adicional no listado en la spec**: `POST /structures/:id/data-points`
+  (crear un data point nuevo). La spec no lo incluye en la lista de la sección
+  C, pero sin él `POST /data-points/:id/versions` no tiene sobre qué actuar —
+  algún endpoint tiene que crear la versión 1. Se agregó siguiendo el mismo
+  contrato de auditoría/transacción que el resto.
 
 ## Motor de cálculo
 
