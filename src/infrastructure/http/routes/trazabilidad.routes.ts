@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DataPointService } from '../../../application/trazabilidad/data-point-service.js';
+import { CalculationRunService } from '../../../application/cost-structures/calculation-run-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import {
   createDataPointSchema,
@@ -29,6 +30,32 @@ function actorFrom(request: FastifyRequest, area: string) {
 
 export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<void> {
   const service = new DataPointService();
+  const runService = new CalculationRunService();
+
+  app.post('/structures/:id/calculate', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const result = await runService.calculate(request.authUser!.id, id, actorFrom(request, 'costista'));
+    return {
+      data: {
+        runId: result.run.id,
+        runN: result.run.runN,
+        results: result.results,
+        tree: result.tree,
+      },
+    };
+  });
+
+  app.get('/calculation-runs/:id/tree', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const tree = await runService.getTree(request.authUser!.id, id);
+    return { data: tree };
+  });
+
+  app.get('/structures/:id/runs', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const runs = await runService.listRuns(request.authUser!.id, id);
+    return { data: runs };
+  });
 
   // Crear un data point (bootstrap de un dato nuevo — la spec no numera este
   // endpoint explícitamente, pero sin él /versions no tiene sobre qué

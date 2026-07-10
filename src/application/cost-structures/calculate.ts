@@ -1,9 +1,11 @@
+import type { Decimal } from 'decimal.js';
 import { Money } from '../../domain/value-objects/money.js';
 import {
   calcOptimalLot,
   calcStockLedgerPPP,
+  type StockLedgerResult,
 } from '../../domain/calculations/raw-material.js';
-import { calcDirectLabor } from '../../domain/calculations/direct-labor.js';
+import { calcDirectLabor, type DirectLaborResult } from '../../domain/calculations/direct-labor.js';
 import {
   primaryProration,
   secondaryProration,
@@ -12,10 +14,14 @@ import {
   type CostCenter,
   type IndirectCostConcept,
   type FixedVariable,
+  type PredeterminedQuota,
+  type VarianceAnalysis,
 } from '../../domain/calculations/indirect-costs.js';
 import {
   calcCostStatement,
   calcGrossMargin,
+  type CostStatementResult,
+  type MarginResult,
 } from '../../domain/calculations/cost-statement.js';
 import type {
   RawMaterialConfig,
@@ -23,6 +29,13 @@ import type {
   IndirectCostConfig,
   InventoryInput,
 } from '../../shared/schemas/cost.schema.js';
+
+/**
+ * Versión del motor de cálculo. Sube con cada cambio de fórmula (no con cada
+ * cambio de código): permite saber, mirando un `calculation_run` viejo, con
+ * qué lógica se calculó. Ver DECISIONES.md.
+ */
+export const ENGINE_VERSION = 'v1.0.0';
 
 /**
  * Orquesta el motor de cálculo completo (Hojas 1-4) a partir de la
@@ -65,6 +78,31 @@ export interface CalculationOutput {
         }
       >;
     };
+  };
+  /**
+   * Objetos intermedios YA calculados por las funciones puras (ledger,
+   * departamentos, cuotas/variaciones por centro, estado de costos). El
+   * tree-builder de F2 arma el árbol de `calculation_nodes` a partir de ESTOS
+   * objetos — nunca recalcula — para que el árbol persistido y el número
+   * final sean, por construcción, la misma fuente de verdad.
+   */
+  raw: {
+    optimalLot: Decimal;
+    ledger: StockLedgerResult;
+    labor: DirectLaborResult;
+    indirectPerDepartment: Record<
+      string,
+      {
+        quota: PredeterminedQuota;
+        variance: VarianceAnalysis;
+        budget: FixedVariable;
+        normalCapacity: number;
+        actualActivity: number;
+        actualCip: Money;
+      }
+    >;
+    statement: CostStatementResult;
+    margin: MarginResult;
   };
 }
 
@@ -122,6 +160,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   );
 
   const perDepartment: CalculationOutput['detail']['indirectCosts']['perDepartment'] = {};
+  const indirectPerDepartment: CalculationOutput['raw']['indirectPerDepartment'] = {};
   let indirectCostsApplied = Money.zero();
 
   for (const setting of input.indirectCosts.productiveSettings) {
@@ -157,6 +196,14 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       actualActivity: setting.actualActivity,
       quota: quota.totalQuota.toNumber(),
       actualCip: actualCip.toNumber(),
+    };
+    indirectPerDepartment[setting.centerId] = {
+      quota,
+      variance,
+      budget,
+      normalCapacity: setting.normalCapacity,
+      actualActivity: setting.actualActivity,
+      actualCip,
     };
   }
 
@@ -217,5 +264,6 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       },
       indirectCosts: { perDepartment },
     },
+    raw: { optimalLot, ledger, labor, indirectPerDepartment, statement, margin },
   };
 }
