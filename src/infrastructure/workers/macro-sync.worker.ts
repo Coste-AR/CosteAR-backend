@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import { getConnection, QUEUE_NAMES, recalculateQueue } from './queues.js';
 import { BcraClient } from '../external-apis/bcra.js';
 import { IndecClient } from '../external-apis/indec.js';
+import { DolarApiClient } from '../external-apis/dolarapi.js';
 import { MacroService } from '../../application/macro/macro-service.js';
 import { prisma } from '../database/prisma.js';
 
@@ -14,6 +15,7 @@ export function startMacroSyncWorker(): Worker {
   const macro = new MacroService();
   const bcra = new BcraClient();
   const indec = new IndecClient();
+  const dolarapi = new DolarApiClient();
 
   const worker = new Worker(
     QUEUE_NAMES.macroSync,
@@ -29,6 +31,13 @@ export function startMacroSyncWorker(): Worker {
       const ipc = await indec.fetchIpcNacional();
       if (ipc) {
         significantChange ||= await persistAndDetect(macro, 'INDEC', ipc);
+      }
+
+      // Dólar blue: solo se muestra en la vitrina de la landing, NO alimenta el
+      // costeo (ese usa el oficial), así que no dispara recálculo.
+      const blue = await dolarapi.fetchBlue();
+      if (blue) {
+        await macro.record({ source: 'DOLARAPI', ...blue });
       }
 
       if (significantChange) {

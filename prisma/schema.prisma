@@ -230,6 +230,7 @@ enum MacroSource {
   INDEC
   ARCA
   PARITARIA
+  DOLARAPI
 }
 
 // Inmutable: nunca se edita, solo se insertan nuevos snapshots.
