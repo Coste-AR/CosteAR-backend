@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { Money } from '../value-objects/money.js';
+import { CalcError } from '../errors/domain-error.js';
 
 /**
  * HOJA 3 · COSTOS INDIRECTOS DE PRODUCCIÓN (CIP)
@@ -75,14 +76,14 @@ export function primaryProration(
       new Decimal(0),
     );
     if (totalBase.isZero()) {
-      throw new Error(`Concepto "${concept.name}": base de distribución total = 0`);
+      throw new CalcError(`Concepto "${concept.name}": base de distribución total = 0`);
     }
 
     for (const [centerId, baseUnits] of Object.entries(concept.distribution)) {
       const share = new Decimal(baseUnits).dividedBy(totalBase);
       const current = result[centerId];
       if (!current) {
-        throw new Error(
+        throw new CalcError(
           `Concepto "${concept.name}" referencia un centro inexistente: ${centerId}`,
         );
       }
@@ -130,7 +131,7 @@ export function secondaryProration(
   for (const dist of serviceDistributions) {
     const serviceCost = primary[dist.serviceCenterId];
     if (!serviceCost) {
-      throw new Error(`Servicio inexistente en prorrateo: ${dist.serviceCenterId}`);
+      throw new CalcError(`Servicio inexistente en prorrateo: ${dist.serviceCenterId}`);
     }
 
     // Distribuir costo Fijo

@@ -59,3 +59,8 @@ export class UnprocessableEntityError extends DomainError {
   readonly statusCode: number = 422;
   readonly code: string = 'UNPROCESSABLE_ENTITY';
 }
+
+export class CalcError extends DomainError {
+  readonly statusCode: number = 422;
+  readonly code: string = 'CALC_ERROR';
+}
