@@ -104,6 +104,13 @@ export interface CalculationOutput {
           actualActivity: number;
           quota: number;
           actualCip: number;
+          // Split fijo/variable del presupuesto derivado y de la cuota (Parte 3.3):
+          // permiten mostrar la ficha del centro con su fórmula (presup ÷ cap. normal).
+          budgetFixed: number;
+          budgetVariable: number;
+          quotaFixed: number;
+          quotaVariable: number;
+          overUnderApplied: number; // aplicado − real (sobre/subaplicación)
         }
       >;
     };
@@ -262,6 +269,11 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       actualActivity: setting.actualActivity,
       quota: quota.totalQuota.toNumber(),
       actualCip: actualCip.toNumber(),
+      budgetFixed: budget.fixed.toNumber(),
+      budgetVariable: budget.variable.toNumber(),
+      quotaFixed: quota.fixedQuota.toNumber(),
+      quotaVariable: quota.variableQuota.toNumber(),
+      overUnderApplied: variance.overUnderApplied.toNumber(),
     };
     indirectPerDepartment[setting.centerId] = {
       quota,

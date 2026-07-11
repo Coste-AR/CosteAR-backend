@@ -274,3 +274,14 @@ pérdida de datos (no hubo).
 - Sitios que arman la entrada del motor (calculate, run-service, macro-service,
   excel-export) pasan a `rawMaterialSectionSchema`. La hoja Excel exporta la
   primera MP en detalle (export multi-MP: pendiente); el cálculo usa todas.
+
+---
+
+## Sesión 2026-07-11 (cont.) — CIF ficha por centro (F4, Parte 3.3)
+
+- **Enriquecimiento aditivo de `detail.indirectCosts.perDepartment`**: se agregan
+  `budgetFixed`, `budgetVariable`, `quotaFixed`, `quotaVariable` y
+  `overUnderApplied`. Permiten que la ficha del centro muestre el presupuesto y
+  la cuota fija/variable con su fórmula (presupuesto ÷ capacidad normal) y la
+  sobre/subaplicación, todo LEÍDO del cálculo persistido — el front no recalcula.
+  Suite 119 verde (cambio aditivo).
