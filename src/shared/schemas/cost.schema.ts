@@ -102,6 +102,14 @@ export const indirectCostConfigSchema = z.object({
         name: z.string().min(1).max(120),
         amount: fixedVariableSchema,
         distribution: z.record(z.string(), nonNeg),
+        // Prorrateo PRIMARIO por concepto (Parte 4.3). Tres modos que conviven:
+        //  - 'direct'  : importe ya asignado por centro (distribution = importes).
+        //  - 'percent' : % manual por centro (lo de hoy; distribution = pesos).
+        //  - 'base'    : base física del catálogo; los valores por centro se
+        //                resuelven desde allocation_base_values y se vuelcan a
+        //                `distribution` en la capa de servicio antes de calcular.
+        allocationMode: z.enum(['direct', 'percent', 'base']).optional().default('percent'),
+        baseCode: z.string().max(60).optional(),
       }),
     )
     .max(200),
@@ -112,9 +120,17 @@ export const indirectCostConfigSchema = z.object({
         toProductive: z.record(z.string(), nonNeg).optional().default({}),
         toProductiveFixed: z.record(z.string(), nonNeg).optional().default({}),
         toProductiveVariable: z.record(z.string(), nonNeg).optional().default({}),
+        // Base física opcional del secundario (para mostrarla en el árbol).
+        baseCode: z.string().max(60).optional(),
       }),
     )
     .max(100),
+  // ORDEN DE CIERRE del prorrateo secundario escalonado (Parte 4.4, criterio
+  // A.3.c). Lista de `serviceCenterId` en el orden en que cierran. Si está
+  // presente y no vacía, el motor usa el método ESCALONADO (un servicio puede
+  // repartir a otro que aún no cerró). Si falta, se usa la pasada directa
+  // legada (retrocompatible con FX1/FX3 y con estructuras ya cargadas).
+  closureOrder: z.array(z.string().min(1)).max(100).optional().default([]),
   // Por depto productivo: capacidad normal, actividad real y CIP real (datos
   // manuales de fin de mes). El PRESUPUESTO no es manual: se deriva del prorrateo
   // y se persiste automáticamente (solo lectura en la UI).

@@ -9,14 +9,18 @@ import { calcDirectLabor, type DirectLaborResult } from '../../domain/calculatio
 import {
   primaryProration,
   secondaryProration,
+  secondaryProrationStepwise,
   calcPredeterminedQuota,
   calcVarianceAnalysis,
+  fvZero,
   type CostCenter,
   type IndirectCostConcept,
   type FixedVariable,
+  type ServiceClosure,
   type PredeterminedQuota,
   type VarianceAnalysis,
 } from '../../domain/calculations/indirect-costs.js';
+import { MissingAllocationBaseError } from '../../domain/errors/calculation-errors.js';
 import {
   calcCostStatement,
   calcGrossMargin,
@@ -115,6 +119,26 @@ export interface CalculationOutput {
 export function computeProductiveBudgets(
   indirectCosts: IndirectCostConfig,
 ): Record<string, { fixed: number; variable: number }> {
+  const productiveCip = resolveProductiveCip(indirectCosts);
+  const out: Record<string, { fixed: number; variable: number }> = {};
+  for (const [centerId, fv] of Object.entries(productiveCip)) {
+    out[centerId] = { fixed: fv.fixed.toNumber(), variable: fv.variable.toNumber() };
+  }
+  return out;
+}
+
+/**
+ * Resuelve el CIP acumulado (primario + secundario) de cada centro PRODUCTIVO.
+ *
+ * Si la config trae `closureOrder` (orden de cierre), usa el método ESCALONADO
+ * (criterio A.3.c): un servicio puede repartir a otro que aún no cerró. Si no,
+ * usa la pasada directa legada (retrocompatible con FX1/FX3 y estructuras ya
+ * cargadas). Es la única fuente del presupuesto productivo: el usuario nunca lo
+ * tipea (criterio A.3).
+ */
+export function resolveProductiveCip(
+  indirectCosts: IndirectCostConfig,
+): Record<string, FixedVariable> {
   const centers: CostCenter[] = indirectCosts.centers;
   const concepts: IndirectCostConcept[] = indirectCosts.concepts.map((c) => ({
     name: c.name,
@@ -122,11 +146,38 @@ export function computeProductiveBudgets(
     distribution: c.distribution,
   }));
   const primary = primaryProration(centers, concepts);
-  const productiveCip = secondaryProration(centers, primary, indirectCosts.serviceDistributions);
 
-  const out: Record<string, { fixed: number; variable: number }> = {};
-  for (const [centerId, fv] of Object.entries(productiveCip)) {
-    out[centerId] = { fixed: fv.fixed.toNumber(), variable: fv.variable.toNumber() };
+  const order = indirectCosts.closureOrder ?? [];
+  if (order.length === 0) {
+    // Camino legado: pasada directa servicio→productivo.
+    return secondaryProration(centers, primary, indirectCosts.serviceDistributions);
+  }
+
+  // Camino escalonado: construir los cierres en el orden pedido.
+  const distById = new Map(
+    indirectCosts.serviceDistributions.map((d) => [d.serviceCenterId, d]),
+  );
+  const closures: ServiceClosure[] = order.map((serviceCenterId) => {
+    const d = distById.get(serviceCenterId);
+    if (!d) {
+      throw new MissingAllocationBaseError(
+        serviceCenterId,
+        `El centro de servicio "${serviceCenterId}" está en el orden de cierre pero no tiene base de distribución cargada. Asigná su base de distribución.`,
+      );
+    }
+    return {
+      serviceCenterId,
+      distribution: d.toProductive ?? {},
+      distributionFixed: d.toProductiveFixed,
+      distributionVariable: d.toProductiveVariable,
+      baseName: d.baseCode,
+    };
+  });
+
+  const { byCenter } = secondaryProrationStepwise(centers, primary, closures);
+  const out: Record<string, FixedVariable> = {};
+  for (const c of centers) {
+    if (c.type === 'productive') out[c.id] = byCenter[c.id] ?? fvZero();
   }
   return out;
 }
@@ -146,18 +197,9 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const directLaborTotal = labor.totalMod;
 
   // --- Hoja 3: Costos Indirectos ---
-  const centers: CostCenter[] = input.indirectCosts.centers;
-  const concepts: IndirectCostConcept[] = input.indirectCosts.concepts.map((c) => ({
-    name: c.name,
-    amount: { fixed: Money.of(c.amount.fixed), variable: Money.of(c.amount.variable) },
-    distribution: c.distribution,
-  }));
-  const primary = primaryProration(centers, concepts);
-  const productiveCip = secondaryProration(
-    centers,
-    primary,
-    input.indirectCosts.serviceDistributions,
-  );
+  // El CIP productivo (presupuesto) sale del prorrateo: escalonado si hay orden
+  // de cierre, directo si no. El usuario nunca lo tipea (criterio A.3).
+  const productiveCip = resolveProductiveCip(input.indirectCosts);
 
   const perDepartment: CalculationOutput['detail']['indirectCosts']['perDepartment'] = {};
   const indirectPerDepartment: CalculationOutput['raw']['indirectPerDepartment'] = {};

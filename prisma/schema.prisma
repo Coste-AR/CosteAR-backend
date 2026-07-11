@@ -755,3 +755,48 @@ model CalculationNode {
   @@index([runId, parentId, ord])
   @@map("calculation_nodes")
 }
+
+// ---------------------------------------------------------------------------
+// Bases de asignación (Parte 4 — desbloquea el prorrateo)
+// ---------------------------------------------------------------------------
+
+// Catálogo de bases de distribución (criterio B — clase 12 de Mirta).
+// `companyId` NULL = base del sistema (precargada, común a todos). Con
+// `companyId` = base personalizada de esa empresa. Relaciones por scalar UUID
+// (FK a nivel DB en la migración) para no tocar los modelos existentes.
+model AllocationBase {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String?  @db.Uuid // NULL = base del sistema
+  code        String // 'superficie_m2', 'hs_maquina', 'focos'...
+  name        String // 'Superficie en m²'
+  unit        String // 'm²', 'hs máquina', 'focos', 'HP'...
+  description String? // cuándo usarla
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  values AllocationBaseValue[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("allocation_bases")
+}
+
+// Valor de una base para un centro dentro de una estructura/período. Es un
+// dato TRAZABLE: puede enlazar a su DataPoint (autor, versión, evidencia).
+model AllocationBaseValue {
+  id          String         @id @default(uuid()) @db.Uuid
+  baseId      String         @db.Uuid
+  base        AllocationBase @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  structureId String         @db.Uuid
+  centerId    String // id del centro de costo (coincide con IndirectCostConfig.centers[].id)
+  value       Decimal        @db.Decimal(18, 4)
+  note        String? // 'superficie según plano municipal'
+  dataPointId String?        @db.Uuid // enlace a la ficha del dato (trazabilidad)
+  createdBy   String?        @db.Uuid
+  createdAt   DateTime       @default(now()) @db.Timestamptz
+  voidedAt    DateTime?      @db.Timestamptz // R1: borrado lógico
+
+  @@unique([baseId, structureId, centerId])
+  @@index([structureId])
+  @@map("allocation_base_values")
+}
