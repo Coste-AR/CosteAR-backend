@@ -223,7 +223,20 @@ export class CostStructureService {
     // However, nodes have parentId referencing other nodes, so we need to save them in order or generate UUIDs here.
     const { v4: uuidv4 } = await import('uuid');
     
-    const runId = uuidv4();
+    const calculation = await this.db.calculationRun.create({
+      data: {
+        costStructureId: id,
+        results: result as any, // Store full CalculationResult
+        executedAt: new Date(),
+        runN,
+        structureId: id,
+        engineVersion: 'v1.1',
+        executedBy: userId,
+        inputsSnapshot: input as object,
+      },
+    });
+
+    const runId = calculation.id;
     const flatNodes: FlatNode[] = [];
     
     function flatten(nodes: CalcNode[], parentId: string | null) {
@@ -247,32 +260,45 @@ export class CostStructureService {
     }
     
     flatten(tree, null);
-
-    const calculation = await this.db.calculationRun.create({
-      data: {
-        id: runId,
-        structureId: id,
-        runN,
-        engineVersion: 'v1.1',
-        executedBy: userId,
-        inputsSnapshot: input as object,
-        results: result as object,
-        nodes: {
-          createMany: {
-            data: flatNodes.map(n => ({
-              id: n.id,
-              parentId: n.parentId,
-              ord: n.ord,
-              label: n.label,
-              formula: n.formula,
-              valueNum: n.valueNum,
-              unit: n.unit,
-              sourceDpVersionIds: n.sourceDpVersionIds
-            }))
+    
+    // Prisma does not guarantee order in createMany, but since we flat the array
+    // with generated UUIDs beforehand, the relations will wire up correctly.
+    // However, SQLite/Postgres might complain about foreign key constraints if parents aren't inserted first.
+    // Given Prisma's constraints, we might have to insert in batches by depth, or defer constraints.
+    // For simplicity, createMany is used here. If constraint fails, we'd need sequential creates.
+    // Since we generate UUIDs, the parent ID is known before insert.
+    try {
+      await this.db.calculationNode.createMany({
+        data: flatNodes.map(n => ({
+          id: n.id,
+          runId: n.runId,
+          parentId: n.parentId,
+          ord: n.ord,
+          label: n.label,
+          formula: n.formula,
+          valueNum: n.valueNum,
+          unit: n.unit,
+          sourceDpVersionIds: n.sourceDpVersionIds
+        }))
+      });
+    } catch (e) {
+      // If constraint fails, fallback to sequential
+      for (const n of flatNodes) {
+        await this.db.calculationNode.create({
+          data: {
+            id: n.id,
+            runId: n.runId,
+            parentId: n.parentId,
+            ord: n.ord,
+            label: n.label,
+            formula: n.formula,
+            valueNum: n.valueNum,
+            unit: n.unit,
+            sourceDpVersionIds: n.sourceDpVersionIds
           }
-        }
-      },
-    });
+        });
+      }
+    }
 
     await recordAudit(
       { ...ctx, userId, action: 'cost_structure.calculate', entityType: 'CostStructure', entityId: id },
@@ -329,5 +355,47 @@ export class CostStructureService {
     }
     
     return { run, tree: roots };
+  }
+
+  async simulate(userId: string, id: string, shocks: { rawMaterial?: number, directLabor?: number, indirectCosts?: number, sales?: number }) {
+    const s = await this.requireStructure(userId, id);
+
+    if (!s.rawMaterialConfig || !s.directLaborConfig || !s.indirectCostConfig) {
+      throw new ValidationError('La estructura está incompleta: cargá MP, MOD y CIP antes de simular');
+    }
+
+    const input: CalculationInput = {
+      rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+      directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
+      indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
+      inventory: inventorySchema.parse({}),
+      sales: {
+        unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
+        quantity: s.salesQuantity ? Number(s.salesQuantity) : 0,
+      },
+    };
+
+    if (shocks.rawMaterial) {
+      const mul = 1 + shocks.rawMaterial;
+      input.rawMaterial.wilson.unitCost *= mul;
+      input.rawMaterial.initialStock.unitCost *= mul;
+      input.rawMaterial.movements.forEach(m => m.unitCost = (m.unitCost ?? 0) * mul);
+    }
+    if (shocks.directLabor) {
+      const mul = 1 + shocks.directLabor;
+      input.directLabor.employees.forEach(e => e.grossSalary *= mul);
+    }
+    if (shocks.indirectCosts) {
+      const mul = 1 + shocks.indirectCosts;
+      input.indirectCosts.fixed.forEach(f => f.amount *= mul);
+      input.indirectCosts.variable.forEach(v => v.amount *= mul);
+    }
+    if (shocks.sales) {
+      const mul = 1 + shocks.sales;
+      input.sales.unitPrice *= mul;
+    }
+
+    const result = runCalculation(input);
+    return { result };
   }
 }
