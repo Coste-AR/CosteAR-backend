@@ -115,17 +115,17 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     return { data: { result, calculationId: calculation.id } };
   });
 
-  // Simulador what-if: calcula SIN persistir (no crea snapshot).
   app.post('/cost-structures/:id/simulate', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
-    // Reusa el motor con override de inventario; el simulador front mandará
-    // overrides de venta/macro en el body en una iteración futura.
-    const { result } = await service.calculate(
-      request.authUser!.id,
-      id,
-      auditContext(request),
-      request.body,
-    );
+    const shocksSchema = z.object({
+      rawMaterial: z.number().optional(),
+      directLabor: z.number().optional(),
+      indirectCosts: z.number().optional(),
+      sales: z.number().optional(),
+    });
+    const shocks = shocksSchema.parse(request.body);
+
+    const { result } = await service.simulate(request.authUser!.id, id, shocks);
     return { data: { result, simulated: true } };
   });
 

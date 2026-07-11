@@ -236,4 +236,46 @@ export class CostStructureService {
       take: 50,
     });
   }
+
+  async simulate(userId: string, id: string, shocks: { rawMaterial?: number, directLabor?: number, indirectCosts?: number, sales?: number }) {
+    const s = await this.requireStructure(userId, id);
+
+    if (!s.rawMaterialConfig || !s.directLaborConfig || !s.indirectCostConfig) {
+      throw new ValidationError('La estructura está incompleta: cargá MP, MOD y CIP antes de simular');
+    }
+
+    const input: CalculationInput = {
+      rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+      directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
+      indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
+      inventory: inventorySchema.parse({}),
+      sales: {
+        unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
+        quantity: s.salesQuantity ? Number(s.salesQuantity) : 0,
+      },
+    };
+
+    if (shocks.rawMaterial) {
+      const mul = 1 + shocks.rawMaterial;
+      input.rawMaterial.wilson.unitCost *= mul;
+      input.rawMaterial.initialStock.unitCost *= mul;
+      input.rawMaterial.movements.forEach(m => m.unitCost = (m.unitCost ?? 0) * mul);
+    }
+    if (shocks.directLabor) {
+      const mul = 1 + shocks.directLabor;
+      input.directLabor.employees.forEach(e => e.grossSalary *= mul);
+    }
+    if (shocks.indirectCosts) {
+      const mul = 1 + shocks.indirectCosts;
+      input.indirectCosts.fixed.forEach(f => f.amount *= mul);
+      input.indirectCosts.variable.forEach(v => v.amount *= mul);
+    }
+    if (shocks.sales) {
+      const mul = 1 + shocks.sales;
+      input.sales.unitPrice *= mul;
+    }
+
+    const result = runCalculation(input);
+    return { result };
+  }
 }
