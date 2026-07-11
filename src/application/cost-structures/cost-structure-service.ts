@@ -48,29 +48,34 @@ export class CostStructureService {
   /** Soft-delete: manda la estructura a la papelera (recuperable). */
   async softDelete(userId: string, id: string, ctx: AuditContext) {
     await this.requireStructure(userId, id);
-    const updated = await this.db.costStructure.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    // R2: mutación + auditoría en la MISMA transacción (rollback conjunto).
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.costStructure.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await recordAudit(
+        { ...ctx, userId, action: 'cost_structure.delete', entityType: 'CostStructure', entityId: id },
+        tx,
+      );
+      return updated;
     });
-    await recordAudit(
-      { ...ctx, userId, action: 'cost_structure.delete', entityType: 'CostStructure', entityId: id },
-      this.db,
-    );
-    return updated;
   }
 
   /** Recupera una estructura que estaba en la papelera. */
   async restore(userId: string, id: string, ctx: AuditContext) {
     await this.requireStructure(userId, id);
-    const updated = await this.db.costStructure.update({
-      where: { id },
-      data: { deletedAt: null },
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.costStructure.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await recordAudit(
+        { ...ctx, userId, action: 'cost_structure.restore', entityType: 'CostStructure', entityId: id },
+        tx,
+      );
+      return updated;
     });
-    await recordAudit(
-      { ...ctx, userId, action: 'cost_structure.restore', entityType: 'CostStructure', entityId: id },
-      this.db,
-    );
-    return updated;
   }
 
   async getById(userId: string, id: string) {
@@ -107,14 +112,16 @@ export class CostStructureService {
 
   async create(userId: string, companyId: string, input: CreateCostStructureInput, ctx: AuditContext) {
     await this.requireCompany(userId, companyId);
-    const structure = await this.db.costStructure.create({
-      data: { companyId, userId, productName: input.productName, period: input.period },
+    return this.db.$transaction(async (tx) => {
+      const structure = await tx.costStructure.create({
+        data: { companyId, userId, productName: input.productName, period: input.period },
+      });
+      await recordAudit(
+        { ...ctx, userId, action: 'cost_structure.create', entityType: 'CostStructure', entityId: structure.id, newValue: input },
+        tx,
+      );
+      return structure;
     });
-    await recordAudit(
-      { ...ctx, userId, action: 'cost_structure.create', entityType: 'CostStructure', entityId: structure.id, newValue: input },
-      this.db,
-    );
-    return structure;
   }
 
   /** Actualiza uno de los tres bloques de configuración (validado con Zod). */
@@ -125,14 +132,21 @@ export class CostStructureService {
     rawConfig: unknown,
     ctx: AuditContext,
   ) {
-    await this.requireStructure(userId, id);
+    const before = await this.requireStructure(userId, id);
 
     const data: Prisma.CostStructureUpdateInput = {};
+    // Valor anterior de la sección (para la auditoría). Hasta que la fuente de
+    // verdad sea append-only, guardar el `oldValue` en la bitácora es la red de
+    // seguridad ante el UPDATE del JSONB (mitiga R1 — ver AUDITORIA-MAXIMA §3).
+    let oldValue: unknown;
     if (section === 'rawMaterial') {
+      oldValue = before.rawMaterialConfig;
       data.rawMaterialConfig = rawMaterialConfigSchema.parse(rawConfig) as object;
     } else if (section === 'directLabor') {
+      oldValue = before.directLaborConfig;
       data.directLaborConfig = directLaborConfigSchema.parse(rawConfig) as object;
     } else {
+      oldValue = before.indirectCostConfig;
       const parsed = indirectCostConfigSchema.parse(rawConfig);
       // Auto-completar el PRESUPUESTO de cada centro productivo con el resultado
       // del prorrateo (primario + cierre del secundario). El usuario nunca lo
@@ -150,25 +164,46 @@ export class CostStructureService {
       data.indirectCostConfig = parsed as object;
     }
 
-    const updated = await this.db.costStructure.update({ where: { id }, data });
-    await recordAudit(
-      { ...ctx, userId, action: `cost_structure.config.${section}`, entityType: 'CostStructure', entityId: id },
-      this.db,
-    );
-    return updated;
+    // R2: update + auditoría en la MISMA transacción.
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.costStructure.update({ where: { id }, data });
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: `cost_structure.config.${section}`,
+          entityType: 'CostStructure',
+          entityId: id,
+          oldValue,
+          newValue: data[`${section === 'rawMaterial' ? 'rawMaterialConfig' : section === 'directLabor' ? 'directLaborConfig' : 'indirectCostConfig'}`],
+        },
+        tx,
+      );
+      return updated;
+    });
   }
 
   async updateSales(userId: string, id: string, unitPrice: number, quantity: number, ctx: AuditContext) {
-    await this.requireStructure(userId, id);
-    const updated = await this.db.costStructure.update({
-      where: { id },
-      data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+    const before = await this.requireStructure(userId, id);
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.costStructure.update({
+        where: { id },
+        data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+      });
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_structure.sales.update',
+          entityType: 'CostStructure',
+          entityId: id,
+          oldValue: { salesUnitPrice: before.salesUnitPrice, salesQuantity: before.salesQuantity },
+          newValue: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+        },
+        tx,
+      );
+      return updated;
     });
-    await recordAudit(
-      { ...ctx, userId, action: 'cost_structure.sales.update', entityType: 'CostStructure', entityId: id },
-      this.db,
-    );
-    return updated;
   }
 
   /**
@@ -197,25 +232,27 @@ export class CostStructureService {
 
     const result = runCalculation(input);
 
-    const calculation = await this.db.costCalculation.create({
-      data: {
-        costStructureId: id,
-        userId,
-        rawMaterialConsumed: result.rawMaterialConsumed,
-        directLaborTotal: result.directLaborTotal,
-        indirectCostsApplied: result.indirectCostsApplied,
-        productionCost: result.productionCost,
-        costOfGoodsSold: result.costOfGoodsSold,
-        grossMargin: result.grossMargin,
-        grossMarginPct: result.grossMarginPct,
-        detail: result.detail as object,
-      },
+    const calculation = await this.db.$transaction(async (tx) => {
+      const created = await tx.costCalculation.create({
+        data: {
+          costStructureId: id,
+          userId,
+          rawMaterialConsumed: result.rawMaterialConsumed,
+          directLaborTotal: result.directLaborTotal,
+          indirectCostsApplied: result.indirectCostsApplied,
+          productionCost: result.productionCost,
+          costOfGoodsSold: result.costOfGoodsSold,
+          grossMargin: result.grossMargin,
+          grossMarginPct: result.grossMarginPct,
+          detail: result.detail as object,
+        },
+      });
+      await recordAudit(
+        { ...ctx, userId, action: 'cost_structure.calculate', entityType: 'CostStructure', entityId: id },
+        tx,
+      );
+      return created;
     });
-
-    await recordAudit(
-      { ...ctx, userId, action: 'cost_structure.calculate', entityType: 'CostStructure', entityId: id },
-      this.db,
-    );
 
     return { calculation, result };
   }
