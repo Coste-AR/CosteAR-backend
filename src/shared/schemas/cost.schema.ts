@@ -20,6 +20,13 @@ export const stockMovementSchema = z.object({
 });
 
 export const rawMaterialConfigSchema = z.object({
+  // Identidad de mercado (criterio C: "nunca una sola MP genérica"). Opcionales
+  // para no romper la MP única legada, que no las tenía.
+  id: z.string().max(60).optional(),
+  code: z.string().max(60).optional(), // codificación real de mercado
+  name: z.string().max(120).optional(),
+  unit: z.string().max(20).optional(),
+  supplier: z.string().max(160).optional(), // proveedor habitual
   wilson: z.object({
     annualDemand: nonNeg,
     orderCost: nonNeg,
@@ -37,6 +44,26 @@ export const rawMaterialConfigSchema = z.object({
   movements: z.array(stockMovementSchema).max(500),
 });
 export type RawMaterialConfig = z.infer<typeof rawMaterialConfigSchema>;
+
+/**
+ * Sección de Materia Prima con N materias primas por estructura (Parte 3.1).
+ * Acepta y normaliza la forma LEGADA (una sola MP como objeto plano con
+ * `wilson`) envolviéndola en `{ materials: [ ... ] }`. Así las estructuras ya
+ * cargadas siguen funcionando sin migración destructiva: se normalizan al leer
+ * y quedan en la forma nueva al volver a guardar.
+ */
+export const rawMaterialSectionSchema = z.preprocess(
+  (val) => {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const o = val as Record<string, unknown>;
+      if ('materials' in o) return o;
+      if ('wilson' in o) return { materials: [o] }; // MP única legada
+    }
+    return val;
+  },
+  z.object({ materials: z.array(rawMaterialConfigSchema).min(1).max(50) }),
+);
+export type RawMaterialSection = z.infer<typeof rawMaterialSectionSchema>;
 
 // --- Mano de Obra Directa (Hoja 2) ---
 

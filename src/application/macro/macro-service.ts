@@ -2,7 +2,7 @@ import type { PrismaClient, MacroSource } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { runCalculation, type CalculationInput } from '../cost-structures/calculate.js';
 import {
-  rawMaterialConfigSchema,
+  rawMaterialSectionSchema,
   directLaborConfigSchema,
   indirectCostConfigSchema,
   inventorySchema,
@@ -64,7 +64,7 @@ export class MacroService {
       try {
         // Cálculo BASE (sin cambio)
         const baseInput: CalculationInput = {
-          rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+          rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
           directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
           indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
           inventory: inventorySchema.parse({}),

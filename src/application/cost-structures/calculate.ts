@@ -29,6 +29,7 @@ import {
 } from '../../domain/calculations/cost-statement.js';
 import type {
   RawMaterialConfig,
+  RawMaterialSection,
   DirectLaborConfig,
   IndirectCostConfig,
   InventoryInput,
@@ -49,11 +50,18 @@ export const ENGINE_VERSION = 'v1.0.0';
  */
 
 export interface CalculationInput {
-  rawMaterial: RawMaterialConfig;
+  rawMaterial: RawMaterialSection;
   directLabor: DirectLaborConfig;
   indirectCosts: IndirectCostConfig;
   inventory: InventoryInput;
   sales: { unitPrice: number; quantity: number };
+}
+
+/** Resultado por materia prima (Parte 3.1: N materias primas). */
+export interface MaterialResult {
+  config: RawMaterialConfig;
+  optimalLot: Decimal;
+  ledger: StockLedgerResult;
 }
 
 export interface CalculationOutput {
@@ -65,7 +73,24 @@ export interface CalculationOutput {
   grossMargin: number;
   grossMarginPct: number;
   detail: {
-    rawMaterial: { optimalLot: number; finalStockQty: number; finalStockValue: number };
+    rawMaterial: {
+      // Agregados (compat con la vista de resultado): lote del primer material,
+      // stock final sumado de todas las materias primas.
+      optimalLot: number;
+      finalStockQty: number;
+      finalStockValue: number;
+      // Detalle por materia prima (Parte 3.1).
+      materials: Array<{
+        id?: string;
+        code?: string;
+        name?: string;
+        unit?: string;
+        optimalLot: number;
+        finalStockQty: number;
+        finalStockValue: number;
+        consumed: number;
+      }>;
+    };
     directLabor: { workingDays: number; paidDays: number; itcsPercent: number; iapPercent: number; hourlyRates: Record<string, number> };
     indirectCosts: {
       perDepartment: Record<
@@ -91,8 +116,7 @@ export interface CalculationOutput {
    * final sean, por construcción, la misma fuente de verdad.
    */
   raw: {
-    optimalLot: Decimal;
-    ledger: StockLedgerResult;
+    materials: MaterialResult[];
     labor: DirectLaborResult;
     indirectPerDepartment: Record<
       string,
@@ -183,14 +207,14 @@ export function resolveProductiveCip(
 }
 
 export function runCalculation(input: CalculationInput): CalculationOutput {
-  // --- Hoja 1: Materia Prima ---
-  const optimalLot = calcOptimalLot(input.rawMaterial.wilson);
-  const ledger = calcStockLedgerPPP(
-    input.rawMaterial.initialStock.quantity,
-    input.rawMaterial.initialStock.unitCost,
-    input.rawMaterial.movements,
-  );
-  const rawMaterialConsumed = ledger.rawMaterialConsumed;
+  // --- Hoja 1: Materia Prima (N materias primas, Parte 3.1) ---
+  const materials: MaterialResult[] = input.rawMaterial.materials.map((m) => ({
+    config: m,
+    optimalLot: calcOptimalLot(m.wilson),
+    ledger: calcStockLedgerPPP(m.initialStock.quantity, m.initialStock.unitCost, m.movements),
+  }));
+  // MP consumida total = Σ del consumo valuado a PPP de cada materia prima.
+  const rawMaterialConsumed = Money.sum(materials.map((x) => x.ledger.rawMaterialConsumed));
 
   // --- Hoja 2: Mano de Obra Directa ---
   const labor = calcDirectLabor(input.directLabor);
@@ -251,20 +275,26 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
 
   // --- Hoja 4: Estado de Costos ---
   // MP: para el estado usamos la valuación de la ficha (Ex.Inicial + Compras − Ex.Final
-  // equivale al consumo de la ficha PPP, ya validado por consistencia).
-  const initialRM = Money.of(input.rawMaterial.initialStock.unitCost).multiply(
-    input.rawMaterial.initialStock.quantity,
+  // equivale al consumo de la ficha PPP, ya validado por consistencia). Con N
+  // materias primas, se suma cada componente entre todas.
+  const initialRM = Money.sum(
+    materials.map((x) =>
+      Money.of(x.config.initialStock.unitCost).multiply(x.config.initialStock.quantity),
+    ),
   );
   const purchases = Money.sum(
-    input.rawMaterial.movements
-      .filter((m) => m.type === 'purchase')
-      .map((m) => Money.of(m.unitCost ?? 0).multiply(m.quantity)),
+    materials.flatMap((x) =>
+      x.config.movements
+        .filter((m) => m.type === 'purchase')
+        .map((m) => Money.of(m.unitCost ?? 0).multiply(m.quantity)),
+    ),
   );
+  const finalRM = Money.sum(materials.map((x) => x.ledger.finalBalanceValue));
 
   const statement = calcCostStatement({
     initialRawMaterial: initialRM,
     rawMaterialPurchases: purchases,
-    finalRawMaterial: ledger.finalBalanceValue,
+    finalRawMaterial: finalRM,
     directLabor: directLaborTotal,
     indirectCostsApplied,
     initialWorkInProcess: Money.of(input.inventory.initialWorkInProcess),
@@ -292,9 +322,19 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     grossMarginPct: margin.grossMarginPct.toPercent(),
     detail: {
       rawMaterial: {
-        optimalLot: optimalLot.toNumber(),
-        finalStockQty: ledger.finalBalanceQty.toNumber(),
-        finalStockValue: ledger.finalBalanceValue.toNumber(),
+        optimalLot: materials[0]?.optimalLot.toNumber() ?? 0,
+        finalStockQty: materials.reduce((a, x) => a + x.ledger.finalBalanceQty.toNumber(), 0),
+        finalStockValue: finalRM.toNumber(),
+        materials: materials.map((x) => ({
+          id: x.config.id,
+          code: x.config.code,
+          name: x.config.name,
+          unit: x.config.unit,
+          optimalLot: x.optimalLot.toNumber(),
+          finalStockQty: x.ledger.finalBalanceQty.toNumber(),
+          finalStockValue: x.ledger.finalBalanceValue.toNumber(),
+          consumed: x.ledger.rawMaterialConsumed.toNumber(),
+        })),
       },
       directLabor: {
         workingDays: labor.workingDays.effectiveWorkDays.toNumber(),
@@ -309,6 +349,6 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       },
       indirectCosts: { perDepartment },
     },
-    raw: { optimalLot, ledger, labor, indirectPerDepartment, statement, margin },
+    raw: { materials, labor, indirectPerDepartment, statement, margin },
   };
 }

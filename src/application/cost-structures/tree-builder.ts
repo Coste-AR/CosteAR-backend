@@ -35,38 +35,56 @@ export function buildCalculationTree(input: CalculationInput, output: Calculatio
 }
 
 function buildRawMaterialNode(output: CalculationOutput): TreeNode {
-  const { ledger, optimalLot } = output.raw;
-  return {
-    label: 'Materia Prima Consumida',
-    formula: 'Existencia Inicial + Compras − Existencia Final (valuado a PPP)',
-    value: output.rawMaterialConsumed,
+  const { materials } = output.raw;
+
+  // Con una sola MP, se muestran sus movimientos directo bajo la raíz (igual
+  // que antes). Con varias, se agrupa un sub-nodo por materia prima.
+  const single = materials.length === 1;
+
+  const movementChildren = (ledger: (typeof materials)[number]['ledger']): TreeNode[] =>
+    ledger.rows.map((row) => ({
+      label: `${row.type === 'purchase' ? 'Compra' : 'Consumo'} — ${row.detail}`,
+      formula:
+        row.type === 'purchase'
+          ? `${row.quantity.toNumber()} u × $ ${row.movementUnitCost.toNumber()}`
+          : `${row.quantity.toNumber()} u × PPP $ ${row.movementUnitCost.toNumber()}`,
+      value: row.movementTotal.toNumber(),
+      unit: '$',
+      children: [],
+    }));
+
+  const materialNode = (m: (typeof materials)[number]): TreeNode => ({
+    label: m.config.name ? `${m.config.code ? m.config.code + ' · ' : ''}${m.config.name}` : 'Materia prima',
+    formula: 'consumo valuado a PPP',
+    value: m.ledger.rawMaterialConsumed.toNumber(),
     unit: '$',
     children: [
       {
         label: 'Lote óptimo (Wilson)',
         formula: 'LE = √(2·R·S / (K·C))',
-        value: optimalLot.toNumber(),
+        value: m.optimalLot.toNumber(),
         unit: 'u',
         children: [],
       },
       {
         label: 'Stock final',
         formula: 'saldo en unidades × PPP vigente',
-        value: output.detail.rawMaterial.finalStockValue,
+        value: m.ledger.finalBalanceValue.toNumber(),
         unit: '$',
         children: [],
       },
-      ...ledger.rows.map((row) => ({
-        label: `${row.type === 'purchase' ? 'Compra' : 'Consumo'} — ${row.detail}`,
-        formula:
-          row.type === 'purchase'
-            ? `${row.quantity.toNumber()} u × $ ${row.movementUnitCost.toNumber()}`
-            : `${row.quantity.toNumber()} u × PPP $ ${row.movementUnitCost.toNumber()}`,
-        value: row.movementTotal.toNumber(),
-        unit: '$',
-        children: [],
-      })),
+      ...movementChildren(m.ledger),
     ],
+  });
+
+  return {
+    label: 'Materia Prima Consumida',
+    formula: single
+      ? 'Existencia Inicial + Compras − Existencia Final (valuado a PPP)'
+      : 'Σ consumo valuado a PPP de cada materia prima',
+    value: output.rawMaterialConsumed,
+    unit: '$',
+    children: single ? materialNode(materials[0]!).children : materials.map(materialNode),
   };
 }
 

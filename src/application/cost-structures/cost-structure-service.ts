@@ -3,7 +3,7 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
 import {
-  rawMaterialConfigSchema,
+  rawMaterialSectionSchema,
   directLaborConfigSchema,
   indirectCostConfigSchema,
   inventorySchema,
@@ -141,7 +141,8 @@ export class CostStructureService {
     let oldValue: unknown;
     if (section === 'rawMaterial') {
       oldValue = before.rawMaterialConfig;
-      data.rawMaterialConfig = rawMaterialConfigSchema.parse(rawConfig) as object;
+      // Acepta la MP única legada o N materias primas; guarda normalizado.
+      data.rawMaterialConfig = rawMaterialSectionSchema.parse(rawConfig) as object;
     } else if (section === 'directLabor') {
       oldValue = before.directLaborConfig;
       data.directLaborConfig = directLaborConfigSchema.parse(rawConfig) as object;
@@ -220,7 +221,7 @@ export class CostStructureService {
     }
 
     const input: CalculationInput = {
-      rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+      rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
       inventory: inventorySchema.parse(inventoryOverride ?? {}),

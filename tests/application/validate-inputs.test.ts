@@ -14,10 +14,14 @@ import type { CalculationInput } from '@/application/cost-structures/calculate.j
 function baseInput(): CalculationInput {
   return {
     rawMaterial: {
-      wilson: { annualDemand: 100, orderCost: 100, holdingRate: 0.3, unitCost: 10 },
-      stockPolicy: { minConsumption: 1, maxConsumption: 2, minLeadTime: 1, maxLeadTime: 2, safetyStock: 1 },
-      initialStock: { quantity: 10, unitCost: 10 },
-      movements: [],
+      materials: [
+        {
+          wilson: { annualDemand: 100, orderCost: 100, holdingRate: 0.3, unitCost: 10 },
+          stockPolicy: { minConsumption: 1, maxConsumption: 2, minLeadTime: 1, maxLeadTime: 2, safetyStock: 1 },
+          initialStock: { quantity: 10, unitCost: 10 },
+          movements: [],
+        },
+      ],
     },
     directLabor: {
       workingDays: {

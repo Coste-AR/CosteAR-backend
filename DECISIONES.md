@@ -252,3 +252,25 @@ pérdida de datos (no hubo).
 - **F4/F5 (navegación lista→detalle y pestaña nueva)** y **F6 (correcciones de
   UI)** son de frontend; se abordan en el repo `CosteAR-frontend`. Los cinco
   errores del 10/07 quedan confirmados con archivo:línea en la auditoría.
+
+---
+
+## Sesión 2026-07-11 (cont.) — Navegación lista→detalle (F4, Parte 3): N materias primas
+
+- **N materias primas por estructura (Parte 3.1)**: `rawMaterialConfigSchema`
+  sumó identidad de mercado opcional (code/name/unit/supplier) y se agregó
+  `rawMaterialSectionSchema` que acepta la forma LEGADA (MP única plana) o la
+  nueva `{ materials: [...] }` y normaliza a lista. Retrocompat sin migración
+  destructiva: las estructuras ya cargadas se normalizan al leer y quedan en la
+  forma nueva al volver a guardar.
+- **Motor**: `runCalculation` itera las materias primas, con MP consumida =
+  Σ del consumo valuado a PPP de cada una; el estado de costos suma existencia
+  inicial/compras/final entre todas. El árbol muestra un sub-nodo por materia
+  prima (con una sola, se ve igual que antes). `output.raw.materials` reemplaza
+  a `ledger`/`optimalLot` singulares.
+- **Regresión cero**: con una sola MP el número es idéntico (FX1 2.043.076,92).
+  Tests nuevos (`multi-materia-prima.test.ts`): única = igual, dos = suma
+  (2.391.076,92), y el schema normaliza la forma legada. Suite 119 verde.
+- Sitios que arman la entrada del motor (calculate, run-service, macro-service,
+  excel-export) pasan a `rawMaterialSectionSchema`. La hoja Excel exporta la
+  primera MP en detalle (export multi-MP: pendiente); el cálculo usa todas.
