@@ -155,6 +155,14 @@ centro (no por nombre), sobre/subaplicación nombrada en `indirect-costs.ts:222`
 
 ## 3) CUMPLIMIENTO R1–R4
 
+> **✅ RESUELTO (sesión 2026-07-11).** `updateConfig`/`updateSales` ahora
+> insertan una versión append-only en `cost_config_versions` dentro de la misma
+> transacción; un trigger de DB (`trg_append_only`) bloquea todo UPDATE/DELETE
+> sobre esa tabla. La columna JSONB en `cost_structures` queda como puntero
+> VIGENTE (para que el motor lea rápido), pero ninguna versión anterior se
+> destruye. Endpoint `GET /cost-structures/:id/config-history`. Verificado
+> contra la DB real (2 guardados → 2 versiones; UPDATE/DELETE directo revientan).
+
 **🔴 R1 (nada se pisa)** `cost-structure-service.ts:153` — `updateConfig` hace
 `costStructure.update({ data: { rawMaterialConfig|directLaborConfig|
 indirectCostConfig } })`: **sobrescribe el JSONB de config en el lugar**. El
@@ -283,7 +291,7 @@ la nada" (Mirta).
 | Estados borrador/validado/aplicado + firma | ✅ IMPLEMENTADO | `data-point-service.ts:145` |
 | `TraceCard` (drill-down in-place) | ✅ IMPLEMENTADO | `DerivationTree.tsx` |
 | Migración de datos viejos (`actor_role='desconocido (migrado)'`) | ✅ IMPLEMENTADO | `scripts/backfill-trazabilidad.mjs` |
-| **Fuente de verdad append-only (config del motor)** | ❌ CONTRADICE LA SPEC | `updateConfig` pisa JSONB (§3, R1) |
+| **Fuente de verdad append-only (config del motor)** | ✅ RESUELTO | `cost_config_versions` append-only + trigger; puntero vigente en `cost_structures` (§3, R1) |
 | **Cada input versionado + clickeable de punta a punta** | ⚠️ PARCIAL | backfill por bloque, no por campo (§4) |
 | **Ver dato / Ver cálculo en pestaña nueva** | ❌ AUSENTE | no hay ruta `/trazabilidad/dato/:id` |
 | **Base de asignación como entidad** | ❌ AUSENTE | Parte 4 |

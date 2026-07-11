@@ -757,6 +757,33 @@ model CalculationNode {
 }
 
 // ---------------------------------------------------------------------------
+// Versiones append-only de la config del motor (R1 — fuente de verdad)
+// ---------------------------------------------------------------------------
+
+// Cada guardado de una sección de config (rawMaterial/directLabor/
+// indirectCosts/sales) inserta una fila NUEVA acá, nunca pisa la anterior. La
+// columna denormalizada en `cost_structures` sigue teniendo el valor VIGENTE
+// (para que el motor lea rápido), pero el histórico completo vive acá y jamás
+// se destruye (trigger append-only, R1). Relaciones por scalar UUID (FK en la
+// migración) para no tocar los modelos existentes.
+model CostConfigVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  structureId String   @db.Uuid
+  section     String // 'rawMaterial' | 'directLabor' | 'indirectCosts' | 'sales'
+  versionN    Int
+  value       Json
+  reason      String?
+  createdBy   String?  @db.Uuid
+  actorRole   String?
+  actorArea   String?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  @@unique([structureId, section, versionN])
+  @@index([structureId, section])
+  @@map("cost_config_versions")
+}
+
+// ---------------------------------------------------------------------------
 // Bases de asignación (Parte 4 — desbloquea el prorrateo)
 // ---------------------------------------------------------------------------
 

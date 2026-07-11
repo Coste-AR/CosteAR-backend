@@ -304,3 +304,32 @@ pérdida de datos (no hubo).
   operarios cargados (no se inventa UI vacía). El motor no lo usa todavía;
   cuando se quiera costear por operario (banco de horas, ausentismo individual)
   el modelo ya está listo para colgar la lógica sin migración.
+
+---
+
+## Sesión 2026-07-11 (cont.) — Fix de fondo de R1: fuente de verdad append-only
+
+- **Problema**: `updateConfig`/`updateSales` pisaban el JSONB de config en
+  `cost_structures` (violación R1). El versionado (DataPoints) era paralelo y el
+  motor no lo leía.
+- **Solución (opción a de la auditoría — la de menor riesgo)**: tabla nueva
+  append-only `cost_config_versions` (structureId, section, versionN, value,
+  reason, createdBy, createdAt). En cada guardado, dentro de la MISMA
+  transacción: (1) se inserta una versión nueva (nunca se pisa), (2) se actualiza
+  el puntero VIGENTE denormalizado en `cost_structures` (para que el motor lea
+  rápido sin recorrer el histórico), (3) se registra la auditoría. Un trigger de
+  DB (`trg_append_only`, reutilizado de trazabilidad) bloquea todo UPDATE/DELETE
+  sobre la tabla. Migración ADITIVA (R7).
+- **Por qué no la opción (b)** (motor leyendo de DataPoints): reescribir el motor
+  para resolver cada input desde `DataPointVersion` es un cambio grande y
+  riesgoso para la matemática (R5). La opción (a) cumple R1 sin tocar el motor
+  ni un centavo del cálculo, y deja el histórico completo consultable.
+- **Endpoint**: `GET /cost-structures/:id/config-history?section=...`.
+- **Verificado contra la DB real**: dos guardados de "sales" → v1 (100/10) y v2
+  (200/20) conviven; UPDATE y DELETE directos sobre `cost_config_versions`
+  revientan con el error append-only; las dos versiones quedan intactas. Suite
+  119 verde, typecheck limpio.
+- **RLS**: la tabla se protege en la capa de aplicación (`getConfigHistory`
+  exige que la estructura sea del usuario), igual que `evidence`/`trace_audit_log`.
+  Se puede agregar una política RLS por join a la estructura si se quiere
+  defensa en profundidad (pendiente menor).

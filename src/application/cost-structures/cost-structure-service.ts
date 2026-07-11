@@ -135,17 +135,19 @@ export class CostStructureService {
     const before = await this.requireStructure(userId, id);
 
     const data: Prisma.CostStructureUpdateInput = {};
-    // Valor anterior de la sección (para la auditoría). Hasta que la fuente de
-    // verdad sea append-only, guardar el `oldValue` en la bitácora es la red de
-    // seguridad ante el UPDATE del JSONB (mitiga R1 — ver AUDITORIA-MAXIMA §3).
+    // Valor anterior de la sección (para la auditoría) y valor nuevo (para el
+    // versionado append-only, R1).
     let oldValue: unknown;
+    let newValue: object;
     if (section === 'rawMaterial') {
       oldValue = before.rawMaterialConfig;
       // Acepta la MP única legada o N materias primas; guarda normalizado.
-      data.rawMaterialConfig = rawMaterialSectionSchema.parse(rawConfig) as object;
+      newValue = rawMaterialSectionSchema.parse(rawConfig) as object;
+      data.rawMaterialConfig = newValue;
     } else if (section === 'directLabor') {
       oldValue = before.directLaborConfig;
-      data.directLaborConfig = directLaborConfigSchema.parse(rawConfig) as object;
+      newValue = directLaborConfigSchema.parse(rawConfig) as object;
+      data.directLaborConfig = newValue;
     } else {
       oldValue = before.indirectCostConfig;
       const parsed = indirectCostConfigSchema.parse(rawConfig);
@@ -162,11 +164,14 @@ export class CostStructureService {
       } catch {
         /* config incompleta: se persiste sin recalcular el presupuesto */
       }
-      data.indirectCostConfig = parsed as object;
+      newValue = parsed as object;
+      data.indirectCostConfig = newValue;
     }
 
-    // R2: update + auditoría en la MISMA transacción.
+    // R1 + R2: versión append-only de la config + update del puntero vigente +
+    // auditoría, TODO en la misma transacción.
     return this.db.$transaction(async (tx) => {
+      await this.appendConfigVersion(tx, id, section, newValue, userId);
       const updated = await tx.costStructure.update({ where: { id }, data });
       await recordAudit(
         {
@@ -176,7 +181,7 @@ export class CostStructureService {
           entityType: 'CostStructure',
           entityId: id,
           oldValue,
-          newValue: data[`${section === 'rawMaterial' ? 'rawMaterialConfig' : section === 'directLabor' ? 'directLaborConfig' : 'indirectCostConfig'}`],
+          newValue,
         },
         tx,
       );
@@ -184,9 +189,49 @@ export class CostStructureService {
     });
   }
 
+  /**
+   * Inserta una versión append-only de una sección de config (R1). Calcula el
+   * próximo `versionN` para (estructura, sección) y NUNCA pisa lo anterior — un
+   * trigger de DB bloquea cualquier UPDATE/DELETE sobre esta tabla.
+   */
+  private async appendConfigVersion(
+    tx: Prisma.TransactionClient,
+    structureId: string,
+    section: string,
+    value: object,
+    userId: string,
+    reason?: string,
+  ) {
+    const last = await tx.costConfigVersion.findFirst({
+      where: { structureId, section },
+      orderBy: { versionN: 'desc' },
+      select: { versionN: true },
+    });
+    await tx.costConfigVersion.create({
+      data: {
+        structureId,
+        section,
+        versionN: (last?.versionN ?? 0) + 1,
+        value: value as Prisma.InputJsonValue,
+        createdBy: userId,
+        reason,
+      },
+    });
+  }
+
+  /** Historial append-only de una sección de config (R1). Más nueva primero. */
+  async getConfigHistory(userId: string, id: string, section?: string) {
+    await this.requireStructure(userId, id);
+    return this.db.costConfigVersion.findMany({
+      where: { structureId: id, ...(section ? { section } : {}) },
+      orderBy: [{ section: 'asc' }, { versionN: 'desc' }],
+    });
+  }
+
   async updateSales(userId: string, id: string, unitPrice: number, quantity: number, ctx: AuditContext) {
     const before = await this.requireStructure(userId, id);
     return this.db.$transaction(async (tx) => {
+      await this.appendConfigVersion(tx, id, 'sales', { salesUnitPrice: unitPrice, salesQuantity: quantity }, userId);
       const updated = await tx.costStructure.update({
         where: { id },
         data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
