@@ -101,7 +101,26 @@ export const directLaborConfigSchema = z.object({
       z.object({
         name: z.string().min(1).max(120),
         basicRemuneration: nonNeg,
+        // OJO: `hoursWorked` es histórico; conceptualmente son HORAS
+        // PRESUPUESTADAS (capacidad normal) con las que se calcula la tarifa.
         hoursWorked: nonNeg,
+        // Dato REAL de fin de mes (horas efectivamente trabajadas). Opcional y
+        // NO usado por el motor: es solo para comparar real vs presupuestado
+        // (Parte 3.2, criterio C). No afecta la tarifa ni el costo.
+        realHours: nonNeg.optional(),
+        // Modelo preparado para operarios individuales (extensión, ver
+        // DECISIONES.md). Opcional; el motor no lo usa todavía.
+        operators: z
+          .array(
+            z.object({
+              name: z.string().max(120),
+              category: z.string().max(80).optional(),
+              bankedHours: nonNeg.optional(),
+              individualAbsenceDays: nonNeg.optional(),
+            }),
+          )
+          .max(500)
+          .optional(),
       }),
     )
     .max(100),

@@ -91,7 +91,25 @@ export interface CalculationOutput {
         consumed: number;
       }>;
     };
-    directLabor: { workingDays: number; paidDays: number; itcsPercent: number; iapPercent: number; hourlyRates: Record<string, number> };
+    directLabor: {
+      workingDays: number;
+      paidDays: number;
+      itcsPercent: number;
+      iapPercent: number;
+      hourlyRates: Record<string, number>;
+      // Desglose del ITCS para la ficha del departamento (Parte 3.2).
+      itcsBreakdown: { certain: number; uncertainRemunerative: number; derived: number; uncertainNonRemunerative: number };
+      // Detalle por departamento (Parte 3.2).
+      departments: Array<{
+        name: string;
+        basicRemuneration: number;
+        socialChargesCost: number;
+        totalMod: number;
+        hourlyRate: number;
+        budgetedHours: number;
+        realHours?: number;
+      }>;
+    };
     indirectCosts: {
       perDepartment: Record<
         string,
@@ -358,6 +376,21 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         // para mostrarlo en el resultado). No cambia ninguna fórmula.
         iapPercent: labor.workingDays.iap.toPercent(),
         hourlyRates,
+        itcsBreakdown: {
+          certain: labor.itcs.certainCharges.toPercent(),
+          uncertainRemunerative: labor.itcs.uncertainRemunerativeCoefs.toPercent(),
+          derived: labor.itcs.derivedCharges.toPercent(),
+          uncertainNonRemunerative: labor.itcs.uncertainNonRemunerative.toPercent(),
+        },
+        departments: labor.departments.map((d, i) => ({
+          name: d.name,
+          basicRemuneration: d.basicRemuneration.toNumber(),
+          socialChargesCost: d.socialChargesCost.toNumber(),
+          totalMod: d.totalMod.toNumber(),
+          hourlyRate: d.hourlyRate.toNumber(),
+          budgetedHours: d.hoursWorked.toNumber(),
+          realHours: input.directLabor.departments[i]?.realHours,
+        })),
       },
       indirectCosts: { perDepartment },
     },

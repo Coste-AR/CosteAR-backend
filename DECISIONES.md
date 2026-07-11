@@ -285,3 +285,22 @@ pérdida de datos (no hubo).
   la cuota fija/variable con su fórmula (presupuesto ÷ capacidad normal) y la
   sobre/subaplicación, todo LEÍDO del cálculo persistido — el front no recalcula.
   Suite 119 verde (cambio aditivo).
+
+---
+
+## Sesión 2026-07-11 (cont.) — MOD ficha por departamento (F4, Parte 3.2)
+
+- **Enriquecimiento aditivo de `detail.directLabor`**: `itcsBreakdown`
+  (CSC/B40/F40/B47) y `departments[]` (básica, cargas, MOD total, tarifa,
+  horas presupuestadas, horas reales). Alimentan la ficha del departamento sin
+  que el front recalcule. Suite 119 verde.
+- **Horas reales de fin de mes**: se agregó `realHours` opcional a cada
+  departamento (schema + UI, columna "Horas reales (fin de mes)" separada de
+  las presupuestadas). El motor NO la usa: es solo para comparar real vs
+  presupuestado (criterio C). Cero impacto en la matemática.
+- **Operarios individuales (extensión preparada, criterio de la spec)**: se
+  dejó `operators?` opcional en el schema del departamento (name, category,
+  bankedHours, individualAbsenceDays) y la ficha lo muestra SOLO si hay
+  operarios cargados (no se inventa UI vacía). El motor no lo usa todavía;
+  cuando se quiera costear por operario (banco de horas, ausentismo individual)
+  el modelo ya está listo para colgar la lógica sin migración.
