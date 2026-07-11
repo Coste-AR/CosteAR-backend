@@ -34,6 +34,8 @@ const envSchema = z.object({
 
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),
   INDEC_API_URL: z.string().url().default('https://apis.datos.gob.ar/series/api'),
+  // dolarapi.com: API pública sin key para el dólar blue (el BCRA no lo publica).
+  DOLARAPI_URL: z.string().url().default('https://dolarapi.com'),
 
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   MACRO_SYNC_CRON: z.string().default('0 18 * * 1-5'),
