@@ -66,7 +66,7 @@ export interface CalculationOutput {
   grossMarginPct: number;
   detail: {
     rawMaterial: { optimalLot: number; finalStockQty: number; finalStockValue: number };
-    directLabor: { workingDays: number; itcsPercent: number; iapPercent: number; hourlyRates: Record<string, number> };
+    directLabor: { workingDays: number; paidDays: number; itcsPercent: number; iapPercent: number; hourlyRates: Record<string, number> };
     indirectCosts: {
       perDepartment: Record<
         string,
@@ -298,6 +298,9 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       },
       directLabor: {
         workingDays: labor.workingDays.effectiveWorkDays.toNumber(),
+        // Días de ausentismo pago (numerador del IAP). Se expone para poder
+        // mostrar la fórmula completa "IAP = días pagos / días efectivos".
+        paidDays: labor.workingDays.totalPaidAbsence.toNumber(),
         itcsPercent: labor.itcs.itcs.toPercent(),
         // IAP — Índice de Ausentismo Pago (ya calculado en calcWorkingDays, se expone
         // para mostrarlo en el resultado). No cambia ninguna fórmula.
