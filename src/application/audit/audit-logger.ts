@@ -35,7 +35,7 @@ export async function recordAudit(
       after: entry.newValue === undefined ? undefined : (entry.newValue as object),
       deviceInfo: `IP: ${entry.ipAddress ?? 'unknown'} | UA: ${entry.userAgent ?? 'unknown'}`,
       actorRole: 'SYSTEM',
-      actorArea: 'ADMINISTRATION'
+      actorArea: 'contaduria'
     },
   });
 }

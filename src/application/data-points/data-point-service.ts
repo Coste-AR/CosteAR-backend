@@ -14,16 +14,16 @@ export class DataPointService {
   async getTrace(id: string) {
     const dp = await this.db.dataPoint.findUnique({
       where: { id },
+    });
+
+    if (!dp) throw new NotFoundError('DataPoint no encontrado');
+
+    const versions = await this.db.dataPointVersion.findMany({
+      where: { dataPointId: dp.id },
+      orderBy: { createdAt: 'desc' },
       include: {
-        versions: {
-          orderBy: { validFrom: 'desc' },
-          include: {
-            author: { select: { id: true, name: true, email: true } },
-          },
-        },
-        evidences: {
-          orderBy: { uploadedAt: 'desc' },
-        },
+        user: { select: { id: true, name: true, email: true } },
+        evidence: true,
       },
     });
 
