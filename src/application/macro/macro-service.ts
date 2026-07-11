@@ -24,6 +24,33 @@ export class MacroService {
     return rows;
   }
 
+  /**
+   * Métricas públicas para la vitrina de la landing (sin login).
+   * Devuelve el dólar blue y el IPC mensual con su fecha. Si algún indicador
+   * todavía no fue sincronizado, va en null y el front muestra un fallback.
+   */
+  async landingMetrics() {
+    const [blue, ipc] = await Promise.all([
+      this.db.macroSnapshot.findFirst({
+        where: { indicatorCode: 'USD_BLUE' },
+        orderBy: { effectiveDate: 'desc' },
+      }),
+      this.db.macroSnapshot.findFirst({
+        where: { indicatorCode: 'IPC_NACIONAL' },
+        orderBy: { effectiveDate: 'desc' },
+      }),
+    ]);
+
+    return {
+      usdBlue: blue
+        ? { value: Number(blue.value), effectiveDate: blue.effectiveDate }
+        : null,
+      ipc: ipc
+        ? { value: Number(ipc.value), effectiveDate: ipc.effectiveDate }
+        : null,
+    };
+  }
+
   async history(params: { source?: MacroSource; indicatorCode?: string; from?: Date; to?: Date }) {
     return this.db.macroSnapshot.findMany({
       where: {
