@@ -132,6 +132,15 @@ export interface CalculationOutput {
         }
       >;
     };
+    // Costo unitario — el número final de un sistema de costos: cuánto cuesta
+    // producir UNA unidad. Se deriva del costo de producción total ÷ unidades
+    // producidas (la "Cantidad producida" de la sección Venta). Va en `detail`
+    // (JSON persistido) para sobrevivir la recarga sin migración de columna.
+    unitCost: {
+      unitsProduced: number;
+      unitProductionCost: number;  // costo de producción ÷ unidades producidas
+      unitCostOfGoodsSold: number; // COGS ÷ unidades producidas
+    };
   };
   /**
    * Objetos intermedios YA calculados por las funciones puras (ledger,
@@ -342,6 +351,17 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     hourlyRates[d.name] = d.hourlyRate.toNumber();
   }
 
+  // --- Costo unitario de producción (el número final del sistema) ---
+  // costo de producción total ÷ unidades producidas. Guarda contra división por
+  // cero: si todavía no se cargó la cantidad producida, el unitario queda en 0.
+  const unitsProduced = Number(input.sales.quantity) || 0;
+  const unitProductionCost = unitsProduced > 0
+    ? statement.productionCost.divide(unitsProduced).toNumber()
+    : 0;
+  const unitCostOfGoodsSold = unitsProduced > 0
+    ? statement.costOfGoodsSold.divide(unitsProduced).toNumber()
+    : 0;
+
   return {
     rawMaterialConsumed: rawMaterialConsumed.toNumber(),
     directLaborTotal: directLaborTotal.toNumber(),
@@ -393,6 +413,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         })),
       },
       indirectCosts: { perDepartment },
+      unitCost: { unitsProduced, unitProductionCost, unitCostOfGoodsSold },
     },
     raw: { materials, labor, indirectPerDepartment, statement, margin },
   };
