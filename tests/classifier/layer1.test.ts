@@ -19,11 +19,18 @@ describe('runLayer1', () => {
     expect(result!.confidence).toBe(98);
   });
 
-  it('detects NOTA DE DÉBITO A at confidence 96', () => {
+  it('detects NOTA DE DÉBITO A at confidence 98', () => {
     const result = runLayer1('NOTA DE DÉBITO A\nCUIT 30-71234567-9');
     expect(result).not.toBeNull();
     expect(result!.documentType).toBe('NOTA_DEBITO');
-    expect(result!.confidence).toBe(96);
+    expect(result!.confidence).toBe(98);
+  });
+
+  it('a NOTA DE DÉBITO con CAE se tipifica como nota, no como factura', () => {
+    // Regresión: el CAE (97) no debe ganarle a la nota (98).
+    const result = runLayer1('NOTA DE DÉBITO A\nCAE Nº: 75123456789012\nCUIT 30-71234567-9');
+    expect(result).not.toBeNull();
+    expect(result!.documentType).toBe('NOTA_DEBITO');
   });
 
   it('detects REMITO without CAE at confidence 93', () => {
