@@ -208,7 +208,10 @@ model CostCalculation {
   productionCost       Decimal @db.Decimal(18, 4)
   costOfGoodsSold      Decimal @db.Decimal(18, 4)
   grossMargin          Decimal @db.Decimal(18, 4)
-  grossMarginPct       Decimal @db.Decimal(9, 4)
+  // Decimal(18,4) — antes (9,4) desbordaba (22003) cuando el costo supera muy
+  // ampliamente al ingreso (margen % de miles de %): eso reventaba el cálculo
+  // con un 500. Ahora entra cualquier magnitud razonable.
+  grossMarginPct       Decimal @db.Decimal(18, 4)
 
   // Snapshot completo del resultado para auditoría / reconstrucción.
   detail Json
