@@ -28,6 +28,15 @@ const propagationPreviewSchema = z.object({
 export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
   const service = new MacroService();
 
+  /**
+   * PÚBLICO (sin auth): métricas de la vitrina de la landing.
+   * Solo expone dólar blue e IPC mensual, que son datos públicos.
+   */
+  app.get('/macro/landing', async () => {
+    const data = await service.landingMetrics();
+    return { data };
+  });
+
   app.get('/macro/latest', { preHandler: authenticate }, async () => {
     const data = await service.latest();
     return { data };
