@@ -212,7 +212,15 @@ model CostPeriod {
   directLaborConfig  Json?
   indirectCostConfig Json?
   salesUnitPrice     Decimal? @db.Decimal(18, 4)
+  /** Unidades VENDIDAS: con esto se factura (precio × cantidad) y sale el margen. */
   salesQuantity      Decimal? @db.Decimal(18, 4)
+  /**
+   * Unidades PRODUCIDAS: con esto se saca el COSTO UNITARIO.
+   * No es lo mismo que lo vendido: si se producen 1.000 y se venden 800, dividir el
+   * costo por 800 da un costo unitario inflado. Opcional: si no está cargado, se cae
+   * a las vendidas (que es lo que hacía el sistema antes de tener este campo).
+   */
+  productionQuantity Decimal? @db.Decimal(18, 4)
 
   // Cierre: congela el período. `closedRunId` apunta al cálculo que quedó fijo.
   closedAt    DateTime? @db.Timestamptz
@@ -262,7 +270,10 @@ model CostStructure {
 
   // Datos de venta para el cálculo de margen.
   salesUnitPrice Decimal? @db.Decimal(18, 4)
+  /** Unidades VENDIDAS (facturación y margen). */
   salesQuantity  Decimal? @db.Decimal(18, 4)
+  /** Unidades PRODUCIDAS (costo unitario). Si no está, se cae a las vendidas. */
+  productionQuantity Decimal? @db.Decimal(18, 4)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

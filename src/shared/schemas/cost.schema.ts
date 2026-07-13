@@ -215,7 +215,14 @@ export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>
 
 export const updateSalesSchema = z.object({
   salesUnitPrice: nonNeg,
+  /** Unidades VENDIDAS: facturación (precio × cantidad) y margen. */
   salesQuantity: nonNeg,
+  /**
+   * Unidades PRODUCIDAS: con esto sale el COSTO UNITARIO. Opcional para no romper
+   * lo ya cargado (ni el cliente viejo): si no viene, el costo unitario se cae a las
+   * vendidas, que es lo que el sistema hacía antes de tener este campo.
+   */
+  productionQuantity: nonNeg.nullish(),
 });
 
 // Inventarios para el Estado de Costos (Hoja 4).

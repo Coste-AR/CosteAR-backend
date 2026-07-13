@@ -466,6 +466,12 @@ pérdida de datos (no hubo).
 > una es conceptual (de costos) y la otra es de arquitectura de datos. Las dos están
 > hoy tapadas por el borrado lógico y por convención, pero las dos muerden en
 > producción si no se hablan.
+>
+> ⚙️ **Estado (13/07/2026):** las dos están **implementadas en `lautaro-test` con la
+> opción (b)**, porque las dos son **aditivas y reversibles**: no rompen nada de lo
+> que ya andaba y, si el equipo elige la (a), se sacan sin tocar datos. Lo que sigue
+> abierto es la **decisión**, no el código. El detalle de lo implementado está abajo
+> de cada punto.
 
 ## 1. El motor no tiene "unidades producidas" — se usa la cantidad de VENTAS
 
@@ -490,6 +496,25 @@ Comparación muestra como titular.
   alguna vez se va a costear con existencia de producto terminado.
 
 **Quién decide:** Alan (producto) + validación de Zayún (criterio contable).
+
+**Implementado (opción b), 13/07/2026 — migración `20260713010000_production_quantity_and_purge`:**
+- Columna nueva y **opcional** `productionQuantity` en `cost_structures` y en
+  `cost_periods`. **Aditiva**: si no está cargada, el costo unitario se cae a las
+  vendidas — exactamente lo que el sistema hacía antes. Cero regresión.
+- **El motor NO se tocó.** `runCalculation` sigue facturando con `sales.quantity`
+  (que es lo correcto: la facturación es sobre lo vendido). El campo nuevo solo lo
+  usa el **costo unitario** de la comparación.
+- La comparación divide por lo producido; si el período no lo tiene, usa lo vendido
+  **y lo avisa** ("el costo unitario está dividido por las unidades vendidas: si se
+  produjo más de lo que se vendió, está inflado"). No se hace pasar por exacto.
+- Las unidades producidas son **del mes**: al abrir el período siguiente arrancan en
+  cero, igual que las vendidas (no son parte del molde).
+- Frontend: la sección Venta ahora tiene **dos campos separados** ("Unidades
+  vendidas" y "Unidades producidas (opcional)") con la explicación de por qué no son
+  lo mismo. Antes había uno solo, rotulado "Cantidad producida / vendida" — que es
+  justamente de donde venía la confusión.
+- Tests: `tests/application/production-quantity.test.ts` (incluye el caso que
+  demuestra que dividir por lo vendido infla el unitario 25%).
 
 ## 2. Una estructura de costos NO se puede borrar de verdad
 
@@ -516,3 +541,32 @@ camino real nunca hace DELETE. La bomba está armada, no detonada.
   que corra con privilegios y deje rastro en auditoría).
 
 **Quién decide:** Santi / Julie (son las dueñas del esquema y de RLS).
+
+**Implementado (opción b), 13/07/2026 — misma migración:**
+- El trigger `trg_append_only()` ahora distingue:
+  · **UPDATE: prohibido SIEMPRE**, pase lo que pase. Esa es la garantía de fondo —
+    un registro histórico no se reescribe nunca, ni siquiera en una purga.
+  · **DELETE: solo dentro de una transacción de purga explícita**, que la aplicación
+    marca con `SET LOCAL app.purge_mode = 'on'`. `SET LOCAL` muere con la
+    transacción, así que el permiso **no se filtra** a ninguna otra consulta: un
+    DELETE suelto, o uno en cascada sin querer, sigue reventando.
+- `CostStructureService.purge()`: borra la estructura y todo lo que cuelga
+  (DataPoints + versiones + evidencia huérfana, CalculationRuns + nodos, valores de
+  bases, versiones de config, períodos), en UNA transacción. El borrado normal sigue
+  siendo **lógico** (`softDelete` → papelera, recuperable); la purga es la puerta
+  aparte, para borrar en serio.
+- **La auditoría sobrevive a la purga**: `AuditLog` no cuelga de la estructura, así
+  que el rastro (quién purgó qué y cuándo, con el nombre del producto) queda aunque
+  la estructura ya no exista. El registro se escribe ANTES de borrar, dentro de la
+  misma transacción: si algo falla, no queda ni el borrado ni una auditoría mentirosa.
+- Endpoint: `POST /cost-structures/:id/purge` con body `{ confirm: "<nombre del
+  producto>" }`. Hay que **escribir el nombre tal cual** — el patrón de "escribí el
+  nombre para confirmar". No hay papelera ni vuelta atrás.
+- **Verificado contra la DB real**: el UPDATE y el DELETE suelto sobre el histórico
+  siguen bloqueados; las dos estructuras de prueba que habían quedado trabadas
+  (imposibles de borrar) se purgaron con todo su histórico, y las purgas quedaron
+  registradas en la auditoría.
+- ⚠️ **Falta (si el equipo elige esta opción):** el borrado de una `Company` sigue
+  cascadeando a sus estructuras y **va a fallar igual**. La purga hoy es por
+  estructura. Si se quiere "borrar la empresa entera", hay que envolver el mismo
+  patrón a nivel empresa.

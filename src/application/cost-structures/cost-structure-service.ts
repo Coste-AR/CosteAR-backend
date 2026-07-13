@@ -67,6 +67,93 @@ export class CostStructureService {
     });
   }
 
+  /**
+   * PURGA: borra la estructura DE VERDAD, con todo lo que cuelga de ella.
+   *
+   * El borrado normal es LÓGICO (`softDelete`): la estructura va a la papelera y se
+   * puede recuperar. Esto es otra cosa — es para cuando hay que borrar en serio
+   * (datos de prueba, "borrá mi cuenta", una empresa que se va).
+   *
+   * Por qué existe: el trigger append-only (R1) bloquea el DELETE sobre las tablas
+   * de histórico, INCLUSO en cascada. O sea que hasta ahora una estructura no se
+   * podía borrar nunca: reventaba con un error de base de datos que no decía nada
+   * (`P0001`). La app lo esquivaba con el borrado lógico, así que la bomba estaba
+   * armada pero no detonada.
+   *
+   * Cómo se hace sin romper el append-only: la transacción se marca con
+   * `app.purge_mode = 'on'`, y el trigger deja pasar el DELETE **solo ahí**. El
+   * UPDATE sigue prohibido SIEMPRE: una versión histórica no se reescribe nunca,
+   * ni en una purga. `SET LOCAL` muere con la transacción, así que el permiso no se
+   * filtra a ninguna otra consulta.
+   *
+   * Queda auditado: el registro de auditoría vive en `trace_audit_log`, que NO
+   * cuelga de la estructura — así que el rastro de la purga sobrevive a la purga.
+   * Es lo único que queda: quién borró qué, cuándo, y con qué números se fue.
+   */
+  async purge(userId: string, id: string, ctx: AuditContext) {
+    const structure = await this.requireStructure(userId, id);
+
+    return this.db.$transaction(async (tx) => {
+      // El rastro se escribe ANTES de borrar: si algo falla, la transacción vuelve
+      // atrás entera y no queda ni el borrado ni una auditoría mentirosa.
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_structure.purge',
+          entityType: 'CostStructure',
+          entityId: id,
+          oldValue: {
+            productName: structure.productName,
+            companyId: structure.companyId,
+            period: structure.period,
+          },
+        },
+        tx,
+      );
+
+      // El permiso de borrar vive solo dentro de esta transacción.
+      await tx.$executeRawUnsafe(`SET LOCAL app.purge_mode = 'on'`);
+
+      // Los hijos primero, de la hoja al tronco: los que apuntan a la estructura sin
+      // cascada (DataPoint, CalculationRun) la bloquean si siguen ahí.
+      const points = await tx.dataPoint.findMany({ where: { structureId: id }, select: { id: true } });
+      const pointIds = points.map((p) => p.id);
+      if (pointIds.length > 0) {
+        // La evidencia no cuelga del dato: cuelga de sus VERSIONES, y una misma
+        // factura puede respaldar versiones de otra estructura. Por eso se borra
+        // después de las versiones, y solo la que quedó sin nadie que la use.
+        const versions = await tx.dataPointVersion.findMany({
+          where: { dataPointId: { in: pointIds } },
+          select: { evidenceId: true },
+        });
+        const evidenceIds = [...new Set(versions.map((v) => v.evidenceId).filter((e): e is string => !!e))];
+
+        await tx.dataPointVersion.deleteMany({ where: { dataPointId: { in: pointIds } } });
+        await tx.dataPoint.deleteMany({ where: { structureId: id } });
+
+        if (evidenceIds.length > 0) {
+          await tx.evidence.deleteMany({ where: { id: { in: evidenceIds }, versions: { none: {} } } });
+        }
+      }
+
+      const runs = await tx.calculationRun.findMany({ where: { structureId: id }, select: { id: true } });
+      const runIds = runs.map((r) => r.id);
+      if (runIds.length > 0) {
+        await tx.calculationNode.deleteMany({ where: { runId: { in: runIds } } });
+        await tx.calculationRun.deleteMany({ where: { structureId: id } });
+      }
+
+      await tx.allocationBaseValue.deleteMany({ where: { structureId: id } });
+      await tx.costConfigVersion.deleteMany({ where: { structureId: id } });
+      await tx.costPeriod.deleteMany({ where: { structureId: id } });
+
+      await tx.costStructure.delete({ where: { id } });
+
+      return { id, productName: structure.productName };
+    });
+  }
+
   /** Recupera una estructura que estaba en la papelera. */
   async restore(userId: string, id: string, ctx: AuditContext) {
     await this.requireStructure(userId, id);
@@ -311,21 +398,43 @@ export class CostStructureService {
     });
   }
 
-  async updateSales(userId: string, id: string, unitPrice: number, quantity: number, ctx: AuditContext) {
+  /**
+   * `quantity` son las unidades VENDIDAS (con eso se factura y sale el margen).
+   * `productionQuantity` son las PRODUCIDAS (con eso sale el costo unitario). No son
+   * lo mismo: producir 1.000 y vender 800 son dos números distintos, y dividir el
+   * costo por las vendidas lo infla. Es opcional: si no viene, el costo unitario se
+   * cae a las vendidas, como hacía el sistema antes de tener el campo.
+   */
+  async updateSales(
+    userId: string,
+    id: string,
+    unitPrice: number,
+    quantity: number,
+    ctx: AuditContext,
+    productionQuantity?: number | null,
+  ) {
     const before = await this.requireStructure(userId, id);
+    const produced = productionQuantity ?? null;
+
     return this.db.$transaction(async (tx) => {
       const period = await requireWritablePeriod(tx, id);
 
-      await this.appendConfigVersion(tx, id, 'sales', { salesUnitPrice: unitPrice, salesQuantity: quantity }, userId);
+      await this.appendConfigVersion(
+        tx,
+        id,
+        'sales',
+        { salesUnitPrice: unitPrice, salesQuantity: quantity, productionQuantity: produced },
+        userId,
+      );
       const updated = await tx.costStructure.update({
         where: { id },
-        data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+        data: { salesUnitPrice: unitPrice, salesQuantity: quantity, productionQuantity: produced },
       });
 
       if (period) {
         await tx.costPeriod.update({
           where: { id: period.id },
-          data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+          data: { salesUnitPrice: unitPrice, salesQuantity: quantity, productionQuantity: produced },
         });
       }
       await recordAudit(
@@ -335,8 +444,12 @@ export class CostStructureService {
           action: 'cost_structure.sales.update',
           entityType: 'CostStructure',
           entityId: id,
-          oldValue: { salesUnitPrice: before.salesUnitPrice, salesQuantity: before.salesQuantity },
-          newValue: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+          oldValue: {
+            salesUnitPrice: before.salesUnitPrice,
+            salesQuantity: before.salesQuantity,
+            productionQuantity: before.productionQuantity,
+          },
+          newValue: { salesUnitPrice: unitPrice, salesQuantity: quantity, productionQuantity: produced },
         },
         tx,
       );

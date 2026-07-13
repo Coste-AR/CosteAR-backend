@@ -45,8 +45,14 @@ export interface PeriodSide {
   rawMaterialConfig: unknown;
   /** Config de CIF: de acá salen los NOMBRES de los centros (el motor solo da ids). */
   indirectCostConfig: unknown;
-  /** Unidades producidas del mes (0 o null si no se cargaron). */
+  /** Unidades PRODUCIDAS del mes (0 o null si no se cargaron). */
   units: number | null;
+  /**
+   * Las `units` no son las producidas: son las VENDIDAS, porque el período es viejo
+   * y no tiene el dato de producción. El costo unitario sale igual, pero queda
+   * dividido por lo vendido — y se avisa, en vez de hacerlo pasar por exacto.
+   */
+  unitsAreSales?: boolean;
 }
 
 export interface Delta {
@@ -299,10 +305,17 @@ export function comparePeriods(from: PeriodSide, to: PeriodSide): PeriodComparis
           'no el total. El total sube por producir más, aunque nada se haya encarecido.',
       );
     }
+    if (from.unitsAreSales || to.unitsAreSales) {
+      warnings.push(
+        'El costo por unidad está dividido por las unidades VENDIDAS, no por las producidas: ' +
+          'alguno de los dos meses no tiene cargada la cantidad producida. Si se produjo más de lo que se ' +
+          'vendió, el costo unitario que ves está inflado. Cargá la cantidad producida en la sección de Venta.',
+      );
+    }
   } else {
     warnings.push(
-      'No se puede mostrar el costo por unidad: falta la cantidad producida en alguno de los dos períodos. ' +
-        'Cargala en la sección de ventas y la comparación se completa sola.',
+      'No se puede mostrar el costo por unidad: falta la cantidad producida (o la vendida) en alguno de los ' +
+        'dos períodos. Cargala en la sección de Venta y la comparación se completa sola.',
     );
   }
 

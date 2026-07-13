@@ -75,6 +75,7 @@ interface PeriodSeed {
   indirectCostConfig?: Prisma.InputJsonValue;
   salesUnitPrice?: Prisma.Decimal | number | null;
   salesQuantity?: Prisma.Decimal | number | null;
+  productionQuantity?: Prisma.Decimal | number | null;
 }
 
 /** Un período tal como lo lee el arrastre (solo lo que necesita). */
@@ -86,6 +87,7 @@ interface PeriodLike {
   indirectCostConfig: Prisma.JsonValue;
   salesUnitPrice: Prisma.Decimal | null;
   salesQuantity: Prisma.Decimal | null;
+  productionQuantity?: Prisma.Decimal | null;
 }
 
 export class CostPeriodService {
@@ -280,6 +282,7 @@ export class CostPeriodService {
     indirectCostConfig: Prisma.JsonValue;
     salesUnitPrice: Prisma.Decimal | null;
     salesQuantity: Prisma.Decimal | null;
+    productionQuantity: Prisma.Decimal | null;
   }): PeriodSeed {
     return {
       rawMaterialConfig: (structure.rawMaterialConfig ?? undefined) as Prisma.InputJsonValue,
@@ -287,6 +290,7 @@ export class CostPeriodService {
       indirectCostConfig: (structure.indirectCostConfig ?? undefined) as Prisma.InputJsonValue,
       salesUnitPrice: structure.salesUnitPrice,
       salesQuantity: structure.salesQuantity,
+      productionQuantity: structure.productionQuantity,
     };
   }
 
@@ -352,9 +356,10 @@ export class CostPeriodService {
       directLaborConfig: (dl ?? undefined) as Prisma.InputJsonValue,
       indirectCostConfig: (ic ?? undefined) as Prisma.InputJsonValue,
       // El precio de venta es lista de precios (parte del molde): viaja.
-      // Las unidades vendidas son del mes: arrancan en cero, siempre.
+      // Las unidades —vendidas y producidas— son del mes: arrancan en cero, siempre.
       salesUnitPrice: last.salesUnitPrice,
       salesQuantity: 0,
+      productionQuantity: 0,
     };
   }
 
@@ -379,6 +384,7 @@ export class CostPeriodService {
         indirectCostConfig: seed.indirectCostConfig,
         salesUnitPrice: seed.salesUnitPrice ?? null,
         salesQuantity: seed.salesQuantity ?? null,
+        productionQuantity: seed.productionQuantity ?? null,
         period: code, // el campo viejo tipeado a mano queda en sincronía
       },
     });
@@ -393,6 +399,7 @@ export class CostPeriodService {
         {
           salesUnitPrice: Number(seed.salesUnitPrice ?? 0),
           salesQuantity: Number(seed.salesQuantity ?? 0),
+          productionQuantity: Number(seed.productionQuantity ?? 0),
         },
       ],
     ];
@@ -554,7 +561,16 @@ export class CostPeriodService {
       result: useFrozen ? frozen : this.computeResult(period, 'comparar'),
       rawMaterialConfig: period.rawMaterialConfig,
       indirectCostConfig: period.indirectCostConfig,
-      units: period.salesQuantity ? Number(period.salesQuantity) : null,
+      // El costo unitario se divide por lo PRODUCIDO, no por lo vendido: producir
+      // 1.000 y vender 800 son dos números distintos, y dividir por 800 infla el
+      // costo. Si el período no tiene el dato (es viejo, de antes del campo), se cae
+      // a las vendidas: es lo que el sistema hacía antes, no un número inventado.
+      units: period.productionQuantity
+        ? Number(period.productionQuantity)
+        : period.salesQuantity
+          ? Number(period.salesQuantity)
+          : null,
+      unitsAreSales: !period.productionQuantity,
     };
   }
 
