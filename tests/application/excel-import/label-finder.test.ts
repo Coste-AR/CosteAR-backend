@@ -73,4 +73,19 @@ describe('findNumberByLabel', () => {
     const wb = await wbFromRows([['Demanda anual', '24.000']]);
     expect(findNumberByLabel(wb, ['Demanda anual'])).toBe(24000);
   });
+
+  it('NO trata un decimal chico con cero inicial y 3 decimales como miles', async () => {
+    const wb = await wbFromRows([['Tasa de mantenimiento', '0.300']]);
+    expect(findNumberByLabel(wb, ['Tasa de mantenimiento'])).toBe(0.3);
+  });
+
+  it('NO trata "0.125" (decimal con cero inicial) como miles', async () => {
+    const wb = await wbFromRows([['Coeficiente', '0.125']]);
+    expect(findNumberByLabel(wb, ['Coeficiente'])).toBe(0.125);
+  });
+
+  it('NO trata un decimal negativo con cero inicial como miles', async () => {
+    const wb = await wbFromRows([['Ajuste', '-0.030']]);
+    expect(findNumberByLabel(wb, ['Ajuste'])).toBe(-0.03);
+  });
 });

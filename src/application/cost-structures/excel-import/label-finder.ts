@@ -19,8 +19,10 @@ function toNumber(text: string | null): number | null {
   }
 
   // Sin coma pero con puntos en forma de miles exacta ("24.000", "1.234.567")
-  // y SIN resto decimal → los puntos son miles, no un punto decimal.
-  if (/^-?\d{1,3}(\.\d{3})+$/.test(trimmed)) {
+  // y SIN resto decimal → los puntos son miles, no un punto decimal. El
+  // primer grupo no puede empezar con 0: un número agrupado por miles nunca
+  // arranca con cero ("0.300" es el decimal 0,3, no el entero 300).
+  if (/^-?[1-9]\d{0,2}(\.\d{3})+$/.test(trimmed)) {
     const n = Number(trimmed.replace(/\./g, ''));
     return Number.isFinite(n) ? n : null;
   }
