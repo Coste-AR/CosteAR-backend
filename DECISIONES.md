@@ -669,3 +669,71 @@ const unitsProduced = Number(input.production?.quantity ?? input.sales.quantity)
 
 Es de Alan ese código, así que la decisión es suya — pero que entre a `devAdmin` sabiendo
 esto, no sin saberlo.
+
+---
+
+## Sesión 2026-07-13 (cont.) — Problema A: el RITMO DE COSTEO existía y nadie podía encenderlo
+
+**Cómo apareció.** El problema A era chico y de pantalla: (1) el botón "Nueva estructura"
+estaba en el header, lejos de la lista que modifica, y (2) el alta de estructura obligaba a
+**tipear el período a mano** (`Input label="Período (YYYY-MM)"`, `required`). Al ir a sacar
+ese campo apareció lo de fondo.
+
+**Lo que estaba roto de verdad.** El calendario de períodos (`domain/periods/period-calendar.ts`,
+Fase 1) maneja los **tres ritmos** completos — mensual (`2026-07`), quincenal (`2026-07-Q1`) y
+trimestral (`2026-T3`): sus fechas límite, su nombre, cuál es el siguiente. `Company.periodicity`
+existe en la base desde la migración `20260712000000_add_cost_periods`, y `cost-period-service`
+lo lee en **cada** apertura de período.
+
+Pero **no había forma de elegirlo**: no estaba en el formulario de empresa, y
+`createCompanySchema` ni siquiera aceptaba el campo. Toda empresa quedaba en `MONTHLY` (el
+default de la DB) **para siempre y en silencio**. El motor de ritmos estaba entero y con el
+interruptor apagado.
+
+Por eso el campo tipeado se sentía mal, y es la parte importante: le pedía al costista un
+código **mensual** aunque su empresa cerrara por quincena. O sea, **el formulario lo obligaba
+a mentir**, y la estructura nacía en el período equivocado.
+
+**Lo que se hizo.**
+- `company.schema.ts`: `periodicity` (`MONTHLY|BIWEEKLY|QUARTERLY`) opcional en alta y edición.
+  `company-service` lo persiste. **Sin migración: la columna ya estaba** (`migrate deploy` →
+  "No pending migrations").
+- `createCostStructureSchema`: `period` pasa a **opcional**, y su regex se ensancha a las tres
+  formas de código. Si llega, se respeta (compatibilidad: importaciones, datos viejos).
+- `CostStructureService.create()`: si no viene, lo **deriva** con `codeFromDate(new Date(),
+  company.periodicity)` — la función pura que ya existía. **No se escribió lógica de fechas
+  nueva.** La auditoría registra el período **derivado**, no el que tipeó el usuario.
+- Frontend: selector "Ritmo de costeo" en el alta/edición de empresa; el `Input` de período
+  murió; el botón "Nueva estructura" pasó al `action` del `CardHeader` de "Estructuras de
+  costos" (patrón que ya usaba `OperatorsSection`).
+
+**Decisión (Lautaro, 13/07/2026): el ritmo lo posee la EMPRESA, no la estructura.** Es donde
+ya vivía la columna → cero migración. Un cliente costea todo con el mismo ritmo.
+👉 **PARA DECIDIR EN EQUIPO:** si alguna vez un mismo cliente necesita costear un producto por
+quincena y otro por mes, hace falta un `periodicity` opcional **por estructura** que caiga al
+de la empresa. Es una migración aditiva. Hoy **no** se hizo: no hay caso real que lo pida.
+
+**El candado (decisión de diseño, no pedida pero necesaria).** El ritmo **no se puede cambiar
+con la empresa en marcha**: si ya hay períodos (abiertos o cerrados), `CompanyService.update()`
+corta con `ConflictError`. Un período viejo lleva un código del ritmo anterior; cambiarlo dejaría
+dos ritmos conviviendo en la misma empresa y el arrastre de existencia de un período al siguiente
+dejaría de tener sentido. Un cambio de ritmo es una **decisión contable**, no un campo más del
+formulario. Se puede elegir libremente mientras no haya ningún período.
+
+**Por qué es seguro guardar `2026-07-Q1` en `cost_structures.period`** (una columna documentada
+como "YYYY-MM"): ese string **no lo parsea nadie**. Se usa como etiqueta y como clave del libro
+mayor. Y `normalizeLegacyCode()` ya contemplaba explícitamente recibir un código nuevo ("ya está
+en el formato nuevo") y devolverlo tal cual. El camino legado (estructuras con `2026-06` tipeado)
+sigue funcionando igual.
+
+**Verificado contra la DB real** (Postgres :5433), corriendo los servicios de verdad:
+
+| ritmo | estructura sin período tipeado | primer período | fechas |
+|---|---|---|---|
+| MONTHLY | `2026-07` | "Julio 2026" | 01/07 a 31/07 |
+| BIWEEKLY | `2026-07-Q1` | "1ª quincena de Julio 2026" | 01/07 a 15/07 |
+| QUARTERLY | `2026-T3` | "3º trimestre 2026" | 01/07 a 30/09 |
+
+Y lo que demuestra que el interruptor quedó encendido: en la quincenal, **el período siguiente
+es la 2ª quincena de julio, no agosto**. El candado del ritmo también cortó como debía.
+Suite completa: **321 verdes**. Tests nuevos en `tests/application/periodicidad-empresa.test.ts`.

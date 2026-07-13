@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
-import { NotFoundError } from '../../domain/errors/domain-error.js';
+import { ConflictError, NotFoundError } from '../../domain/errors/domain-error.js';
 import type {
   CreateCompanyInput,
   UpdateCompanyInput,
@@ -38,6 +38,8 @@ export class CompanyService {
         industry: input.industry ?? null,
         cuit: input.cuit ?? null,
         description: input.description ?? null,
+        // Si no lo eligen, mensual: es el ritmo más común y el default de la DB.
+        periodicity: input.periodicity ?? 'MONTHLY',
       },
     });
     await recordAudit(
@@ -49,6 +51,22 @@ export class CompanyService {
 
   async update(userId: string, id: string, input: UpdateCompanyInput, ctx: AuditContext) {
     const existing = await this.getById(userId, id);
+
+    // El ritmo de costeo no se cambia con la empresa en marcha. Los períodos ya abiertos
+    // llevan un código que responde al ritmo viejo ("2026-07" es mensual; "2026-07-Q1" es
+    // quincenal): cambiarlo dejaría a la empresa con períodos de dos ritmos distintos
+    // conviviendo, y el arrastre de existencia de uno al siguiente dejaría de tener sentido.
+    // Un cambio de ritmo es una decisión contable, no un campo más del formulario.
+    if (input.periodicity && input.periodicity !== existing.periodicity) {
+      const periods = await this.db.costPeriod.count({ where: { companyId: id } });
+      if (periods > 0) {
+        throw new ConflictError(
+          'No se puede cambiar el ritmo de costeo: esta empresa ya tiene períodos abiertos o cerrados. ' +
+            'El ritmo se elige al dar de alta la empresa, antes de cargar el primer período.',
+        );
+      }
+    }
+
     const company = await this.db.company.update({
       where: { id },
       data: {
@@ -57,6 +75,7 @@ export class CompanyService {
         cuit: input.cuit ?? existing.cuit,
         description: input.description ?? existing.description,
         isActive: input.isActive ?? existing.isActive,
+        periodicity: input.periodicity ?? existing.periodicity,
       },
     });
     await recordAudit(
