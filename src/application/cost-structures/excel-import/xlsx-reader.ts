@@ -1,11 +1,24 @@
 import ExcelJS from 'exceljs';
 import { ValidationError } from '../../../domain/errors/domain-error.js';
 
+/**
+ * Lector de celdas seguro para el import de Excel. Todo el código que lee un
+ * workbook cargado acá debe pasar los valores de celda por `cellText` —
+ * nunca leer `cell.value` directamente — para no reintroducir los casos
+ * raros de ExcelJS (fórmulas compartidas, errores, rich text, hipervínculos)
+ * que este módulo ya resuelve de forma centralizada.
+ */
+
 /** Carga un buffer como workbook de ExcelJS. Tira ValidationError si no es un .xlsx válido. */
 export async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   try {
-    await wb.xlsx.load(buffer);
+    // El `Buffer` que declara exceljs en su .d.ts es un `interface Buffer
+    // extends ArrayBuffer` local al módulo (no el `Buffer` real de Node), lo
+    // que rompe la asignación estructural incluso con @types/node
+    // deduplicado en todo el árbol de dependencias. Cast angosto y atado al
+    // tipo exacto que espera el parámetro (no `any`).
+    await wb.xlsx.load(buffer as unknown as Parameters<typeof wb.xlsx.load>[0]);
   } catch {
     throw new ValidationError('El archivo no es un Excel (.xlsx) válido.');
   }
@@ -15,18 +28,46 @@ export async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
   return wb;
 }
 
+function isErrorValue(v: unknown): v is ExcelJS.CellErrorValue {
+  return typeof v === 'object' && v !== null && 'error' in v;
+}
+
 /**
- * Texto de una celda, sea texto plano, número, o fórmula con valor cacheado.
- * Fórmula sin valor cacheado → null (nunca se evalúa la fórmula acá).
+ * Texto de una celda: texto plano, número, fecha, fórmula (maestra o
+ * compartida) con valor cacheado, rich text o hipervínculo.
+ *
+ * Nunca evalúa fórmulas: si no hay valor cacheado, o si el valor cacheado es
+ * un error de Excel (#DIV/0!, etc.), devuelve null. Las fórmulas
+ * "esclavas" de un rango compartido (`fillFormula`) llegan como
+ * `{ sharedFormula, result }`, sin la propiedad `formula` — se manejan
+ * igual que la fórmula maestra.
  */
 export function cellText(cell: ExcelJS.Cell): string | null {
   const v = cell.value;
   if (v === null || v === undefined) return null;
-  if (typeof v === 'object' && 'formula' in v) {
-    const result = (v as ExcelJS.CellFormulaValue).result;
-    if (result === undefined || result === null) return null;
-    return String(result).trim();
-  }
   if (v instanceof Date) return v.toISOString();
+
+  if (typeof v === 'object') {
+    if ('formula' in v || 'sharedFormula' in v) {
+      const result = (v as ExcelJS.CellFormulaValue | ExcelJS.CellSharedFormulaValue).result;
+      if (result === undefined || result === null || isErrorValue(result)) return null;
+      if (result instanceof Date) return result.toISOString();
+      return String(result).trim() || null;
+    }
+    if (isErrorValue(v)) return null;
+    if ('richText' in v) {
+      const text = (v as ExcelJS.CellRichTextValue).richText.map((r) => r.text).join('');
+      return text.trim() || null;
+    }
+    if ('hyperlink' in v) {
+      const text = (v as ExcelJS.CellHyperlinkValue).text;
+      return text === undefined || text === null ? null : String(text).trim() || null;
+    }
+    // Forma de objeto no reconocida por ExcelJS.CellValue: un null es mucho
+    // más seguro que un "[object Object]" silencioso, ya que 8 tareas más
+    // del import de Excel dependen de este módulo.
+    return null;
+  }
+
   return String(v).trim() || null;
 }
