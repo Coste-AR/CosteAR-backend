@@ -17,12 +17,16 @@ function orUndef(n: number | null): number | undefined {
 }
 
 export function extractRawMaterial(wb: ExcelJS.Workbook): PartialRawMaterialConfig {
-  const unitCost = orUndef(findNumberByLabel(wb, ['Costo unitario']));
+  const unitCost = orUndef(findNumberByLabel(wb, ['Costo unitario', 'Costo unitario (C)']));
   return {
     wilson: {
-      annualDemand: orUndef(findNumberByLabel(wb, ['Demanda anual'])),
-      orderCost: orUndef(findNumberByLabel(wb, ['Costo de orden', 'Costo de pedido'])),
-      holdingRate: orUndef(findNumberByLabel(wb, ['Tasa de mantenimiento'])),
+      annualDemand: orUndef(findNumberByLabel(wb, ['Demanda anual', 'Demanda anual (R)'])),
+      orderCost: orUndef(
+        findNumberByLabel(wb, ['Costo de orden', 'Costo de pedido', 'Costo de orden (S)']),
+      ),
+      holdingRate: orUndef(
+        findNumberByLabel(wb, ['Tasa de mantenimiento', 'Tasa de mantenimiento (K)']),
+      ),
       unitCost,
     },
     stockPolicy: {
