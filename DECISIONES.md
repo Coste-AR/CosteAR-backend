@@ -333,3 +333,470 @@ pérdida de datos (no hubo).
   exige que la estructura sea del usuario), igual que `evidence`/`trace_audit_log`.
   Se puede agregar una política RLS por join a la estructura si se quiere
   defensa en profundidad (pendiente menor).
+
+## Sesión 2026-07-13 — Períodos, Fase 3: apertura inteligente (problema C)
+
+- **Hallazgo de arranque (bug real, no previsto en el diseño)**: las Fases 1 y 2
+  dejaron el período DESCONECTADO de la pantalla. `updateConfig`/`updateSales`
+  escribían solo en `cost_structures`; el `CostPeriod` conservaba la foto tomada
+  el día en que se abrió. Consecuencias: (1) `close()` validaba la actividad real
+  y el CIP real contra esa foto (siempre en cero) → **cerrar un período fallaba
+  siempre**; (2) el arrastre de la Fase 3 habría leído una existencia que no era
+  la real. Decidido con Lautaro: cerrar ese hueco como parte de la Fase 3.
+- **Espejo estructura → período abierto** (`period-sync.ts`): toda escritura de
+  datos en la estructura se replica en el período ABIERTO, en la MISMA
+  transacción (`updateConfig`, `updateSales`, y el populator de documentos). El
+  período pasa a ser dueño real de los datos de su mes sin mover nada de lugar
+  (la migración de la Fase 1 sigue sin borrar un byte).
+- **Candado del mes cerrado**: si la estructura tiene períodos y ninguno está
+  abierto, se rechaza la escritura con un mensaje que dice qué hacer (reabrir o
+  abrir el siguiente). Las estructuras SIN períodos (legado) siguen funcionando
+  exactamente igual: no se rompe nada de lo que ya andaba.
+- **Arrastre de existencia** (`domain/periods/closing-stock.ts`): la existencia
+  FINAL de cada materia prima pasa a ser la existencia INICIAL del período que
+  abre, valuada al **PPP con el que cerró**. Se DERIVA corriendo la ficha de
+  stock del mes que cierra con la misma función del motor (`calcStockLedgerPPP`),
+  no se copia a mano. El PPP se guarda con 6 decimales, no 2: un centavo por
+  unidad, arrastrado mes a mes sobre miles de unidades, deja de ser un centavo.
+- **Si la ficha no cuadra, no se abre**: un consumo mayor al saldo hace que la
+  existencia final no se pueda valuar. En vez de inventar un saldo (que
+  ensuciaría todos los meses siguientes), se corta con un error que NOMBRA la
+  materia prima. El diálogo lo muestra sin romperse (`openingStockError`).
+- **Reseteo de la estructura al abrir**: como la app escribe en la estructura, al
+  abrir el período siguiente se la deja con lo arrastrado (receta + existencia
+  inicial, movimientos vacíos, importes según elección). Es lo que hace que la
+  pantalla amanezca en el mes nuevo. Nada se pierde: el mes que cerró queda en su
+  `CostPeriod` y el reseteo se versiona en `cost_config_versions` (R1) con
+  `reason: "Apertura del período X (arrastre desde Y)"`.
+- **El PRIMER período no arrastra**: fotografía lo que la estructura ya tiene
+  cargado y NO toca la pantalla (resetear ahí sería borrarle el trabajo al
+  costista).
+- **Ventas**: el precio unitario viaja (es lista de precios, parte del molde); las
+  unidades vendidas arrancan SIEMPRE en cero (son del mes). `calcGrossMargin` ya
+  es a prueba de ventas en cero.
+- **Preview de apertura**: `GET /structures/:id/periods/next-preview` — qué mes se
+  abre, con cuánta existencia y a qué PPP arranca cada MP, y qué importes hay para
+  traer. No modifica nada. Alimenta el diálogo del frontend.
+- **Tests**: 22 nuevos (arrastre al PPP de cierre, ficha que no cuadra, primer
+  período, espejo, candado del mes cerrado, legado sin períodos). Suite de
+  `application/` 90 verde; typecheck backend y frontend limpios; build del
+  frontend OK.
+- **Límite del entorno (igual que siempre)**: esta máquina no tiene Postgres, así
+  que NO se ejecutó contra una DB real. El espejo y el candado tocan el camino de
+  guardado de toda la app: **el equipo tiene que probarlo en local con la DB antes
+  de mergear a `devAdmin`** (abrir un período, guardar, cerrar, abrir el siguiente
+  y verificar la existencia arrastrada).
+
+## Sesión 2026-07-13 (cont.) — Períodos, Fase 4: comparación entre períodos (problema C)
+
+- **Agujero encontrado antes de empezar**: el diseño decía que cerrar un período
+  "corre el cálculo y CONGELA los números", pero el código no lo hacía. `close()`
+  solo cambiaba el estado a CLOSED y guardaba los INSUMOS; el `closedRunId` era
+  opcional, nadie lo pasaba y nadie lo leía. O sea: **un mes cerrado no tenía
+  números propios**. Comparar mayo contra junio habría significado recalcular el
+  pasado con el motor de hoy, y cualquier mejora del motor habría cambiado, en
+  silencio, un mes ya cerrado y firmado.
+- **Decisión (Lautaro)**: el cierre CONGELA. Migración aditiva (R7):
+  `cost_periods.resultSnapshot` (el `CalculationOutput` entero, menos `raw`),
+  `resultEngineVersion` y `resultAt`. `close()` corre `runCalculation()` —la misma
+  función que usa la app, así el número del mes cerrado y el de la pantalla son el
+  mismo por construcción— y guarda estado + snapshot + auditoría en la MISMA
+  transacción (R2; antes la auditoría quedaba afuera).
+- **Si el motor no puede correr, el período NO se cierra.** Cambio de conducta
+  explícito: antes cerraba igual y dejaba el mes firmado y vacío. Un mes cerrado
+  sin números es exactamente el agujero que esto tapa.
+- **Los períodos cerrados ANTES de esta migración** quedan con `resultSnapshot`
+  null: la comparación los recalcula al vuelo y los marca `source: 'recomputed'`,
+  con un aviso. No se los hace pasar por congelados.
+- **La comparación** (`application/cost-structures/period-comparison.ts`, pura, sin
+  DB, todo en Decimal). Va en `application/` y no en `domain/` a propósito: depende
+  de `CalculationOutput`, que vive en `application/calculate.ts` (igual que el
+  motor). Meterla en `domain/` sería que el dominio importe de la aplicación.
+  Tres niveles: (1) MP / MOD / CIF con su % de contribución —"el 80% vino de la
+  MP"—; (2) qué MP, qué departamento, qué centro; (3) **por MP, la variación se
+  abre en PRECIO y CONSUMO**:
+      ΔValor = (P₁ − P₀) × Q₁  +  (Q₁ − Q₀) × P₀
+  La identidad cierra al centavo (por eso Decimal y no float) y está asertada en
+  los tests. Es lo que separa la inflación del desperdicio, y es lo que va a
+  alimentar la "variación costos país" (problema B).
+  · Q sale de los movimientos `consumption` de la ficha del período; V sale del
+    motor (`detail.rawMaterial.materials[].consumed`, que es el consumo VALORIZADO).
+  · Emparejamiento: MP por `code ?? name ?? id` (nunca por posición: si el costista
+    reordena las MP, se compararía la chapa contra el aluminio), departamentos por
+    nombre, centros por `centerId` (clave estable, sobrevive al arrastre).
+  · Altas y bajas entre meses se comparan contra cero y se marcan `new`/`removed`.
+  · Si las subas y las bajas se cancelan (Δtotal ≈ 0), las contribuciones se
+    reparten sobre Σ|Δ| y se avisa (`offsetting`), en vez de dividir por ~0 y
+    escupir porcentajes de cuatro cifras.
+- **Dos planos: total y POR UNIDAD.** El total sube solo con producir más, aunque
+  nada se haya encarecido; el unitario es la comparación honesta. ⚠️ El motor **no
+  tiene un campo de unidades producidas**: se usa `sales.quantity` (el form lo
+  rotula "cantidad producida"). Si eso está mal conceptualmente, es un ticket
+  aparte. Sin cantidad en alguno de los dos meses, el plano unitario vuelve `null`
+  con un aviso — nunca una división por cero.
+- **Endpoint**: `GET /structures/:id/periods/compare?from=&to=`. Sin parámetros
+  compara los dos últimos. La variación siempre se lee del más viejo al más nuevo,
+  aunque los manden al revés.
+- **Frontend**: pestaña "Comparación" (`components/PeriodComparison.tsx`). Sin
+  gráficos: para un costista los pesos exactos dicen más que una barra. Ojo con dos
+  trampas del repo: `text-success` y `text-line-heavy` NO existen como tokens (los
+  usa `ScenarioSimulator` y sus deltas verdes no se ven), y `<Percent colorize>`
+  tiene semántica de MARGEN (subir = bueno); para un COSTO subir es malo, así que
+  el color se maneja aparte.
+- **Verificado contra la DB real** (Docker: Postgres :5433). Recorrido completo:
+  abrir junio → cerrar (queda congelado: MP consumida $232.000 = 200 kg × $1.160 de
+  PPP, motor v1.0.0) → abrir julio (arrastra 300 kg @ $1.160) → comprar más caro
+  ($1.500) y consumir 210 kg → cerrar → comparar. Resultado: costo total +2,93%
+  pero **costo por unidad −6,4%** (se produjo más); la chapa subió $52.400, de los
+  cuales **$40.800 fueron PRECIO y $11.600 CONSUMO** (suma exacta ✓). Y lo más
+  importante: al ensuciar los datos de la estructura, los números de junio **no se
+  movieron**. Suite: 309 verdes, typecheck y build limpios.
+- **Hallazgo lateral (NO es de esta sesión, pero es una mina)**: una `CostStructure`
+  **no se puede borrar de verdad**: el trigger append-only de `cost_config_versions`
+  bloquea el DELETE en cascada (P0001). La app usa borrado lógico (`deletedAt`), así
+  que no molesta hoy, pero cualquier intento de borrar una empresa/estructura en
+  serio (o un cascade desde `Company`) va a reventar. Vale decidirlo antes de que
+  aparezca en producción.
+
+---
+
+# 🔴 PARA DECIDIR EN EQUIPO (abierto al 13/07/2026)
+
+> Dos cosas que salieron de la Fase 4 y que **no las puede decidir una sola persona**:
+> una es conceptual (de costos) y la otra es de arquitectura de datos. Las dos están
+> hoy tapadas por el borrado lógico y por convención, pero las dos muerden en
+> producción si no se hablan.
+>
+> ⚙️ **Estado (13/07/2026):** las dos están **implementadas en `lautaro-test` con la
+> opción (b)**, porque las dos son **aditivas y reversibles**: no rompen nada de lo
+> que ya andaba y, si el equipo elige la (a), se sacan sin tocar datos. Lo que sigue
+> abierto es la **decisión**, no el código. El detalle de lo implementado está abajo
+> de cada punto.
+
+## 1. El motor no tiene "unidades producidas" — se usa la cantidad de VENTAS
+
+**Qué pasa hoy.** `CalculationInput.sales = { unitPrice, quantity }`. Esa `quantity`
+es lo único parecido a un volumen que tiene el motor, y el formulario del frontend la
+rotula **"cantidad producida"** ("Precio unitario y cantidad producida para calcular
+el margen bruto"). El costo unitario de la comparación (Fase 4) divide por ahí.
+
+**Por qué importa.** Producción y venta **no son lo mismo**: si se producen 1.000 y se
+venden 800, el estado de costos ya distingue el costo de producción del CMV (por eso
+existe `finishedGoodsCost`), pero el **costo unitario** lo estaríamos calculando sobre
+las unidades **vendidas**, no sobre las **producidas**. Con existencia de producto
+terminado ≠ 0, el costo por unidad queda mal — y es el número que la pantalla de
+Comparación muestra como titular.
+
+**Opciones:**
+- **(a)** Confirmar que en el alcance actual "producción = venta" (no se modela stock
+  de producto terminado) y **documentarlo como supuesto explícito**. Costo cero,
+  riesgo: el día que se modele producto terminado, el unitario miente.
+- **(b)** Agregar `production: { quantity }` como campo propio del período (aditivo,
+  sin tocar el motor), y que el unitario divida por ahí. Es el camino correcto si
+  alguna vez se va a costear con existencia de producto terminado.
+
+**Quién decide:** Alan (producto) + validación de Zayún (criterio contable).
+
+**Implementado (opción b), 13/07/2026 — migración `20260713010000_production_quantity_and_purge`:**
+- Columna nueva y **opcional** `productionQuantity` en `cost_structures` y en
+  `cost_periods`. **Aditiva**: si no está cargada, el costo unitario se cae a las
+  vendidas — exactamente lo que el sistema hacía antes. Cero regresión.
+- **El motor NO se tocó.** `runCalculation` sigue facturando con `sales.quantity`
+  (que es lo correcto: la facturación es sobre lo vendido). El campo nuevo solo lo
+  usa el **costo unitario** de la comparación.
+- La comparación divide por lo producido; si el período no lo tiene, usa lo vendido
+  **y lo avisa** ("el costo unitario está dividido por las unidades vendidas: si se
+  produjo más de lo que se vendió, está inflado"). No se hace pasar por exacto.
+- Las unidades producidas son **del mes**: al abrir el período siguiente arrancan en
+  cero, igual que las vendidas (no son parte del molde).
+- Frontend: la sección Venta ahora tiene **dos campos separados** ("Unidades
+  vendidas" y "Unidades producidas (opcional)") con la explicación de por qué no son
+  lo mismo. Antes había uno solo, rotulado "Cantidad producida / vendida" — que es
+  justamente de donde venía la confusión.
+- Tests: `tests/application/production-quantity.test.ts` (incluye el caso que
+  demuestra que dividir por lo vendido infla el unitario 25%).
+
+## 2. Una estructura de costos NO se puede borrar de verdad
+
+**Qué pasa hoy.** El trigger append-only de `cost_config_versions` (regla R1) bloquea
+todo DELETE sobre esa tabla — **incluido el DELETE en cascada**. Resultado: borrar una
+`CostStructure` (o una `Company`, que cascadea a sus estructuras) revienta con
+`P0001: append-only`. Encontrado en la prueba real de la Fase 4, al intentar limpiar
+los datos de test.
+
+**Por qué no explota hoy.** La app borra **lógicamente** (`deletedAt`), así que el
+camino real nunca hace DELETE. La bomba está armada, no detonada.
+
+**Dónde muerde:**
+- Un `Company.delete()` en cascada (existe la relación) falla.
+- Cualquier "borrar mi cuenta" / limpieza de datos / GDPR-like es imposible hoy.
+- Un test o un script de mantenimiento que borre queda trabado sin explicación obvia.
+
+**Opciones:**
+- **(a)** Asumirlo: el sistema **no borra nunca** (append-only de verdad, tipo libro
+  contable). Entonces hay que **prohibir el DELETE en la capa de aplicación** con un
+  error claro, y que nadie escriba `.delete()` por error.
+- **(b)** Permitir un borrado administrativo real: que el trigger deje pasar el DELETE
+  cuando viene en cascada del borrado de la estructura (o una función `purgeStructure()`
+  que corra con privilegios y deje rastro en auditoría).
+
+**Quién decide:** Santi / Julie (son las dueñas del esquema y de RLS).
+
+**Implementado (opción b), 13/07/2026 — misma migración:**
+- El trigger `trg_append_only()` ahora distingue:
+  · **UPDATE: prohibido SIEMPRE**, pase lo que pase. Esa es la garantía de fondo —
+    un registro histórico no se reescribe nunca, ni siquiera en una purga.
+  · **DELETE: solo dentro de una transacción de purga explícita**, que la aplicación
+    marca con `SET LOCAL app.purge_mode = 'on'`. `SET LOCAL` muere con la
+    transacción, así que el permiso **no se filtra** a ninguna otra consulta: un
+    DELETE suelto, o uno en cascada sin querer, sigue reventando.
+- `CostStructureService.purge()`: borra la estructura y todo lo que cuelga
+  (DataPoints + versiones + evidencia huérfana, CalculationRuns + nodos, valores de
+  bases, versiones de config, períodos), en UNA transacción. El borrado normal sigue
+  siendo **lógico** (`softDelete` → papelera, recuperable); la purga es la puerta
+  aparte, para borrar en serio.
+- **La auditoría sobrevive a la purga**: `AuditLog` no cuelga de la estructura, así
+  que el rastro (quién purgó qué y cuándo, con el nombre del producto) queda aunque
+  la estructura ya no exista. El registro se escribe ANTES de borrar, dentro de la
+  misma transacción: si algo falla, no queda ni el borrado ni una auditoría mentirosa.
+- Endpoint: `POST /cost-structures/:id/purge` con body `{ confirm: "<nombre del
+  producto>" }`. Hay que **escribir el nombre tal cual** — el patrón de "escribí el
+  nombre para confirmar". No hay papelera ni vuelta atrás.
+- **Verificado contra la DB real**: el UPDATE y el DELETE suelto sobre el histórico
+  siguen bloqueados; las dos estructuras de prueba que habían quedado trabadas
+  (imposibles de borrar) se purgaron con todo su histórico, y las purgas quedaron
+  registradas en la auditoría.
+- ⚠️ **Falta (si el equipo elige esta opción):** el borrado de una `Company` sigue
+  cascadeando a sus estructuras y **va a fallar igual**. La purga hoy es por
+  estructura. Si se quiere "borrar la empresa entera", hay que envolver el mismo
+  patrón a nivel empresa.
+
+---
+
+## Sesión 2026-07-13 (cont.) — Problema B: se saca la "Variación de Costos País" del Dashboard
+
+**Qué era.** El panel más grande del Dashboard (`DashboardPage.tsx`, "Bento 3") se
+titulaba **"Variación de Costos País"**, con el subtítulo "Histórico consolidado del
+índice de costos CosteAR" y un badge verde **"+20.4% Semestre"**.
+
+**Qué encontramos al abrirlo.** Nada. El gráfico se alimentaba de una constante
+escrita a mano en el módulo:
+
+```ts
+const COST_EVOLUTION = [
+  { name: 'Ene', índice: 100.0 }, ... { name: 'Jun', índice: 120.4 },
+];
+```
+
+No salía de un endpoint, no salía de `MacroSnapshot` (el INDEC/BCRA que **sí** están
+ingestados y son reales), no salía de los períodos del costista, y no dependía ni de
+la empresa ni de la estructura ni de la fecha (hoy es julio y el gráfico terminaba en
+"Jun", siempre). El "+20.4%" tampoco se calculaba: era un string. Era un **dibujo con
+forma de dato**.
+
+**Decisión (Lautaro, 13/07/2026): se saca.** En una herramienta que fija precios
+reales, un número que no se puede rastrear hasta su origen es **peor que no tener el
+número**: el costista no tiene cómo saber que ese no lo es. Todo el resto del sistema
+(trazabilidad, R1 append-only, congelar el resultado al cerrar el mes) existe para
+garantizar exactamente lo contrario. El panel se elimina y el "Centro de Alertas"
+—que sí muestra datos reales— pasa a ocupar la fila entera; no queda un hueco.
+
+**Lo que NO se tocó:** el módulo macro es real y queda como está (`MacroSnapshot`,
+BCRA/INDEC/dolarapi, `MacroPage`, `MacroRiskPanel`). Lo que era mentira era el gráfico
+del Dashboard, no la ingesta.
+
+### El diseño del feature de verdad (queda escrito, NO implementado)
+
+Se posterga a propósito: primero había que borrar la mentira, que es lo urgente. Cuando
+se construya, el insumo **ya existe y está testeado** — no hay que inventar nada:
+
+- La **base**: `application/cost-structures/period-comparison.ts` (Fase 4) ya abre la
+  variación de cada MP en **PRECIO** y **CONSUMO**: `ΔValor = (P₁−P₀)·Q₁ + (Q₁−Q₀)·P₀`,
+  identidad exacta al centavo. **Ese es el corazón de "variación costos país"**: el
+  efecto PRECIO es el país (la inflación que entró por los insumos); el efecto CONSUMO
+  es la planta (el desperdicio, la eficiencia). Un costista que ve "la chapa subió
+  $500.000" no sabe qué hacer; uno que ve "$480.000 fue precio y $20.000 fue consumo"
+  ya sabe si el problema es de él o del país.
+- El **contraste**: contra eso se puede graficar el IPC del INDEC / el dólar, que ya
+  están en `macro_snapshots`. La pregunta que el panel tiene que contestar es
+  **"¿mis costos suben más o menos que el país?"**.
+- **Regla de oro para cuando se implemente (decisión de Lautaro):** si no hay al menos
+  **dos períodos cerrados**, el panel **dice que no hay datos suficientes** ("cerrá al
+  menos dos meses para ver tu índice de costos"). **Nunca** se inventa una serie ni se
+  rellena con datos de ejemplo. Es exactamente el error que estamos borrando hoy.
+
+### Hallazgos laterales del módulo macro (anotados, NO corregidos)
+
+1. `GET /macro/landing` (público, sin auth) **no tiene ningún consumidor** en el
+   frontend de este repo. O quedó huérfano, o lo consume una vitrina que no vive acá.
+2. `useMacroHistory` (`alerts/alert-hooks.ts`) manda el query param como
+   `indicatorCode`, pero el schema de la ruta (`macro.routes.ts`) lo lee como
+   `indicator` → **el filtro se ignora en silencio**. Afecta el % de variación del
+   dólar en `MacroRiskPanel`. Es un bug real, chico, y no es de esta sesión.
+3. `propagationPreview()` (`macro-service.ts`) multiplica el costo por un
+   `changeFactor` **que tipea el usuario a mano**: es un simulador manual, no está
+   atado a ningún indicador real. Está bien que exista, pero no es "variación país".
+
+---
+
+# ⚠️ AVISO PARA ALAN — dos costos unitarios distintos (antes de mergear `AlanSandbox`)
+
+**El problema.** En `AlanSandbox` (commit `e0307ae`, todavía **no** está en `devAdmin`)
+el motor devuelve `detail.unitCost`, y divide por `input.sales.quantity` — las unidades
+**VENDIDAS**:
+
+```ts
+const unitsProduced = Number(input.sales.quantity) || 0;   // ← son las VENDIDAS
+```
+
+En paralelo, en `lautaro-test` se agregó el campo `productionQuantity` (unidades
+**PRODUCIDAS**, migración `20260713010000`) **justamente porque dividir por las vendidas
+está mal**: si se producen 1.000 y se venden 800, dividir por 800 **infla el costo
+unitario un 25%** (hay un test que lo demuestra: `tests/application/production-quantity.test.ts`).
+
+**Lo peligroso:** git **mergea las dos cosas sin quejarse** (lo verificamos con
+`git merge-tree`: cero conflictos de texto, en los dos repos). O sea que el error **no
+lo va a frenar nadie**: la app terminaría mostrando **dos costos unitarios distintos** —
+el del motor (dividido por lo vendido, inflado) y el de la pantalla de Comparación
+(dividido por lo producido, correcto).
+
+**El arreglo (3 líneas, cuando `AlanSandbox` entre a `devAdmin`):** que el motor reciba
+las unidades producidas y las use, cayéndose a las vendidas solo si no están:
+
+```ts
+const unitsProduced = Number(input.production?.quantity ?? input.sales.quantity) || 0;
+```
+
+Es de Alan ese código, así que la decisión es suya — pero que entre a `devAdmin` sabiendo
+esto, no sin saberlo.
+
+---
+
+## Sesión 2026-07-13 (cont.) — Problema A: el RITMO DE COSTEO existía y nadie podía encenderlo
+
+**Cómo apareció.** El problema A era chico y de pantalla: (1) el botón "Nueva estructura"
+estaba en el header, lejos de la lista que modifica, y (2) el alta de estructura obligaba a
+**tipear el período a mano** (`Input label="Período (YYYY-MM)"`, `required`). Al ir a sacar
+ese campo apareció lo de fondo.
+
+**Lo que estaba roto de verdad.** El calendario de períodos (`domain/periods/period-calendar.ts`,
+Fase 1) maneja los **tres ritmos** completos — mensual (`2026-07`), quincenal (`2026-07-Q1`) y
+trimestral (`2026-T3`): sus fechas límite, su nombre, cuál es el siguiente. `Company.periodicity`
+existe en la base desde la migración `20260712000000_add_cost_periods`, y `cost-period-service`
+lo lee en **cada** apertura de período.
+
+Pero **no había forma de elegirlo**: no estaba en el formulario de empresa, y
+`createCompanySchema` ni siquiera aceptaba el campo. Toda empresa quedaba en `MONTHLY` (el
+default de la DB) **para siempre y en silencio**. El motor de ritmos estaba entero y con el
+interruptor apagado.
+
+Por eso el campo tipeado se sentía mal, y es la parte importante: le pedía al costista un
+código **mensual** aunque su empresa cerrara por quincena. O sea, **el formulario lo obligaba
+a mentir**, y la estructura nacía en el período equivocado.
+
+**Lo que se hizo.**
+- `company.schema.ts`: `periodicity` (`MONTHLY|BIWEEKLY|QUARTERLY`) opcional en alta y edición.
+  `company-service` lo persiste. **Sin migración: la columna ya estaba** (`migrate deploy` →
+  "No pending migrations").
+- `createCostStructureSchema`: `period` pasa a **opcional**, y su regex se ensancha a las tres
+  formas de código. Si llega, se respeta (compatibilidad: importaciones, datos viejos).
+- `CostStructureService.create()`: si no viene, lo **deriva** con `codeFromDate(new Date(),
+  company.periodicity)` — la función pura que ya existía. **No se escribió lógica de fechas
+  nueva.** La auditoría registra el período **derivado**, no el que tipeó el usuario.
+- Frontend: selector "Ritmo de costeo" en el alta/edición de empresa; el `Input` de período
+  murió; el botón "Nueva estructura" pasó al `action` del `CardHeader` de "Estructuras de
+  costos" (patrón que ya usaba `OperatorsSection`).
+
+**Decisión (Lautaro, 13/07/2026): el ritmo lo posee la EMPRESA, no la estructura.** Es donde
+ya vivía la columna → cero migración. Un cliente costea todo con el mismo ritmo.
+👉 **PARA DECIDIR EN EQUIPO:** si alguna vez un mismo cliente necesita costear un producto por
+quincena y otro por mes, hace falta un `periodicity` opcional **por estructura** que caiga al
+de la empresa. Es una migración aditiva. Hoy **no** se hizo: no hay caso real que lo pida.
+
+**El candado (decisión de diseño, no pedida pero necesaria).** El ritmo **no se puede cambiar
+con la empresa en marcha**: si ya hay períodos (abiertos o cerrados), `CompanyService.update()`
+corta con `ConflictError`. Un período viejo lleva un código del ritmo anterior; cambiarlo dejaría
+dos ritmos conviviendo en la misma empresa y el arrastre de existencia de un período al siguiente
+dejaría de tener sentido. Un cambio de ritmo es una **decisión contable**, no un campo más del
+formulario. Se puede elegir libremente mientras no haya ningún período.
+
+**Por qué es seguro guardar `2026-07-Q1` en `cost_structures.period`** (una columna documentada
+como "YYYY-MM"): ese string **no lo parsea nadie**. Se usa como etiqueta y como clave del libro
+mayor. Y `normalizeLegacyCode()` ya contemplaba explícitamente recibir un código nuevo ("ya está
+en el formato nuevo") y devolverlo tal cual. El camino legado (estructuras con `2026-06` tipeado)
+sigue funcionando igual.
+
+**Verificado contra la DB real** (Postgres :5433), corriendo los servicios de verdad:
+
+| ritmo | estructura sin período tipeado | primer período | fechas |
+|---|---|---|---|
+| MONTHLY | `2026-07` | "Julio 2026" | 01/07 a 31/07 |
+| BIWEEKLY | `2026-07-Q1` | "1ª quincena de Julio 2026" | 01/07 a 15/07 |
+| QUARTERLY | `2026-T3` | "3º trimestre 2026" | 01/07 a 30/09 |
+
+Y lo que demuestra que el interruptor quedó encendido: en la quincenal, **el período siguiente
+es la 2ª quincena de julio, no agosto**. El candado del ritmo también cortó como debía.
+Suite completa: **321 verdes**. Tests nuevos en `tests/application/periodicidad-empresa.test.ts`.
+
+---
+
+## Sesión 2026-07-13 (cont.) — Problema 3: el dictado por voz
+
+**Por qué "no funcionaba bien".** No era una cosa: eran cuatro. El dictado estaba
+**copiado y pegado a mano en 4 lugares** (`ChatComposer`, `NewCompanyForm` de
+`CompaniesPage`, el `AiSuggesterSection` local de `CompanyDetailPage`, y un
+`components/AiSuggesterSection.tsx` **que no renderizaba nadie**), cada copia con sus
+propios bugs y ninguna compartiendo una línea con las otras.
+
+Los tres que lo rompían de verdad:
+
+1. **`continuous = false`** en tres de las cuatro copias: el navegador **corta el
+   micrófono al primer silencio**. El costista frenaba a pensar —describiendo un proceso
+   productivo, o sea justo cuando más se piensa— y el micrófono se apagaba solo, sin
+   avisar. Para "contame cómo produce tu empresa" era inusable.
+2. **Frases perdidas** en `ChatComposer` (la única con `continuous = true`): hacía
+   `setText(text + nuevo)` con un `text` **congelado en el momento de arrancar**
+   (stale closure). Con `continuous`, el handler corre una vez por frase, y todas leían
+   el mismo `text` viejo: **la 2ª frase pisaba a la 1ª, la 3ª a la 2ª.** Dictabas tres
+   oraciones y quedaba una. El tipo del prop lo habilitaba: `setText: (t: string) => void`
+   ni siquiera permitía la forma funcional.
+3. **Silencio ante el error.** Dos copias no tenían `onerror` **en absoluto**; las otras
+   dos hacían `console.error`. Micrófono bloqueado por el navegador, sin micrófono
+   conectado, o el servicio de voz caído → el botón dejaba de titilar y **nada más**.
+   El usuario no tenía cómo saber qué pasó.
+
+Además: sólo se leía `results[0]` (se tiraba todo lo que venía después), no había limpieza
+al salir de la pantalla (el micrófono podía quedar prendido), `start()` sin `try/catch`
+(doble clic → `InvalidStateError`), y `CompaniesPage` mostraba **"Deteniendo…"
+MIENTRAS grababa** — la pantalla mentía sobre lo que estaba pasando.
+
+**Lo que se hizo.** Un solo hook, `src/lib/use-dictation.ts`, y las tres pantallas vivas
+pasan por ahí. `continuous = true`; **se reengancha solo** si el navegador corta igual
+(Chrome lo hace tras un silencio largo, aunque esté en `continuous`) — eso es lo que
+permite frenar a pensar. El texto reconocido se **entrega** (`onText`) y el que llama lo
+agrega con la forma funcional, así que no puede pisar nada. Cada código de error del
+navegador tiene un mensaje que dice **qué pasó y qué hacer** (`not-allowed` → "habilitá
+el micrófono desde el candado de la barra de direcciones"). Se lee desde `resultIndex`,
+se aborta al desmontar, y `start()` va en `try/catch`.
+
+**Archivos muertos borrados** (con OK de Lautaro; nadie los importaba, verificado con
+typecheck y build después de borrarlos): `components/AiSuggesterSection.tsx` (la 4ª copia
+del dictado, la que no renderizaba nadie) y `components/NewStructureForm.tsx` (copia
+huérfana con el campo período tipeado que acabábamos de matar). Eran la trampa clásica de
+"arreglé la copia equivocada".
+
+**El techo de este enfoque (queda anotado, NO se hizo).** El reconocimiento lo hace el
+**navegador** (Chrome manda el audio a Google), no un servidor nuestro. Por eso no
+necesita clave de API y anda hoy mismo — pero **no entiende el vocabulario de costos**:
+"prorrateo", "PPP", "CIF", "$1.250,50" salen mal. Arreglar eso pide **Whisper del lado del
+servidor** (Groq ya está en el proyecto y ofrece `whisper-large-v3`), donde se le puede
+pasar una lista de términos del oficio para que los transcriba bien.
+👉 **Decisión de Lautaro (13/07/2026): primero el arreglo del navegador** —anda ya, sin
+clave— y **Whisper queda como el paso siguiente.** No se hizo ahora porque la clave de
+Groq en local es un placeholder: se podría escribir, pero no probar de punta a punta, y
+este proyecto no entrega cosas sin probar.
+
+⚠️ **Hallazgo lateral (real, no de esta sesión):** el guard `isConfigured` de Groq es
+`this.apiKey.length > 10`, y el placeholder `'groq_placeholder'` tiene 16 caracteres →
+**pasa el guard**. O sea que en local no degrada elegante: dispara el HTTP igual, se come
+un 401 y lo esconde en un `console.error`. Cuando se toque Whisper, arreglar esto también.
