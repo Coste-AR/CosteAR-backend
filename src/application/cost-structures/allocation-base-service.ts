@@ -90,6 +90,54 @@ export class AllocationBaseService {
   }
 
   /**
+   * Sincroniza (persiste) al registro trazable las unidades por centro de una
+   * base, tomándolas de la config al guardar (3b-2). Append-only con detección
+   * de cambios: solo versiona los centros cuyo valor cambió, y anula los que ya
+   * no están en la base, dejando la tabla como ESPEJO exacto de la config. Si la
+   * base no está en el catálogo (ej. un valor legado "fuera del catálogo"), no
+   * persiste nada y devuelve 0 (el motor cae al valor de la config). Devuelve la
+   * cantidad de centros modificados.
+   */
+  async syncValues(
+    userId: string,
+    structureId: string,
+    baseCode: string,
+    units: Record<string, number>,
+  ): Promise<number> {
+    const s = await this.requireStructure(userId, structureId);
+    const base = await this.db.allocationBase.findFirst({
+      where: { code: baseCode, OR: [{ companyId: null }, { companyId: s.companyId }] },
+    });
+    if (!base) return 0; // base no catalogada → no se persiste; se usa la config
+    const current = await this.db.allocationBaseValue.findMany({
+      where: { baseId: base.id, structureId, voidedAt: null },
+    });
+    const curMap = new Map(current.map((v) => [v.centerId, Number(v.value)]));
+    const provided = new Set(Object.keys(units));
+    let changed = 0;
+
+    // Alta/actualización: solo si el valor cambió (evita versionar de más).
+    for (const [centerId, raw] of Object.entries(units)) {
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0) continue;
+      if (curMap.get(centerId) === value) continue;
+      await this.setValue(userId, structureId, { baseId: base.id, centerId, value });
+      changed++;
+    }
+    // Baja lógica: centros que ya no están en la base quedan anulados (espejo).
+    for (const v of current) {
+      if (!provided.has(v.centerId)) {
+        await this.db.allocationBaseValue.updateMany({
+          where: { baseId: base.id, structureId, centerId: v.centerId, voidedAt: null },
+          data: { voidedAt: new Date() },
+        });
+        changed++;
+      }
+    }
+    return changed;
+  }
+
+  /**
    * Resuelve las unidades por centro de una base (para el prorrateo primario
    * en modo 'base'). Devuelve `{ centerId: value }` con los valores vigentes.
    * Si no hay ningún valor cargado para esa base, lanza 422 accionable.

@@ -14,6 +14,10 @@ import type {
   IndirectCostsSectionData,
   SalesSectionData,
 } from '../../infrastructure/ai/groq-service.js';
+import {
+  classifySocialCharge,
+  normalizeChargeName,
+} from '../../domain/knowledge/social-charges-catalog.js';
 
 // ─── Tipos internos de CostStructure ─────────────────────────────────────────
 
@@ -176,7 +180,7 @@ function populateRawMaterial(
   return cfg;
 }
 
-function populateDirectLabor(
+export function populateDirectLabor(
   current: DirectLaborConfig | null,
   sec: DirectLaborSectionData,
 ): DirectLaborConfig {
@@ -219,18 +223,54 @@ function populateDirectLabor(
     if (sec.itcs.derivationBase != null) cfg.itcs.derivationBase = normPercent(n(sec.itcs.derivationBase, 0.27));
     if (sec.itcs.fixedArt       != null) cfg.itcs.fixedArt       = normPercent(n(sec.itcs.fixedArt, 0.015));
 
-    if (!Array.isArray(cfg.itcs.uncertainRemunerative)) cfg.itcs.uncertainRemunerative = [];
-    for (const item of sec.itcs.uncertainRemunerative ?? []) {
-      const existing = cfg.itcs.uncertainRemunerative.find(
-        (r) => r.name.toLowerCase().startsWith(item.name.slice(0, 3).toLowerCase())
-      );
+    if (!Array.isArray(cfg.itcs.uncertainRemunerative))    cfg.itcs.uncertainRemunerative    = [];
+    if (!Array.isArray(cfg.itcs.uncertainNonRemunerative)) cfg.itcs.uncertainNonRemunerative = [];
+
+    // D-2 — Cargas sociales inciertas: la IA EXTRAE, el SISTEMA CLASIFICA.
+    //
+    // Solo las inciertas REMUNERATIVAS generan cargas derivadas (clase 8). Si una
+    // no remunerativa (uniformes, viandas…) cae como remunerativa, el ITCS se infla
+    // con derivadas que no corresponden. Por eso la clasificación NO se le cree a la
+    // IA: la decide el catálogo de la cátedra.
+    const incoming: { name: string; coefficient: number; aiHint: 'remunerative' | 'nonRemunerative' | null }[] = [
+      // Formato nuevo: la IA no clasifica.
+      ...(sec.itcs.uncertainCharges ?? []).map((i) => ({ ...i, aiHint: null })),
+      // Formato viejo (documentos analizados antes de D-2): su clasificación es
+      // apenas una pista, y solo se usa si el catálogo no reconoce el concepto.
+      ...(sec.itcs.uncertainRemunerative ?? []).map((i) => ({ ...i, aiHint: 'remunerative' as const })),
+      ...(sec.itcs.uncertainNonRemunerative ?? []).map((i) => ({ ...i, aiHint: 'nonRemunerative' as const })),
+    ];
+
+    for (const item of incoming) {
+      const name = String(item.name ?? '').trim();
+      if (!name) continue;
+      // El IAP/ausentismo lo calcula el motor a partir de los días: no se carga acá.
+      if (normalizeChargeName(name).startsWith('iap') || normalizeChargeName(name).startsWith('yap')) continue;
+
+      // Catálogo primero. Si no lo reconoce: la pista de la IA; y si no hay pista,
+      // va a NO remunerativa (la opción que NO infla el costo). El costista lo ve
+      // en el formulario y lo mueve si corresponde.
+      const kind = classifySocialCharge(name) ?? item.aiHint ?? 'nonRemunerative';
+      const coefficient = normPercent(n(item.coefficient));
+
+      // ¿Ya está cargado (en cualquiera de las dos listas)? Se compara el nombre
+      // completo normalizado — nunca por las primeras letras, porque "Premio
+      // Asistencia" y "Premio Productividad" son conceptos distintos.
+      const target = kind === 'remunerative' ? cfg.itcs.uncertainRemunerative : cfg.itcs.uncertainNonRemunerative;
+      const other  = kind === 'remunerative' ? cfg.itcs.uncertainNonRemunerative : cfg.itcs.uncertainRemunerative;
+      const sameName = (r: { name: string }) => normalizeChargeName(r.name) === normalizeChargeName(name);
+
+      const existing = target.find(sameName);
       if (existing) {
-        if (!existing.coefficient) {
-          existing.coefficient = normPercent(n(item.coefficient));
-        }
-      } else {
-        cfg.itcs.uncertainRemunerative.push({ name: item.name, coefficient: normPercent(n(item.coefficient)) });
+        // Nunca se pisa un coeficiente que ya puso el costista.
+        if (!existing.coefficient) existing.coefficient = coefficient;
+        continue;
       }
+      // Si el costista ya lo tenía en la OTRA lista, se respeta su decisión:
+      // no se mueve solo (mover cambiaría el costo sin avisar). El formulario avisa.
+      if (other.some(sameName)) continue;
+
+      target.push({ name, coefficient });
     }
   }
 
@@ -272,31 +312,24 @@ function populateIndirectCosts(
     }
   }
 
-  // Conceptos CIF — construir un mapa de IDs de centros ya existentes para la distribución
+  // Mapa de IDs de centros por nombre (se usa más abajo para matchear los datos
+  // de fin de mes por centro productivo).
   const centerMap: Record<string, string> = {};
   for (const c of cfg.centers) { centerMap[c.name.toLowerCase()] = c.id; }
 
+  // Conceptos CIF — la IA aporta nombre e importes. La DISTRIBUCIÓN (prorrateo)
+  // NUNCA se toma de la IA (E1): el reparto lo pone el costista a mano o lo deriva
+  // una base de asignación. Los conceptos nuevos nacen con distribución vacía.
   for (const concept of sec.concepts ?? []) {
-    const dist: Record<string, number> = {};
-    for (const [k, v] of Object.entries(concept.distribution ?? {})) {
-      const resolvedId = centerMap[k.toLowerCase()] ?? k;
-      dist[resolvedId] = Number(v);
-    }
-
     const existing = cfg.concepts.find((c) => c.name.toLowerCase() === concept.name.toLowerCase());
     if (existing) {
       if (!existing.amount.fixed) existing.amount.fixed = n(concept.amountFixed);
       if (!existing.amount.variable) existing.amount.variable = n(concept.amountVariable);
-      for (const [centerId, val] of Object.entries(dist)) {
-        if (!existing.distribution[centerId]) {
-          existing.distribution[centerId] = val;
-        }
-      }
     } else {
       cfg.concepts.push({
         name: concept.name,
         amount: { fixed: n(concept.amountFixed), variable: n(concept.amountVariable) },
-        distribution: dist,
+        distribution: {},
         fromDocument: true,
       });
     }

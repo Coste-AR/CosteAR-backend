@@ -12,8 +12,12 @@ import {
 import {
   runCalculation,
   computeProductiveBudgets,
+  applyPrimaryAllocationBases,
+  applySecondaryAllocationBases,
   type CalculationInput,
 } from './calculate.js';
+import { AllocationBaseService } from './allocation-base-service.js';
+import type { IndirectCostConfig } from '../../shared/schemas/cost.schema.js';
 
 /**
  * Gestión de estructuras de costos y ejecución de cálculos.
@@ -124,6 +128,68 @@ export class CostStructureService {
     });
   }
 
+  /**
+   * Resuelve el reparto en modo 'base' del PRIMARIO (conceptos) y del SECUNDARIO
+   * (centros de servicio): lee las unidades vigentes de cada base de asignación
+   * (allocation_base_values) y las vuelca a `distribution` / `toProductive`, para
+   * que el motor derive los % (nunca la IA, nunca a mano). Tolerante: si una base
+   * todavía no tiene valores cargados, deja ese concepto/servicio como está (no
+   * bloquea el guardado; la validación de insumos lo detecta al calcular).
+   */
+  private async resolveAllocationBases(
+    userId: string,
+    structureId: string,
+    config: IndirectCostConfig,
+  ): Promise<IndirectCostConfig> {
+    const baseCodes = [
+      ...new Set([
+        ...config.concepts
+          .filter((c) => c.allocationMode === 'base' && c.baseCode)
+          .map((c) => c.baseCode as string),
+        ...config.serviceDistributions
+          .filter((d) => d.distributionMode === 'base' && d.baseCode)
+          .map((d) => d.baseCode as string),
+      ]),
+    ];
+    if (baseCodes.length === 0) return config;
+    const alloc = new AllocationBaseService(this.db);
+
+    // 3b-2: persistir en el registro trazable (append-only, con historial) las
+    // unidades por centro que vienen de la config, ANTES de resolver. Así el
+    // motor lee de la tabla auditable y no de un dato suelto. Las unidades del
+    // primario viven en `distribution`; las del secundario, en `toProductive`.
+    const unitsByCode = new Map<string, Record<string, number>>();
+    for (const c of config.concepts) {
+      if (c.allocationMode === 'base' && c.baseCode) {
+        unitsByCode.set(c.baseCode, { ...(unitsByCode.get(c.baseCode) ?? {}), ...(c.distribution ?? {}) });
+      }
+    }
+    for (const d of config.serviceDistributions) {
+      if (d.distributionMode === 'base' && d.baseCode) {
+        unitsByCode.set(d.baseCode, { ...(unitsByCode.get(d.baseCode) ?? {}), ...(d.toProductive ?? {}) });
+      }
+    }
+    for (const [code, u] of unitsByCode) {
+      try {
+        await alloc.syncValues(userId, structureId, code, u);
+      } catch {
+        /* si la persistencia falla, no bloquea el guardado; se usa la config */
+      }
+    }
+
+    const units = new Map<string, Record<string, number>>();
+    for (const code of baseCodes) {
+      try {
+        units.set(code, await alloc.resolveBaseUnits(userId, structureId, code));
+      } catch {
+        /* base sin valores todavía: se deja el reparto como estaba */
+      }
+    }
+    const resolver = (code: string) => units.get(code);
+    // Primario primero (conceptos), luego secundario (servicios).
+    return applySecondaryAllocationBases(applyPrimaryAllocationBases(config, resolver), resolver);
+  }
+
   /** Actualiza uno de los tres bloques de configuración (validado con Zod). */
   async updateConfig(
     userId: string,
@@ -151,20 +217,25 @@ export class CostStructureService {
     } else {
       oldValue = before.indirectCostConfig;
       const parsed = indirectCostConfigSchema.parse(rawConfig);
+      // Reparto en modo 'base' (primario y secundario): "bajar" las unidades de
+      // la base de asignación a números concretos (`distribution`/`toProductive`)
+      // para que el motor derive los % (trazable, nunca la IA). No-op si ningún
+      // concepto/servicio está en modo 'base'.
+      const resolved = await this.resolveAllocationBases(userId, id, parsed);
       // Auto-completar el PRESUPUESTO de cada centro productivo con el resultado
       // del prorrateo (primario + cierre del secundario). El usuario nunca lo
       // tipea: queda en solo lectura en la UI. Si la config aún está incompleta
       // (p. ej. sin conceptos), se persiste tal cual y se completará al re-guardar.
       try {
-        const budgets = computeProductiveBudgets(parsed);
-        parsed.productiveSettings = parsed.productiveSettings.map((p) => ({
+        const budgets = computeProductiveBudgets(resolved);
+        resolved.productiveSettings = resolved.productiveSettings.map((p) => ({
           ...p,
           budget: budgets[p.centerId] ?? p.budget ?? { fixed: 0, variable: 0 },
         }));
       } catch {
         /* config incompleta: se persiste sin recalcular el presupuesto */
       }
-      newValue = parsed as object;
+      newValue = resolved as object;
       data.indirectCostConfig = newValue;
     }
 

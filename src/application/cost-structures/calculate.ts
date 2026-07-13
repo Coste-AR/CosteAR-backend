@@ -129,6 +129,11 @@ export interface CalculationOutput {
           quotaFixed: number;
           quotaVariable: number;
           overUnderApplied: number; // aplicado − real (sobre/subaplicación)
+          /** E3 — faltan datos de cierre (actividad real y/o CIP real): las
+           *  variaciones no se calculan y el CIF se aplica a capacidad normal. */
+          pendingClosing: boolean;
+          /** Sobre qué nivel de actividad se aplicó el CIF al producto. */
+          appliedOn: 'actualActivity' | 'normalCapacity';
         }
       >;
     };
@@ -152,11 +157,89 @@ export interface CalculationOutput {
         normalCapacity: number;
         actualActivity: number;
         actualCip: Money;
+        pendingClosing: boolean;
       }
     >;
     statement: CostStatementResult;
     margin: MarginResult;
   };
+}
+
+/**
+ * Deriva el reparto PRIMARIO de los conceptos en modo 'base' a partir de las
+ * UNIDADES de una base de asignación (ej. superficie o focos por centro). Los
+ * porcentajes NO se tipean ni los inventa la IA: el motor los deriva de las
+ * unidades (unidad_centro ÷ Σ unidades) al prorratear. Esta función solo vuelca
+ * las unidades a `distribution`; el cálculo del % lo hace `primaryProration`.
+ *
+ * Solo toca los conceptos en modo 'base'. Los de modo 'percent' o 'direct' (o
+ * sin modo: default 'percent') quedan EXACTAMENTE igual → cero regresión.
+ *
+ * Es PURA: recibe un resolvedor sincrónico `resolveUnits` (sin base de datos)
+ * para testearse al centavo. Si una base no tiene valores todavía, `resolveUnits`
+ * devuelve `undefined` y ese concepto se deja como estaba.
+ *
+ * @param resolveUnits  baseCode → { centerId: unidades } (o `undefined`).
+ */
+export function applyPrimaryAllocationBases(
+  config: IndirectCostConfig,
+  resolveUnits: (baseCode: string) => Record<string, number> | undefined,
+): IndirectCostConfig {
+  const validIds = new Set(config.centers.map((c) => c.id));
+  const concepts = config.concepts.map((c) => {
+    if (c.allocationMode !== 'base' || !c.baseCode) return c;
+    const units = resolveUnits(c.baseCode);
+    if (!units) return c;
+    const distribution: Record<string, number> = {};
+    for (const [centerId, value] of Object.entries(units)) {
+      if (!validIds.has(centerId)) continue; // ignorar centros que no existen
+      if (!(value > 0)) continue; // solo unidades positivas suman a la base
+      distribution[centerId] = value;
+    }
+    return { ...c, distribution };
+  });
+  return { ...config, concepts };
+}
+
+/**
+ * Deriva el reparto SECUNDARIO de los centros de servicio en modo 'base' a
+ * partir de las UNIDADES de una base de asignación (ej. horas-máquina o
+ * superficie por centro). Los porcentajes NO se tipean: el motor los deriva de
+ * las unidades (unidad_centro ÷ Σ unidades) al hacer el prorrateo. Esta función
+ * solo vuelca las unidades a `toProductive`; el cálculo del % lo hace el motor.
+ *
+ * Solo toca los servicios en modo 'base'. Los de modo 'manual' (o sin modo:
+ * default 'manual') quedan EXACTAMENTE igual → cero regresión sobre lo cargado.
+ *
+ * Es PURA: recibe un resolvedor sincrónico `resolveUnits` (sin base de datos)
+ * para poder testearse al centavo. La capa de servicio le pasa las unidades ya
+ * leídas de `allocation_base_values`. Si una base no tiene valores todavía,
+ * `resolveUnits` devuelve `undefined` y ese servicio se deja como estaba (la
+ * validación de insumos detecta el reparto vacío y pide cargar la base).
+ *
+ * @param resolveUnits  baseCode → { centerId: unidades } (o `undefined`).
+ */
+export function applySecondaryAllocationBases(
+  config: IndirectCostConfig,
+  resolveUnits: (baseCode: string) => Record<string, number> | undefined,
+): IndirectCostConfig {
+  const validIds = new Set(config.centers.map((c) => c.id));
+  const serviceDistributions = config.serviceDistributions.map((d) => {
+    if (d.distributionMode !== 'base' || !d.baseCode) return d;
+    const units = resolveUnits(d.baseCode);
+    if (!units) return d;
+    const toProductive: Record<string, number> = {};
+    for (const [centerId, value] of Object.entries(units)) {
+      if (centerId === d.serviceCenterId) continue; // un servicio no se reparte a sí mismo
+      if (!validIds.has(centerId)) continue; // ignorar centros que no existen
+      if (!(value > 0)) continue; // solo unidades positivas suman a la base
+      toProductive[centerId] = value;
+    }
+    // El fijo y el variable siguen la MISMA base (se limpian los overrides para
+    // que el motor caiga al fallback `toProductive`).
+    return { ...d, toProductive, toProductiveFixed: {}, toProductiveVariable: {} };
+  });
+  return { ...config, serviceDistributions };
 }
 
 /**
@@ -269,13 +352,39 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     // compara contra el presupuesto para obtener la variación de presupuesto.
     const actualCip = Money.of(setting.actualCip);
 
-    const variance = calcVarianceAnalysis(
-      quota,
-      budget,
-      setting.normalCapacity,
-      setting.actualActivity,
-      actualCip,
-    );
+    // E3 — ACTIVIDAD REAL y CIP REAL son datos de CIERRE de mes: durante el mes
+    // todavía no existen. "Todavía no lo sé" NO es lo mismo que "es cero":
+    //
+    //   · Sin actividad real, el CIF se aplica sobre la CAPACIDAD NORMAL (costo
+    //     predeterminado puro). Antes se aplicaba sobre cero → el producto salía
+    //     costeado SIN CIF y sin ningún aviso.
+    //   · Sin CIP real no hay contra qué comparar: las variaciones quedan en cero
+    //     y el centro se marca como PENDIENTE DE CIERRE, en vez de mostrar una
+    //     variación fantasma calculada contra cero.
+    const hasActualActivity = setting.actualActivity > 0;
+    const hasActualCip = actualCip.toNumber() > 0;
+    const pendingClosing = !hasActualActivity || !hasActualCip;
+
+    // Nivel de actividad con el que se aplica el CIF al producto.
+    const applicationLevel = hasActualActivity ? setting.actualActivity : setting.normalCapacity;
+    const cipApplied = quota.totalQuota.multiply(applicationLevel);
+
+    // Las variaciones solo tienen sentido con el cierre cargado.
+    const variance: VarianceAnalysis = pendingClosing
+      ? {
+          cipApplied,
+          overUnderApplied: Money.zero(),
+          budgetVariance: Money.zero(),
+          volumeVariance: Money.zero(),
+        }
+      : calcVarianceAnalysis(
+          quota,
+          budget,
+          setting.normalCapacity,
+          setting.actualActivity,
+          actualCip,
+        );
+
     indirectCostsApplied = indirectCostsApplied.add(variance.cipApplied);
 
     perDepartment[setting.centerId] = {
@@ -292,6 +401,8 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       quotaFixed: quota.fixedQuota.toNumber(),
       quotaVariable: quota.variableQuota.toNumber(),
       overUnderApplied: variance.overUnderApplied.toNumber(),
+      pendingClosing,
+      appliedOn: hasActualActivity ? 'actualActivity' : 'normalCapacity',
     };
     indirectPerDepartment[setting.centerId] = {
       quota,
@@ -300,6 +411,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       normalCapacity: setting.normalCapacity,
       actualActivity: setting.actualActivity,
       actualCip,
+      pendingClosing,
     };
   }
 

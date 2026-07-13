@@ -166,7 +166,17 @@ export const indirectCostConfigSchema = z.object({
         toProductive: z.record(z.string(), nonNeg).optional().default({}),
         toProductiveFixed: z.record(z.string(), nonNeg).optional().default({}),
         toProductiveVariable: z.record(z.string(), nonNeg).optional().default({}),
-        // Base física opcional del secundario (para mostrarla en el árbol).
+        // Cómo se arma el reparto secundario de este servicio:
+        //  - 'manual' : el costista tipea los % por centro (toProductive*). Es el
+        //               modo por defecto → todo lo ya cargado sigue igual.
+        //  - 'base'   : el motor DERIVA el reparto desde las unidades de una base
+        //               física (`baseCode`); los valores por centro se resuelven
+        //               desde allocation_base_values y se vuelcan a `toProductive`
+        //               en la capa de servicio antes de calcular. El costista no
+        //               tipea porcentajes: salen de la base (trazable).
+        distributionMode: z.enum(['manual', 'base']).optional().default('manual'),
+        // Base física del secundario. Requerida en modo 'base'; en 'manual' es
+        // opcional (solo etiqueta para mostrar en el árbol).
         baseCode: z.string().max(60).optional(),
       }),
     )
