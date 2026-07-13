@@ -570,3 +570,102 @@ camino real nunca hace DELETE. La bomba está armada, no detonada.
   cascadeando a sus estructuras y **va a fallar igual**. La purga hoy es por
   estructura. Si se quiere "borrar la empresa entera", hay que envolver el mismo
   patrón a nivel empresa.
+
+---
+
+## Sesión 2026-07-13 (cont.) — Problema B: se saca la "Variación de Costos País" del Dashboard
+
+**Qué era.** El panel más grande del Dashboard (`DashboardPage.tsx`, "Bento 3") se
+titulaba **"Variación de Costos País"**, con el subtítulo "Histórico consolidado del
+índice de costos CosteAR" y un badge verde **"+20.4% Semestre"**.
+
+**Qué encontramos al abrirlo.** Nada. El gráfico se alimentaba de una constante
+escrita a mano en el módulo:
+
+```ts
+const COST_EVOLUTION = [
+  { name: 'Ene', índice: 100.0 }, ... { name: 'Jun', índice: 120.4 },
+];
+```
+
+No salía de un endpoint, no salía de `MacroSnapshot` (el INDEC/BCRA que **sí** están
+ingestados y son reales), no salía de los períodos del costista, y no dependía ni de
+la empresa ni de la estructura ni de la fecha (hoy es julio y el gráfico terminaba en
+"Jun", siempre). El "+20.4%" tampoco se calculaba: era un string. Era un **dibujo con
+forma de dato**.
+
+**Decisión (Lautaro, 13/07/2026): se saca.** En una herramienta que fija precios
+reales, un número que no se puede rastrear hasta su origen es **peor que no tener el
+número**: el costista no tiene cómo saber que ese no lo es. Todo el resto del sistema
+(trazabilidad, R1 append-only, congelar el resultado al cerrar el mes) existe para
+garantizar exactamente lo contrario. El panel se elimina y el "Centro de Alertas"
+—que sí muestra datos reales— pasa a ocupar la fila entera; no queda un hueco.
+
+**Lo que NO se tocó:** el módulo macro es real y queda como está (`MacroSnapshot`,
+BCRA/INDEC/dolarapi, `MacroPage`, `MacroRiskPanel`). Lo que era mentira era el gráfico
+del Dashboard, no la ingesta.
+
+### El diseño del feature de verdad (queda escrito, NO implementado)
+
+Se posterga a propósito: primero había que borrar la mentira, que es lo urgente. Cuando
+se construya, el insumo **ya existe y está testeado** — no hay que inventar nada:
+
+- La **base**: `application/cost-structures/period-comparison.ts` (Fase 4) ya abre la
+  variación de cada MP en **PRECIO** y **CONSUMO**: `ΔValor = (P₁−P₀)·Q₁ + (Q₁−Q₀)·P₀`,
+  identidad exacta al centavo. **Ese es el corazón de "variación costos país"**: el
+  efecto PRECIO es el país (la inflación que entró por los insumos); el efecto CONSUMO
+  es la planta (el desperdicio, la eficiencia). Un costista que ve "la chapa subió
+  $500.000" no sabe qué hacer; uno que ve "$480.000 fue precio y $20.000 fue consumo"
+  ya sabe si el problema es de él o del país.
+- El **contraste**: contra eso se puede graficar el IPC del INDEC / el dólar, que ya
+  están en `macro_snapshots`. La pregunta que el panel tiene que contestar es
+  **"¿mis costos suben más o menos que el país?"**.
+- **Regla de oro para cuando se implemente (decisión de Lautaro):** si no hay al menos
+  **dos períodos cerrados**, el panel **dice que no hay datos suficientes** ("cerrá al
+  menos dos meses para ver tu índice de costos"). **Nunca** se inventa una serie ni se
+  rellena con datos de ejemplo. Es exactamente el error que estamos borrando hoy.
+
+### Hallazgos laterales del módulo macro (anotados, NO corregidos)
+
+1. `GET /macro/landing` (público, sin auth) **no tiene ningún consumidor** en el
+   frontend de este repo. O quedó huérfano, o lo consume una vitrina que no vive acá.
+2. `useMacroHistory` (`alerts/alert-hooks.ts`) manda el query param como
+   `indicatorCode`, pero el schema de la ruta (`macro.routes.ts`) lo lee como
+   `indicator` → **el filtro se ignora en silencio**. Afecta el % de variación del
+   dólar en `MacroRiskPanel`. Es un bug real, chico, y no es de esta sesión.
+3. `propagationPreview()` (`macro-service.ts`) multiplica el costo por un
+   `changeFactor` **que tipea el usuario a mano**: es un simulador manual, no está
+   atado a ningún indicador real. Está bien que exista, pero no es "variación país".
+
+---
+
+# ⚠️ AVISO PARA ALAN — dos costos unitarios distintos (antes de mergear `AlanSandbox`)
+
+**El problema.** En `AlanSandbox` (commit `e0307ae`, todavía **no** está en `devAdmin`)
+el motor devuelve `detail.unitCost`, y divide por `input.sales.quantity` — las unidades
+**VENDIDAS**:
+
+```ts
+const unitsProduced = Number(input.sales.quantity) || 0;   // ← son las VENDIDAS
+```
+
+En paralelo, en `lautaro-test` se agregó el campo `productionQuantity` (unidades
+**PRODUCIDAS**, migración `20260713010000`) **justamente porque dividir por las vendidas
+está mal**: si se producen 1.000 y se venden 800, dividir por 800 **infla el costo
+unitario un 25%** (hay un test que lo demuestra: `tests/application/production-quantity.test.ts`).
+
+**Lo peligroso:** git **mergea las dos cosas sin quejarse** (lo verificamos con
+`git merge-tree`: cero conflictos de texto, en los dos repos). O sea que el error **no
+lo va a frenar nadie**: la app terminaría mostrando **dos costos unitarios distintos** —
+el del motor (dividido por lo vendido, inflado) y el de la pantalla de Comparación
+(dividido por lo producido, correcto).
+
+**El arreglo (3 líneas, cuando `AlanSandbox` entre a `devAdmin`):** que el motor reciba
+las unidades producidas y las use, cayéndose a las vendidas solo si no están:
+
+```ts
+const unitsProduced = Number(input.production?.quantity ?? input.sales.quantity) || 0;
+```
+
+Es de Alan ese código, así que la decisión es suya — pero que entre a `devAdmin` sabiendo
+esto, no sin saberlo.
