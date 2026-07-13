@@ -9,14 +9,18 @@ import { calcDirectLabor, type DirectLaborResult } from '../../domain/calculatio
 import {
   primaryProration,
   secondaryProration,
+  secondaryProrationStepwise,
   calcPredeterminedQuota,
   calcVarianceAnalysis,
+  fvZero,
   type CostCenter,
   type IndirectCostConcept,
   type FixedVariable,
+  type ServiceClosure,
   type PredeterminedQuota,
   type VarianceAnalysis,
 } from '../../domain/calculations/indirect-costs.js';
+import { MissingAllocationBaseError } from '../../domain/errors/calculation-errors.js';
 import {
   calcCostStatement,
   calcGrossMargin,
@@ -25,6 +29,7 @@ import {
 } from '../../domain/calculations/cost-statement.js';
 import type {
   RawMaterialConfig,
+  RawMaterialSection,
   DirectLaborConfig,
   IndirectCostConfig,
   InventoryInput,
@@ -45,11 +50,18 @@ export const ENGINE_VERSION = 'v1.0.0';
  */
 
 export interface CalculationInput {
-  rawMaterial: RawMaterialConfig;
+  rawMaterial: RawMaterialSection;
   directLabor: DirectLaborConfig;
   indirectCosts: IndirectCostConfig;
   inventory: InventoryInput;
   sales: { unitPrice: number; quantity: number };
+}
+
+/** Resultado por materia prima (Parte 3.1: N materias primas). */
+export interface MaterialResult {
+  config: RawMaterialConfig;
+  optimalLot: Decimal;
+  ledger: StockLedgerResult;
 }
 
 export interface CalculationOutput {
@@ -61,8 +73,43 @@ export interface CalculationOutput {
   grossMargin: number;
   grossMarginPct: number;
   detail: {
-    rawMaterial: { optimalLot: number; finalStockQty: number; finalStockValue: number };
-    directLabor: { workingDays: number; itcsPercent: number; iapPercent: number; hourlyRates: Record<string, number> };
+    rawMaterial: {
+      // Agregados (compat con la vista de resultado): lote del primer material,
+      // stock final sumado de todas las materias primas.
+      optimalLot: number;
+      finalStockQty: number;
+      finalStockValue: number;
+      // Detalle por materia prima (Parte 3.1).
+      materials: Array<{
+        id?: string;
+        code?: string;
+        name?: string;
+        unit?: string;
+        optimalLot: number;
+        finalStockQty: number;
+        finalStockValue: number;
+        consumed: number;
+      }>;
+    };
+    directLabor: {
+      workingDays: number;
+      paidDays: number;
+      itcsPercent: number;
+      iapPercent: number;
+      hourlyRates: Record<string, number>;
+      // Desglose del ITCS para la ficha del departamento (Parte 3.2).
+      itcsBreakdown: { certain: number; uncertainRemunerative: number; derived: number; uncertainNonRemunerative: number };
+      // Detalle por departamento (Parte 3.2).
+      departments: Array<{
+        name: string;
+        basicRemuneration: number;
+        socialChargesCost: number;
+        totalMod: number;
+        hourlyRate: number;
+        budgetedHours: number;
+        realHours?: number;
+      }>;
+    };
     indirectCosts: {
       perDepartment: Record<
         string,
@@ -75,6 +122,18 @@ export interface CalculationOutput {
           actualActivity: number;
           quota: number;
           actualCip: number;
+          // Split fijo/variable del presupuesto derivado y de la cuota (Parte 3.3):
+          // permiten mostrar la ficha del centro con su fórmula (presup ÷ cap. normal).
+          budgetFixed: number;
+          budgetVariable: number;
+          quotaFixed: number;
+          quotaVariable: number;
+          overUnderApplied: number; // aplicado − real (sobre/subaplicación)
+          /** E3 — faltan datos de cierre (actividad real y/o CIP real): las
+           *  variaciones no se calculan y el CIF se aplica a capacidad normal. */
+          pendingClosing: boolean;
+          /** Sobre qué nivel de actividad se aplicó el CIF al producto. */
+          appliedOn: 'actualActivity' | 'normalCapacity';
         }
       >;
     };
@@ -87,8 +146,7 @@ export interface CalculationOutput {
    * final sean, por construcción, la misma fuente de verdad.
    */
   raw: {
-    optimalLot: Decimal;
-    ledger: StockLedgerResult;
+    materials: MaterialResult[];
     labor: DirectLaborResult;
     indirectPerDepartment: Record<
       string,
@@ -99,11 +157,89 @@ export interface CalculationOutput {
         normalCapacity: number;
         actualActivity: number;
         actualCip: Money;
+        pendingClosing: boolean;
       }
     >;
     statement: CostStatementResult;
     margin: MarginResult;
   };
+}
+
+/**
+ * Deriva el reparto PRIMARIO de los conceptos en modo 'base' a partir de las
+ * UNIDADES de una base de asignación (ej. superficie o focos por centro). Los
+ * porcentajes NO se tipean ni los inventa la IA: el motor los deriva de las
+ * unidades (unidad_centro ÷ Σ unidades) al prorratear. Esta función solo vuelca
+ * las unidades a `distribution`; el cálculo del % lo hace `primaryProration`.
+ *
+ * Solo toca los conceptos en modo 'base'. Los de modo 'percent' o 'direct' (o
+ * sin modo: default 'percent') quedan EXACTAMENTE igual → cero regresión.
+ *
+ * Es PURA: recibe un resolvedor sincrónico `resolveUnits` (sin base de datos)
+ * para testearse al centavo. Si una base no tiene valores todavía, `resolveUnits`
+ * devuelve `undefined` y ese concepto se deja como estaba.
+ *
+ * @param resolveUnits  baseCode → { centerId: unidades } (o `undefined`).
+ */
+export function applyPrimaryAllocationBases(
+  config: IndirectCostConfig,
+  resolveUnits: (baseCode: string) => Record<string, number> | undefined,
+): IndirectCostConfig {
+  const validIds = new Set(config.centers.map((c) => c.id));
+  const concepts = config.concepts.map((c) => {
+    if (c.allocationMode !== 'base' || !c.baseCode) return c;
+    const units = resolveUnits(c.baseCode);
+    if (!units) return c;
+    const distribution: Record<string, number> = {};
+    for (const [centerId, value] of Object.entries(units)) {
+      if (!validIds.has(centerId)) continue; // ignorar centros que no existen
+      if (!(value > 0)) continue; // solo unidades positivas suman a la base
+      distribution[centerId] = value;
+    }
+    return { ...c, distribution };
+  });
+  return { ...config, concepts };
+}
+
+/**
+ * Deriva el reparto SECUNDARIO de los centros de servicio en modo 'base' a
+ * partir de las UNIDADES de una base de asignación (ej. horas-máquina o
+ * superficie por centro). Los porcentajes NO se tipean: el motor los deriva de
+ * las unidades (unidad_centro ÷ Σ unidades) al hacer el prorrateo. Esta función
+ * solo vuelca las unidades a `toProductive`; el cálculo del % lo hace el motor.
+ *
+ * Solo toca los servicios en modo 'base'. Los de modo 'manual' (o sin modo:
+ * default 'manual') quedan EXACTAMENTE igual → cero regresión sobre lo cargado.
+ *
+ * Es PURA: recibe un resolvedor sincrónico `resolveUnits` (sin base de datos)
+ * para poder testearse al centavo. La capa de servicio le pasa las unidades ya
+ * leídas de `allocation_base_values`. Si una base no tiene valores todavía,
+ * `resolveUnits` devuelve `undefined` y ese servicio se deja como estaba (la
+ * validación de insumos detecta el reparto vacío y pide cargar la base).
+ *
+ * @param resolveUnits  baseCode → { centerId: unidades } (o `undefined`).
+ */
+export function applySecondaryAllocationBases(
+  config: IndirectCostConfig,
+  resolveUnits: (baseCode: string) => Record<string, number> | undefined,
+): IndirectCostConfig {
+  const validIds = new Set(config.centers.map((c) => c.id));
+  const serviceDistributions = config.serviceDistributions.map((d) => {
+    if (d.distributionMode !== 'base' || !d.baseCode) return d;
+    const units = resolveUnits(d.baseCode);
+    if (!units) return d;
+    const toProductive: Record<string, number> = {};
+    for (const [centerId, value] of Object.entries(units)) {
+      if (centerId === d.serviceCenterId) continue; // un servicio no se reparte a sí mismo
+      if (!validIds.has(centerId)) continue; // ignorar centros que no existen
+      if (!(value > 0)) continue; // solo unidades positivas suman a la base
+      toProductive[centerId] = value;
+    }
+    // El fijo y el variable siguen la MISMA base (se limpian los overrides para
+    // que el motor caiga al fallback `toProductive`).
+    return { ...d, toProductive, toProductiveFixed: {}, toProductiveVariable: {} };
+  });
+  return { ...config, serviceDistributions };
 }
 
 /**
@@ -115,15 +251,7 @@ export interface CalculationOutput {
 export function computeProductiveBudgets(
   indirectCosts: IndirectCostConfig,
 ): Record<string, { fixed: number; variable: number }> {
-  const centers: CostCenter[] = indirectCosts.centers;
-  const concepts: IndirectCostConcept[] = indirectCosts.concepts.map((c) => ({
-    name: c.name,
-    amount: { fixed: Money.of(c.amount.fixed), variable: Money.of(c.amount.variable) },
-    distribution: c.distribution,
-  }));
-  const primary = primaryProration(centers, concepts);
-  const productiveCip = secondaryProration(centers, primary, indirectCosts.serviceDistributions);
-
+  const productiveCip = resolveProductiveCip(indirectCosts);
   const out: Record<string, { fixed: number; variable: number }> = {};
   for (const [centerId, fv] of Object.entries(productiveCip)) {
     out[centerId] = { fixed: fv.fixed.toNumber(), variable: fv.variable.toNumber() };
@@ -131,33 +259,79 @@ export function computeProductiveBudgets(
   return out;
 }
 
-export function runCalculation(input: CalculationInput): CalculationOutput {
-  // --- Hoja 1: Materia Prima ---
-  const optimalLot = calcOptimalLot(input.rawMaterial.wilson);
-  const ledger = calcStockLedgerPPP(
-    input.rawMaterial.initialStock.quantity,
-    input.rawMaterial.initialStock.unitCost,
-    input.rawMaterial.movements,
+/**
+ * Resuelve el CIP acumulado (primario + secundario) de cada centro PRODUCTIVO.
+ *
+ * Si la config trae `closureOrder` (orden de cierre), usa el método ESCALONADO
+ * (criterio A.3.c): un servicio puede repartir a otro que aún no cerró. Si no,
+ * usa la pasada directa legada (retrocompatible con FX1/FX3 y estructuras ya
+ * cargadas). Es la única fuente del presupuesto productivo: el usuario nunca lo
+ * tipea (criterio A.3).
+ */
+export function resolveProductiveCip(
+  indirectCosts: IndirectCostConfig,
+): Record<string, FixedVariable> {
+  const centers: CostCenter[] = indirectCosts.centers;
+  const concepts: IndirectCostConcept[] = indirectCosts.concepts.map((c) => ({
+    name: c.name,
+    amount: { fixed: Money.of(c.amount.fixed), variable: Money.of(c.amount.variable) },
+    distribution: c.distribution,
+  }));
+  const primary = primaryProration(centers, concepts);
+
+  const order = indirectCosts.closureOrder ?? [];
+  if (order.length === 0) {
+    // Camino legado: pasada directa servicio→productivo.
+    return secondaryProration(centers, primary, indirectCosts.serviceDistributions);
+  }
+
+  // Camino escalonado: construir los cierres en el orden pedido.
+  const distById = new Map(
+    indirectCosts.serviceDistributions.map((d) => [d.serviceCenterId, d]),
   );
-  const rawMaterialConsumed = ledger.rawMaterialConsumed;
+  const closures: ServiceClosure[] = order.map((serviceCenterId) => {
+    const d = distById.get(serviceCenterId);
+    if (!d) {
+      throw new MissingAllocationBaseError(
+        serviceCenterId,
+        `El centro de servicio "${serviceCenterId}" está en el orden de cierre pero no tiene base de distribución cargada. Asigná su base de distribución.`,
+      );
+    }
+    return {
+      serviceCenterId,
+      distribution: d.toProductive ?? {},
+      distributionFixed: d.toProductiveFixed,
+      distributionVariable: d.toProductiveVariable,
+      baseName: d.baseCode,
+    };
+  });
+
+  const { byCenter } = secondaryProrationStepwise(centers, primary, closures);
+  const out: Record<string, FixedVariable> = {};
+  for (const c of centers) {
+    if (c.type === 'productive') out[c.id] = byCenter[c.id] ?? fvZero();
+  }
+  return out;
+}
+
+export function runCalculation(input: CalculationInput): CalculationOutput {
+  // --- Hoja 1: Materia Prima (N materias primas, Parte 3.1) ---
+  const materials: MaterialResult[] = input.rawMaterial.materials.map((m) => ({
+    config: m,
+    optimalLot: calcOptimalLot(m.wilson),
+    ledger: calcStockLedgerPPP(m.initialStock.quantity, m.initialStock.unitCost, m.movements),
+  }));
+  // MP consumida total = Σ del consumo valuado a PPP de cada materia prima.
+  const rawMaterialConsumed = Money.sum(materials.map((x) => x.ledger.rawMaterialConsumed));
 
   // --- Hoja 2: Mano de Obra Directa ---
   const labor = calcDirectLabor(input.directLabor);
   const directLaborTotal = labor.totalMod;
 
   // --- Hoja 3: Costos Indirectos ---
-  const centers: CostCenter[] = input.indirectCosts.centers;
-  const concepts: IndirectCostConcept[] = input.indirectCosts.concepts.map((c) => ({
-    name: c.name,
-    amount: { fixed: Money.of(c.amount.fixed), variable: Money.of(c.amount.variable) },
-    distribution: c.distribution,
-  }));
-  const primary = primaryProration(centers, concepts);
-  const productiveCip = secondaryProration(
-    centers,
-    primary,
-    input.indirectCosts.serviceDistributions,
-  );
+  // El CIP productivo (presupuesto) sale del prorrateo: escalonado si hay orden
+  // de cierre, directo si no. El usuario nunca lo tipea (criterio A.3).
+  const productiveCip = resolveProductiveCip(input.indirectCosts);
 
   const perDepartment: CalculationOutput['detail']['indirectCosts']['perDepartment'] = {};
   const indirectPerDepartment: CalculationOutput['raw']['indirectPerDepartment'] = {};
@@ -178,13 +352,39 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     // compara contra el presupuesto para obtener la variación de presupuesto.
     const actualCip = Money.of(setting.actualCip);
 
-    const variance = calcVarianceAnalysis(
-      quota,
-      budget,
-      setting.normalCapacity,
-      setting.actualActivity,
-      actualCip,
-    );
+    // E3 — ACTIVIDAD REAL y CIP REAL son datos de CIERRE de mes: durante el mes
+    // todavía no existen. "Todavía no lo sé" NO es lo mismo que "es cero":
+    //
+    //   · Sin actividad real, el CIF se aplica sobre la CAPACIDAD NORMAL (costo
+    //     predeterminado puro). Antes se aplicaba sobre cero → el producto salía
+    //     costeado SIN CIF y sin ningún aviso.
+    //   · Sin CIP real no hay contra qué comparar: las variaciones quedan en cero
+    //     y el centro se marca como PENDIENTE DE CIERRE, en vez de mostrar una
+    //     variación fantasma calculada contra cero.
+    const hasActualActivity = setting.actualActivity > 0;
+    const hasActualCip = actualCip.toNumber() > 0;
+    const pendingClosing = !hasActualActivity || !hasActualCip;
+
+    // Nivel de actividad con el que se aplica el CIF al producto.
+    const applicationLevel = hasActualActivity ? setting.actualActivity : setting.normalCapacity;
+    const cipApplied = quota.totalQuota.multiply(applicationLevel);
+
+    // Las variaciones solo tienen sentido con el cierre cargado.
+    const variance: VarianceAnalysis = pendingClosing
+      ? {
+          cipApplied,
+          overUnderApplied: Money.zero(),
+          budgetVariance: Money.zero(),
+          volumeVariance: Money.zero(),
+        }
+      : calcVarianceAnalysis(
+          quota,
+          budget,
+          setting.normalCapacity,
+          setting.actualActivity,
+          actualCip,
+        );
+
     indirectCostsApplied = indirectCostsApplied.add(variance.cipApplied);
 
     perDepartment[setting.centerId] = {
@@ -196,6 +396,13 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       actualActivity: setting.actualActivity,
       quota: quota.totalQuota.toNumber(),
       actualCip: actualCip.toNumber(),
+      budgetFixed: budget.fixed.toNumber(),
+      budgetVariable: budget.variable.toNumber(),
+      quotaFixed: quota.fixedQuota.toNumber(),
+      quotaVariable: quota.variableQuota.toNumber(),
+      overUnderApplied: variance.overUnderApplied.toNumber(),
+      pendingClosing,
+      appliedOn: hasActualActivity ? 'actualActivity' : 'normalCapacity',
     };
     indirectPerDepartment[setting.centerId] = {
       quota,
@@ -204,25 +411,32 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
       normalCapacity: setting.normalCapacity,
       actualActivity: setting.actualActivity,
       actualCip,
+      pendingClosing,
     };
   }
 
   // --- Hoja 4: Estado de Costos ---
   // MP: para el estado usamos la valuación de la ficha (Ex.Inicial + Compras − Ex.Final
-  // equivale al consumo de la ficha PPP, ya validado por consistencia).
-  const initialRM = Money.of(input.rawMaterial.initialStock.unitCost).multiply(
-    input.rawMaterial.initialStock.quantity,
+  // equivale al consumo de la ficha PPP, ya validado por consistencia). Con N
+  // materias primas, se suma cada componente entre todas.
+  const initialRM = Money.sum(
+    materials.map((x) =>
+      Money.of(x.config.initialStock.unitCost).multiply(x.config.initialStock.quantity),
+    ),
   );
   const purchases = Money.sum(
-    input.rawMaterial.movements
-      .filter((m) => m.type === 'purchase')
-      .map((m) => Money.of(m.unitCost ?? 0).multiply(m.quantity)),
+    materials.flatMap((x) =>
+      x.config.movements
+        .filter((m) => m.type === 'purchase')
+        .map((m) => Money.of(m.unitCost ?? 0).multiply(m.quantity)),
+    ),
   );
+  const finalRM = Money.sum(materials.map((x) => x.ledger.finalBalanceValue));
 
   const statement = calcCostStatement({
     initialRawMaterial: initialRM,
     rawMaterialPurchases: purchases,
-    finalRawMaterial: ledger.finalBalanceValue,
+    finalRawMaterial: finalRM,
     directLabor: directLaborTotal,
     indirectCostsApplied,
     initialWorkInProcess: Money.of(input.inventory.initialWorkInProcess),
@@ -250,20 +464,48 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     grossMarginPct: margin.grossMarginPct.toPercent(),
     detail: {
       rawMaterial: {
-        optimalLot: optimalLot.toNumber(),
-        finalStockQty: ledger.finalBalanceQty.toNumber(),
-        finalStockValue: ledger.finalBalanceValue.toNumber(),
+        optimalLot: materials[0]?.optimalLot.toNumber() ?? 0,
+        finalStockQty: materials.reduce((a, x) => a + x.ledger.finalBalanceQty.toNumber(), 0),
+        finalStockValue: finalRM.toNumber(),
+        materials: materials.map((x) => ({
+          id: x.config.id,
+          code: x.config.code,
+          name: x.config.name,
+          unit: x.config.unit,
+          optimalLot: x.optimalLot.toNumber(),
+          finalStockQty: x.ledger.finalBalanceQty.toNumber(),
+          finalStockValue: x.ledger.finalBalanceValue.toNumber(),
+          consumed: x.ledger.rawMaterialConsumed.toNumber(),
+        })),
       },
       directLabor: {
         workingDays: labor.workingDays.effectiveWorkDays.toNumber(),
+        // Días de ausentismo pago (numerador del IAP). Se expone para poder
+        // mostrar la fórmula completa "IAP = días pagos / días efectivos".
+        paidDays: labor.workingDays.totalPaidAbsence.toNumber(),
         itcsPercent: labor.itcs.itcs.toPercent(),
         // IAP — Índice de Ausentismo Pago (ya calculado en calcWorkingDays, se expone
         // para mostrarlo en el resultado). No cambia ninguna fórmula.
         iapPercent: labor.workingDays.iap.toPercent(),
         hourlyRates,
+        itcsBreakdown: {
+          certain: labor.itcs.certainCharges.toPercent(),
+          uncertainRemunerative: labor.itcs.uncertainRemunerativeCoefs.toPercent(),
+          derived: labor.itcs.derivedCharges.toPercent(),
+          uncertainNonRemunerative: labor.itcs.uncertainNonRemunerative.toPercent(),
+        },
+        departments: labor.departments.map((d, i) => ({
+          name: d.name,
+          basicRemuneration: d.basicRemuneration.toNumber(),
+          socialChargesCost: d.socialChargesCost.toNumber(),
+          totalMod: d.totalMod.toNumber(),
+          hourlyRate: d.hourlyRate.toNumber(),
+          budgetedHours: d.hoursWorked.toNumber(),
+          realHours: input.directLabor.departments[i]?.realHours,
+        })),
       },
       indirectCosts: { perDepartment },
     },
-    raw: { optimalLot, ledger, labor, indirectPerDepartment, statement, margin },
+    raw: { materials, labor, indirectPerDepartment, statement, margin },
   };
 }

@@ -18,6 +18,20 @@ export interface Layer4Result {
 export const SECTION_MARGIN = 2;
 
 /**
+ * Conceptos que son Costos Indirectos de Producción en CUALQUIER rubro
+ * (criterio de la cátedra: todo lo de producción que no es MP ni MOD directa).
+ * Se puntean además de las cipKeywords del perfil para no depender de frases
+ * multi-palabra exactas que se rompen con un "de"/"y" en el medio
+ * (ej. "seguro de maquinaria", "mantenimiento y reparación").
+ */
+export const UNIVERSAL_CIP_KEYWORDS = [
+  'mantenimiento', 'reparación', 'reparacion', 'seguro', 'póliza', 'poliza',
+  'alquiler', 'limpieza', 'vigilancia', 'seguridad', 'flete', 'logística',
+  'logistica', 'amortización', 'amortizacion', 'depreciación', 'depreciacion',
+  'telefonía', 'telefonia', 'internet', 'expensas', 'vtv', 'residuos',
+];
+
+/**
  * Layer 4: Business Routing con conciencia de rubro.
  * Determina a qué sección de costos pertenece un documento.
  *
@@ -132,9 +146,12 @@ function routeFacturaCompra(
     };
   }
 
-  // Punteo de keywords por sección usando el perfil del rubro
+  // Punteo de keywords por sección usando el perfil del rubro.
+  // CIP suma las del perfil + las universales (dedup) para no depender de
+  // frases exactas del rubro.
+  const cipKw = [...new Set([...profile.cipKeywords, ...UNIVERSAL_CIP_KEYWORDS])];
   const mpScore  = profile.mpKeywords.filter((kw)  => lower.includes(kw.toLowerCase())).length;
-  const cipScore = profile.cipKeywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
+  const cipScore = cipKw.filter((kw) => lower.includes(kw.toLowerCase())).length;
   const modScore = profile.modKeywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
 
   // MOD: si el texto menciona servicios de personal directo
@@ -171,7 +188,7 @@ function routeFacturaCompra(
 
   if (cipScore > mpScore && cipScore >= 1) {
     const conf = 82 + Math.min(cipScore * 3, 15);
-    const matched = profile.cipKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+    const matched = cipKw.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
     return {
       costSection: 'COSTOS_INDIRECTOS',
       confidence: conf,

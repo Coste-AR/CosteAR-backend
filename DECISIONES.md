@@ -171,3 +171,165 @@ resolución versión→data point ya existe en `getTrace`).
   (422) y se envuelven los puntos de falla conocidos del motor para que
   lancen ese error tipado con `code: 'MISSING_INPUT'` y mensaje accionable en
   español.
+
+---
+
+# Sesión 2026-07-11 — Auditoría máxima + Bases de asignación (F0–F3)
+
+Registro de decisiones autónomas de esta sesión. Ante ambigüedad: el default
+más simple que cumpla el criterio, y seguir; frenar solo ante riesgo real de
+pérdida de datos (no hubo).
+
+## Ubicación de entregables
+- `AUDITORIA-MAXIMA.md` y esta sección de `DECISIONES.md` viven en `Costear.api/`
+  porque el nivel `CosteAR rep/` no es un repo git; `Costear.api` es donde ya
+  estaba `DECISIONES.md` y donde vive el motor auditado. El frontend
+  (`Costear.web/CosteAR-frontend`) tiene su propio repo/rama `AlanSandbox`.
+
+## Límite del entorno (igual que la sesión previa)
+- Sin Postgres/Redis en esta máquina: migraciones y endpoints se validan con
+  `prisma validate`/`prisma generate`, `tsc --noEmit` y los tests puros de
+  dominio/aplicación (que no tocan DB), pero NO se ejecutan contra una base
+  real. Los pasos para correrlo en local van en el resumen de sesión.
+
+## F0 — Caracterización
+- **FX3 "Dorado Muebles"** (`tests/domain/fx3-dorado.test.ts`): agregado como
+  caracterización del motor ACTUAL. Verde sin tocar nada → prueba que el
+  prorrateo secundario DIRECTO, PPP, cuotas y variaciones del caso Dorado ya
+  eran correctos. No se testean Wilson ni el costo de producción total del caso
+  porque la spec no trae los insumos completos de MOD para Dorado.
+
+## F3 — Bases de asignación y prorrateo escalonado (Parte 4)
+- **Motor escalonado nuevo, aditivo**: `secondaryProrationStepwise` en
+  `indirect-costs.ts`. NO se toca `secondaryProration` (pasada directa), que
+  sigue siendo el camino legado y mantiene FX1/FX3 en verde (R5). El escalonado
+  procesa los cierres en orden, permite servicio→servicio-no-cerrado y lanza
+  `CalcError` accionable si un destino ya cerró ("cerrado no recibe",
+  criterio A.3.c).
+- **FX4** (`tests/domain/fx4-escalonado.test.ts`): la transcripción del fixture
+  en el prompt está **incompleta y es internamente inconsistente** en los
+  centavos finales (720,07 vs 1.680,18 no salen de una misma cuota/redondeo).
+  Se reconstruyó un escenario equivalente y CONSISTENTE que reproduce los
+  números NO ambiguos de la cátedra (Mantenimiento acumula 2.400,25 f / 2.482 v;
+  base 750 hs máquina → cuotas 3,2003 f / 3,3093 v) y prueba la SEMÁNTICA que el
+  fixture protege (cerrado no recibe, servicios en 0, sin pérdida de centavos,
+  fijo/variable siempre separados).
+- **Decisión de redondeo (criterio A.4)**: el motor acumula en precisión plena
+  y redondea al final. Por eso reparte 2.400,25 × 0,3 = 720,075 (→ 720,08),
+  mientras la cátedra muestra 720,07 por redondear la cuota a 4 decimales antes
+  de multiplicar. El número que fluye al costo es el de precisión plena
+  (A.4-compliant); la cuota redondeada (3,2003) puede mostrarse en el árbol como
+  ayuda visual. **A confirmar con la cátedra** cuál presentación quieren en la
+  ficha (el costo total no cambia, solo la lectura de los parciales).
+- **Config retrocompatible**: `indirectCostConfigSchema` suma `closureOrder`
+  (opcional), `allocationMode`/`baseCode` por concepto y `baseCode` por servicio,
+  todos opcionales con default. Sin `closureOrder`, el motor usa la pasada
+  directa: estructuras ya cargadas y FX1/FX3 no cambian.
+- **Entidad base de asignación**: modelos `AllocationBase` (catálogo;
+  `companyId` NULL = sistema) y `AllocationBaseValue` (valor por base×centro×
+  estructura, trazable vía `dataPointId`, borrado lógico `voidedAt`). Migración
+  ADITIVA (R7) `20260711150000_add_allocation_bases` con las 11 bases del
+  criterio B precargadas. Relaciones a Company/CostStructure por scalar UUID
+  (FK a nivel DB) para no tocar modelos existentes.
+- **Resolución del modo 'base' del primario**: `AllocationBaseService.
+  resolveBaseUnits` existe y lanza 422 `MISSING_ALLOCATION_BASE` si falta la
+  base o sus valores. El *cableado* de ese modo dentro de `updateConfig`/
+  `calculate` (reemplazar `distribution` por las unidades resueltas antes de
+  calcular) queda como paso siguiente cuando se conecte el frontend: hoy el
+  modo 'base' se persiste como metadato y el prorrateo primario sigue usando
+  `distribution` (modo % / directo). El ESCALONADO del secundario —el
+  desbloqueante real— sí está completo y probado.
+- **Validación 4.5**: endpoint `GET /structures/:id/allocation-check` lista los
+  servicios sin base/orden de cierre para alertar al guardar; al calcular, el
+  motor lanza 422 accionable (nunca 500).
+
+## Pendiente para próximas fases (honestidad de alcance)
+- **F2 (append-only de la fuente de verdad)**: el hallazgo 🔴 de que
+  `updateConfig` pisa el JSONB (R1) y audita fuera de transacción (R2) está
+  documentado en `AUDITORIA-MAXIMA.md §3`. El fix (versionar la config o migrar
+  el motor a leer de DataPoints, + envolver mutaciones legadas en
+  `$transaction`) es de riesgo medio y toca DB: se hace con la base disponible.
+- **F4/F5 (navegación lista→detalle y pestaña nueva)** y **F6 (correcciones de
+  UI)** son de frontend; se abordan en el repo `CosteAR-frontend`. Los cinco
+  errores del 10/07 quedan confirmados con archivo:línea en la auditoría.
+
+---
+
+## Sesión 2026-07-11 (cont.) — Navegación lista→detalle (F4, Parte 3): N materias primas
+
+- **N materias primas por estructura (Parte 3.1)**: `rawMaterialConfigSchema`
+  sumó identidad de mercado opcional (code/name/unit/supplier) y se agregó
+  `rawMaterialSectionSchema` que acepta la forma LEGADA (MP única plana) o la
+  nueva `{ materials: [...] }` y normaliza a lista. Retrocompat sin migración
+  destructiva: las estructuras ya cargadas se normalizan al leer y quedan en la
+  forma nueva al volver a guardar.
+- **Motor**: `runCalculation` itera las materias primas, con MP consumida =
+  Σ del consumo valuado a PPP de cada una; el estado de costos suma existencia
+  inicial/compras/final entre todas. El árbol muestra un sub-nodo por materia
+  prima (con una sola, se ve igual que antes). `output.raw.materials` reemplaza
+  a `ledger`/`optimalLot` singulares.
+- **Regresión cero**: con una sola MP el número es idéntico (FX1 2.043.076,92).
+  Tests nuevos (`multi-materia-prima.test.ts`): única = igual, dos = suma
+  (2.391.076,92), y el schema normaliza la forma legada. Suite 119 verde.
+- Sitios que arman la entrada del motor (calculate, run-service, macro-service,
+  excel-export) pasan a `rawMaterialSectionSchema`. La hoja Excel exporta la
+  primera MP en detalle (export multi-MP: pendiente); el cálculo usa todas.
+
+---
+
+## Sesión 2026-07-11 (cont.) — CIF ficha por centro (F4, Parte 3.3)
+
+- **Enriquecimiento aditivo de `detail.indirectCosts.perDepartment`**: se agregan
+  `budgetFixed`, `budgetVariable`, `quotaFixed`, `quotaVariable` y
+  `overUnderApplied`. Permiten que la ficha del centro muestre el presupuesto y
+  la cuota fija/variable con su fórmula (presupuesto ÷ capacidad normal) y la
+  sobre/subaplicación, todo LEÍDO del cálculo persistido — el front no recalcula.
+  Suite 119 verde (cambio aditivo).
+
+---
+
+## Sesión 2026-07-11 (cont.) — MOD ficha por departamento (F4, Parte 3.2)
+
+- **Enriquecimiento aditivo de `detail.directLabor`**: `itcsBreakdown`
+  (CSC/B40/F40/B47) y `departments[]` (básica, cargas, MOD total, tarifa,
+  horas presupuestadas, horas reales). Alimentan la ficha del departamento sin
+  que el front recalcule. Suite 119 verde.
+- **Horas reales de fin de mes**: se agregó `realHours` opcional a cada
+  departamento (schema + UI, columna "Horas reales (fin de mes)" separada de
+  las presupuestadas). El motor NO la usa: es solo para comparar real vs
+  presupuestado (criterio C). Cero impacto en la matemática.
+- **Operarios individuales (extensión preparada, criterio de la spec)**: se
+  dejó `operators?` opcional en el schema del departamento (name, category,
+  bankedHours, individualAbsenceDays) y la ficha lo muestra SOLO si hay
+  operarios cargados (no se inventa UI vacía). El motor no lo usa todavía;
+  cuando se quiera costear por operario (banco de horas, ausentismo individual)
+  el modelo ya está listo para colgar la lógica sin migración.
+
+---
+
+## Sesión 2026-07-11 (cont.) — Fix de fondo de R1: fuente de verdad append-only
+
+- **Problema**: `updateConfig`/`updateSales` pisaban el JSONB de config en
+  `cost_structures` (violación R1). El versionado (DataPoints) era paralelo y el
+  motor no lo leía.
+- **Solución (opción a de la auditoría — la de menor riesgo)**: tabla nueva
+  append-only `cost_config_versions` (structureId, section, versionN, value,
+  reason, createdBy, createdAt). En cada guardado, dentro de la MISMA
+  transacción: (1) se inserta una versión nueva (nunca se pisa), (2) se actualiza
+  el puntero VIGENTE denormalizado en `cost_structures` (para que el motor lea
+  rápido sin recorrer el histórico), (3) se registra la auditoría. Un trigger de
+  DB (`trg_append_only`, reutilizado de trazabilidad) bloquea todo UPDATE/DELETE
+  sobre la tabla. Migración ADITIVA (R7).
+- **Por qué no la opción (b)** (motor leyendo de DataPoints): reescribir el motor
+  para resolver cada input desde `DataPointVersion` es un cambio grande y
+  riesgoso para la matemática (R5). La opción (a) cumple R1 sin tocar el motor
+  ni un centavo del cálculo, y deja el histórico completo consultable.
+- **Endpoint**: `GET /cost-structures/:id/config-history?section=...`.
+- **Verificado contra la DB real**: dos guardados de "sales" → v1 (100/10) y v2
+  (200/20) conviven; UPDATE y DELETE directos sobre `cost_config_versions`
+  revientan con el error append-only; las dos versiones quedan intactas. Suite
+  119 verde, typecheck limpio.
+- **RLS**: la tabla se protege en la capa de aplicación (`getConfigHistory`
+  exige que la estructura sea del usuario), igual que `evidence`/`trace_audit_log`.
+  Se puede agregar una política RLS por join a la estructura si se quiere
+  defensa en profundidad (pendiente menor).

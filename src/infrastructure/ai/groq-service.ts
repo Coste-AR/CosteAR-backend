@@ -59,13 +59,13 @@ Respondé SIEMPRE con un JSON válido (sin texto fuera del JSON):
     "directLabor": {
       "present": true,
       "workingDays": { "totalDaysPerYear": número o null, "sundays": número o null, "saturdays": número o null, "holidays": número o null, "vacations": número o null, "sickness": número o null, "specialLeaves": número o null, "workAccidents": número o null, "unjustifiedAbsences": número o null, "holidaysOnWeekend": número o null },
-      "itcs": { "derivationBase": número o null, "fixedArt": número o null, "uncertainRemunerative": [{ "name": "string", "coefficient": número }] },
+      "itcs": { "derivationBase": número o null, "fixedArt": número o null, "uncertainCharges": [{ "name": "string", "coefficient": número }] },
       "departments": [{ "name": "string", "basicRemuneration": número, "hoursWorked": número }]
     },
     "indirectCosts": {
       "present": true,
       "centers": [{ "id": "string", "name": "string", "type": "productive | service" }],
-      "concepts": [{ "name": "string", "amountFixed": número, "amountVariable": número, "distribution": {} }],
+      "concepts": [{ "name": "string", "amountFixed": número, "amountVariable": número }],
       "productiveSettings": [{ "center": "nombre o id del centro productivo", "normalCapacity": número o null, "actualActivity": número o null, "actualCip": número o null }]
     },
     "sales": {
@@ -75,6 +75,15 @@ Respondé SIEMPRE con un JSON válido (sin texto fuera del JSON):
     }
   }
 }
+
+CARGAS SOCIALES INCIERTAS (itcs.uncertainCharges) — MUY IMPORTANTE:
+Listá TODAS las cargas sociales inciertas que aparezcan en el documento, con su nombre TAL CUAL figura
+y su coeficiente (ej: premio por asistencia perfecta, premio por productividad, antigüedad, horas extras,
+comisiones, uniformes/ropa de trabajo, viandas/almuerzos, guardería, medicamentos, útiles escolares,
+viáticos, asignaciones familiares…).
+NO las clasifiques en remunerativas / no remunerativas, y NO inventes esa distinción: el sistema clasifica
+cada concepto con su propio catálogo. Vos solo extraés nombre y coeficiente.
+NO incluyas el ausentismo pago (IAP/YAP): lo calcula el sistema a partir de los días.
 
 Si una sección NO está presente en el documento, ponés "present": false y omitís los demás campos de esa sección.
 Si el documento está ilegible, todos los "present" van en false.
@@ -96,14 +105,26 @@ export interface DirectLaborSectionData {
     specialLeaves?: number | null; workAccidents?: number | null;
     unjustifiedAbsences?: number | null; holidaysOnWeekend?: number | null;
   };
-  itcs?: { derivationBase?: number | null; fixedArt?: number | null; uncertainRemunerative?: { name: string; coefficient: number }[] };
+  itcs?: {
+    derivationBase?: number | null;
+    fixedArt?: number | null;
+    /** D-2: cargas inciertas SIN clasificar. La IA solo extrae nombre y coeficiente;
+     *  el sistema decide si son remunerativas o no con el catálogo de la cátedra. */
+    uncertainCharges?: { name: string; coefficient: number }[];
+    /** Formato viejo (documentos analizados antes de D-2). Se sigue leyendo, pero
+     *  la clasificación que traiga NO se toma como verdad: la revisa el catálogo. */
+    uncertainRemunerative?: { name: string; coefficient: number }[];
+    uncertainNonRemunerative?: { name: string; coefficient: number }[];
+  };
   departments?: { name: string; basicRemuneration: number; hoursWorked: number }[];
 }
 
 export interface IndirectCostsSectionData {
   present: boolean;
   centers?: { id: string; name: string; type: 'productive' | 'service' }[];
-  concepts?: { name: string; amountFixed: number; amountVariable: number; distribution?: Record<string, number> }[];
+  // La DISTRIBUCIÓN (prorrateo) NO se extrae de la IA (E1): la pone el costista a
+  // mano o la deriva una base de asignación. La IA solo trae nombre e importes.
+  concepts?: { name: string; amountFixed: number; amountVariable: number }[];
   /** Datos de fin de mes por centro productivo (capacidad normal, actividad real, CIP real).
    *  El presupuesto NO se incluye: se deriva del prorrateo al guardar. */
   productiveSettings?: {

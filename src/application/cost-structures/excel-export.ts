@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import {
-  rawMaterialConfigSchema,
+  rawMaterialSectionSchema,
   directLaborConfigSchema,
   indirectCostConfigSchema,
 } from '../../shared/schemas/cost.schema.js';
@@ -78,7 +78,10 @@ export async function exportCostStructureToXlsx(
   cover.addRow(['Generado', new Date().toLocaleString('es-AR')]);
 
   // --- Materia Prima ---
-  const rm = rawMaterialConfigSchema.parse(s.rawMaterialConfig);
+  // Exporta la primera materia prima en detalle (la hoja Excel legada es de una
+  // sola MP); el cálculo de resultado usa TODAS. Export multi-MP: pendiente.
+  const rmSection = rawMaterialSectionSchema.parse(s.rawMaterialConfig);
+  const rm = rmSection.materials[0]!;
   const mpSheetName = '1-Materia Prima';
   const mp = wb.addWorksheet(mpSheetName);
   mp.columns = [{ width: 36 }, { width: 16 }, { width: 16 }, { width: 16 }];
@@ -128,7 +131,7 @@ export async function exportCostStructureToXlsx(
 
   // --- Cálculo (motor real, para los valores derivados que no se reproducen como fórmula) ---
   const input: CalculationInput = {
-    rawMaterial: rm,
+    rawMaterial: rmSection,
     directLabor: dl,
     indirectCosts: ic,
     inventory: { initialWorkInProcess: 0, finalWorkInProcess: 0, initialFinishedGoods: 0, finalFinishedGoods: 0 },

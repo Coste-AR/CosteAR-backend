@@ -135,6 +135,15 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     return { data: history };
   });
 
+  // Historial append-only de la config (R1): todas las versiones de cada
+  // sección, la más nueva primero. `?section=rawMaterial|directLabor|indirectCosts|sales`.
+  app.get('/cost-structures/:id/config-history', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const q = z.object({ section: z.string().optional() }).parse(request.query);
+    const history = await service.getConfigHistory(request.authUser!.id, id, q.section);
+    return { data: history };
+  });
+
   app.get(
     '/cost-structures/:id/calculations/latest',
     { preHandler: authenticate },

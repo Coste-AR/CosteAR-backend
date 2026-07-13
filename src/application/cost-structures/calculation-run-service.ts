@@ -4,7 +4,7 @@ import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
 import { MissingInputError } from '../../domain/errors/calculation-errors.js';
 import {
-  rawMaterialConfigSchema,
+  rawMaterialSectionSchema,
   directLaborConfigSchema,
   indirectCostConfigSchema,
   inventorySchema,
@@ -60,7 +60,7 @@ export class CalculationRunService {
     }
 
     const input: CalculationInput = {
-      rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+      rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
       inventory: inventorySchema.parse({}),

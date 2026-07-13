@@ -10,12 +10,17 @@ import { buildCalculationTree } from '@/application/cost-structures/tree-builder
 describe('tree-builder — el árbol coincide con los totales del motor', () => {
   const input: CalculationInput = {
     rawMaterial: {
-      wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
-      stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
-      initialStock: { quantity: 300, unitCost: 2400 },
-      movements: [
-        { date: '01', type: 'purchase', detail: 'Compra', quantity: 1000, unitCost: 2600 },
-        { date: '02', type: 'consumption', detail: 'Consumo', quantity: 800 },
+      materials: [
+        {
+          name: 'Acero', code: 'MP-100', unit: 'u',
+          wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
+          stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
+          initialStock: { quantity: 300, unitCost: 2400 },
+          movements: [
+            { date: '01', type: 'purchase', detail: 'Compra', quantity: 1000, unitCost: 2600 },
+            { date: '02', type: 'consumption', detail: 'Consumo', quantity: 800 },
+          ],
+        },
       ],
     },
     directLabor: {
