@@ -55,4 +55,13 @@ describe('findTableByHeaders', () => {
     const rows = findTableByHeaders(wb, ['Concepto', 'Fijo', 'Variable']);
     expect(rows).toEqual([['Alquiler', 300000, 0]]);
   });
+
+  it('parsea celdas numéricas con coma decimal como número, sin devolver NaN', async () => {
+    const wb = await wbFromRows([
+      ['Departamento', 'Remun. básica', 'Horas-Hombre'],
+      ['Depto A', 100, '4,5'],
+    ]);
+    const rows = findTableByHeaders(wb, ['Departamento', 'Remun. básica', 'Horas-Hombre']);
+    expect(rows).toEqual([['Depto A', 100, 4.5]]);
+  });
 });

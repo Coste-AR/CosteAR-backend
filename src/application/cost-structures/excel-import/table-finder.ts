@@ -42,8 +42,9 @@ export function findTableByHeaders(wb: ExcelJS.Workbook, headers: HeaderSpec[]):
         const values: unknown[] = [];
         for (let c = 1; c <= headers.length; c++) {
           const text = cellText(dataRow.getCell(c));
-          const num = text !== null && /^-?\d+([.,]\d+)?$/.test(text) ? Number(text) : null;
-          values.push(num !== null ? num : text);
+          const matchesNumber = text !== null && /^-?\d+([.,]\d+)?$/.test(text);
+          const num = matchesNumber ? Number(text!.replace(',', '.')) : NaN;
+          values.push(Number.isFinite(num) ? num : text);
         }
         dataRows.push(values);
       }
