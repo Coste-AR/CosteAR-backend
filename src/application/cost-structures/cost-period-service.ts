@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from '@prisma/client';
+import type { PrismaClient, Prisma, CostPeriod } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
@@ -12,6 +12,19 @@ import {
   closingStockOf,
   type MaterialClosingBalance,
 } from '../../domain/periods/closing-stock.js';
+import {
+  runCalculation,
+  ENGINE_VERSION,
+  type CalculationInput,
+  type FrozenCalculation,
+} from './calculate.js';
+import {
+  rawMaterialSectionSchema,
+  directLaborConfigSchema,
+  indirectCostConfigSchema,
+  inventorySchema,
+} from '../../shared/schemas/cost.schema.js';
+import { comparePeriods, type PeriodSide } from './period-comparison.js';
 
 /**
  * PERÍODOS DE COSTEO (problema C — Fases 1 y 3).
@@ -410,6 +423,12 @@ export class CostPeriodService {
    * Requisito duro (E3): todo centro productivo debe tener actividad real y CIP
    * real cargados. Sin eso, el costo del período está calculado con presupuesto
    * y cerrarlo sería congelar una foto incompleta.
+   *
+   * Fase 4 — el cierre CORRE EL MOTOR y guarda el resultado (`resultSnapshot`).
+   * Antes solo guardaba los insumos: los números había que recalcularlos después,
+   * con el motor de ese momento, así que una mejora del motor podía cambiar un mes
+   * ya cerrado sin que nadie se enterara. Un mes cerrado es un hecho contable: sus
+   * números se leen, no se recalculan.
    */
   async close(userId: string, periodId: string, runId: string | null, ctx: AuditContext) {
     const period = await this.requirePeriod(userId, periodId);
@@ -425,26 +444,149 @@ export class CostPeriodService {
       );
     }
 
-    const closed = await this.db.costPeriod.update({
-      where: { id: periodId },
-      data: {
-        status: 'CLOSED',
-        closedAt: new Date(),
-        closedBy: userId,
-        closedRunId: runId,
-      },
-    });
+    // Si el motor no puede correr, el período NO se cierra: un mes cerrado sin
+    // números es exactamente el agujero que esto viene a tapar.
+    const frozen = this.computeResult(period, 'cerrar');
 
-    await recordAudit({
-      ...ctx,
-      userId,
-      action: 'cost_period.close',
-      entityType: 'CostPeriod',
-      entityId: periodId,
-      newValue: { code: closed.code, closedRunId: runId },
+    const closed = await this.db.$transaction(async (tx) => {
+      const updated = await tx.costPeriod.update({
+        where: { id: periodId },
+        data: {
+          status: 'CLOSED',
+          closedAt: new Date(),
+          closedBy: userId,
+          closedRunId: runId,
+          resultSnapshot: frozen as unknown as Prisma.InputJsonValue,
+          resultEngineVersion: ENGINE_VERSION,
+          resultAt: new Date(),
+        },
+      });
+
+      // R2: la mutación y su auditoría, en la MISMA transacción.
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_period.close',
+          entityType: 'CostPeriod',
+          entityId: periodId,
+          newValue: {
+            code: updated.code,
+            closedRunId: runId,
+            engineVersion: ENGINE_VERSION,
+            // Los números con los que quedó firmado el mes, en el registro de auditoría.
+            productionCost: frozen.productionCost,
+            costOfGoodsSold: frozen.costOfGoodsSold,
+            grossMargin: frozen.grossMargin,
+          },
+        },
+        tx,
+      );
+
+      return updated;
     });
 
     return closed;
+  }
+
+  /**
+   * COMPARAR DOS PERÍODOS (Fase 4).
+   *
+   * Sin argumentos compara los dos últimos: el más nuevo contra el anterior, que es
+   * lo que el costista quiere ver el 90% de las veces ("¿cómo venimos contra el mes
+   * pasado?").
+   *
+   * De dónde salen los números de cada lado:
+   *   · si el período tiene su resultado CONGELADO (se cerró después de la Fase 4),
+   *     se lee tal cual: es EL número de ese mes, y no se toca;
+   *   · si no (está abierto, o se cerró antes), se recalcula con el motor de hoy y
+   *     se marca como `recomputed`, para no hacerlo pasar por congelado.
+   */
+  async compare(userId: string, structureId: string, fromCode?: string, toCode?: string) {
+    await this.requireStructure(userId, structureId);
+
+    const periods = await this.db.costPeriod.findMany({
+      where: { structureId },
+      orderBy: { code: 'desc' },
+    });
+
+    if (periods.length < 2) {
+      throw new ValidationError(
+        'Para comparar hacen falta al menos dos períodos. Cerrá el mes actual y abrí el siguiente: ' +
+          'a partir de ahí el sistema puede mostrarte qué cambió y por qué.',
+      );
+    }
+
+    const byCode = (code: string) => {
+      const p = periods.find((x) => x.code === code);
+      if (!p) throw new NotFoundError(`No existe el período "${code}" en esta estructura.`);
+      return p;
+    };
+
+    // Por defecto: el último contra el anterior (vienen ordenados del más nuevo al
+    // más viejo).
+    const to = toCode ? byCode(toCode) : periods[0]!;
+    const from = fromCode
+      ? byCode(fromCode)
+      : periods.find((p) => p.code < to.code) ?? periods[1]!;
+
+    if (from.code === to.code) {
+      throw new ValidationError('Elegí dos períodos distintos para comparar.');
+    }
+
+    // El más viejo siempre es el punto de partida, aunque los manden al revés: la
+    // variación se lee "de mayo a junio", no "de junio a mayo".
+    const [older, newer] = from.code < to.code ? [from, to] : [to, from];
+
+    return comparePeriods(this.toSide(older), this.toSide(newer));
+  }
+
+  /** Un período tal como lo necesita la comparación, con sus números resueltos. */
+  private toSide(period: CostPeriod): PeriodSide {
+    const frozen = period.resultSnapshot as FrozenCalculation | null;
+    const useFrozen = period.status === 'CLOSED' && frozen != null;
+
+    return {
+      code: period.code,
+      label: period.label,
+      status: period.status as 'OPEN' | 'CLOSED',
+      source: useFrozen ? 'frozen' : 'recomputed',
+      result: useFrozen ? frozen : this.computeResult(period, 'comparar'),
+      rawMaterialConfig: period.rawMaterialConfig,
+      indirectCostConfig: period.indirectCostConfig,
+      units: period.salesQuantity ? Number(period.salesQuantity) : null,
+    };
+  }
+
+  /**
+   * Corre el motor sobre los datos del propio período. Usa `runCalculation` — la
+   * misma función que el cálculo de la app — así el número del mes cerrado y el que
+   * ve el costista en pantalla son, por construcción, el mismo número.
+   *
+   * Si los datos no alcanzan para calcular, corta con un mensaje accionable en vez
+   * de devolver un resultado vacío que después nadie sabe interpretar.
+   */
+  private computeResult(period: PeriodLike, accion: 'cerrar' | 'comparar'): FrozenCalculation {
+    try {
+      const input: CalculationInput = {
+        rawMaterial: rawMaterialSectionSchema.parse(period.rawMaterialConfig),
+        directLabor: directLaborConfigSchema.parse(period.directLaborConfig),
+        indirectCosts: indirectCostConfigSchema.parse(period.indirectCostConfig),
+        inventory: inventorySchema.parse({}),
+        sales: {
+          unitPrice: period.salesUnitPrice ? Number(period.salesUnitPrice) : 0,
+          quantity: period.salesQuantity ? Number(period.salesQuantity) : 0,
+        },
+      };
+      const { raw: _raw, ...frozen } = runCalculation(input);
+      return frozen;
+    } catch (e) {
+      throw new ValidationError(
+        `No se puede ${accion} "${period.label}": el sistema no pudo calcular los números del período. ` +
+          `Revisá que las tres secciones (materia prima, mano de obra y costos indirectos) estén completas. ` +
+          `Detalle: ${(e as Error).message}`,
+      );
+    }
   }
 
   /** Centros productivos a los que les falta el cierre (misma regla que E3). */

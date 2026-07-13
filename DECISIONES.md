@@ -386,3 +386,133 @@ pérdida de datos (no hubo).
   guardado de toda la app: **el equipo tiene que probarlo en local con la DB antes
   de mergear a `devAdmin`** (abrir un período, guardar, cerrar, abrir el siguiente
   y verificar la existencia arrastrada).
+
+## Sesión 2026-07-13 (cont.) — Períodos, Fase 4: comparación entre períodos (problema C)
+
+- **Agujero encontrado antes de empezar**: el diseño decía que cerrar un período
+  "corre el cálculo y CONGELA los números", pero el código no lo hacía. `close()`
+  solo cambiaba el estado a CLOSED y guardaba los INSUMOS; el `closedRunId` era
+  opcional, nadie lo pasaba y nadie lo leía. O sea: **un mes cerrado no tenía
+  números propios**. Comparar mayo contra junio habría significado recalcular el
+  pasado con el motor de hoy, y cualquier mejora del motor habría cambiado, en
+  silencio, un mes ya cerrado y firmado.
+- **Decisión (Lautaro)**: el cierre CONGELA. Migración aditiva (R7):
+  `cost_periods.resultSnapshot` (el `CalculationOutput` entero, menos `raw`),
+  `resultEngineVersion` y `resultAt`. `close()` corre `runCalculation()` —la misma
+  función que usa la app, así el número del mes cerrado y el de la pantalla son el
+  mismo por construcción— y guarda estado + snapshot + auditoría en la MISMA
+  transacción (R2; antes la auditoría quedaba afuera).
+- **Si el motor no puede correr, el período NO se cierra.** Cambio de conducta
+  explícito: antes cerraba igual y dejaba el mes firmado y vacío. Un mes cerrado
+  sin números es exactamente el agujero que esto tapa.
+- **Los períodos cerrados ANTES de esta migración** quedan con `resultSnapshot`
+  null: la comparación los recalcula al vuelo y los marca `source: 'recomputed'`,
+  con un aviso. No se los hace pasar por congelados.
+- **La comparación** (`application/cost-structures/period-comparison.ts`, pura, sin
+  DB, todo en Decimal). Va en `application/` y no en `domain/` a propósito: depende
+  de `CalculationOutput`, que vive en `application/calculate.ts` (igual que el
+  motor). Meterla en `domain/` sería que el dominio importe de la aplicación.
+  Tres niveles: (1) MP / MOD / CIF con su % de contribución —"el 80% vino de la
+  MP"—; (2) qué MP, qué departamento, qué centro; (3) **por MP, la variación se
+  abre en PRECIO y CONSUMO**:
+      ΔValor = (P₁ − P₀) × Q₁  +  (Q₁ − Q₀) × P₀
+  La identidad cierra al centavo (por eso Decimal y no float) y está asertada en
+  los tests. Es lo que separa la inflación del desperdicio, y es lo que va a
+  alimentar la "variación costos país" (problema B).
+  · Q sale de los movimientos `consumption` de la ficha del período; V sale del
+    motor (`detail.rawMaterial.materials[].consumed`, que es el consumo VALORIZADO).
+  · Emparejamiento: MP por `code ?? name ?? id` (nunca por posición: si el costista
+    reordena las MP, se compararía la chapa contra el aluminio), departamentos por
+    nombre, centros por `centerId` (clave estable, sobrevive al arrastre).
+  · Altas y bajas entre meses se comparan contra cero y se marcan `new`/`removed`.
+  · Si las subas y las bajas se cancelan (Δtotal ≈ 0), las contribuciones se
+    reparten sobre Σ|Δ| y se avisa (`offsetting`), en vez de dividir por ~0 y
+    escupir porcentajes de cuatro cifras.
+- **Dos planos: total y POR UNIDAD.** El total sube solo con producir más, aunque
+  nada se haya encarecido; el unitario es la comparación honesta. ⚠️ El motor **no
+  tiene un campo de unidades producidas**: se usa `sales.quantity` (el form lo
+  rotula "cantidad producida"). Si eso está mal conceptualmente, es un ticket
+  aparte. Sin cantidad en alguno de los dos meses, el plano unitario vuelve `null`
+  con un aviso — nunca una división por cero.
+- **Endpoint**: `GET /structures/:id/periods/compare?from=&to=`. Sin parámetros
+  compara los dos últimos. La variación siempre se lee del más viejo al más nuevo,
+  aunque los manden al revés.
+- **Frontend**: pestaña "Comparación" (`components/PeriodComparison.tsx`). Sin
+  gráficos: para un costista los pesos exactos dicen más que una barra. Ojo con dos
+  trampas del repo: `text-success` y `text-line-heavy` NO existen como tokens (los
+  usa `ScenarioSimulator` y sus deltas verdes no se ven), y `<Percent colorize>`
+  tiene semántica de MARGEN (subir = bueno); para un COSTO subir es malo, así que
+  el color se maneja aparte.
+- **Verificado contra la DB real** (Docker: Postgres :5433). Recorrido completo:
+  abrir junio → cerrar (queda congelado: MP consumida $232.000 = 200 kg × $1.160 de
+  PPP, motor v1.0.0) → abrir julio (arrastra 300 kg @ $1.160) → comprar más caro
+  ($1.500) y consumir 210 kg → cerrar → comparar. Resultado: costo total +2,93%
+  pero **costo por unidad −6,4%** (se produjo más); la chapa subió $52.400, de los
+  cuales **$40.800 fueron PRECIO y $11.600 CONSUMO** (suma exacta ✓). Y lo más
+  importante: al ensuciar los datos de la estructura, los números de junio **no se
+  movieron**. Suite: 309 verdes, typecheck y build limpios.
+- **Hallazgo lateral (NO es de esta sesión, pero es una mina)**: una `CostStructure`
+  **no se puede borrar de verdad**: el trigger append-only de `cost_config_versions`
+  bloquea el DELETE en cascada (P0001). La app usa borrado lógico (`deletedAt`), así
+  que no molesta hoy, pero cualquier intento de borrar una empresa/estructura en
+  serio (o un cascade desde `Company`) va a reventar. Vale decidirlo antes de que
+  aparezca en producción.
+
+---
+
+# 🔴 PARA DECIDIR EN EQUIPO (abierto al 13/07/2026)
+
+> Dos cosas que salieron de la Fase 4 y que **no las puede decidir una sola persona**:
+> una es conceptual (de costos) y la otra es de arquitectura de datos. Las dos están
+> hoy tapadas por el borrado lógico y por convención, pero las dos muerden en
+> producción si no se hablan.
+
+## 1. El motor no tiene "unidades producidas" — se usa la cantidad de VENTAS
+
+**Qué pasa hoy.** `CalculationInput.sales = { unitPrice, quantity }`. Esa `quantity`
+es lo único parecido a un volumen que tiene el motor, y el formulario del frontend la
+rotula **"cantidad producida"** ("Precio unitario y cantidad producida para calcular
+el margen bruto"). El costo unitario de la comparación (Fase 4) divide por ahí.
+
+**Por qué importa.** Producción y venta **no son lo mismo**: si se producen 1.000 y se
+venden 800, el estado de costos ya distingue el costo de producción del CMV (por eso
+existe `finishedGoodsCost`), pero el **costo unitario** lo estaríamos calculando sobre
+las unidades **vendidas**, no sobre las **producidas**. Con existencia de producto
+terminado ≠ 0, el costo por unidad queda mal — y es el número que la pantalla de
+Comparación muestra como titular.
+
+**Opciones:**
+- **(a)** Confirmar que en el alcance actual "producción = venta" (no se modela stock
+  de producto terminado) y **documentarlo como supuesto explícito**. Costo cero,
+  riesgo: el día que se modele producto terminado, el unitario miente.
+- **(b)** Agregar `production: { quantity }` como campo propio del período (aditivo,
+  sin tocar el motor), y que el unitario divida por ahí. Es el camino correcto si
+  alguna vez se va a costear con existencia de producto terminado.
+
+**Quién decide:** Alan (producto) + validación de Zayún (criterio contable).
+
+## 2. Una estructura de costos NO se puede borrar de verdad
+
+**Qué pasa hoy.** El trigger append-only de `cost_config_versions` (regla R1) bloquea
+todo DELETE sobre esa tabla — **incluido el DELETE en cascada**. Resultado: borrar una
+`CostStructure` (o una `Company`, que cascadea a sus estructuras) revienta con
+`P0001: append-only`. Encontrado en la prueba real de la Fase 4, al intentar limpiar
+los datos de test.
+
+**Por qué no explota hoy.** La app borra **lógicamente** (`deletedAt`), así que el
+camino real nunca hace DELETE. La bomba está armada, no detonada.
+
+**Dónde muerde:**
+- Un `Company.delete()` en cascada (existe la relación) falla.
+- Cualquier "borrar mi cuenta" / limpieza de datos / GDPR-like es imposible hoy.
+- Un test o un script de mantenimiento que borre queda trabado sin explicación obvia.
+
+**Opciones:**
+- **(a)** Asumirlo: el sistema **no borra nunca** (append-only de verdad, tipo libro
+  contable). Entonces hay que **prohibir el DELETE en la capa de aplicación** con un
+  error claro, y que nadie escriba `.delete()` por error.
+- **(b)** Permitir un borrado administrativo real: que el trigger deje pasar el DELETE
+  cuando viene en cascada del borrado de la estructura (o una función `purgeStructure()`
+  que corra con privilegios y deje rastro en auditoría).
+
+**Quién decide:** Santi / Julie (son las dueñas del esquema y de RLS).

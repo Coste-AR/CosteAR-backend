@@ -219,6 +219,18 @@ model CostPeriod {
   closedBy    String?   @db.Uuid
   closedRunId String?   @db.Uuid
 
+  // El RESULTADO congelado del período (Fase 4). Hasta ahora el cierre guardaba
+  // los INSUMOS pero no los NÚMEROS: comparar dos meses obligaba a recalcular el
+  // pasado con el motor de hoy, y una mejora del motor podía cambiar, en silencio,
+  // un mes ya cerrado. Un período cerrado es un hecho contable: sus números no se
+  // recalculan, se leen. Por eso el cierre corre el motor UNA vez y guarda acá el
+  // `CalculationOutput` entero, junto con la versión del motor que lo produjo.
+  // Los períodos cerrados ANTES de esta migración quedan en null: la comparación
+  // los recalcula y los marca como "recalculado", sin mentir sobre su origen.
+  resultSnapshot      Json?
+  resultEngineVersion String?
+  resultAt            DateTime? @db.Timestamptz
+
   // Reapertura: se permite, pero deja rastro (quién, cuándo, por qué).
   reopenCount  Int       @default(0)
   reopenedAt   DateTime? @db.Timestamptz

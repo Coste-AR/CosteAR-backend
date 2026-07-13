@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CostPeriodService } from '@/application/cost-structures/cost-period-service.js';
+import { ENGINE_VERSION } from '@/application/cost-structures/calculate.js';
 import { ValidationError } from '@/domain/errors/domain-error.js';
 
 vi.mock('@/application/audit/audit-logger.js', () => ({
@@ -48,7 +49,17 @@ const junio = {
       {
         name: 'Chapa',
         unit: 'kg',
-        wilson: { annualDemand: 6000 },
+        // La ficha va completa: desde la Fase 4 el cierre CORRE el motor sobre los
+        // datos del período, y el motor exige el insumo entero (Wilson + política
+        // de stock), como en un período real.
+        wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
+        stockPolicy: {
+          minConsumption: 10,
+          maxConsumption: 30,
+          minLeadTime: 2,
+          maxLeadTime: 5,
+          safetyStock: 50,
+        },
         initialStock: { quantity: 100, unitCost: 1000 },
         movements: [
           { date: '05/06/2026', type: 'purchase', detail: 'Compra', quantity: 400, unitCost: 1200 },
@@ -58,11 +69,23 @@ const junio = {
     ],
   },
   directLaborConfig: {
+    workingDays: {
+      totalDaysPerYear: 365,
+      unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 0, holidaysOnWeekend: 0 },
+      paidAbsence: { holidays: 15, vacations: 14, sickness: 5, specialLeaves: 2, workAccidents: 0 },
+    },
+    itcs: {
+      derivationBase: 0.23,
+      fixedArt: 0.05,
+      uncertainRemunerative: [],
+      uncertainNonRemunerative: [],
+    },
     departments: [{ name: 'Corte', basicRemuneration: 800000, hoursWorked: 160 }],
   },
   indirectCostConfig: {
     centers: [{ id: 'corte', name: 'Corte', type: 'productive' }],
     concepts: [{ name: 'Alquiler', amount: { fixed: 300000, variable: 0 }, distribution: { corte: 40 } }],
+    serviceDistributions: [],
     productiveSettings: [
       { centerId: 'corte', normalCapacity: 160, actualActivity: 150, actualCip: 350000 },
     ],
@@ -362,6 +385,45 @@ describe('CERRAR período', () => {
     expect(cerrado.status).toBe('CLOSED');
     expect(cerrado.closedBy).toBe(USER);
     expect(cerrado.closedRunId).toBe('run-9');
+  });
+
+  it('🔒 al cerrar, CORRE el motor y deja los números congelados en el período', async () => {
+    const db = makeDb();
+    db.costPeriod.findFirst = vi.fn(async () => ({ ...junio, status: 'OPEN' }));
+
+    const svc = new CostPeriodService(db as never);
+    await svc.close(USER, 'per-x', null, ctx);
+
+    const data = (db.costPeriod.update as ReturnType<typeof vi.fn>).mock.calls[0][0].data;
+    const snap = data.resultSnapshot;
+
+    // El mes cerrado guarda SU resultado: no hay que recalcularlo nunca más.
+    expect(data.resultEngineVersion).toBe(ENGINE_VERSION);
+    expect(data.resultAt).toBeInstanceOf(Date);
+
+    // La MP consumida es la de la ficha de junio: 200 u al PPP de $1.160 = $232.000.
+    // Si esto cambia, el arrastre y la comparación mienten.
+    expect(snap.rawMaterialConsumed).toBeCloseTo(232000, 2);
+    expect(snap.productionCost).toBeGreaterThan(0);
+    expect(snap.detail.rawMaterial.materials[0].name).toBe('Chapa');
+
+    // `raw` son andamios internos (Money/Decimal): no se congelan.
+    expect(snap.raw).toBeUndefined();
+  });
+
+  it('si el motor no puede calcular, el mes NO se cierra (nada de cerrar sin números)', async () => {
+    const db = makeDb();
+    db.costPeriod.findFirst = vi.fn(async () => ({
+      ...junio,
+      status: 'OPEN',
+      // Sin la sección de mano de obra el motor no puede correr. Antes esto cerraba
+      // igual y dejaba el mes firmado y vacío.
+      directLaborConfig: null,
+    }));
+
+    const svc = new CostPeriodService(db as never);
+    await expect(svc.close(USER, 'per-x', null, ctx)).rejects.toThrow(/no pudo calcular/i);
+    expect(db.costPeriod.update).not.toHaveBeenCalled();
   });
 
   it('un período ya cerrado no se cierra dos veces', async () => {
