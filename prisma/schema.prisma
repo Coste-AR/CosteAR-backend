@@ -212,12 +212,32 @@ model CostPeriod {
   directLaborConfig  Json?
   indirectCostConfig Json?
   salesUnitPrice     Decimal? @db.Decimal(18, 4)
+  /** Unidades VENDIDAS: con esto se factura (precio × cantidad) y sale el margen. */
   salesQuantity      Decimal? @db.Decimal(18, 4)
+  /**
+   * Unidades PRODUCIDAS: con esto se saca el COSTO UNITARIO.
+   * No es lo mismo que lo vendido: si se producen 1.000 y se venden 800, dividir el
+   * costo por 800 da un costo unitario inflado. Opcional: si no está cargado, se cae
+   * a las vendidas (que es lo que hacía el sistema antes de tener este campo).
+   */
+  productionQuantity Decimal? @db.Decimal(18, 4)
 
   // Cierre: congela el período. `closedRunId` apunta al cálculo que quedó fijo.
   closedAt    DateTime? @db.Timestamptz
   closedBy    String?   @db.Uuid
   closedRunId String?   @db.Uuid
+
+  // El RESULTADO congelado del período (Fase 4). Hasta ahora el cierre guardaba
+  // los INSUMOS pero no los NÚMEROS: comparar dos meses obligaba a recalcular el
+  // pasado con el motor de hoy, y una mejora del motor podía cambiar, en silencio,
+  // un mes ya cerrado. Un período cerrado es un hecho contable: sus números no se
+  // recalculan, se leen. Por eso el cierre corre el motor UNA vez y guarda acá el
+  // `CalculationOutput` entero, junto con la versión del motor que lo produjo.
+  // Los períodos cerrados ANTES de esta migración quedan en null: la comparación
+  // los recalcula y los marca como "recalculado", sin mentir sobre su origen.
+  resultSnapshot      Json?
+  resultEngineVersion String?
+  resultAt            DateTime? @db.Timestamptz
 
   // Reapertura: se permite, pero deja rastro (quién, cuándo, por qué).
   reopenCount  Int       @default(0)
@@ -250,7 +270,10 @@ model CostStructure {
 
   // Datos de venta para el cálculo de margen.
   salesUnitPrice Decimal? @db.Decimal(18, 4)
+  /** Unidades VENDIDAS (facturación y margen). */
   salesQuantity  Decimal? @db.Decimal(18, 4)
+  /** Unidades PRODUCIDAS (costo unitario). Si no está, se cae a las vendidas. */
+  productionQuantity Decimal? @db.Decimal(18, 4)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

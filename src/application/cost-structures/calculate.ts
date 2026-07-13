@@ -166,6 +166,17 @@ export interface CalculationOutput {
 }
 
 /**
+ * El resultado tal como se CONGELA en un período cerrado (Fase 4).
+ *
+ * Se guarda todo menos `raw`: esos objetos (Money, Decimal, ledgers) son andamios
+ * intermedios para el árbol de trazabilidad, no números para leer, y guardarlos
+ * serializados solo engorda la foto. Lo que un mes cerrado tiene que poder contar
+ * —MP, MOD, CIF, costo, CMV, margen y el detalle por MP / departamento / centro—
+ * vive entero en el resto del output.
+ */
+export type FrozenCalculation = Omit<CalculationOutput, 'raw'>;
+
+/**
  * Deriva el reparto PRIMARIO de los conceptos en modo 'base' a partir de las
  * UNIDADES de una base de asignación (ej. superficie o focos por centro). Los
  * porcentajes NO se tipean ni los inventa la IA: el motor los deriva de las

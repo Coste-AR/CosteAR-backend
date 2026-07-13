@@ -206,16 +206,35 @@ export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
 
 // --- Estructura de costos (crear / actualizar) ---
 
+/**
+ * Las tres formas de código de período que entiende el calendario
+ * (`domain/periods/period-calendar.ts`): mensual, quincenal y trimestral.
+ */
+const periodCodeRegex = /^\d{4}-(\d{2}(-Q[12])?|T[1-4])$/;
+
 export const createCostStructureSchema = z.object({
   productName: z.string().min(1).max(160).trim(),
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'Formato de período: YYYY-MM'),
+  /**
+   * El período de arranque. Es OPCIONAL: si no viene, el servicio lo deriva de la fecha
+   * de hoy y del ritmo de la empresa. No se tipea más a mano — pedirle al costista que
+   * invente un código mensual para una empresa que costea por quincena era pedirle que
+   * mienta. Se sigue aceptando si llega (estructuras importadas, compatibilidad).
+   */
+  period: z.string().regex(periodCodeRegex, 'Código de período inválido').optional(),
   costingSystem: z.enum(['ORDERS', 'PROCESSES']).default('ORDERS'),
 });
 export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>;
 
 export const updateSalesSchema = z.object({
   salesUnitPrice: nonNeg,
+  /** Unidades VENDIDAS: facturación (precio × cantidad) y margen. */
   salesQuantity: nonNeg,
+  /**
+   * Unidades PRODUCIDAS: con esto sale el COSTO UNITARIO. Opcional para no romper
+   * lo ya cargado (ni el cliente viejo): si no viene, el costo unitario se cae a las
+   * vendidas, que es lo que el sistema hacía antes de tener este campo.
+   */
+  productionQuantity: nonNeg.nullish(),
 });
 
 // Inventarios para el Estado de Costos (Hoja 4).

@@ -19,6 +19,12 @@ const reopenSchema = z.object({
   reason: z.string().min(10).max(500),
 });
 
+/** Códigos de período ("2026-06"). Si no vienen, se comparan los dos últimos. */
+const compareQuery = z.object({
+  from: z.string().min(4).max(20).optional(),
+  to: z.string().min(4).max(20).optional(),
+});
+
 /**
  * Períodos de costeo (problema C — Fase 1): abrir, cerrar y reabrir.
  * El período es dueño de los datos y del resultado de su mes.
@@ -38,6 +44,24 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
     const { id: structureId } = idParam.parse(request.params);
     const period = await service.getOpen(request.authUser!.id, structureId);
     return { data: period };
+  });
+
+  // Qué va a pasar si abro el siguiente: con qué existencia arranca cada materia
+  // prima (y a qué PPP) y qué importes hay para traer. Alimenta el diálogo de
+  // apertura (Fase 3) — no modifica nada.
+  app.get('/structures/:id/periods/next-preview', { preHandler: authenticate }, async (request) => {
+    const { id: structureId } = idParam.parse(request.params);
+    const preview = await service.previewNext(request.authUser!.id, structureId);
+    return { data: preview };
+  });
+
+  // Comparar dos períodos (Fase 4): qué cambió y de dónde vino el cambio.
+  // Sin query params compara los dos últimos (el más nuevo contra el anterior).
+  app.get('/structures/:id/periods/compare', { preHandler: authenticate }, async (request) => {
+    const { id: structureId } = idParam.parse(request.params);
+    const { from, to } = compareQuery.parse(request.query ?? {});
+    const comparison = await service.compare(request.authUser!.id, structureId, from, to);
+    return { data: comparison };
   });
 
   // Abrir el período siguiente.
