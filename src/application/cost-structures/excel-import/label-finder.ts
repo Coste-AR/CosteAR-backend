@@ -7,17 +7,26 @@ function normalize(s: string): string {
 
 function toNumber(text: string | null): number | null {
   if (text === null) return null;
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
 
-  // Si hay coma, es formato argentino: coma es decimal, puntos son miles
-  if (text.includes(',')) {
-    const cleaned = text.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+  // Coma decimal (formato argentino: "1.234,56") — los puntos son miles, la coma es el decimal.
+  if (trimmed.includes(',')) {
+    const cleaned = trimmed.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
     if (!cleaned) return null;
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;
   }
 
-  // Sin coma: es formato decimal estándar o número plano
-  const cleaned = text.replace(/[^\d.-]/g, '');
+  // Sin coma pero con puntos en forma de miles exacta ("24.000", "1.234.567")
+  // y SIN resto decimal → los puntos son miles, no un punto decimal.
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(trimmed)) {
+    const n = Number(trimmed.replace(/\./g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // Sin coma, sin forma de miles → punto decimal normal ("0.3", "24000", "3500.75").
+  const cleaned = trimmed.replace(/[^\d.-]/g, '');
   if (!cleaned) return null;
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;

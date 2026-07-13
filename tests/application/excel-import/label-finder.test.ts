@@ -53,4 +53,24 @@ describe('findNumberByLabel', () => {
     ]);
     expect(findNumberByLabel(wb, ['Costo unitario'])).toBe(800);
   });
+
+  it('parsea formato argentino con coma decimal (celda de texto)', async () => {
+    const wb = await wbFromRows([['Costo unitario', '1.234,56']]);
+    expect(findNumberByLabel(wb, ['Costo unitario'])).toBe(1234.56);
+  });
+
+  it('parsea formato argentino negativo con coma decimal (celda de texto)', async () => {
+    const wb = await wbFromRows([['Ajuste', '-1.234,56']]);
+    expect(findNumberByLabel(wb, ['Ajuste'])).toBe(-1234.56);
+  });
+
+  it('parsea un decimal estilo inglés en celda de texto', async () => {
+    const wb = await wbFromRows([['Tasa de mantenimiento', '0.3']]);
+    expect(findNumberByLabel(wb, ['Tasa de mantenimiento'])).toBe(0.3);
+  });
+
+  it('parsea miles con punto sin coma decimal (celda de texto) sin perder 3 órdenes de magnitud', async () => {
+    const wb = await wbFromRows([['Demanda anual', '24.000']]);
+    expect(findNumberByLabel(wb, ['Demanda anual'])).toBe(24000);
+  });
 });
