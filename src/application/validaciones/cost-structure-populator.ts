@@ -18,6 +18,10 @@ import {
   classifySocialCharge,
   normalizeChargeName,
 } from '../../domain/knowledge/social-charges-catalog.js';
+import {
+  requireWritablePeriod,
+  type PeriodMirrorData,
+} from '../cost-structures/period-sync.js';
 
 // ─── Tipos internos de CostStructure ─────────────────────────────────────────
 
@@ -468,7 +472,17 @@ export async function populateCostStructureFromApproval(
       return;
     }
 
+    // C — Fase 3: un documento tampoco entra a un mes cerrado, y lo que entra al
+    // mes abierto tiene que quedar también en el período (es el dueño del mes).
+    const period = await requireWritablePeriod(db, structure.id);
+
     await db.costStructure.update({ where: { id: structure.id }, data: updateData });
+    if (period) {
+      await db.costPeriod.update({
+        where: { id: period.id },
+        data: updateData as PeriodMirrorData,
+      });
+    }
     console.log(`[populator] CostStructure ${structure.id} actualizada. Secciones: ${Object.keys(updateData).join(', ')}`);
 
   } catch (err) {

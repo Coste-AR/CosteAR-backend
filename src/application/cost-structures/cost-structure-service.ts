@@ -17,6 +17,7 @@ import {
   type CalculationInput,
 } from './calculate.js';
 import { AllocationBaseService } from './allocation-base-service.js';
+import { requireWritablePeriod, type PeriodMirrorData } from './period-sync.js';
 import type { IndirectCostConfig } from '../../shared/schemas/cost.schema.js';
 
 /**
@@ -240,10 +241,21 @@ export class CostStructureService {
     }
 
     // R1 + R2: versión append-only de la config + update del puntero vigente +
-    // auditoría, TODO en la misma transacción.
+    // espejo en el período abierto + auditoría, TODO en la misma transacción.
     return this.db.$transaction(async (tx) => {
+      // Un mes cerrado no se edita (C — Fase 3). Sin períodos, sigue como antes.
+      const period = await requireWritablePeriod(tx, id);
+
       await this.appendConfigVersion(tx, id, section, newValue, userId);
       const updated = await tx.costStructure.update({ where: { id }, data });
+
+      if (period) {
+        await tx.costPeriod.update({
+          where: { id: period.id },
+          data: data as PeriodMirrorData,
+        });
+      }
+
       await recordAudit(
         {
           ...ctx,
@@ -302,11 +314,20 @@ export class CostStructureService {
   async updateSales(userId: string, id: string, unitPrice: number, quantity: number, ctx: AuditContext) {
     const before = await this.requireStructure(userId, id);
     return this.db.$transaction(async (tx) => {
+      const period = await requireWritablePeriod(tx, id);
+
       await this.appendConfigVersion(tx, id, 'sales', { salesUnitPrice: unitPrice, salesQuantity: quantity }, userId);
       const updated = await tx.costStructure.update({
         where: { id },
         data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
       });
+
+      if (period) {
+        await tx.costPeriod.update({
+          where: { id: period.id },
+          data: { salesUnitPrice: unitPrice, salesQuantity: quantity },
+        });
+      }
       await recordAudit(
         {
           ...ctx,

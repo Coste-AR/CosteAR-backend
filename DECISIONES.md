@@ -333,3 +333,56 @@ pérdida de datos (no hubo).
   exige que la estructura sea del usuario), igual que `evidence`/`trace_audit_log`.
   Se puede agregar una política RLS por join a la estructura si se quiere
   defensa en profundidad (pendiente menor).
+
+## Sesión 2026-07-13 — Períodos, Fase 3: apertura inteligente (problema C)
+
+- **Hallazgo de arranque (bug real, no previsto en el diseño)**: las Fases 1 y 2
+  dejaron el período DESCONECTADO de la pantalla. `updateConfig`/`updateSales`
+  escribían solo en `cost_structures`; el `CostPeriod` conservaba la foto tomada
+  el día en que se abrió. Consecuencias: (1) `close()` validaba la actividad real
+  y el CIP real contra esa foto (siempre en cero) → **cerrar un período fallaba
+  siempre**; (2) el arrastre de la Fase 3 habría leído una existencia que no era
+  la real. Decidido con Lautaro: cerrar ese hueco como parte de la Fase 3.
+- **Espejo estructura → período abierto** (`period-sync.ts`): toda escritura de
+  datos en la estructura se replica en el período ABIERTO, en la MISMA
+  transacción (`updateConfig`, `updateSales`, y el populator de documentos). El
+  período pasa a ser dueño real de los datos de su mes sin mover nada de lugar
+  (la migración de la Fase 1 sigue sin borrar un byte).
+- **Candado del mes cerrado**: si la estructura tiene períodos y ninguno está
+  abierto, se rechaza la escritura con un mensaje que dice qué hacer (reabrir o
+  abrir el siguiente). Las estructuras SIN períodos (legado) siguen funcionando
+  exactamente igual: no se rompe nada de lo que ya andaba.
+- **Arrastre de existencia** (`domain/periods/closing-stock.ts`): la existencia
+  FINAL de cada materia prima pasa a ser la existencia INICIAL del período que
+  abre, valuada al **PPP con el que cerró**. Se DERIVA corriendo la ficha de
+  stock del mes que cierra con la misma función del motor (`calcStockLedgerPPP`),
+  no se copia a mano. El PPP se guarda con 6 decimales, no 2: un centavo por
+  unidad, arrastrado mes a mes sobre miles de unidades, deja de ser un centavo.
+- **Si la ficha no cuadra, no se abre**: un consumo mayor al saldo hace que la
+  existencia final no se pueda valuar. En vez de inventar un saldo (que
+  ensuciaría todos los meses siguientes), se corta con un error que NOMBRA la
+  materia prima. El diálogo lo muestra sin romperse (`openingStockError`).
+- **Reseteo de la estructura al abrir**: como la app escribe en la estructura, al
+  abrir el período siguiente se la deja con lo arrastrado (receta + existencia
+  inicial, movimientos vacíos, importes según elección). Es lo que hace que la
+  pantalla amanezca en el mes nuevo. Nada se pierde: el mes que cerró queda en su
+  `CostPeriod` y el reseteo se versiona en `cost_config_versions` (R1) con
+  `reason: "Apertura del período X (arrastre desde Y)"`.
+- **El PRIMER período no arrastra**: fotografía lo que la estructura ya tiene
+  cargado y NO toca la pantalla (resetear ahí sería borrarle el trabajo al
+  costista).
+- **Ventas**: el precio unitario viaja (es lista de precios, parte del molde); las
+  unidades vendidas arrancan SIEMPRE en cero (son del mes). `calcGrossMargin` ya
+  es a prueba de ventas en cero.
+- **Preview de apertura**: `GET /structures/:id/periods/next-preview` — qué mes se
+  abre, con cuánta existencia y a qué PPP arranca cada MP, y qué importes hay para
+  traer. No modifica nada. Alimenta el diálogo del frontend.
+- **Tests**: 22 nuevos (arrastre al PPP de cierre, ficha que no cuadra, primer
+  período, espejo, candado del mes cerrado, legado sin períodos). Suite de
+  `application/` 90 verde; typecheck backend y frontend limpios; build del
+  frontend OK.
+- **Límite del entorno (igual que siempre)**: esta máquina no tiene Postgres, así
+  que NO se ejecutó contra una DB real. El espejo y el candado tocan el camino de
+  guardado de toda la app: **el equipo tiene que probarlo en local con la DB antes
+  de mergear a `devAdmin`** (abrir un período, guardar, cerrar, abrir el siguiente
+  y verificar la existencia arrastrada).

@@ -40,6 +40,15 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
     return { data: period };
   });
 
+  // Qué va a pasar si abro el siguiente: con qué existencia arranca cada materia
+  // prima (y a qué PPP) y qué importes hay para traer. Alimenta el diálogo de
+  // apertura (Fase 3) — no modifica nada.
+  app.get('/structures/:id/periods/next-preview', { preHandler: authenticate }, async (request) => {
+    const { id: structureId } = idParam.parse(request.params);
+    const preview = await service.previewNext(request.authUser!.id, structureId);
+    return { data: preview };
+  });
+
   // Abrir el período siguiente.
   app.post('/structures/:id/periods', { preHandler: authenticate }, async (request, reply) => {
     const { id: structureId } = idParam.parse(request.params);
