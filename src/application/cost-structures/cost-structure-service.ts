@@ -399,7 +399,10 @@ export class CostStructureService {
     }
 
     const input: CalculationInput = {
-      rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+      // Se arma con el MISMO esquema que `calculate()` (N materias primas). Antes
+      // el simulador usaba la forma vieja de UNA sola materia prima y quedaba
+      // desincronizado del motor.
+      rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
       inventory: inventorySchema.parse({}),
@@ -411,9 +414,14 @@ export class CostStructureService {
 
     if (shocks.rawMaterial) {
       const mul = 1 + shocks.rawMaterial;
-      input.rawMaterial.wilson.unitCost *= mul;
-      input.rawMaterial.initialStock.unitCost *= mul;
-      input.rawMaterial.movements.forEach(m => m.unitCost = (m.unitCost ?? 0) * mul);
+      // El shock de precio golpea a TODAS las materias primas de la estructura.
+      for (const material of input.rawMaterial.materials) {
+        material.wilson.unitCost *= mul;
+        material.initialStock.unitCost *= mul;
+        for (const m of material.movements) {
+          m.unitCost = (m.unitCost ?? 0) * mul;
+        }
+      }
     }
     if (shocks.directLabor) {
       const mul = 1 + shocks.directLabor;
