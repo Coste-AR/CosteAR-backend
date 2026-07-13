@@ -263,12 +263,16 @@ export class CostStructureService {
     }
     if (shocks.directLabor) {
       const mul = 1 + shocks.directLabor;
-      input.directLabor.employees.forEach(e => e.grossSalary *= mul);
+      input.directLabor.departments.forEach(d => {
+        d.basicRemuneration *= mul;
+      });
     }
     if (shocks.indirectCosts) {
       const mul = 1 + shocks.indirectCosts;
-      input.indirectCosts.fixed.forEach(f => f.amount *= mul);
-      input.indirectCosts.variable.forEach(v => v.amount *= mul);
+      input.indirectCosts.concepts.forEach(c => {
+        c.amount.fixed *= mul;
+        c.amount.variable *= mul;
+      });
     }
     if (shocks.sales) {
       const mul = 1 + shocks.sales;
