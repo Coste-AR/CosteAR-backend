@@ -737,3 +737,66 @@ sigue funcionando igual.
 Y lo que demuestra que el interruptor quedó encendido: en la quincenal, **el período siguiente
 es la 2ª quincena de julio, no agosto**. El candado del ritmo también cortó como debía.
 Suite completa: **321 verdes**. Tests nuevos en `tests/application/periodicidad-empresa.test.ts`.
+
+---
+
+## Sesión 2026-07-13 (cont.) — Problema 3: el dictado por voz
+
+**Por qué "no funcionaba bien".** No era una cosa: eran cuatro. El dictado estaba
+**copiado y pegado a mano en 4 lugares** (`ChatComposer`, `NewCompanyForm` de
+`CompaniesPage`, el `AiSuggesterSection` local de `CompanyDetailPage`, y un
+`components/AiSuggesterSection.tsx` **que no renderizaba nadie**), cada copia con sus
+propios bugs y ninguna compartiendo una línea con las otras.
+
+Los tres que lo rompían de verdad:
+
+1. **`continuous = false`** en tres de las cuatro copias: el navegador **corta el
+   micrófono al primer silencio**. El costista frenaba a pensar —describiendo un proceso
+   productivo, o sea justo cuando más se piensa— y el micrófono se apagaba solo, sin
+   avisar. Para "contame cómo produce tu empresa" era inusable.
+2. **Frases perdidas** en `ChatComposer` (la única con `continuous = true`): hacía
+   `setText(text + nuevo)` con un `text` **congelado en el momento de arrancar**
+   (stale closure). Con `continuous`, el handler corre una vez por frase, y todas leían
+   el mismo `text` viejo: **la 2ª frase pisaba a la 1ª, la 3ª a la 2ª.** Dictabas tres
+   oraciones y quedaba una. El tipo del prop lo habilitaba: `setText: (t: string) => void`
+   ni siquiera permitía la forma funcional.
+3. **Silencio ante el error.** Dos copias no tenían `onerror` **en absoluto**; las otras
+   dos hacían `console.error`. Micrófono bloqueado por el navegador, sin micrófono
+   conectado, o el servicio de voz caído → el botón dejaba de titilar y **nada más**.
+   El usuario no tenía cómo saber qué pasó.
+
+Además: sólo se leía `results[0]` (se tiraba todo lo que venía después), no había limpieza
+al salir de la pantalla (el micrófono podía quedar prendido), `start()` sin `try/catch`
+(doble clic → `InvalidStateError`), y `CompaniesPage` mostraba **"Deteniendo…"
+MIENTRAS grababa** — la pantalla mentía sobre lo que estaba pasando.
+
+**Lo que se hizo.** Un solo hook, `src/lib/use-dictation.ts`, y las tres pantallas vivas
+pasan por ahí. `continuous = true`; **se reengancha solo** si el navegador corta igual
+(Chrome lo hace tras un silencio largo, aunque esté en `continuous`) — eso es lo que
+permite frenar a pensar. El texto reconocido se **entrega** (`onText`) y el que llama lo
+agrega con la forma funcional, así que no puede pisar nada. Cada código de error del
+navegador tiene un mensaje que dice **qué pasó y qué hacer** (`not-allowed` → "habilitá
+el micrófono desde el candado de la barra de direcciones"). Se lee desde `resultIndex`,
+se aborta al desmontar, y `start()` va en `try/catch`.
+
+**Archivos muertos borrados** (con OK de Lautaro; nadie los importaba, verificado con
+typecheck y build después de borrarlos): `components/AiSuggesterSection.tsx` (la 4ª copia
+del dictado, la que no renderizaba nadie) y `components/NewStructureForm.tsx` (copia
+huérfana con el campo período tipeado que acabábamos de matar). Eran la trampa clásica de
+"arreglé la copia equivocada".
+
+**El techo de este enfoque (queda anotado, NO se hizo).** El reconocimiento lo hace el
+**navegador** (Chrome manda el audio a Google), no un servidor nuestro. Por eso no
+necesita clave de API y anda hoy mismo — pero **no entiende el vocabulario de costos**:
+"prorrateo", "PPP", "CIF", "$1.250,50" salen mal. Arreglar eso pide **Whisper del lado del
+servidor** (Groq ya está en el proyecto y ofrece `whisper-large-v3`), donde se le puede
+pasar una lista de términos del oficio para que los transcriba bien.
+👉 **Decisión de Lautaro (13/07/2026): primero el arreglo del navegador** —anda ya, sin
+clave— y **Whisper queda como el paso siguiente.** No se hizo ahora porque la clave de
+Groq en local es un placeholder: se podría escribir, pero no probar de punta a punta, y
+este proyecto no entrega cosas sin probar.
+
+⚠️ **Hallazgo lateral (real, no de esta sesión):** el guard `isConfigured` de Groq es
+`this.apiKey.length > 10`, y el placeholder `'groq_placeholder'` tiene 16 caracteres →
+**pasa el guard**. O sea que en local no degrada elegante: dispara el HTTP igual, se come
+un 401 y lo esconde en un `console.error`. Cuando se toque Whisper, arreglar esto también.
