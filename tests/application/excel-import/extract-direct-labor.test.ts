@@ -11,7 +11,7 @@ describe('extractDirectLabor', () => {
     ws.addRow(['Sábados', 52]);
     ws.addRow(['Ausencias injustificadas', 3]);
     ws.addRow(['Feriados en fin de semana', 4]);
-    ws.addRow(['Feriados', 19]);
+    ws.addRow(['Feriados Nacionales y Provinciales', 19]);
     ws.addRow(['Vacaciones', 14]);
     ws.addRow(['Enfermedad', 5]);
     ws.addRow(['Licencias especiales', 2]);

@@ -25,7 +25,11 @@ export function extractRawMaterial(wb: ExcelJS.Workbook): PartialRawMaterialConf
         findNumberByLabel(wb, ['Costo de orden', 'Costo de pedido', 'Costo de orden (S)']),
       ),
       holdingRate: orUndef(
-        findNumberByLabel(wb, ['Tasa de mantenimiento', 'Tasa de mantenimiento (K)']),
+        findNumberByLabel(wb, [
+          'Tasa de mantenimiento',
+          'Tasa de mantenimiento (K)',
+          'Tasa de mantener inventario',
+        ]),
       ),
       unitCost,
     },

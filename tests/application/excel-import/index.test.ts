@@ -24,7 +24,7 @@ async function fullFixtureBuffer(): Promise<Buffer> {
   mod.addRow(['Sábados', 52]);
   mod.addRow(['Ausencias injustificadas', 3]);
   mod.addRow(['Feriados en fin de semana', 4]);
-  mod.addRow(['Feriados', 19]);
+  mod.addRow(['Feriados Nacionales y Provinciales', 19]);
   mod.addRow(['Vacaciones', 14]);
   mod.addRow(['Enfermedad', 5]);
   mod.addRow(['Licencias especiales', 2]);

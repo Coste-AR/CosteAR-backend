@@ -25,15 +25,32 @@ export function extractDirectLabor(wb: ExcelJS.Workbook): PartialDirectLaborConf
 
   return {
     workingDays: {
-      totalDaysPerYear: orUndef(findNumberByLabel(wb, ['Total días por año', 'Días del año'])),
+      totalDaysPerYear: orUndef(
+        findNumberByLabel(wb, ['Total días por año', 'Días del año', 'Días totales del año']),
+      ),
       unpaidAbsence: {
         sundays: orUndef(findNumberByLabel(wb, ['Domingos'])),
         saturdays: orUndef(findNumberByLabel(wb, ['Sábados'])),
-        unjustifiedAbsences: orUndef(findNumberByLabel(wb, ['Ausencias injustificadas'])),
-        holidaysOnWeekend: orUndef(findNumberByLabel(wb, ['Feriados en fin de semana'])),
+        unjustifiedAbsences: orUndef(
+          findNumberByLabel(wb, ['Ausencias injustificadas', 'Inasistencias injustificadas']),
+        ),
+        holidaysOnWeekend: orUndef(
+          findNumberByLabel(wb, [
+            'Feriados en fin de semana',
+            'Feriados coincidentes con fin de semana',
+          ]),
+        ),
       },
       paidAbsence: {
-        holidays: orUndef(findNumberByLabel(wb, ['Feriados'])),
+        // OJO: "Feriados" a secas NO está en esta lista a propósito. Si el
+        // Excel también tiene una fila de "Feriados en fin de semana" (otro
+        // campo), un genérico "Feriados" matchearía las dos filas por igual
+        // — no hay forma de saber cuál es cuál con solo esa palabra — así
+        // que preferimos exigir un calificador ("nacionales"/"provinciales")
+        // antes que arriesgarnos a la ambigüedad con el campo vecino.
+        holidays: orUndef(
+          findNumberByLabel(wb, ['Feriados nacionales', 'Feriados Nacionales y Provinciales']),
+        ),
         vacations: orUndef(findNumberByLabel(wb, ['Vacaciones'])),
         sickness: orUndef(findNumberByLabel(wb, ['Enfermedad'])),
         specialLeaves: orUndef(findNumberByLabel(wb, ['Licencias especiales'])),
