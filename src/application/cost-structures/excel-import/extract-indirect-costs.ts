@@ -24,6 +24,14 @@ export function extractIndirectCosts(wb: ExcelJS.Workbook): PartialIndirectCostC
   const centerRows = findTableByHeaders(wb, [['Centro', 'Centro de costo'], ['Tipo']]);
   const conceptRows = findTableByHeaders(wb, [['Concepto'], ['Fijo'], ['Variable']]);
 
+  // `id` se usa aguas abajo como clave real (serviceDistributions[].serviceCenterId,
+  // productiveSettings[].centerId, y el diccionario de costos por centro en
+  // indirect-costs.ts). Dos nombres distintos que normalizan al mismo slug
+  // (espacios, mayúsculas, acentos, o directamente el mismo nombre repetido)
+  // NO pueden colapsar silenciosamente en un único id — sus costos se
+  // mezclarían sin ningún error. Se desambigua determinísticamente dentro de
+  // esta misma extracción agregando un sufijo -2, -3, ... al primer choque.
+  const seenIds = new Set<string>();
   const centers = centerRows
     .map((r) => {
       const type = mapType(r[1]);
@@ -31,7 +39,17 @@ export function extractIndirectCosts(wb: ExcelJS.Workbook): PartialIndirectCostC
       const name = String(r[0]);
       return { id: slugify(name), name, type };
     })
-    .filter((c): c is { id: string; name: string; type: 'productive' | 'service' } => c !== null);
+    .filter((c): c is { id: string; name: string; type: 'productive' | 'service' } => c !== null)
+    .map((c) => {
+      let id = c.id;
+      let n = 2;
+      while (seenIds.has(id)) {
+        id = `${c.id}-${n}`;
+        n++;
+      }
+      seenIds.add(id);
+      return { ...c, id };
+    });
 
   // `findTableByHeaders` ya devuelve las columnas numéricas parseadas (o el
   // texto original si no pudo interpretarlas como número). Un concepto cuyo

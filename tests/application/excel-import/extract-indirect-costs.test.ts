@@ -47,4 +47,25 @@ describe('extractIndirectCosts', () => {
     ]);
     expect(result.concepts.find((c) => c.name === 'Seguro')).toBeUndefined();
   });
+
+  it('desambigua ids cuando dos filas de centro slugifican al mismo id', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('3-Costos Indirectos');
+    ws.addRow(['Centro de costo', 'Tipo']);
+    ws.addRow(['Armado', 'Productivo']);
+    ws.addRow(['Armado', 'Productivo']); // nombre repetido exacto (p.ej. fila duplicada al pegar)
+    ws.addRow(['Depósito', 'Servicio']);
+    ws.addRow(['DEPÓSITO', 'Servicio']); // mismo slug vía normalización de mayúsculas
+
+    const result = extractIndirectCosts(wb);
+
+    expect(result.centers).toEqual([
+      { id: 'armado', name: 'Armado', type: 'productive' },
+      { id: 'armado-2', name: 'Armado', type: 'productive' },
+      { id: 'deposito', name: 'Depósito', type: 'service' },
+      { id: 'deposito-2', name: 'DEPÓSITO', type: 'service' },
+    ]);
+    const ids = result.centers.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
