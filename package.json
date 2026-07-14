@@ -49,6 +49,9 @@
     "uuid": "^11.0.5",
     "zod": "^3.24.1"
   },
+  "overrides": {
+    "@types/node": "$@types/node"
+  },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.5",
