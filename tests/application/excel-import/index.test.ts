@@ -64,4 +64,31 @@ describe('parseExcelImport', () => {
   it('tira ValidationError si el buffer no es un .xlsx válido', async () => {
     await expect(parseExcelImport(Buffer.from('no es excel'))).rejects.toThrow();
   });
+
+  it('resuelve salesQuantity aunque haya una columna "Cantidad" en la Ficha de stock (colisión real de excel-export.ts)', async () => {
+    const wb = new ExcelJS.Workbook();
+
+    // Reproduce tal cual la Ficha de stock que escribe excel-export.ts:92 —
+    // encabezado con columna 'Cantidad' y, debajo, un valor numérico
+    // DISTINTO (el costo unitario del renglón) en esa misma columna.
+    // `findNumberByLabel` mira a la derecha de la celda 'Cantidad' primero
+    // (texto, no numérico) y después abajo — ahí encuentra el 800, que no
+    // tiene nada que ver con la cantidad vendida.
+    const mp = wb.addWorksheet('1-Materia Prima');
+    mp.addRow(['Ficha de stock', 'Cantidad', 'Costo Unit.', 'Tipo']);
+    mp.addRow(['Existencia inicial', 300, 800, 'inicial']);
+
+    const ventas = wb.addWorksheet('4-Estado de Costos');
+    ventas.addRow(['Precio unitario de venta', 12000]);
+    ventas.addRow(['Cantidad vendida', 1200]);
+
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+    const result = await parseExcelImport(buffer);
+
+    // Antes del fix: 'Cantidad' (alias genérico) matcheaba tanto el 800 de
+    // la Ficha de stock como el 1200 de 'Cantidad vendida' → dos valores
+    // DISTINTOS → ambiguo → null. Con el fix, sólo matchea 'Cantidad
+    // vendida' (exacto, sin alias genérico) → resuelve a 1200.
+    expect(result.sales.salesQuantity).toBe(1200);
+  });
 });
