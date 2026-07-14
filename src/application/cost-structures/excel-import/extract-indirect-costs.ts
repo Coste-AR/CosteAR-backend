@@ -33,19 +33,20 @@ export function extractIndirectCosts(wb: ExcelJS.Workbook): PartialIndirectCostC
     })
     .filter((c): c is { id: string; name: string; type: 'productive' | 'service' } => c !== null);
 
-  const concepts = conceptRows.map((r) => {
-    // findTableByHeaders already parsed numeric cells via toNumber(), returning either
-    // a JS number or null. We DON'T re-call Number() on already-parsed values.
-    // For empty/unparseable cells (null or string), default to 0 (reasonable for a cost).
-    const fixed = typeof r[1] === 'number' ? r[1] : 0;
-    const variable = typeof r[2] === 'number' ? r[2] : 0;
-
-    return {
+  // `findTableByHeaders` ya devuelve las columnas numéricas parseadas (o el
+  // texto original si no pudo interpretarlas como número). Un concepto cuyo
+  // fijo o variable no se pudo parsear queda descartado acá en vez de
+  // colarse con un 0 inventado: mismo criterio que extract-direct-labor.ts
+  // (ambiguo/no-parseable → no se adivina, va a carga manual). Un 0
+  // legítimo en la celda origen ya llega como número 0 vía toNumber, así
+  // que este filtro no descarta conceptos que realmente cuestan cero.
+  const concepts = conceptRows
+    .filter((r): r is [unknown, number, number] => typeof r[1] === 'number' && typeof r[2] === 'number')
+    .map((r) => ({
       name: String(r[0]),
-      amount: { fixed, variable },
+      amount: { fixed: r[1], variable: r[2] },
       distribution: {},
-    };
-  });
+    }));
 
   return { centers, concepts };
 }

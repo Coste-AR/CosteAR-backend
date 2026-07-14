@@ -27,4 +27,24 @@ describe('extractIndirectCosts', () => {
       { name: 'Energía', amount: { fixed: 0, variable: 180000 }, distribution: {} },
     ]);
   });
+
+  it('descarta (no adivina 0) un concepto cuyo fijo o variable no se pudo parsear como número', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('3-Costos Indirectos');
+    ws.addRow(['Centro de costo', 'Tipo']);
+    ws.addRow(['Armado', 'Productivo']);
+    ws.addRow([]);
+    ws.addRow(['Concepto', 'Fijo', 'Variable']);
+    ws.addRow(['Alquiler', 300000, 0]);
+    ws.addRow(['Seguro', 'a confirmar', 50000]);
+    ws.addRow(['Energía', 0, 180000]);
+
+    const result = extractIndirectCosts(wb);
+
+    expect(result.concepts).toEqual([
+      { name: 'Alquiler', amount: { fixed: 300000, variable: 0 }, distribution: {} },
+      { name: 'Energía', amount: { fixed: 0, variable: 180000 }, distribution: {} },
+    ]);
+    expect(result.concepts.find((c) => c.name === 'Seguro')).toBeUndefined();
+  });
 });
