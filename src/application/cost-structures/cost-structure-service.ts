@@ -107,6 +107,19 @@ export class CostStructureService {
     return { buffer, filename: `CosteAR-${safeName}.xlsx` };
   }
 
+  /**
+   * Parsea un .xlsx (base64) buscando los campos de MP/MOD/CIP/Ventas por
+   * etiqueta. NO persiste nada — el resultado se usa como `defaultValues` en
+   * los formularios existentes, que ya no guardan hasta que el costista
+   * aprieta "Guardar" en cada sección.
+   */
+  async importFromExcel(userId: string, id: string, fileBase64: string) {
+    await this.requireStructure(userId, id);
+    const buffer = Buffer.from(fileBase64, 'base64');
+    const { parseExcelImport } = await import('./excel-import/index.js');
+    return parseExcelImport(buffer);
+  }
+
   async create(userId: string, companyId: string, input: CreateCostStructureInput, ctx: AuditContext) {
     await this.requireCompany(userId, companyId);
     const structure = await this.db.costStructure.create({

@@ -66,6 +66,14 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
       .send(buffer);
   });
 
+  // Importar desde Excel: parsea y devuelve valores sugeridos, no persiste nada.
+  app.post('/cost-structures/:id/import-excel', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const { fileBase64 } = z.object({ fileBase64: z.string().min(1).max(14_000_000) }).parse(request.body);
+    const result = await service.importFromExcel(request.authUser!.id, id, fileBase64);
+    return { data: result };
+  });
+
   // Carga de cada bloque de configuración (validación dentro del servicio).
   for (const section of ['raw-material', 'direct-labor', 'indirect-costs'] as const) {
     const key =
