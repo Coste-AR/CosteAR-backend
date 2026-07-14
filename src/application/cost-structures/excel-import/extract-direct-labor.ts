@@ -44,10 +44,17 @@ export function extractDirectLabor(wb: ExcelJS.Workbook): PartialDirectLaborConf
       derivationBase: orUndef(findNumberByLabel(wb, ['Base de derivación'])),
       fixedArt: orUndef(findNumberByLabel(wb, ['ART fija'])),
     },
-    departments: departmentRows.map((r) => ({
-      name: String(r[0]),
-      basicRemuneration: Number(r[1]),
-      hoursWorked: Number(r[2]),
-    })),
+    // `findTableByHeaders` ya devuelve las columnas numéricas parseadas (o el
+    // texto original si no pudo interpretarlas como número). Una fila cuya
+    // remuneración u horas no se pudieron parsear queda descartada acá en vez
+    // de colarse como NaN en la config: mismo criterio que el resto del
+    // extractor (ambiguo/no-parseable → no se adivina, va a carga manual).
+    departments: departmentRows
+      .filter((r): r is [unknown, number, number] => typeof r[1] === 'number' && typeof r[2] === 'number')
+      .map((r) => ({
+        name: String(r[0]),
+        basicRemuneration: r[1],
+        hoursWorked: r[2],
+      })),
   };
 }

@@ -1,5 +1,6 @@
 import type ExcelJS from 'exceljs';
 import { cellText } from './xlsx-reader.js';
+import { toNumber } from './label-finder.js';
 
 function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -42,9 +43,14 @@ export function findTableByHeaders(wb: ExcelJS.Workbook, headers: HeaderSpec[]):
         const values: unknown[] = [];
         for (let c = 1; c <= headers.length; c++) {
           const text = cellText(dataRow.getCell(c));
-          const matchesNumber = text !== null && /^-?\d+([.,]\d+)?$/.test(text);
-          const num = matchesNumber ? Number(text!.replace(',', '.')) : NaN;
-          values.push(Number.isFinite(num) ? num : text);
+          // Solo se intenta parsear como número si el texto ENTERO tiene forma
+          // numérica (dígitos, puntos de miles, coma decimal, signo). Si no se
+          // ancla así, `toNumber` (pensado para celdas que ya se sabe que son
+          // numéricas) podría extraer dígitos sueltos de un texto como
+          // "Depto Productivo 1" y devolver 1 en vez de dejarlo como texto.
+          const looksNumeric = text !== null && /^-?[\d.,]+$/.test(text);
+          const num = looksNumeric ? toNumber(text) : null;
+          values.push(num !== null ? num : text);
         }
         dataRows.push(values);
       }

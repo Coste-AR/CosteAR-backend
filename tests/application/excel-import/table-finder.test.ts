@@ -64,4 +64,24 @@ describe('findTableByHeaders', () => {
     const rows = findTableByHeaders(wb, ['Departamento', 'Remun. básica', 'Horas-Hombre']);
     expect(rows).toEqual([['Depto A', 100, 4.5]]);
   });
+
+  it('parsea celdas de TEXTO con formato argentino de miles (puntos), sin NaN ni 1000x de error', async () => {
+    // Celdas de texto (no numéricas nativas) con puntos de miles: "4.500.000"
+    // debe leerse como 4500000 (no NaN), y "1.200" como 1200 (no 1.2).
+    const wb = await wbFromRows([
+      ['Departamento', 'Remun. básica', 'Horas-Hombre'],
+      ['Depto A', '4.500.000', '1.200'],
+    ]);
+    const rows = findTableByHeaders(wb, ['Departamento', 'Remun. básica', 'Horas-Hombre']);
+    expect(rows).toEqual([['Depto A', 4500000, 1200]]);
+  });
+
+  it('no corrompe el nombre de una fila con dígitos (ej. "Depto Productivo 1") al intentar parsearlo como número', async () => {
+    const wb = await wbFromRows([
+      ['Departamento', 'Remun. básica', 'Horas-Hombre'],
+      ['Depto Productivo 1', 4500000, 12000],
+    ]);
+    const rows = findTableByHeaders(wb, ['Departamento', 'Remun. básica', 'Horas-Hombre']);
+    expect(rows).toEqual([['Depto Productivo 1', 4500000, 12000]]);
+  });
 });
