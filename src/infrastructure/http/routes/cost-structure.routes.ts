@@ -67,12 +67,21 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
   });
 
   // Importar desde Excel: parsea y devuelve valores sugeridos, no persiste nada.
-  app.post('/cost-structures/:id/import-excel', { preHandler: authenticate }, async (request) => {
-    const { id } = idParam.parse(request.params);
-    const { fileBase64 } = z.object({ fileBase64: z.string().min(1).max(14_000_000) }).parse(request.body);
-    const result = await service.importFromExcel(request.authUser!.id, id, fileBase64);
-    return { data: result };
-  });
+  // `bodyLimit` acá override el global de app.ts (1 MiB, pensado para el resto
+  // de la API) — un .xlsx en base64 de ~10MB decodificados (tope real: los
+  // 14_000_000 caracteres que valida el schema de abajo) no entra en 1 MiB, y
+  // sin este override Fastify lo rechazaba con un 413 genérico ANTES de que
+  // el Zod de acá corriera. 15_000_000 bytes deja margen sobre el cap de Zod.
+  app.post(
+    '/cost-structures/:id/import-excel',
+    { preHandler: authenticate, bodyLimit: 15_000_000 },
+    async (request) => {
+      const { id } = idParam.parse(request.params);
+      const { fileBase64 } = z.object({ fileBase64: z.string().min(1).max(14_000_000) }).parse(request.body);
+      const result = await service.importFromExcel(request.authUser!.id, id, fileBase64);
+      return { data: result };
+    },
+  );
 
   // Carga de cada bloque de configuración (validación dentro del servicio).
   for (const section of ['raw-material', 'direct-labor', 'indirect-costs'] as const) {
