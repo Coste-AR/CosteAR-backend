@@ -5,7 +5,7 @@ function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
-function toNumber(text: string | null): number | null {
+export function toNumber(text: string | null): number | null {
   if (text === null) return null;
   const trimmed = text.trim();
   if (trimmed === '') return null;
