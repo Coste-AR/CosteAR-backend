@@ -89,6 +89,52 @@ describe('parseExcelImport', () => {
     // la Ficha de stock como el 1200 de 'Cantidad vendida' → dos valores
     // DISTINTOS → ambiguo → null. Con el fix, sólo matchea 'Cantidad
     // vendida' (exacto, sin alias genérico) → resuelve a 1200.
-    expect(result.sales.salesQuantity).toBe(1200);
+    expect(result.sales?.salesQuantity).toBe(1200);
+  });
+
+  it('omite (undefined) las secciones sin datos en vez de devolverlas vacías-con-forma, cuando el Excel sólo trae Materia Prima', async () => {
+    const wb = new ExcelJS.Workbook();
+
+    const mp = wb.addWorksheet('1-Materia Prima');
+    mp.addRow(['Demanda anual', 24000]);
+    mp.addRow(['Costo de orden', 3500]);
+    mp.addRow(['Tasa de mantenimiento', 0.3]);
+    mp.addRow(['Costo unitario', 800]);
+    mp.addRow(['Consumo mínimo', 40]);
+    mp.addRow(['Consumo máximo', 90]);
+    mp.addRow(['Plazo mínimo', 8]);
+    mp.addRow(['Plazo máximo', 12]);
+    mp.addRow(['Stock de reserva', 200]);
+    mp.addRow(['Existencia inicial', 300]);
+
+    // MOD/CIP/Ventas: hojas presentes pero sin ningún dato relevante.
+    wb.addWorksheet('2-Mano de Obra');
+    wb.addWorksheet('3-Costos Indirectos');
+    wb.addWorksheet('4-Estado de Costos');
+
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+    const result = await parseExcelImport(buffer);
+
+    expect(result.rawMaterialConfig).toBeDefined();
+    expect(result.rawMaterialConfig?.wilson?.annualDemand).toBe(24000);
+
+    expect(result.directLaborConfig).toBeUndefined();
+    expect(result.indirectCostConfig).toBeUndefined();
+    expect(result.sales).toBeUndefined();
+  });
+
+  it('conserva un valor legítimo de 0 (no lo trata como "vacío")', async () => {
+    const wb = new ExcelJS.Workbook();
+
+    const mod = wb.addWorksheet('2-Mano de Obra');
+    mod.addRow(['Base de derivación', 0]);
+
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+    const result = await parseExcelImport(buffer);
+
+    // `derivationBase: 0` es un valor DEFINIDO y legítimo — no debe hacer que
+    // la sección entera se trate como vacía ni que el 0 se pierda.
+    expect(result.directLaborConfig).toBeDefined();
+    expect(result.directLaborConfig?.itcs?.derivationBase).toBe(0);
   });
 });
