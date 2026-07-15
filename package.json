@@ -21,6 +21,7 @@
     "prisma:deploy": "node scripts/migrate-deploy.mjs",
     "db:rls": "node scripts/apply-rls.mjs",
     "db:seed": "node prisma/seed.mjs",
+    "db:backfill-trazabilidad": "node scripts/backfill-trazabilidad.mjs",
     "db:setup": "prisma migrate dev --name init && node scripts/apply-rls.mjs",
     "worker": "tsx --env-file=.env src/infrastructure/workers/index.ts",
     "keys:generate": "node scripts/generate-keys.mjs"
@@ -68,5 +69,14 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "argon2@0.41.1": true,
+    "esbuild@0.28.0": true,
+    "esbuild@0.21.5": true,
+    "msgpackr-extract@3.0.4": true,
+    "prisma@6.19.3": true
   }
 }

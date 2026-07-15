@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { CostStructureService } from '../../../application/cost-structures/cost-structure-service.js';
+import { ValidationError } from '../../../domain/errors/domain-error.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
 import {
   createCostStructureSchema,
@@ -48,6 +49,31 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     const { id } = idParam.parse(request.params);
     const deleted = await service.softDelete(request.authUser!.id, id, auditContext(request));
     return { data: deleted };
+  });
+
+  /**
+   * PURGA: borra la estructura DE VERDAD, con todo su histórico. No hay papelera,
+   * no hay vuelta atrás.
+   *
+   * Para que no pase por accidente (ni por un click, ni por un bug de otro lado),
+   * hay que mandar el NOMBRE DEL PRODUCTO escrito tal cual. Es el patrón de "escribí
+   * el nombre para confirmar": lo único que queda después es el registro de
+   * auditoría.
+   */
+  app.post('/cost-structures/:id/purge', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const { confirm } = z.object({ confirm: z.string().min(1) }).parse(request.body);
+
+    const structure = await service.requireStructure(request.authUser!.id, id);
+    if (confirm.trim() !== structure.productName.trim()) {
+      throw new ValidationError(
+        `Para borrar definitivamente hay que escribir el nombre del producto tal cual: "${structure.productName}". ` +
+          'Esto no se puede deshacer: se borra el histórico completo (versiones, cálculos, períodos y datos).',
+      );
+    }
+
+    const purged = await service.purge(request.authUser!.id, id, auditContext(request));
+    return { data: purged };
   });
 
   app.post('/cost-structures/:id/restore', { preHandler: authenticate }, async (request) => {
@@ -110,13 +136,14 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
 
   app.put('/cost-structures/:id/sales', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
-    const { salesUnitPrice, salesQuantity } = updateSalesSchema.parse(request.body);
+    const { salesUnitPrice, salesQuantity, productionQuantity } = updateSalesSchema.parse(request.body);
     const updated = await service.updateSales(
       request.authUser!.id,
       id,
       salesUnitPrice,
       salesQuantity,
       auditContext(request),
+      productionQuantity,
     );
     return { data: updated };
   });
@@ -152,6 +179,15 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     return { data: history };
   });
 
+  // Historial append-only de la config (R1): todas las versiones de cada
+  // sección, la más nueva primero. `?section=rawMaterial|directLabor|indirectCosts|sales`.
+  app.get('/cost-structures/:id/config-history', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const q = z.object({ section: z.string().optional() }).parse(request.query);
+    const history = await service.getConfigHistory(request.authUser!.id, id, q.section);
+    return { data: history };
+  });
+
   app.get(
     '/cost-structures/:id/calculations/latest',
     { preHandler: authenticate },
@@ -159,17 +195,6 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
       const { id } = idParam.parse(request.params);
       const latest = await service.latestCalculation(request.authUser!.id, id);
       return { data: latest };
-    },
-  );
-
-  const runIdParam = z.object({ id: z.string().uuid(), runId: z.string().uuid() });
-  app.get(
-    '/cost-structures/:id/calculations/:runId/tree',
-    { preHandler: authenticate },
-    async (request) => {
-      const { id, runId } = runIdParam.parse(request.params);
-      const data = await service.getCalculationTree(request.authUser!.id, id, runId);
-      return { data };
     },
   );
 }

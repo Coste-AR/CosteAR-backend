@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
@@ -14,10 +16,12 @@ import { registerMacroRoutes } from './routes/macro.routes.js';
 import { registerAlertRoutes } from './routes/alert.routes.js';
 import { registerUserRoutes } from './routes/user.routes.js';
 import { registerValidacionesRoutes } from './routes/validaciones.routes.js';
-import { registerDataPointRoutes } from './routes/data-point.routes.js';
 import { registerEmpresaPortalRoutes } from './routes/empresa-portal.routes.js';
 import { registerCostitaChatRoutes } from './routes/costista-chat.routes.js';
 import { registerAdvisorRoutes } from './routes/advisor.routes.js';
+import { registerTrazabilidadRoutes } from './routes/trazabilidad.routes.js';
+import { registerAllocationBaseRoutes } from './routes/allocation-base.routes.js';
+import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -115,6 +119,25 @@ export async function buildApp(): Promise<FastifyInstance> {
   // --- Healthcheck ---
   app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));
 
+  // --- Demo de Trazabilidad Total v1 ---
+  // Arnés de verificación estático (HTML+JS vanilla, sin build step) porque
+  // el repo del frontend real de CosteAR no está disponible en este checkout
+  // — ver DECISIONES.md. Sirve same-origin para no pelear con CORS/CSP.
+  const demoDir = fileURLToPath(new URL('../../../public/demo/', import.meta.url));
+  const demoFiles: Record<string, { file: string; type: string }> = {
+    '/demo': { file: 'index.html', type: 'text/html; charset=utf-8' },
+    '/demo/': { file: 'index.html', type: 'text/html; charset=utf-8' },
+    '/demo/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
+    '/demo/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
+    '/demo/app.js': { file: 'app.js', type: 'application/javascript; charset=utf-8' },
+  };
+  for (const [route, { file, type }] of Object.entries(demoFiles)) {
+    app.get(route, async (_request, reply) => {
+      const content = await readFile(demoDir + file, 'utf-8');
+      reply.header('Content-Type', type).send(content);
+    });
+  }
+
   // --- Rutas de la API (versionadas) ---
   const prefix = `/api/${env.API_VERSION}`;
   await app.register(
@@ -127,10 +150,12 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerAlertRoutes(api);
       await registerUserRoutes(api);
       await registerValidacionesRoutes(api);
-      await registerDataPointRoutes(api);
       await registerEmpresaPortalRoutes(api);
       await registerCostitaChatRoutes(api);
       await registerAdvisorRoutes(api);
+      await registerTrazabilidadRoutes(api);
+      await registerAllocationBaseRoutes(api);
+      await registerCostPeriodRoutes(api);
     },
     { prefix },
   );
