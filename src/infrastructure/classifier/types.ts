@@ -51,6 +51,24 @@ export type InputIntent =
   | 'DESCONOCIDO';          // no se pudo determinar
 
 /**
+ * Naturaleza de una merma / desperdicio, según la doctrina de costos.
+ *
+ * Es un EJE DE CLASIFICACIÓN GENERAL, deliberadamente desacoplado del método
+ * de costeo (órdenes vs procesos): describe QUÉ es la merma, no CÓMO se absorbe.
+ *
+ * - NORMAL:        merma esperada/rutinaria, dentro del rango habitual. Se
+ *                  absorbe en el costo de las unidades buenas → NO es pérdida.
+ *                  (En procesos genera CAUO; en órdenes recarga el CIP/orden —
+ *                  eso lo decide el módulo de costeo, no este eje.)
+ * - EXTRAORDINARY: siniestro / evento anormal (incendio, robo, inundación,
+ *                  deterioro total). Cae fuera del costo → pérdida en el Estado
+ *                  de Resultados (PERDIDA_INVENTARIO).
+ * - AMBIGUOUS:     hay lenguaje de merma pero no hay señal clara de su
+ *                  naturaleza → no se asume ninguna, va a revisión humana.
+ */
+export type WasteNature = 'NORMAL' | 'EXTRAORDINARY' | 'AMBIGUOUS';
+
+/**
  * Categoría de industria de la empresa.
  * Determina qué es MP, MOD y CIP en ese contexto.
  */
