@@ -32,6 +32,24 @@ Y estas áreas de GASTO (NO son costo del producto, NO van en COSTOS_INDIRECTOS)
 - GASTO_FINANCIERO: costo de financiamiento/servicios bancarios (comisiones bancarias, intereses financieros, gastos de mantenimiento de cuenta, impuesto al cheque).
 REGLA: los gastos de comercialización, administración y financieros NO son inventariables — nunca los pongas en COSTOS_INDIRECTOS, porque inflarían la tasa de prorrateo y el costo unitario.
 
+REGLAS CONTABLES (cátedra de Costos) — cómo interpretar los importes y clasificar:
+1. COSTO DE ADQUISICIÓN DE MATERIA PRIMA: el costo de una materia prima = precio NETO de impuestos
+   + costos inherentes a la compra (flete, seguro, acarreo/manipuleo, derechos aduaneros, honorarios
+   y gastos de despachante de aduana) − recuperos (valor de rezago/desperdicio recuperable, depósitos
+   de envases retornables). Consecuencia práctica: cuando un documento ES una compra de materia prima,
+   el flete y el seguro que figuran en ESA factura son parte del costo de la MP → van en MATERIA_PRIMA,
+   NO en un bucket de costo indirecto aparte. Un flete o seguro SUELTO, sin compra de MP asociada
+   (logística de planta, seguro de maquinaria, seguro del galpón), sí es COSTOS_INDIRECTOS.
+2. IVA: si la empresa es Responsable Inscripto, el IVA NO forma parte del costo — el costeo se hace
+   sobre el importe NETO (netAmount), nunca sobre el total con IVA (totalAmount). Asumí Responsable
+   Inscripto por defecto (es el caso más común de las PyMEs a las que apunta este producto). PERO si el
+   documento muestra indicios de lo contrario ("Factura C", "Consumidor Final", "Monotributista" o
+   "Responsable No Inscripto"), marcá el documento para revisión en qualityNote —en esos casos el IVA
+   SÍ integra el costo— y no lo descartes en silencio.
+3. COSTO vs GASTO: los conceptos de comercialización, administración y financiero NO son costo del
+   producto. Nunca van a COSTOS_INDIRECTOS ni a MATERIA_PRIMA: se clasifican como GASTO_COMERCIALIZACION,
+   GASTO_ADMINISTRACION o GASTO_FINANCIERO según corresponda.
+
 IMPORTANTE: Un mismo mensaje puede contener datos de VARIAS secciones a la vez.
 Cuando eso ocurra, extraé TODOS los datos de TODAS las secciones presentes.
 
@@ -51,6 +69,7 @@ Respondé SIEMPRE con un JSON válido (sin texto fuera del JSON):
     "currency": "ARS | USD | null",
     "items": [{ "description": "string", "quantity": número o null, "unitCost": número o null, "total": número o null }],
     "department": "string o null",
+    "role": "string o null",
     "hoursWorked": número o null,
     "employeeCount": número o null
   },
@@ -90,6 +109,15 @@ viáticos, asignaciones familiares…).
 NO las clasifiques en remunerativas / no remunerativas, y NO inventes esa distinción: el sistema clasifica
 cada concepto con su propio catálogo. Vos solo extraés nombre y coeficiente.
 NO incluyas el ausentismo pago (IAP/YAP): lo calcula el sistema a partir de los días.
+
+PUESTO / CARGO (extractedData.role) — para liquidaciones y planillas de horas — MUY IMPORTANTE:
+Extraé el puesto o cargo del empleado TAL CUAL figura (ej: jornalero, operario, operador de máquina,
+peón de producción, capataz, supervisor, encargado, jefe/gerente de producción, gerente general,
+administrativo, limpieza, vigilancia/sereno, mantenimiento). NO lo confundas con el departamento/área
+(extractedData.department): "Producción" es un ÁREA, "capataz" es un PUESTO. Si el documento no indica
+el puesto, poné "role": null (no lo inventes). Es clave para el costeo: solo el trabajador que TRANSFORMA
+la materia prima (jornalero/operario de línea) es Mano de Obra Directa; capataz, supervisor, gerente,
+limpieza, vigilancia y mantenimiento son mano de obra INDIRECTA y se imputan distinto.
 
 Si una sección NO está presente en el documento, ponés "present": false y omitís los demás campos de esa sección.
 Si el documento está ilegible, todos los "present" van en false.
@@ -163,6 +191,9 @@ export interface DocumentAnalysis {
     currency?: string | null;
     items?: { description: string; quantity?: number | null; unitCost?: number | null; total?: number | null }[];
     department?: string | null;
+    /** Puesto/cargo del empleado en una liquidación (jornalero, capataz, gerente,
+     *  administrativo…). Distingue MOD de mano de obra indirecta en Layer 4. */
+    role?: string | null;
     hoursWorked?: number | null;
     employeeCount?: number | null;
   };

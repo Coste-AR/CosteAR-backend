@@ -7,6 +7,14 @@ export interface Layer4Result {
   confidence: number;
   requiresAI: boolean;
   reasoning: string;
+  /**
+   * Cuando `requiresAI` es true, sección candidata que las reglas deterministas
+   * sugieren como prior fuerte para Layer 5 (IA) y el revisor humano. No es una
+   * decisión final — es un candidato con fundamento para que la IA/el costista
+   * no arranquen de cero (ej. una liquidación de un puesto de mano de obra
+   * INDIRECTA → COSTOS_INDIRECTOS, o de un administrativo → GASTO_ADMINISTRACION).
+   */
+  suggestedSection?: CostSection;
 }
 
 /**
@@ -29,6 +37,20 @@ export const UNIVERSAL_CIP_KEYWORDS = [
   'alquiler', 'limpieza', 'vigilancia', 'seguridad', 'flete', 'logística',
   'logistica', 'amortización', 'amortizacion', 'depreciación', 'depreciacion',
   'telefonía', 'telefonia', 'internet', 'expensas', 'vtv', 'residuos',
+];
+
+/**
+ * Conceptos que son INHERENTES al costo de adquisición de la materia prima
+ * (cátedra, Clase 4 "Costo de adquisición": FOB + flete + seguro + derechos
+ * aduaneros + honorarios/gastos de despachante = costo de adquisición). Estos
+ * también figuran como CIP en UNIVERSAL_CIP_KEYWORDS, pero SOLO son CIP cuando
+ * vienen SUELTOS (flete de planta, seguro de maquinaria). Cuando acompañan una
+ * COMPRA de materia prima, se bundlean en el costo de esa MP y NO deben desviarse
+ * a Costos Indirectos. `routeFacturaCompra` los "rescata" para MP en ese caso.
+ */
+export const ACQUISITION_INHERENT_KEYWORDS = [
+  'flete', 'seguro', 'póliza', 'poliza', 'acarreo',
+  'despachante', 'derechos aduaneros', 'gastos de aduana',
 ];
 
 /** Etiqueta legible de cada subtipo de gasto para el reasoning del costista. */
@@ -56,31 +78,180 @@ function scoreGasto(lower: string): { subtype: GastoSubtype; score: number; matc
   return best;
 }
 
+// ── Ruteo de MANO DE OBRA por puesto (MOD vs mano de obra indirecta) ─────────
+//
+// Criterio de la cátedra (Clase 1, "Mano de obra: directa e indirecta"): MOD es
+// el trabajador IDENTIFICABLE que transforma la materia prima (jornalero,
+// operario que corta/cose/etiqueta). Cualquier otro puesto de la planilla
+// —capataz, supervisor, gerente de producción, limpieza, vigilancia,
+// mantenimiento, sereno— es mano de obra INDIRECTA: su costo (Remuneración +
+// Cargas Sociales) va a Costos Indirectos de Producción, NO a MOD. El personal
+// administrativo / de conducción general es mano de obra indirecta que ni
+// siquiera nace en producción → es GASTO de administración, no costo.
+
+/**
+ * Puestos de MANO DE OBRA DIRECTA (MOD). Solo estos se auto-clasifican como MOD
+ * sin intervención de IA. Deliberadamente acotado a términos de "línea".
+ */
+export const MOD_ROLE_KEYWORDS = [
+  'jornalero', 'jornalera', 'jornal', 'operario', 'operaria', 'operarios',
+  'operador de máquina', 'operador de maquina', 'operador de línea', 'operador de linea',
+  'operador de producción', 'operador de produccion', 'maquinista',
+  'peón de producción', 'peon de produccion', 'peón', 'peon', 'obrero', 'obrera',
+  'personal de producción', 'personal de produccion', 'personal de línea', 'personal de linea',
+  'mano de obra directa',
+];
+
+/**
+ * Puestos de mano de obra INDIRECTA dentro de producción → Costos Indirectos
+ * de Producción (CIP). Incluye supervisión de planta y servicios de producción.
+ */
+export const CIP_ROLE_KEYWORDS = [
+  'capataz', 'supervisor', 'supervisora', 'encargado', 'encargada',
+  'jefe de producción', 'jefe de produccion', 'jefe de planta', 'jefe de turno',
+  'jefe de fábrica', 'jefe de fabrica',
+  'gerente de producción', 'gerente de produccion', 'gerente de planta',
+  'gerente de fábrica', 'gerente de fabrica',
+  'limpieza', 'personal de limpieza', 'maestranza',
+  'vigilancia', 'vigilador', 'guardia de seguridad', 'sereno', 'portero', 'ordenanza',
+  'mantenimiento', 'personal de mantenimiento',
+  'control de calidad', 'controlador de calidad', 'foreman',
+];
+
+/**
+ * Puestos administrativos / de conducción general → GASTO_ADMINISTRACION.
+ * Mano de obra indirecta que NO nace en producción: es gasto, no costo del
+ * producto. "gerente" sin calificador de planta/fábrica/producción cae acá.
+ */
+export const ADMIN_ROLE_KEYWORDS = [
+  'administrativo', 'administrativa', 'personal administrativo', 'empleado administrativo',
+  'gerente general', 'gerente de administración', 'gerente de administracion',
+  'gerente administrativo', 'gerente comercial', 'gerente de ventas',
+  'gerente de finanzas', 'gerente financiero',
+  'director', 'directorio', 'contador', 'recepcionista', 'secretaria', 'secretario',
+  'recursos humanos', 'rrhh', 'tesorería', 'tesoreria', 'cobranzas',
+  // Genérico: debe ir ÚLTIMO. Los buckets CIP/ADMIN calificados se evalúan antes.
+  'gerente',
+];
+
+type PayrollRoleBucket = 'MOD' | 'CIP' | 'ADMIN' | 'UNKNOWN';
+
+function matchAnyKeyword(haystack: string, keywords: string[]): string | null {
+  for (const kw of keywords) if (haystack.includes(kw)) return kw;
+  return null;
+}
+
+/**
+ * Extrae el puesto de una línea etiquetada del texto ("Puesto/Cargo: X").
+ * NO escanea el cuerpo completo de la liquidación a propósito: un recibo suele
+ * decir "Seguridad Social", "Obra Social", etc., y un match ciego sobre esas
+ * palabras rutearía mal. Solo confiamos en el campo de rol explícito.
+ */
+export function extractRoleFromText(text: string): string | null {
+  // 1) Campo de rol específico y explícito — máxima precisión.
+  const labeled = text.match(/(?:puesto|cargo|categor[ií]a|funci[oó]n)\s*[:\-]\s*([^\n]+)/i);
+  if (labeled?.[1]) return labeled[1].trim();
+  // 2) Línea de empleado de un recibo ("Empleado: Nombre — puesto"): en los
+  //    recibos argentinos el puesto suele ir junto al nombre. Se usa solo si no
+  //    hubo un campo de puesto/categoría explícito.
+  const empleado = text.match(/empleado\s*[:\-]\s*([^\n]+)/i);
+  if (empleado?.[1]) return empleado[1].trim();
+  return null;
+}
+
+/**
+ * Clasifica el puesto/cargo de una liquidación en su bucket contable.
+ * Prioridad: CIP (indirecta de producción) → ADMIN → MOD, para que
+ * "gerente de producción" gane a la regla genérica de "gerente" (ADMIN).
+ */
+export function classifyPayrollRole(role: string | null): {
+  bucket: PayrollRoleBucket;
+  matched: string | null;
+} {
+  if (!role || !role.trim()) return { bucket: 'UNKNOWN', matched: null };
+  const r = role.toLowerCase();
+  const cip = matchAnyKeyword(r, CIP_ROLE_KEYWORDS);
+  if (cip) return { bucket: 'CIP', matched: cip };
+  const admin = matchAnyKeyword(r, ADMIN_ROLE_KEYWORDS);
+  if (admin) return { bucket: 'ADMIN', matched: admin };
+  const mod = matchAnyKeyword(r, MOD_ROLE_KEYWORDS);
+  if (mod) return { bucket: 'MOD', matched: mod };
+  return { bucket: 'UNKNOWN', matched: null };
+}
+
+/**
+ * Rutea una liquidación de haberes / planilla de horas según el puesto.
+ * MOD (o sin señal que contradiga) se auto-clasifica; un puesto de mano de obra
+ * indirecta o administrativa NO se auto-clasifica: escala a IA/revisión con la
+ * sección candidata como prior fuerte.
+ */
+function routePayroll(text: string, extractedRole?: string | null): Layer4Result {
+  const role = (extractedRole?.trim() || extractRoleFromText(text)) || null;
+  const { bucket, matched } = classifyPayrollRole(role);
+
+  if (bucket === 'CIP') {
+    return {
+      costSection: 'COSTOS_INDIRECTOS',
+      suggestedSection: 'COSTOS_INDIRECTOS',
+      confidence: 60,
+      requiresAI: true,
+      reasoning: `Liquidación de "${role}" (${matched}) → mano de obra INDIRECTA de producción, no MOD → candidato: Costos Indirectos de Producción (requiere confirmación)`,
+    };
+  }
+  if (bucket === 'ADMIN') {
+    return {
+      costSection: 'GASTO_ADMINISTRACION',
+      suggestedSection: 'GASTO_ADMINISTRACION',
+      confidence: 60,
+      requiresAI: true,
+      reasoning: `Liquidación de "${role}" (${matched}) → personal administrativo / de conducción, fuera de producción → candidato: Gasto de Administración (requiere confirmación)`,
+    };
+  }
+
+  // MOD explícito, puesto no reconocido, o sin puesto → default MOD.
+  let note: string;
+  if (bucket === 'MOD') {
+    note = `puesto directo de producción (${matched})`;
+  } else if (role) {
+    note = `puesto "${role}" no reconocido → no contradice mano de obra directa, se asume MOD (revisar)`;
+  } else {
+    note = 'sin puesto informado → se asume MOD (LIMITACIÓN CONOCIDA: sin señal de rol no se distingue MOD de mano de obra indirecta)';
+  }
+  return {
+    costSection: 'MANO_DE_OBRA',
+    confidence: 99,
+    requiresAI: false,
+    reasoning: `Liquidación de haberes o planilla de horas → Mano de Obra Directa (${note})`,
+  };
+}
+
 /**
  * Layer 4: Business Routing con conciencia de rubro.
  * Determina a qué sección de costos pertenece un documento.
  *
  * Usa el perfil de industria para sobreescribir las reglas genéricas
  * cuando el rubro tiene convenciones distintas.
+ *
+ * `extractedRole` es el puesto/cargo que Groq extrajo del documento (si lo hay);
+ * se usa para distinguir mano de obra directa de indirecta en liquidaciones.
  */
 export function runLayer4(
   documentType: DocumentType | string,
   text: string,
   industryCategory: IndustryCategory = 'DEFAULT',
+  extractedRole?: string | null,
 ): Layer4Result {
   const lower = text.toLowerCase();
   const profile = getIndustryProfile(industryCategory);
 
   switch (documentType) {
-    // ── Liquidaciones y planillas → siempre MOD ───────────────────────────────
+    // ── Liquidaciones y planillas → MOD solo si el puesto es directo ──────────
+    // MOD = trabajador que transforma la MP (jornalero/operario). Otros puestos
+    // (capataz, supervisor, gerente, limpieza, vigilancia, mantenimiento…) son
+    // mano de obra indirecta → escalan a IA/revisión, no se auto-clasifican.
     case 'LIQUIDACION_MOD':
     case 'PLANILLA_HORAS':
-      return {
-        costSection: 'MANO_DE_OBRA',
-        confidence: 99,
-        requiresAI: false,
-        reasoning: 'Liquidación de haberes o planilla de horas → Mano de Obra Directa',
-      };
+      return routePayroll(text, extractedRole);
 
     // ── Facturas de venta → siempre VENTAS ───────────────────────────────────
     case 'FACTURA_VENTA':
@@ -212,6 +383,50 @@ function routeFacturaCompra(
       confidence: 80,
       requiresAI: false,
       reasoning: `Factura con indicadores de mano de obra directa (${modScore} señales)`,
+    };
+  }
+
+  // ── Flete / seguro inherentes a una COMPRA de materia prima (cátedra) ─────
+  // El flete y el seguro que acompañan una factura de compra de MP son parte
+  // del COSTO DE ADQUISICIÓN de esa MP (Clase 4), no un costo indirecto aparte.
+  // UNIVERSAL_CIP_KEYWORDS los putea como CIP por defecto; acá los rescatamos
+  // para MATERIA_PRIMA cuando la MISMA factura tiene contexto de compra de MP.
+  // Sin contexto de MP (flete/seguro suelto) NO entra acá → sigue el flujo
+  // normal y queda en CIP como antes (sin regresión).
+  const freightInsuranceMatched = ACQUISITION_INHERENT_KEYWORDS.filter((kw) => lower.includes(kw));
+  if (freightInsuranceMatched.length > 0 && mpScore >= 1) {
+    // CIP "de verdad": señales de costo indirecto que NO son flete/seguro de
+    // adquisición (ej. alquiler, energía, mantenimiento, seguro de maquinaria).
+    const cipCoreScore = cipKw
+      .filter((kw) => !ACQUISITION_INHERENT_KEYWORDS.includes(kw.toLowerCase()))
+      .filter((kw) => lower.includes(kw.toLowerCase()))
+      .length;
+
+    // Hay una compra de MP que LIDERA con claridad (margen ≥ SECTION_MARGIN)
+    // sobre otros conceptos de CIP → el flete/seguro se bundlea en el costo de
+    // la MP. Exigimos un lead claro (no un empate) para no bundlear cuando el
+    // "seguro"/"flete" es en realidad de planta (ej. "carne y seguro del local",
+    // 1 MP vs 1 CIP): esos casos son ambiguos y bajan al escalado de abajo.
+    if (mpScore - cipCoreScore >= SECTION_MARGIN) {
+      const conf = 82 + Math.min(mpScore * 3, 13);
+      const matchedMp = profile.mpKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+      return {
+        costSection: 'MATERIA_PRIMA',
+        confidence: conf,
+        requiresAI: false,
+        reasoning: `Compra de Materia Prima (${matchedMp.join(', ')}) con flete/seguro (${freightInsuranceMatched.join(', ')}) inherentes al costo de adquisición → se mantiene en Materia Prima, no se desvía a Costos Indirectos`,
+      };
+    }
+
+    // Hay compra de MP pero también señales fuertes de otros CIP → genuinamente
+    // ambiguo si el flete/seguro integra el costo de adquisición o es CIP de
+    // planta → lo desempata la IA, con Materia Prima como prior.
+    return {
+      costSection: 'DESCONOCIDO',
+      suggestedSection: 'MATERIA_PRIMA',
+      confidence: 55,
+      requiresAI: true,
+      reasoning: `Factura con compra de Materia Prima (${mpScore}) + flete/seguro (${freightInsuranceMatched.join(', ')}) pero también otros Costos Indirectos (${cipCoreScore}) → ambiguo si el flete integra el costo de adquisición o es CIP de planta, requiere análisis por IA`,
     };
   }
 

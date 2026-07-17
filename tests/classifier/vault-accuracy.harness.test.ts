@@ -227,6 +227,9 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
     expect(acc).toBeGreaterThanOrEqual(90);
   });
 
+  // Timeout holgado: es informativo y sin DB local cada caso que escala hace un
+  // round-trip a Prisma (getCorrectionExamples) que reintenta contra el server
+  // ausente antes de fallar gracefully. En CI (con DB) es instantáneo.
   it('GAP: reporta divergencias conocidas cátedra vs. sistema (informativo)', async () => {
     const gaps = CASES.filter((c) => c.kind === 'gap');
     const rows: string[] = [];
@@ -245,5 +248,5 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
     }
     // eslint-disable-next-line no-console
     console.log('\n── GAP (divergencias conocidas, no cuentan en la métrica) ──\n' + rows.join('\n') + '\n');
-  });
+  }, 30000);
 });
