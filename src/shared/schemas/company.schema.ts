@@ -17,11 +17,21 @@ export const cuitSchema = z
   .trim()
   .refine(isValidCuit, 'CUIT inválido (dígito verificador incorrecto)');
 
+/**
+ * El RITMO de costeo de la empresa: cada cuánto cierra un período.
+ * No todas las empresas costean por mes: hay quienes cierran por quincena y quienes
+ * lo hacen por trimestre. El calendario de períodos (`domain/periods/period-calendar.ts`)
+ * ya sabía manejar los tres, pero hasta ahora no había forma de elegirlo: toda empresa
+ * quedaba clavada en MONTHLY (el default de la DB) sin que nadie se enterara.
+ */
+export const periodicitySchema = z.enum(['MONTHLY', 'BIWEEKLY', 'QUARTERLY']);
+
 export const createCompanySchema = z.object({
   name: z.string().min(2, 'Nombre demasiado corto').max(160).trim(),
   industry: z.string().max(120).trim().optional(),
   cuit: cuitSchema.optional(),
   description: z.string().max(5000).trim().optional(),
+  periodicity: periodicitySchema.optional(),
 });
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
 

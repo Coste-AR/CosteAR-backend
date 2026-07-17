@@ -18,12 +18,17 @@ describe('Caso Dorado — costeo Por Órdenes', () => {
   // Presupuesto OMITIDO a propósito: debe derivarse del prorrateo, no tipearse.
   const input: CalculationInput = {
     rawMaterial: {
-      wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
-      stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
-      initialStock: { quantity: 100, unitCost: 1000 },
-      movements: [
-        { date: '05/01/2026', type: 'purchase', detail: 'Compra', quantity: 400, unitCost: 1200 },
-        { date: '15/01/2026', type: 'consumption', detail: 'Consumo', quantity: 300 },
+      materials: [
+        {
+          name: 'Chapa', code: 'MP-001', unit: 'u',
+          wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
+          stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
+          initialStock: { quantity: 100, unitCost: 1000 },
+          movements: [
+            { date: '05/01/2026', type: 'purchase', detail: 'Compra', quantity: 400, unitCost: 1200 },
+            { date: '15/01/2026', type: 'consumption', detail: 'Consumo', quantity: 300 },
+          ],
+        },
       ],
     },
     directLabor: {
