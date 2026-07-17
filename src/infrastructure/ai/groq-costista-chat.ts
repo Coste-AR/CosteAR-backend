@@ -92,7 +92,8 @@ export class GroqCostitaChat {
   }
 
   get isConfigured(): boolean {
-    return this.apiKey.length > 10;
+    // Ver nota en GroqService: el placeholder no debe contar como configurado.
+    return this.apiKey.length > 10 && this.apiKey !== 'groq_placeholder';
   }
 
   async interpret(

@@ -180,7 +180,11 @@ export class GroqService {
   }
 
   get isConfigured(): boolean {
-    return this.apiKey.length > 10;
+    // El default de env es 'groq_placeholder' (16 chars): pasaba length>10 y
+    // disparaba llamadas reales que fallan con "Invalid API Key". Lo excluimos
+    // explícitamente para que sin key válida la IA se saltee limpio (fallback a
+    // reglas deterministas / revisión humana) en vez de fallar por cada request.
+    return this.apiKey.length > 10 && this.apiKey !== 'groq_placeholder';
   }
 
   /**

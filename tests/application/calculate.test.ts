@@ -140,6 +140,21 @@ describe('Caso Dorado — costeo Por Órdenes', () => {
     expect(r.indirectCostsApplied).toBe(578750);
   });
 
+  // ── Costo unitario: el número final del sistema ────────────────────────────
+  it('costo unitario de producción = costo de producción ÷ unidades producidas', () => {
+    const r = runCalculation(input);
+    expect(r.detail.unitCost.unitsProduced).toBe(100); // sales.quantity
+    expect(r.detail.unitCost.unitProductionCost).toBeCloseTo(r.productionCost / 100, 2);
+    expect(r.detail.unitCost.unitCostOfGoodsSold).toBeCloseTo(r.costOfGoodsSold / 100, 2);
+    expect(r.detail.unitCost.unitProductionCost).toBeGreaterThan(0);
+  });
+
+  it('costo unitario = 0 (no revienta) cuando aún no se cargó la cantidad producida', () => {
+    const r = runCalculation({ ...input, sales: { unitPrice: 0, quantity: 0 } });
+    expect(r.detail.unitCost.unitsProduced).toBe(0);
+    expect(r.detail.unitCost.unitProductionCost).toBe(0);
+  });
+
   it('días hábiles efectivos = 232 e itcsPercent expuesto como porcentaje (>1)', () => {
     const r = runCalculation(input);
     expect(r.detail.directLabor.workingDays).toBe(232);
