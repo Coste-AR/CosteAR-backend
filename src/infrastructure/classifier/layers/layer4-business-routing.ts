@@ -1,6 +1,6 @@
 // src/infrastructure/classifier/layers/layer4-business-routing.ts
-import type { DocumentType, CostSection, IndustryCategory } from '../types.js';
-import { getIndustryProfile } from '../industry/industry-profile.js';
+import type { DocumentType, CostSection, IndustryCategory, GastoSubtype } from '../types.js';
+import { getIndustryProfile, TRANSVERSAL_GASTO_KEYWORDS } from '../industry/industry-profile.js';
 
 export interface Layer4Result {
   costSection: CostSection;
@@ -30,6 +30,31 @@ export const UNIVERSAL_CIP_KEYWORDS = [
   'logistica', 'amortización', 'amortizacion', 'depreciación', 'depreciacion',
   'telefonía', 'telefonia', 'internet', 'expensas', 'vtv', 'residuos',
 ];
+
+/** Etiqueta legible de cada subtipo de gasto para el reasoning del costista. */
+const GASTO_LABELS: Record<GastoSubtype, string> = {
+  GASTO_COMERCIALIZACION: 'Gasto de Comercialización',
+  GASTO_ADMINISTRACION: 'Gasto de Administración',
+  GASTO_FINANCIERO: 'Gasto Financiero',
+};
+
+/**
+ * Puntea las señales transversales de gasto y devuelve el subtipo ganador.
+ * `score` = cantidad de keywords del subtipo líder que aparecen en el texto;
+ * `matched` = las frases concretas que dispararon (para explicar la decisión).
+ */
+function scoreGasto(lower: string): { subtype: GastoSubtype; score: number; matched: string[] } {
+  let best: { subtype: GastoSubtype; score: number; matched: string[] } = {
+    subtype: 'GASTO_ADMINISTRACION',
+    score: 0,
+    matched: [],
+  };
+  for (const subtype of Object.keys(TRANSVERSAL_GASTO_KEYWORDS) as GastoSubtype[]) {
+    const matched = TRANSVERSAL_GASTO_KEYWORDS[subtype].filter((kw) => lower.includes(kw.toLowerCase()));
+    if (matched.length > best.score) best = { subtype, score: matched.length, matched };
+  }
+  return best;
+}
 
 /**
  * Layer 4: Business Routing con conciencia de rubro.
@@ -153,6 +178,32 @@ function routeFacturaCompra(
   const mpScore  = profile.mpKeywords.filter((kw)  => lower.includes(kw.toLowerCase())).length;
   const cipScore = cipKw.filter((kw) => lower.includes(kw.toLowerCase())).length;
   const modScore = profile.modKeywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
+
+  // ── Gasto (no-costo) transversal ──────────────────────────────────────────
+  // Se evalúa ANTES que MP/MOD/CIP: un gasto de comercialización/administración
+  // /financiero no es costo inventariable y no debe caer en CIP. Solo ruteamos
+  // con confianza cuando la señal de gasto SUPERA claramente a MP/CIP/MOD; si
+  // está peleada, es genuinamente ambiguo entre costo y gasto → lo desempata la
+  // IA (Layer 5) en vez de adivinar.
+  const gasto = scoreGasto(lower);
+  if (gasto.score >= 1) {
+    const competing = Math.max(mpScore, cipScore, modScore);
+    if (gasto.score > competing) {
+      const conf = 85 + Math.min(gasto.score * 3, 12);
+      return {
+        costSection: gasto.subtype,
+        confidence: conf,
+        requiresAI: false,
+        reasoning: `Factura con señales de ${GASTO_LABELS[gasto.subtype]} (${gasto.matched.slice(0, 3).join(', ')}) → gasto no inventariable, fuera de Costos Indirectos de Producción`,
+      };
+    }
+    return {
+      costSection: 'DESCONOCIDO',
+      confidence: 55,
+      requiresAI: true,
+      reasoning: `Factura con señales de ${GASTO_LABELS[gasto.subtype]} (${gasto.score}) peleadas con Materia Prima (${mpScore}) / Costos Indirectos (${cipScore}) → ambiguo entre costo y gasto, requiere análisis por IA`,
+    };
+  }
 
   // MOD: si el texto menciona servicios de personal directo
   if (modScore > 0 && modScore >= mpScore && modScore >= cipScore) {

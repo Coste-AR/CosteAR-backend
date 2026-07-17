@@ -48,4 +48,47 @@ describe('runLayer4', () => {
     expect(result.costSection).toBe('DESCONOCIDO');
     expect(result.requiresAI).toBe(true);
   });
+
+  // ── Gastos (no-costo) transversales ────────────────────────────────────────
+  describe('gasto routing', () => {
+    it('routes a strong comercialización match to GASTO_COMERCIALIZACION (no AI)', () => {
+      const result = runLayer4(
+        'FACTURA_COMPRA',
+        'Factura por publicidad y campaña publicitaria en redes sociales',
+      );
+      expect(result.costSection).toBe('GASTO_COMERCIALIZACION');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('routes a strong administración match to GASTO_ADMINISTRACION (no AI)', () => {
+      const result = runLayer4(
+        'FACTURA_COMPRA',
+        'Honorarios contador y papelería oficina del mes',
+      );
+      expect(result.costSection).toBe('GASTO_ADMINISTRACION');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('routes a strong financiero match to GASTO_FINANCIERO (no AI)', () => {
+      const result = runLayer4(
+        'FACTURA_COMPRA',
+        'Resumen: gastos bancarios y comisión bancaria del período',
+      );
+      expect(result.costSection).toBe('GASTO_FINANCIERO');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('escalates to AI when MP and gasto signals are tied (ambiguous)', () => {
+      // TEXTIL: 1 MP (tela) vs 1 gasto (campaña publicitaria) → ambiguo costo/gasto
+      const result = runLayer4('FACTURA_COMPRA', 'compra de tela y campaña publicitaria', 'TEXTIL');
+      expect(result.requiresAI).toBe(true);
+      expect(result.costSection).toBe('DESCONOCIDO');
+    });
+
+    it('does not misfire on a pure CIP invoice (no gasto keywords)', () => {
+      const result = runLayer4('FACTURA_COMPRA', 'Alquiler mensual del galpón - Servicio de electricidad');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+  });
 });

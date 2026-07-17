@@ -25,7 +25,7 @@ export interface ProposedEntry {
   companyId: string;
   companyName: string;
   rawContent: string;
-  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'DESCONOCIDO';
+  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'GASTO_COMERCIALIZACION' | 'GASTO_ADMINISTRACION' | 'GASTO_FINANCIERO' | 'DESCONOCIDO';
   documentType: string;
   estimatedImpact?: string; // ej: "+15% en Costos Indirectos"
 }

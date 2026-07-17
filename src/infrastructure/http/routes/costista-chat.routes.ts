@@ -23,7 +23,10 @@ const confirmSchema = z.object({
       companyId: z.string(),
       companyName: z.string(),
       rawContent: z.string().min(1).max(5000),
-      costSection: z.enum(['MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS', 'DESCONOCIDO']),
+      costSection: z.enum([
+        'MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS',
+        'GASTO_COMERCIALIZACION', 'GASTO_ADMINISTRACION', 'GASTO_FINANCIERO', 'DESCONOCIDO',
+      ]),
       documentType: z.string(),
       estimatedImpact: z.string().optional(),
     })

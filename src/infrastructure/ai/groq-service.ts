@@ -20,11 +20,17 @@ const SYSTEM_PROMPT = `Sos un asistente experto en contabilidad de costos para P
 Los operadores de empresas te envían documentos (facturas, liquidaciones, planillas, o texto libre)
 para que los analices y extraigas información para el sistema de costeo.
 
-El sistema maneja cuatro áreas:
+El sistema maneja estas áreas de COSTO de producción (inventariable, parte del costo unitario):
 - MATERIA_PRIMA: compras de insumos, materiales, facturas de proveedores, Wilson, ficha PPP
 - MANO_DE_OBRA: liquidaciones de sueldos, horas, departamentos, ITCS, cargas sociales
 - COSTOS_INDIRECTOS: alquileres, energía, seguros, mantenimiento, CIF, prorrateo, capacidad normal / actividad real / CIP real por centro productivo
 - VENTAS: precio de venta unitario, cantidad producida/vendida
+
+Y estas áreas de GASTO (NO son costo del producto, NO van en COSTOS_INDIRECTOS):
+- GASTO_COMERCIALIZACION: gasto de cara a la venta/marketing (publicidad, comisiones de vendedores, viáticos de vendedores, promoción, folletería).
+- GASTO_ADMINISTRACION: gasto de back-office/conducción (honorarios del contador/estudio, sueldos de administración/gerencia, papelería y útiles de oficina).
+- GASTO_FINANCIERO: costo de financiamiento/servicios bancarios (comisiones bancarias, intereses financieros, gastos de mantenimiento de cuenta, impuesto al cheque).
+REGLA: los gastos de comercialización, administración y financieros NO son inventariables — nunca los pongas en COSTOS_INDIRECTOS, porque inflarían la tasa de prorrateo y el costo unitario.
 
 IMPORTANTE: Un mismo mensaje puede contener datos de VARIAS secciones a la vez.
 Cuando eso ocurra, extraé TODOS los datos de TODAS las secciones presentes.
@@ -34,7 +40,7 @@ Respondé SIEMPRE con un JSON válido (sin texto fuera del JSON):
   "documentType": "factura_compra | factura_venta | liquidacion_sueldos | planilla_horas | datos_costeo | otro",
   "quality": "legible | parcial | ilegible",
   "qualityNote": "string o null",
-  "costSection": "MATERIA_PRIMA | MANO_DE_OBRA | COSTOS_INDIRECTOS | VENTAS | MULTIPLE | DESCONOCIDO",
+  "costSection": "MATERIA_PRIMA | MANO_DE_OBRA | COSTOS_INDIRECTOS | VENTAS | GASTO_COMERCIALIZACION | GASTO_ADMINISTRACION | GASTO_FINANCIERO | MULTIPLE | DESCONOCIDO",
   "message": "2 a 4 oraciones en español argentino para el operador",
   "extractedData": {
     "date": "YYYY-MM-DD o null",
@@ -145,7 +151,7 @@ export interface DocumentAnalysis {
   documentType: string;
   quality: 'legible' | 'parcial' | 'ilegible';
   qualityNote?: string;
-  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'MULTIPLE' | 'DESCONOCIDO';
+  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'GASTO_COMERCIALIZACION' | 'GASTO_ADMINISTRACION' | 'GASTO_FINANCIERO' | 'MULTIPLE' | 'DESCONOCIDO';
   message: string;
   extractedData: {
     date?: string | null;
@@ -373,7 +379,12 @@ Texto del documento:
 ${input.text.slice(0, 3000)}
 
 Tipos posibles: FACTURA_COMPRA, FACTURA_VENTA, REMITO, LIQUIDACION_MOD, PLANILLA_HORAS, NOTA_DEBITO, NOTA_CREDITO, DESCONOCIDO
-Secciones de costo: MATERIA_PRIMA, MANO_DE_OBRA, COSTOS_INDIRECTOS, VENTAS, MULTIPLE, DESCONOCIDO
+Secciones: MATERIA_PRIMA, MANO_DE_OBRA, COSTOS_INDIRECTOS, VENTAS, GASTO_COMERCIALIZACION, GASTO_ADMINISTRACION, GASTO_FINANCIERO, MULTIPLE, DESCONOCIDO
+
+COSTO vs GASTO: solo MP, MOD y CIP son costo del producto. Los gastos NO van a COSTOS_INDIRECTOS:
+- GASTO_COMERCIALIZACION: gasto de venta/marketing (publicidad, comisiones y viáticos de vendedores, promoción).
+- GASTO_ADMINISTRACION: gasto de back-office/conducción (honorarios contador/estudio, sueldos de administración/gerencia, papelería de oficina).
+- GASTO_FINANCIERO: costo de financiamiento/banca (comisiones bancarias, intereses financieros, mantenimiento de cuenta, impuesto al cheque).
 
 Respondé SOLO con JSON:
 {

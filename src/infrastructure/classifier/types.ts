@@ -15,8 +15,24 @@ export type CostSection =
   | 'MANO_DE_OBRA'
   | 'COSTOS_INDIRECTOS'
   | 'VENTAS'
+  // Gastos (no-costo): NO son inventariables ni parte del costo unitario.
+  // Según la cátedra, solo los costos de producción (MP, MOD, CIP) son "costo";
+  // comercialización, administración y financiero son "gasto" y NO deben
+  // mezclarse en COSTOS_INDIRECTOS (inflarían la tasa de prorrateo del CIP).
+  | 'GASTO_COMERCIALIZACION'
+  | 'GASTO_ADMINISTRACION'
+  | 'GASTO_FINANCIERO'
   | 'MULTIPLE'
   | 'DESCONOCIDO';
+
+/**
+ * Subtipos de gasto (no-costo). Subconjunto de CostSection usado por el
+ * routing y las señales transversales de gasto.
+ */
+export type GastoSubtype =
+  | 'GASTO_COMERCIALIZACION'
+  | 'GASTO_ADMINISTRACION'
+  | 'GASTO_FINANCIERO';
 
 /**
  * Tipo de intención del mensaje del operario.

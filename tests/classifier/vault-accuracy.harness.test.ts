@@ -176,6 +176,7 @@ const CASES: Case[] = [
 const LABEL: Record<string, string> = {
   MATERIA_PRIMA: 'MP', MANO_DE_OBRA: 'MOD', COSTOS_INDIRECTOS: 'CIP',
   VENTAS: 'VTA', MULTIPLE: 'MULTI', DESCONOCIDO: '???',
+  GASTO_COMERCIALIZACION: 'G-COM', GASTO_ADMINISTRACION: 'G-ADM', GASTO_FINANCIERO: 'G-FIN',
 };
 
 describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
