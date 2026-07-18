@@ -227,7 +227,10 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
 
     // Objetivo del equipo: ≥90% en casos operativos normales.
     expect(acc).toBeGreaterThanOrEqual(90);
-  });
+    // Timeout holgado igual que el test GAP: sin DB local cada caso que escala
+    // reintenta contra Prisma ausente antes de fallar gracefully y la corrida
+    // supera los 5000ms por defecto. En CI (con DB) es instantáneo.
+  }, 30000);
 
   // Timeout holgado: es informativo y sin DB local cada caso que escala hace un
   // round-trip a Prisma (getCorrectionExamples) que reintenta contra el server
