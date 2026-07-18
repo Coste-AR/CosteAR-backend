@@ -15,9 +15,57 @@ describe('runLayer4', () => {
     expect(result.confidence).toBe(99);
   });
 
-  it('routes NOTA_DEBITO to COSTOS_INDIRECTOS at 85', () => {
-    const result = runLayer4('NOTA_DEBITO', '');
-    expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+  describe('nota de débito/crédito routing (inherits the corrected document\'s section)', () => {
+    // (a) Nota de crédito sobre una VENTA (devolución de cliente) → VENTAS.
+    it('routes a credit note on a sale (customer return) to VENTAS', () => {
+      const result = runLayer4(
+        'NOTA_CREDITO',
+        'Nota de crédito por devolución de mercadería vendida — el cliente devolvió 10 unidades',
+      );
+      expect(result.costSection).toBe('VENTAS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('routes a credit note with explicit "venta a cliente" context to VENTAS', () => {
+      const result = runLayer4('NOTA_CREDITO', 'Nota de crédito A - ajuste por venta a cliente ACME SA');
+      expect(result.costSection).toBe('VENTAS');
+    });
+
+    // (b) Nota sobre una COMPRA con señales de MP → MATERIA_PRIMA.
+    it('routes a debit note on a purchase with MP signals to MATERIA_PRIMA', () => {
+      const result = runLayer4('NOTA_DEBITO', 'Nota de débito por bobina de acero kg materia prima adicional');
+      expect(result.costSection).toBe('MATERIA_PRIMA');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    // (c) Nota sobre una COMPRA con señales de CIP → COSTOS_INDIRECTOS,
+    //     incluyendo el override incondicional (fuerza motriz).
+    it('routes a note on a purchase with CIP signals to COSTOS_INDIRECTOS', () => {
+      const result = runLayer4('NOTA_DEBITO', 'Nota de débito por alquiler mensual del galpón y electricidad');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('applies the unconditional CIP override to notes (fuerza motriz)', () => {
+      const result = runLayer4('NOTA_CREDITO', 'Nota de crédito: fuerza motriz comprada para el molino');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    // (d) Nota sobre una COMPRA con señales de GASTO → subtipo GASTO_* correcto.
+    it('routes a note on a purchase with GASTO signals to the right GASTO subtype', () => {
+      const result = runLayer4('NOTA_DEBITO', 'Nota de débito por campaña publicitaria y comisiones de venta', 'TEXTIL');
+      expect(result.costSection).toBe('GASTO_COMERCIALIZACION');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    // (e) Nota genuinamente ambigua (sin señal venta/compra ni MP/CIP/GASTO) →
+    //     requiresAI, no se auto-clasifica.
+    it('escalates a genuinely ambiguous note to requiresAI instead of guessing', () => {
+      const result = runLayer4('NOTA_CREDITO', 'Nota de crédito por ajuste varios sin detalle');
+      expect(result.requiresAI).toBe(true);
+      expect(result.costSection).not.toBe('COSTOS_INDIRECTOS');
+    });
   });
 
   it('routes FACTURA_COMPRA with MP keywords to MATERIA_PRIMA', () => {
@@ -89,6 +137,77 @@ describe('runLayer4', () => {
       const result = runLayer4('FACTURA_COMPRA', 'Alquiler mensual del galpón - Servicio de electricidad');
       expect(result.costSection).toBe('COSTOS_INDIRECTOS');
       expect(result.requiresAI).toBe(false);
+    });
+  });
+
+  // ── Conceptos "siempre variables" → CIP incondicional (cátedra) ────────────
+  // Materiales indirectos, fuerza motriz comprada, reproceso y energía de
+  // máquinas son SIEMPRE Costos Indirectos de Producción, sin la excepción de
+  // contexto-de-compra-de-MP que tienen flete/seguro.
+  describe('always-variable CIP keywords (indirect materials, motive power, rework, machine energy)', () => {
+    it('routes an "fuerza motriz comprada" invoice to COSTOS_INDIRECTOS', () => {
+      const result = runLayer4('FACTURA_COMPRA', 'Factura de compra: fuerza motriz comprada para el molino');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('routes a bare "fuerza motriz" invoice to COSTOS_INDIRECTOS', () => {
+      const result = runLayer4('FACTURA_COMPRA', 'Provisión de fuerza motriz del período');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('routes an "energía de máquinas" invoice to COSTOS_INDIRECTOS', () => {
+      const result = runLayer4('FACTURA_COMPRA', 'Factura por energía de máquinas de la línea de producción');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it('routes an "energía eléctrica de planta" invoice to COSTOS_INDIRECTOS', () => {
+      const result = runLayer4('FACTURA_COMPRA', 'Consumo: energía eléctrica de planta del mes');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    it.each(['reproceso', 'costos de reproceso', 'costo de reproceso', 'retrabajo'])(
+      'routes a "%s" invoice to COSTOS_INDIRECTOS',
+      (term) => {
+        const result = runLayer4('FACTURA_COMPRA', `Factura de servicio: ${term} de unidades defectuosas`);
+        expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+        expect(result.requiresAI).toBe(false);
+      },
+    );
+
+    // Aislado: aunque "materiales indirectos" arrastre el substring 'material'
+    // (mpKeyword de DEFAULT), el HARD-OVERRIDE lo manda a CIP igual.
+    it('routes a bare "materiales indirectos" invoice to COSTOS_INDIRECTOS', () => {
+      const result = runLayer4('FACTURA_COMPRA', 'Factura de compra: materiales indirectos de fabricación');
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+    });
+
+    // HARD-OVERRIDE: una factura MAYORMENTE de MP (chapa, kg, bobina) que también
+    // menciona "materiales indirectos" ya NO se rutea a MP → gana CIP sí o sí.
+    it('hard-overrides an MP-dominant invoice to CIP when "materiales indirectos" appears', () => {
+      const result = runLayer4(
+        'FACTURA_COMPRA',
+        'Factura: 2000 kg de chapa de acero y bobina (materia prima) + materiales indirectos de fabricación',
+      );
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+      expect(result.reasoning).toMatch(/siempre variable/i);
+    });
+
+    // El override también aplica a fuerza motriz / reproceso sobre una compra de MP,
+    // y NO pasa por el rescate de adquisición (flete/seguro).
+    it('hard-overrides an MP purchase to CIP when motive power / rework appears', () => {
+      const result = runLayer4(
+        'FACTURA_COMPRA',
+        'Compra de chapa de acero (materia prima) con fuerza motriz comprada y reproceso de piezas',
+      );
+      expect(result.costSection).toBe('COSTOS_INDIRECTOS');
+      expect(result.requiresAI).toBe(false);
+      expect(result.reasoning).not.toMatch(/flete\/seguro/i);
     });
   });
 

@@ -11,6 +11,9 @@ import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
 import { prisma } from '../database/prisma.js';
 
+// OJO: 72 se usa con DOS escalas distintas (ver caveat detallado en la asignación
+// de `confidence`, ~línea 267): umbral de PROBABILIDAD calibrada para la rama de
+// señal definitiva, y umbral de PUNTOS acumulados para la rama corroborante.
 const CONFIDENCE_THRESHOLD = 72;
 
 /**
@@ -245,6 +248,22 @@ export async function classifyDocument(input: ClassifierInput & {
   const l4 = runLayer4(chosenType, text, industryCategory, extractedRole);
 
   // ── Confianza a partir de la evidencia ──────────────────────────────────────
+  // ⚠️ CAVEAT DE ESCALAS: las dos ramas NO están en la misma unidad, aunque
+  // compartan la variable `confidence` y se comparen luego contra el mismo umbral.
+  //   • definitiveType → layer1.confidence  = probabilidad CALIBRADA (~93-98),
+  //     una señal definitiva ya mapeada a "qué tan probable es este tipo".
+  //   • si no → layer2.totalPts + layer3Delta = SUMA DE PUNTAJES acumulados de
+  //     señales corroborantes independientes. Un documento con 5 señales fuertes
+  //     puede superar 72 puntos con facilidad, pero eso NO es "72% de probabilidad";
+  //     es una suma de pesos, no una probabilidad normalizada 0-100.
+  // Por eso CONFIDENCE_THRESHOLD (72, ver línea 17) actúa como umbral de PUNTOS en
+  // la rama corroborante y como umbral de PROBABILIDAD en la rama definitiva: son
+  // dos criterios distintos que casualmente coinciden en el mismo número. Funciona
+  // hoy y NO es urgente de arreglar, pero NO asumas que ambas ramas producen una
+  // probabilidad calibrada 0-100 al tocar esta lógica.
+  // TODO(future): normalizar Layer 2 a 0-100 antes de comparar contra el umbral,
+  //   p.ej. saturación `100 * (1 - Math.exp(-pts / k))`, para que ambas ramas sean
+  //   comparables de verdad. NO implementado a propósito (cambiaría el comportamiento).
   let confidence = definitiveType
     ? layer1!.confidence
     : layer2.totalPts + layer3Delta;

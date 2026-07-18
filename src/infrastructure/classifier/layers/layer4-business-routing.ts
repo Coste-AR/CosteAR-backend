@@ -32,11 +32,34 @@ export const SECTION_MARGIN = 2;
  * multi-palabra exactas que se rompen con un "de"/"y" en el medio
  * (ej. "seguro de maquinaria", "mantenimiento y reparación").
  */
+/**
+ * Conceptos "siempre variables → SIEMPRE Costos Indirectos de Producción", sin
+ * excepción de contexto (cátedra, doctrina firme): materiales indirectos, fuerza
+ * motriz comprada, costos de reproceso y energía de máquinas. A diferencia de
+ * flete/seguro (que se rescatan a Materia Prima cuando acompañan una compra de
+ * MP), estos NO admiten ninguna excepción: aunque la factura sea mayormente de
+ * MP, su presencia HARD-OVERRIDE a CIP (ver short-circuit en `routeFacturaCompra`).
+ * Por eso NO figuran en ACQUISITION_INHERENT_KEYWORDS. Cada forma base cubre sus
+ * variantes por substring ('reproceso' ⊃ 'costos de reproceso'; 'fuerza motriz' ⊃
+ * 'fuerza motriz comprada'; 'materiales indirectos' ⊃ '... de fabricación').
+ */
+export const UNCONDITIONAL_CIP_KEYWORDS = [
+  'fuerza motriz',
+  'materiales indirectos', 'material indirecto',
+  'reproceso', 'retrabajo',
+  'energía de máquinas', 'energia de maquinas',
+  'energía eléctrica de planta', 'energia electrica de planta',
+  'energía eléctrica de máquinas', 'energia electrica de maquinas',
+];
+
 export const UNIVERSAL_CIP_KEYWORDS = [
   'mantenimiento', 'reparación', 'reparacion', 'seguro', 'póliza', 'poliza',
   'alquiler', 'limpieza', 'vigilancia', 'seguridad', 'flete', 'logística',
   'logistica', 'amortización', 'amortizacion', 'depreciación', 'depreciacion',
   'telefonía', 'telefonia', 'internet', 'expensas', 'vtv', 'residuos',
+  // Los conceptos siempre-variables también puntean como CIP en el scoring
+  // normal (además del short-circuit que los hace ganar sí o sí).
+  ...UNCONDITIONAL_CIP_KEYWORDS,
 ];
 
 /**
@@ -262,15 +285,20 @@ export function runLayer4(
         reasoning: 'Factura de venta emitida → Ventas',
       };
 
-    // ── Notas de débito/crédito → CIP por defecto ─────────────────────────────
+    // ── Notas de débito/crédito → según qué corrigen (venta vs compra) ────────
+    // Una nota NO es CIP por defecto: corrige un documento previo y hereda su
+    // sección. Nota sobre una VENTA (devolución/ajuste a cliente) → reduce
+    // Ventas. Nota sobre una COMPRA → se rutea por CONTENIDO exactamente igual
+    // que una factura de compra (misma MP/CIP/GASTO, mismo override de CIP
+    // incondicional y misma excepción flete/seguro). Ver `routeNota`.
     case 'NOTA_DEBITO':
     case 'NOTA_CREDITO':
-      return {
-        costSection: 'COSTOS_INDIRECTOS',
-        confidence: 85,
-        requiresAI: false,
-        reasoning: 'Nota de débito/crédito → Costos Indirectos de Producción',
-      };
+      return routeNota(
+        documentType === 'NOTA_CREDITO' ? 'Nota de crédito' : 'Nota de débito',
+        lower,
+        profile,
+        industryCategory,
+      );
 
     // ── Remito → según contexto o IA ─────────────────────────────────────────
     case 'REMITO': {
@@ -313,6 +341,60 @@ export function runLayer4(
   }
 }
 
+// ── Ruteo de Notas de Débito / Crédito ───────────────────────────────────────
+//
+// Doctrina (cátedra): una nota de crédito/débito corrige un documento previo y
+// hereda SU sección — no es Costos Indirectos "por defecto". Nota sobre una
+// VENTA (devolución o ajuste a un cliente) reduce VENTAS; nota sobre una COMPRA
+// reduce lo que la compra original haya sido (MP / CIP / GASTO). No linkeamos
+// el documento original: reusamos las MISMAS señales de contenido que una
+// factura equivalente (routeFacturaCompra) para inferir la sección.
+
+/**
+ * Marcadores INEQUÍVOCOS de que la nota corrige una VENTA emitida (devolución o
+ * ajuste a un cliente) → reduce Ventas. Reutiliza los mismos marcadores de venta
+ * emitida que usa la detección de FACTURA_VENTA (definitive-signals: "factura de
+ * venta", "venta a cliente", "vendimos", "nota de venta") y agrega los propios de
+ * una devolución de cliente. Deliberadamente NO usa "cliente" a secas: en una
+ * COMPRA nuestra empresa figura como "Cliente" del proveedor, así que sería
+ * ambiguo. Sin uno de estos marcadores la nota se asume corrección de una COMPRA.
+ */
+const NOTA_VENTA_CONTEXT =
+  /\bfactura\s+[abc]?\s*de\s+venta\b|\bventa\s+a\s+cliente\b|\bvendimos\b|\bnota\s+de\s+venta\b|\bpor\s+(la\s+)?venta\b|\bdevoluci[oó]n\s+de\s+(mercader[ií]a\s+)?vendida\b|\bdevoluci[oó]n\s+del?\s+cliente\b|\bel\s+cliente\s+(nos\s+)?devolvi[oó]\b|\bnota\s+de\s+cr[eé]dito\s+a\s+cliente\b/i;
+
+/**
+ * Rutea una NOTA_DEBITO / NOTA_CREDITO. Venta (devolución/ajuste a cliente) →
+ * VENTAS. En otro caso se rutea por CONTENIDO reusando `routeFacturaCompra`
+ * (idéntico a una factura de compra: override de CIP incondicional, excepción
+ * flete/seguro de MP, gasto transversal, punteo MP/CIP). Como `routeFacturaCompra`
+ * ya escala a IA (`requiresAI: true`) cuando el contenido es ambiguo o no hay
+ * señal, una nota genuinamente ambigua NO se auto-clasifica: hereda esa política.
+ */
+function routeNota(
+  docLabel: string,
+  lower: string,
+  profile: ReturnType<typeof getIndustryProfile>,
+  industryCategory: IndustryCategory,
+): Layer4Result {
+  if (NOTA_VENTA_CONTEXT.test(lower)) {
+    return {
+      costSection: 'VENTAS',
+      confidence: 90,
+      requiresAI: false,
+      reasoning: `${docLabel} sobre una VENTA (devolución/ajuste a cliente) → reduce Ventas, igual que la factura de venta que corrige`,
+    };
+  }
+
+  // Corrige una COMPRA → misma clasificación por contenido que una factura de
+  // compra. Reusamos la función completa para no duplicar la lógica de keywords:
+  // cualquier fix futuro al ruteo de facturas aplica también a las notas.
+  const routed = routeFacturaCompra(lower, profile, industryCategory);
+  return {
+    ...routed,
+    reasoning: `${docLabel} sobre una COMPRA → ruteada por contenido como factura de compra: ${routed.reasoning}`,
+  };
+}
+
 // ── Routing de Factura de Compra con perfil de industria ─────────────────────
 
 function routeFacturaCompra(
@@ -320,6 +402,21 @@ function routeFacturaCompra(
   profile: ReturnType<typeof getIndustryProfile>,
   industryCategory: IndustryCategory,
 ): Layer4Result {
+
+  // Conceptos "siempre variables" (materiales indirectos, fuerza motriz, reproceso,
+  // energía de máquinas): HARD-OVERRIDE a CIP antes que cualquier otra regla, sin
+  // importar el rubro ni que la factura tenga señales fuertes de MP. Son CIP por
+  // definición de la cátedra, sin excepción (cf. flete/seguro, que sí se rescatan
+  // a MP en una compra de MP). Se evalúa primero para que gane a MP/energía-MP.
+  const unconditionalCip = UNCONDITIONAL_CIP_KEYWORDS.filter((kw) => lower.includes(kw));
+  if (unconditionalCip.length > 0) {
+    return {
+      costSection: 'COSTOS_INDIRECTOS',
+      confidence: 95,
+      requiresAI: false,
+      reasoning: `Concepto siempre variable (${unconditionalCip.slice(0, 3).join(', ')}) → Costos Indirectos de Producción por definición de la cátedra, sin excepción de contexto (no se desvía a Materia Prima)`,
+    };
+  }
 
   // Primero: combustible/energía — dependen del rubro
   const hasFuel    = /\bgasoil\b|\bcombustible\b|\bnafta\b|\bGNC\b/.test(lower);
