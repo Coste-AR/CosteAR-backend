@@ -50,6 +50,9 @@
     "uuid": "^11.0.5",
     "zod": "^3.24.1"
   },
+  "overrides": {
+    "@types/node": "$@types/node"
+  },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.5",
@@ -66,5 +69,14 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "argon2@0.41.1": true,
+    "esbuild@0.28.0": true,
+    "esbuild@0.21.5": true,
+    "msgpackr-extract@3.0.4": true,
+    "prisma@6.19.3": true
   }
 }
