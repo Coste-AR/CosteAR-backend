@@ -25,7 +25,7 @@ export interface ProposedEntry {
   companyId: string;
   companyName: string;
   rawContent: string;
-  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'DESCONOCIDO';
+  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'GASTO_COMERCIALIZACION' | 'GASTO_ADMINISTRACION' | 'GASTO_FINANCIERO' | 'DESCONOCIDO';
   documentType: string;
   estimatedImpact?: string; // ej: "+15% en Costos Indirectos"
 }
@@ -92,7 +92,8 @@ export class GroqCostitaChat {
   }
 
   get isConfigured(): boolean {
-    return this.apiKey.length > 10;
+    // Ver nota en GroqService: el placeholder no debe contar como configurado.
+    return this.apiKey.length > 10 && this.apiKey !== 'groq_placeholder';
   }
 
   async interpret(

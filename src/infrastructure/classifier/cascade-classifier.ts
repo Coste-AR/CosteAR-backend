@@ -11,6 +11,9 @@ import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
 import { prisma } from '../database/prisma.js';
 
+// OJO: 72 se usa con DOS escalas distintas (ver caveat detallado en la asignación
+// de `confidence`, ~línea 267): umbral de PROBABILIDAD calibrada para la rama de
+// señal definitiva, y umbral de PUNTOS acumulados para la rama corroborante.
 const CONFIDENCE_THRESHOLD = 72;
 
 /**
@@ -37,12 +40,14 @@ function buildExplanation(params: {
   industryCategory: IndustryCategory;
   industryLabel: string;
   signalCount: number;
+  wasteReviewRequired?: boolean;
 }): string {
   const {
     intent, documentType, costSection, confidence,
     definitiveSignal, l4Reasoning, aiUsed,
     supplierFingerprintUsed, requiresReview,
     industryCategory, industryLabel, signalCount,
+    wasteReviewRequired,
   } = params;
 
   const parts: string[] = [];
@@ -58,6 +63,11 @@ function buildExplanation(params: {
     DOCUMENTO_INFORMAL:    'ℹ️ El operario describió un documento con texto libre.',
   };
   if (intentLabels[intent]) parts.push(intentLabels[intent]!);
+
+  // Merma de naturaleza ambigua: aviso explícito de por qué va a revisión.
+  if (wasteReviewRequired) {
+    parts.push('⚠️ Se menciona una merma/pérdida pero no queda claro si es NORMAL (esperada, se absorbe en el costo) o EXTRAORDINARIA (siniestro, es pérdida). No se asume ninguna → requiere tu confirmación.');
+  }
 
   // Qué fue detectado
   if (definitiveSignal) {
@@ -121,6 +131,11 @@ export async function classifyDocument(input: ClassifierInput & {
   // ── Layer 0A: Detección de intención ──────────────────────────────────────
   const intentResult = detectIntent(text, sourceType, industryProfile);
   const intent: InputIntent = intentResult.intent;
+
+  // Merma de naturaleza ambigua (ni claramente normal ni extraordinaria):
+  // revisión humana OBLIGATORIA. No se auto-clasifica ni como pérdida ni como
+  // costo. "Cero errores silenciosos".
+  const wasteReviewRequired = intentResult.requiresReview === true;
 
   // ── Layer 0: Quality Gate ──────────────────────────────────────────────────
   const qualityResult = runQualityGate({ quality: input.groqQuality ?? null, text });
@@ -223,10 +238,32 @@ export async function classifyDocument(input: ClassifierInput & {
   // Ambigüedad interna de Layer 2 (dos tipos pegados) cuando no hay señal definitiva.
   const typeAmbiguous = !layer1 && layer2.ambiguous;
 
+  // ── Puesto/cargo extraído por Groq (para distinguir MOD de mano de obra
+  //    indirecta en liquidaciones). Puede venir null si no se pudo extraer. ────
+  const extractedRole = typeof input.extractedData?.role === 'string'
+    ? (input.extractedData.role as string)
+    : null;
+
   // ── Layer 4: routing de sección para la hipótesis elegida ───────────────────
-  const l4 = runLayer4(chosenType, text, industryCategory);
+  const l4 = runLayer4(chosenType, text, industryCategory, extractedRole);
 
   // ── Confianza a partir de la evidencia ──────────────────────────────────────
+  // ⚠️ CAVEAT DE ESCALAS: las dos ramas NO están en la misma unidad, aunque
+  // compartan la variable `confidence` y se comparen luego contra el mismo umbral.
+  //   • definitiveType → layer1.confidence  = probabilidad CALIBRADA (~93-98),
+  //     una señal definitiva ya mapeada a "qué tan probable es este tipo".
+  //   • si no → layer2.totalPts + layer3Delta = SUMA DE PUNTAJES acumulados de
+  //     señales corroborantes independientes. Un documento con 5 señales fuertes
+  //     puede superar 72 puntos con facilidad, pero eso NO es "72% de probabilidad";
+  //     es una suma de pesos, no una probabilidad normalizada 0-100.
+  // Por eso CONFIDENCE_THRESHOLD (72, ver línea 17) actúa como umbral de PUNTOS en
+  // la rama corroborante y como umbral de PROBABILIDAD en la rama definitiva: son
+  // dos criterios distintos que casualmente coinciden en el mismo número. Funciona
+  // hoy y NO es urgente de arreglar, pero NO asumas que ambas ramas producen una
+  // probabilidad calibrada 0-100 al tocar esta lógica.
+  // TODO(future): normalizar Layer 2 a 0-100 antes de comparar contra el umbral,
+  //   p.ej. saturación `100 * (1 - Math.exp(-pts / k))`, para que ambas ramas sean
+  //   comparables de verdad. NO implementado a propósito (cambiaría el comportamiento).
   let confidence = definitiveType
     ? layer1!.confidence
     : layer2.totalPts + layer3Delta;
@@ -244,7 +281,7 @@ export async function classifyDocument(input: ClassifierInput & {
   // ── DECISIÓN ────────────────────────────────────────────────────────────────
   // Auto-clasifica SOLO si todas las fuentes coinciden, no hay ambigüedad de
   // sección, y la confianza alcanza. Cualquier duda → IA y/o revisión humana.
-  const blocked = crossLayerConflict || typeAmbiguous || l4.requiresAI;
+  const blocked = crossLayerConflict || typeAmbiguous || l4.requiresAI || wasteReviewRequired;
 
   if (!blocked && confidence >= EFFECTIVE_THRESHOLD && chosenType !== 'DESCONOCIDO') {
     return {
@@ -278,6 +315,18 @@ export async function classifyDocument(input: ClassifierInput & {
       ? `Las reglas dejaron dos tipos empatados: ${layer2.winningType} vs ${layer2.runnerUpType}. Decidí cuál corresponde.`
       : undefined;
 
+  // Prior fuerte para liquidaciones de personal que NO es mano de obra directa:
+  // el puesto (capataz, gerente, administrativo…) sugiere CIP o gasto admin.
+  const payrollHint = (l4.requiresAI && l4.suggestedSection
+    && (chosenType === 'LIQUIDACION_MOD' || chosenType === 'PLANILLA_HORAS'))
+    ? `Liquidación/planilla de un puesto que NO es mano de obra directa. ${l4.reasoning}. Las reglas sugieren ${l4.suggestedSection} como candidato (mano de obra indirecta = Costos Indirectos de Producción; personal administrativo = Gasto de Administración). Confirmá según el puesto.`
+    : undefined;
+
+  // Merma ambigua: la IA debe entender que NO puede asumir pérdida ni costo.
+  const wasteHint = wasteReviewRequired
+    ? 'El texto menciona una merma/pérdida pero no aclara su naturaleza. Merma NORMAL (esperada, dentro de rango, "% habitual", "merma de proceso") se absorbe en el costo de las unidades buenas y NO es pérdida. Merma EXTRAORDINARIA (incendio, robo, inundación, "se pudrió todo", siniestro) es pérdida fuera del costo (PERDIDA_INVENTARIO). No la clasifiques como pérdida ni como costo sin que el costista confirme cuál es.'
+    : undefined;
+
   const correctionExamples = await getCorrectionExamples({
     costistId: input.costistId,
     industryCategory,
@@ -291,12 +340,12 @@ export async function classifyDocument(input: ClassifierInput & {
     industryLabel: industryProfile.label,
     industryCategory,
     intent,
-    ambiguityHint: conflictHint,
+    ambiguityHint: conflictHint ?? payrollHint ?? wasteHint,
     correctionExamples,
   });
 
   if (aiResult) {
-    const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory);
+    const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory, extractedRole);
     const finalSection: CostSection = (!l4afterAI.requiresAI)
       ? l4afterAI.costSection
       : aiResult.costSection as CostSection;
@@ -306,9 +355,9 @@ export async function classifyDocument(input: ClassifierInput & {
       : aiResult.confidence;
 
     // Garantía de cero errores silenciosos: si hubo conflicto duro entre capas,
-    // la IA pre-llena su mejor hipótesis pero SIEMPRE pasa por revisión humana.
-    // Sin conflicto, vale el umbral normal de confianza.
-    const requiresReview = crossLayerConflict || finalConf < CONFIDENCE_THRESHOLD;
+    // o una merma de naturaleza ambigua, la IA pre-llena su mejor hipótesis pero
+    // SIEMPRE pasa por revisión humana. Sin conflicto, vale el umbral normal.
+    const requiresReview = crossLayerConflict || wasteReviewRequired || finalConf < CONFIDENCE_THRESHOLD;
 
     return {
       documentType: aiResult.documentType as DocumentType,
@@ -331,6 +380,7 @@ export async function classifyDocument(input: ClassifierInput & {
         l4Reasoning: crossLayerConflict ? `${aiResult.reasoning} (había señales contradictorias → confirmá)` : aiResult.reasoning,
         aiUsed: true, supplierFingerprintUsed, requiresReview,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
+        wasteReviewRequired,
       }),
     };
   }
@@ -356,6 +406,7 @@ export async function classifyDocument(input: ClassifierInput & {
       definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
       aiUsed: false, supplierFingerprintUsed, requiresReview: true,
       industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
+      wasteReviewRequired,
     }),
   };
 }

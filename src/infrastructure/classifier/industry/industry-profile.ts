@@ -1,5 +1,60 @@
 // src/infrastructure/classifier/industry/industry-profile.ts
-import type { IndustryCategory } from '../types.js';
+import type { IndustryCategory, GastoSubtype } from '../types.js';
+
+/**
+ * Señales de GASTO (no-costo) TRANSVERSALES a todos los rubros.
+ *
+ * Criterio de la cátedra: solo los costos del área de producción (MP, MOD, CIP)
+ * son "costo" inventariable y parte del costo unitario. Todo lo que nace en
+ * comercialización, administración o el área financiera es "gasto" y NO debe
+ * imputarse a Costos Indirectos de Producción (CIP): hacerlo infla la tasa de
+ * prorrateo y sobrecostea la unidad.
+ *
+ * Estas señales son cross-industry (una comisión bancaria o los honorarios del
+ * contador son gasto en cualquier rubro), por eso viven acá y no dentro de cada
+ * perfil de industria. El routing (layer4) las puntea aparte de MP/MOD/CIP.
+ */
+export const TRANSVERSAL_GASTO_KEYWORDS: Record<GastoSubtype, string[]> = {
+  // Comercialización: gasto de cara a la venta / marketing.
+  GASTO_COMERCIALIZACION: [
+    'publicidad', 'marketing', 'promoción', 'promocion', 'promociones',
+    'comisión de venta', 'comision de venta', 'comisión por venta', 'comision por venta',
+    'comisión sobre venta', 'comision sobre venta', 'comisión de vendedor', 'comision de vendedor',
+    'viáticos vendedor', 'viaticos vendedor', 'viático vendedor', 'viatico vendedor',
+    'viáticos de vendedores', 'viaticos de vendedores',
+    'gastos de comercialización', 'gastos de comercializacion',
+    'material publicitario', 'campaña publicitaria', 'campana publicitaria',
+    'folletería', 'folleteria', 'volantes', 'cartelería', 'carteleria',
+    'stand', 'feria comercial', 'exposición comercial', 'exposicion comercial',
+    'redes sociales', 'community manager', 'google ads', 'facebook ads',
+  ],
+  // Administración: gasto de back-office / conducción de la empresa.
+  GASTO_ADMINISTRACION: [
+    'honorarios contador', 'honorarios contable', 'honorarios contables',
+    'honorarios estudio', 'honorarios del estudio', 'honorarios estudio contable',
+    'honorarios abogado', 'honorarios jurídicos', 'honorarios juridicos',
+    'sueldo administración', 'sueldo administracion', 'sueldos administración', 'sueldos administracion',
+    'sueldo administrativo', 'sueldos administrativos', 'personal administrativo',
+    'sueldo gerente general', 'sueldo gerente', 'sueldos gerencia', 'honorarios directorio',
+    'papelería oficina', 'papeleria oficina', 'papelería de oficina', 'papeleria de oficina',
+    'útiles de oficina', 'utiles de oficina', 'útiles oficina', 'utiles oficina',
+    'insumos de oficina', 'gastos administrativos', 'gastos de administración', 'gastos de administracion',
+    // Tareas contables/impositivas: gasto de administración en cualquier rubro.
+    'confección de balance', 'confeccion de balance', 'balance contable', 'balance impositivo',
+    'liquidación de impuestos', 'liquidacion de impuestos', 'declaración jurada', 'declaracion jurada',
+  ],
+  // Financiero: costo de financiamiento / servicios bancarios.
+  GASTO_FINANCIERO: [
+    'gastos bancarios', 'gasto bancario', 'comisión bancaria', 'comision bancaria',
+    'comisiones bancarias', 'comisión de mantenimiento de cuenta', 'comision de mantenimiento de cuenta',
+    'gastos de mantenimiento de cuenta', 'mantenimiento de cuenta',
+    'interés financiero', 'interes financiero', 'intereses financieros',
+    'interés por mora', 'interes por mora', 'intereses moratorios', 'punitorios',
+    'gastos financieros', 'sellado bancario', 'impuesto al cheque', 'impuesto a los débitos',
+    'impuesto a los debitos', 'comisión tarjeta', 'comision tarjeta',
+    'descuento de cheques', 'descubierto bancario', 'interés préstamo', 'interes prestamo',
+  ],
+};
 
 export interface IndustryProfile {
   category: IndustryCategory;

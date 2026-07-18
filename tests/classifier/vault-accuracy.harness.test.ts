@@ -143,8 +143,10 @@ const CASES: Case[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // CORE — NOTAS y REMITOS de entrada
   // ═══════════════════════════════════════════════════════════════════════════
-  { id: 'ND-01', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'NOTA DE DÉBITO A\nCAE Nº: 76000000000001\nCUIT 30-12345678-9\nAjuste por diferencia de precio de proveedor', expected: 'COSTOS_INDIRECTOS', note: 'nota de débito → CIP (regla layer4)' },
-  { id: 'NC-01', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'NOTA DE CRÉDITO B\nCAE Nº: 76000000000002\nCUIT 30-12345678-9\nDevolución parcial de mercadería', expected: 'COSTOS_INDIRECTOS', note: 'nota de crédito → CIP (regla layer4)' },
+  { id: 'ND-01', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'NOTA DE DÉBITO A\nCAE Nº: 76000000000001\nCUIT 30-12345678-9\nAjuste por diferencia de precio de proveedor', expected: 'DESCONOCIDO', note: 'nota de débito sobre una compra sin señal de sección (MP/CIP/GASTO) → ambigua, escala a revisión (ya NO se hardcodea a CIP)' },
+  { id: 'NC-01', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'NOTA DE CRÉDITO B\nCAE Nº: 76000000000002\nCUIT 30-12345678-9\nDevolución parcial de mercadería', expected: 'DESCONOCIDO', note: 'nota de crédito sin contexto venta/compra claro ni señal de sección → ambigua, escala a revisión (ya NO se hardcodea a CIP)' },
+  { id: 'ND-02', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'NOTA DE DÉBITO A\nCAE Nº: 76000000000010\nCUIT 30-12345678-9\nAjuste por bobina de acero y chapa laminada — materia prima', expected: 'MATERIA_PRIMA', note: 'nota de débito sobre compra con señales de MP → hereda MP (misma lógica que factura de compra)' },
+  { id: 'NC-02', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'NOTA DE CRÉDITO B\nCAE Nº: 76000000000011\nCUIT 30-12345678-9\nNota de crédito por devolución de mercadería vendida a cliente', expected: 'VENTAS', note: 'nota de crédito sobre una venta (devolución de cliente) → reduce Ventas' },
   { id: 'REM-in-01', kind: 'core', industry: 'Fábrica metalúrgica / manufactura', text: 'REMITO\nRecibimos 500 kg de acero del proveedor\nEntrada a depósito de materia prima\nFecha de entrega: 10/06/2026', expected: 'MATERIA_PRIMA', note: 'remito de entrada/compra = MP' },
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -176,6 +178,7 @@ const CASES: Case[] = [
 const LABEL: Record<string, string> = {
   MATERIA_PRIMA: 'MP', MANO_DE_OBRA: 'MOD', COSTOS_INDIRECTOS: 'CIP',
   VENTAS: 'VTA', MULTIPLE: 'MULTI', DESCONOCIDO: '???',
+  GASTO_COMERCIALIZACION: 'G-COM', GASTO_ADMINISTRACION: 'G-ADM', GASTO_FINANCIERO: 'G-FIN',
 };
 
 describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
@@ -224,8 +227,14 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
 
     // Objetivo del equipo: ≥90% en casos operativos normales.
     expect(acc).toBeGreaterThanOrEqual(90);
-  });
+    // Timeout holgado igual que el test GAP: sin DB local cada caso que escala
+    // reintenta contra Prisma ausente antes de fallar gracefully y la corrida
+    // supera los 5000ms por defecto. En CI (con DB) es instantáneo.
+  }, 30000);
 
+  // Timeout holgado: es informativo y sin DB local cada caso que escala hace un
+  // round-trip a Prisma (getCorrectionExamples) que reintenta contra el server
+  // ausente antes de fallar gracefully. En CI (con DB) es instantáneo.
   it('GAP: reporta divergencias conocidas cátedra vs. sistema (informativo)', async () => {
     const gaps = CASES.filter((c) => c.kind === 'gap');
     const rows: string[] = [];
@@ -244,5 +253,5 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
     }
     // eslint-disable-next-line no-console
     console.log('\n── GAP (divergencias conocidas, no cuentan en la métrica) ──\n' + rows.join('\n') + '\n');
-  });
+  }, 30000);
 });

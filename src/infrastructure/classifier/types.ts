@@ -15,8 +15,24 @@ export type CostSection =
   | 'MANO_DE_OBRA'
   | 'COSTOS_INDIRECTOS'
   | 'VENTAS'
+  // Gastos (no-costo): NO son inventariables ni parte del costo unitario.
+  // Según la cátedra, solo los costos de producción (MP, MOD, CIP) son "costo";
+  // comercialización, administración y financiero son "gasto" y NO deben
+  // mezclarse en COSTOS_INDIRECTOS (inflarían la tasa de prorrateo del CIP).
+  | 'GASTO_COMERCIALIZACION'
+  | 'GASTO_ADMINISTRACION'
+  | 'GASTO_FINANCIERO'
   | 'MULTIPLE'
   | 'DESCONOCIDO';
+
+/**
+ * Subtipos de gasto (no-costo). Subconjunto de CostSection usado por el
+ * routing y las señales transversales de gasto.
+ */
+export type GastoSubtype =
+  | 'GASTO_COMERCIALIZACION'
+  | 'GASTO_ADMINISTRACION'
+  | 'GASTO_FINANCIERO';
 
 /**
  * Tipo de intención del mensaje del operario.
@@ -33,6 +49,24 @@ export type InputIntent =
   | 'CORRECCION'            // "el de ayer fue un error, el monto real era..."
   | 'CONSULTA'              // pregunta al costista
   | 'DESCONOCIDO';          // no se pudo determinar
+
+/**
+ * Naturaleza de una merma / desperdicio, según la doctrina de costos.
+ *
+ * Es un EJE DE CLASIFICACIÓN GENERAL, deliberadamente desacoplado del método
+ * de costeo (órdenes vs procesos): describe QUÉ es la merma, no CÓMO se absorbe.
+ *
+ * - NORMAL:        merma esperada/rutinaria, dentro del rango habitual. Se
+ *                  absorbe en el costo de las unidades buenas → NO es pérdida.
+ *                  (En procesos genera CAUO; en órdenes recarga el CIP/orden —
+ *                  eso lo decide el módulo de costeo, no este eje.)
+ * - EXTRAORDINARY: siniestro / evento anormal (incendio, robo, inundación,
+ *                  deterioro total). Cae fuera del costo → pérdida en el Estado
+ *                  de Resultados (PERDIDA_INVENTARIO).
+ * - AMBIGUOUS:     hay lenguaje de merma pero no hay señal clara de su
+ *                  naturaleza → no se asume ninguna, va a revisión humana.
+ */
+export type WasteNature = 'NORMAL' | 'EXTRAORDINARY' | 'AMBIGUOUS';
 
 /**
  * Categoría de industria de la empresa.

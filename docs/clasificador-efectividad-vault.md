@@ -189,3 +189,31 @@ Ordenadas por impacto:
 | `tests/classifier/layer1.test.ts` | Assert 96→98 + test de regresión nota-con-CAE. |
 | `tests/classifier/vault-accuracy.harness.test.ts` | **Nuevo** — harness + dataset (53 core, 8 gap) con gate ≥90%. |
 | `docs/clasificador-efectividad-vault.md` | **Nuevo** — este reporte. |
+
+---
+
+## 8. Caveat de arquitectura conocido — escalas de `confidence`
+
+> **No urgente, sin fix funcional pendiente.** Documentado para que quien toque la
+> lógica de decisión no asuma de más.
+
+En `src/infrastructure/classifier/cascade-classifier.ts` (asignación de
+`confidence`, ~línea 267) la variable `confidence` se llena con **dos escalas
+distintas** según la rama:
+
+- **Rama de señal definitiva** (`definitiveType`) → `layer1.confidence`: una
+  **probabilidad calibrada** (~93-98).
+- **Rama corroborante** (sin señal definitiva) → `layer2.totalPts + layer3Delta`:
+  una **suma de puntajes** de señales independientes. Un documento con 5 señales
+  fuertes puede superar 72 puntos, pero eso **no es "72% de probabilidad"** — es
+  una suma de pesos, no una probabilidad normalizada 0-100.
+
+El umbral `CONFIDENCE_THRESHOLD = 72` (línea 17) se compara contra ambas: funciona
+como **umbral de probabilidad** en una rama y **umbral de puntos** en la otra. Que
+coincidan en el mismo número es conveniente, no equivalencia real. **Funciona hoy**
+y no rompe nada; el riesgo es sólo de lectura (asumir que ambas ramas dan una
+probabilidad 0-100 comparable).
+
+**Fix futuro sugerido (no implementado):** normalizar Layer 2 a 0-100 con una
+saturación, p.ej. `100 * (1 - e^(-pts/k))`, antes de comparar contra el umbral, para
+que ambas ramas sean realmente comparables. Ver `// TODO(future)` en el mismo archivo.

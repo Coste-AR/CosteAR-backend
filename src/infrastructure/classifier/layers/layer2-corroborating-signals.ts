@@ -1,4 +1,5 @@
 import { CORROBORATING_SIGNALS, CONTRADICTIONS } from '../signals/corroborating-signals.config.js';
+import { extractCAE } from '../utils/cae-validator.js';
 import type { DocumentType, SignalResult } from '../types.js';
 
 export interface Layer2Result {
@@ -46,10 +47,20 @@ export function runLayer2(text: string, extraFoundLabels: string[] = []): Layer2
     }
   }
 
+  // Detección propia de CAE en Layer 2. Las contradicciones que dependen de
+  // CAE_FOUND deben evaluarse aunque Layer 1 NO haya emitido esa etiqueta: si
+  // Layer 1 eligió otro ganador (p. ej. FACTURA_VENTA_CTX con confianza 98),
+  // CAE_FOUND nunca llega en extraFoundLabels y la contradicción quedaría muda.
+  // Re-chequeamos el CAE contra el texto (con validación estructural) sin
+  // depender de la etiqueta única que haya elegido Layer 1.
+  if (extractCAE(text)) {
+    foundLabels.add('CAE_FOUND');
+  }
+
   const penalties: SignalResult[] = [];
   for (const rule of CONTRADICTIONS) {
     if (foundLabels.has(rule.if) && foundLabels.has(rule.and)) {
-      penalties.push({ label: `CONTRADICTION:${rule.if}+${rule.and}`, pts: rule.penalty, type: '', layer: 2 });
+      penalties.push({ label: `CONTRADICTION:${rule.if}+${rule.and}`, pts: rule.penalty, type: rule.penalizes, layer: 2 });
     }
   }
 
@@ -60,11 +71,12 @@ export function runLayer2(text: string, extraFoundLabels: string[] = []): Layer2
   for (const signal of foundSignals) {
     scoreByType[signal.type] = (scoreByType[signal.type] ?? 0) + signal.pts;
   }
-  // Penalties reduce all types proportionally (simplification: reduce winning type)
+  // Cada penalización se resta SOLO al tipo que la contradicción desacredita
+  // (penalty.type = rule.penalizes), no a todos. Restar a todos hundía también
+  // al tipo probablemente correcto y empujaba casos claros a revisión humana.
   for (const penalty of penalties) {
-    for (const type of Object.keys(scoreByType)) {
-      scoreByType[type] = (scoreByType[type] ?? 0) + penalty.pts;
-    }
+    const target = penalty.type;
+    scoreByType[target] = (scoreByType[target] ?? 0) + penalty.pts;
   }
 
   // Ordenar tipos por puntaje descendente para extraer ganador y segundo.
