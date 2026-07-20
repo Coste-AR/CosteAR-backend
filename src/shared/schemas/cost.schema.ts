@@ -209,8 +209,11 @@ export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
 /**
  * Las tres formas de código de período que entiende el calendario
  * (`domain/periods/period-calendar.ts`): mensual, quincenal y trimestral.
+ * El mes va con rango real (01-12): el \d{2} suelto dejaba pasar "1999-13".
  */
-const periodCodeRegex = /^\d{4}-(\d{2}(-Q[12])?|T[1-4])$/;
+const periodCodeRegex = /^\d{4}-((0[1-9]|1[0-2])(-Q[12])?|T[1-4])$/;
+
+export const periodSchema = z.string().regex(periodCodeRegex, 'Código de período inválido');
 
 export const createCostStructureSchema = z.object({
   productName: z.string().min(1).max(160).trim(),
@@ -220,7 +223,7 @@ export const createCostStructureSchema = z.object({
    * invente un código mensual para una empresa que costea por quincena era pedirle que
    * mienta. Se sigue aceptando si llega (estructuras importadas, compatibilidad).
    */
-  period: z.string().regex(periodCodeRegex, 'Código de período inválido').optional(),
+  period: periodSchema.optional(),
   costingSystem: z.enum(['ORDERS', 'PROCESSES']).default('ORDERS'),
 });
 export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>;

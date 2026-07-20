@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ValidacionesService } from '../../../application/validaciones/validaciones-service.js';
 import { EmpresaConnectionService } from '../../../application/empresa/empresa-connection-service.js';
 import { authenticate } from '../plugins/authenticate.js';
+import { periodSchema } from '../../../shared/schemas/cost.schema.js';
 
 const DOC_TYPES = [
   'FACTURA_COMPRA', 'FACTURA_VENTA', 'REMITO', 'LIQUIDACION_MOD',
@@ -147,7 +148,7 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
   // Carga manual de una línea del libro mayor
   const manualLedgerSchema = z.object({
     companyId: z.string().uuid(),
-    period: z.string().regex(/^\d{4}-\d{2}$/),
+    period: periodSchema,
     costSection: z.enum(COST_SECTIONS),
     description: z.string().min(1).max(200),
     amount: z.number().finite().positive().max(9_999_999_999_999),
@@ -167,7 +168,7 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     description: z.string().min(1).max(200).optional(),
     amount: z.number().finite().positive().max(9_999_999_999_999).optional(),
     supplier: z.string().max(120).nullable().optional(),
-    period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+    period: periodSchema.optional(),
     currency: z.string().max(8).optional(),
     docDate: z.string().nullable().optional(),
   });

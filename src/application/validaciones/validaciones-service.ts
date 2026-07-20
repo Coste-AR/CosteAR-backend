@@ -1,6 +1,6 @@
 import type { PrismaClient, DataEntryStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
-import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
+import { NotFoundError, ForbiddenError, ValidationError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { buildLedgerDraft } from './ledger-builder.js';
 import { populateCostStructureFromApproval } from './cost-structure-populator.js';
@@ -565,6 +565,10 @@ export class ValidacionesService {
     });
     if (!company) throw new ForbiddenError('Empresa no encontrada o sin acceso');
 
+    // El período tiene que existir de verdad para esa empresa — si no, una
+    // línea de costo queda imputada a un mes que nunca se abrió.
+    await this.requirePeriodExists(input.companyId, input.period);
+
     return this.db.costLedgerEntry.create({
       data: {
         companyId:    input.companyId,
@@ -596,9 +600,16 @@ export class ValidacionesService {
     currency?: string;
     docDate?: string | null;
   }) {
-    const existing = await this.db.costLedgerEntry.findUnique({ where: { id }, select: { costistId: true } });
+    const existing = await this.db.costLedgerEntry.findUnique({
+      where: { id },
+      select: { costistId: true, companyId: true },
+    });
     if (!existing) throw new NotFoundError('Línea no encontrada');
     if (existing.costistId !== costistId) throw new ForbiddenError('Sin permiso sobre esta línea');
+
+    if (input.period !== undefined) {
+      await this.requirePeriodExists(existing.companyId, input.period);
+    }
 
     return this.db.costLedgerEntry.update({
       where: { id },
@@ -635,5 +646,22 @@ export class ValidacionesService {
       where: { entryId },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  /**
+   * El Libro de Costos no puede imputar a un período que la empresa nunca
+   * abrió: valida contra los períodos reales (las estructuras de costos ya
+   * creadas) en vez de aceptar cualquier string con forma de fecha.
+   */
+  private async requirePeriodExists(companyId: string, period: string): Promise<void> {
+    const structure = await this.db.costStructure.findFirst({
+      where: { companyId, period },
+      select: { id: true },
+    });
+    if (!structure) {
+      throw new ValidationError(
+        `El período ${period} no existe para esta empresa: creá primero la estructura de costos de ese mes`,
+      );
+    }
   }
 }
