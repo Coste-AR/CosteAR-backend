@@ -9,6 +9,12 @@ import { z } from 'zod';
 const nonNeg = z.number().finite().nonnegative();
 const positive = z.number().finite().positive();
 
+// "YYYY-MM" con mes real (01-12) — el formato solo (\d{4}-\d{2}) deja pasar
+// cosas como "1999-13", que no es un período que pueda existir.
+export const periodSchema = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Formato de período inválido: usá AAAA-MM con mes 01-12');
+
 // --- Materia Prima (Hoja 1) ---
 
 export const stockMovementSchema = z.object({
@@ -136,7 +142,7 @@ export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
 
 export const createCostStructureSchema = z.object({
   productName: z.string().min(1).max(160).trim(),
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'Formato de período: YYYY-MM'),
+  period: periodSchema,
   costingSystem: z.enum(['ORDERS', 'PROCESSES']).default('ORDERS'),
 });
 export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>;
