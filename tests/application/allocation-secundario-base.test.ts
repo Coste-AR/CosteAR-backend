@@ -32,15 +32,19 @@ describe('E2 — reparto secundario derivado de una base de asignación', () => 
     });
 
     // Antes de resolver la base, el reparto está vacío (queda en cero).
-    expect(config.serviceDistributions[0]!.toProductive).toEqual({});
+    expect(config.serviceDistributions[0]!.distributions).toEqual([]);
 
     // Resolvedor de la base "HM" (horas-máquina): 300 en Corte, 200 en Armado.
     const resolved = applySecondaryAllocationBases(config, (code) =>
       code === 'HM' ? { corte: 300, armado: 200 } : undefined,
     );
 
-    // Las unidades se volcaron a toProductive → el motor puede derivar los %.
-    expect(resolved.serviceDistributions[0]!.toProductive).toEqual({ corte: 300, armado: 200 });
+    // Las unidades se volcaron a PARES EXPLÍCITOS → el motor puede derivar los %.
+    // En modo 'base', fijo y variable comparten la misma base (mismas unidades).
+    expect(resolved.serviceDistributions[0]!.distributions).toEqual([
+      { centroDestinoId: 'corte', fijo: 300, variable: 300 },
+      { centroDestinoId: 'armado', fijo: 200, variable: 200 },
+    ]);
 
     const budgets = computeProductiveBudgets(resolved);
     // 300/500 = 60% → Corte 600 f / 300 v ; 200/500 = 40% → Armado 400 f / 200 v.
@@ -102,11 +106,13 @@ describe('E2 — reparto secundario derivado de una base de asignación', () => 
       corte: 300,
       armado: 0, // 0 no suma a la base → se ignora
     }));
-    expect(resolved.serviceDistributions[0]!.toProductive).toEqual({ corte: 300 });
+    expect(resolved.serviceDistributions[0]!.distributions).toEqual([
+      { centroDestinoId: 'corte', fijo: 300, variable: 300 },
+    ]);
 
     // Una base que todavía no tiene valores (resolvedor → undefined) deja el
     // reparto como estaba (vacío), sin romper.
     const untouched = applySecondaryAllocationBases(config, () => undefined);
-    expect(untouched.serviceDistributions[0]!.toProductive).toEqual({});
+    expect(untouched.serviceDistributions[0]!.distributions).toEqual([]);
   });
 });

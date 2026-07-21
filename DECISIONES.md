@@ -847,3 +847,74 @@ patrones intencionales YA presentes en `staging` (no las introdujo este sync, qu
 actualizado por el fast-forward). Este único commit local de la tarea agrega esta entrada
 de `DECISIONES.md` (regla #8). `AlanSandbox` queda 1 commit por delante de `staging` (solo
 esta documentación). No se hace push ni PR (reglas #1–#3): Alan pushea a mano.
+
+## Sesión 2026-07-20 — F01-A: prorrateo secundario por PARES EXPLÍCITOS (fin del mapeo posicional)
+
+**Problema (testeo caja negra del 20/07, DEVS-Testeo-Ronda-2).** Cualquier estructura con
+centros de servicio no se podía calcular: devolvía *"El centro «serv3» no puede repartirse a
+sí mismo"* o —peor— repartía los porcentajes al centro equivocado sin avisar. Causa raíz: la
+UI omitía la columna del propio centro de cada fila y el backend leía esos valores por
+POSICIÓN contra la lista completa de centros, corriendo un lugar el mapeo. El tercer valor
+(que la UI mandó para Adm. Planta) aterrizaba en el propio centro de la fila. El bug no rompía
+siempre: cuando no tiraba error, mentía (60/40 podía aplicarse como 40/60).
+
+**Decisión de contrato — PARES EXPLÍCITOS.** El reparto secundario ya no viaja como un array
+cuyo significado depende del índice. Cada valor viaja con su centro destino:
+`serviceDistributions[].distributions: { centroDestinoId: string, fijo: number, variable: number }[]`.
+El id del destino está SIEMPRE presente → es imposible que un valor aterrice en el centro
+equivocado por un desfasaje de columnas. Se actualizó el schema Zod (`cost.schema.ts`), el
+motor (`indirect-costs.ts`) y el wiring (`calculate.ts`). Las fórmulas de la cátedra NO se
+tocaron: el prorrateo directo y el escalonado siguen dando los mismos números (FX3/FX4 verdes).
+
+**Retrocompatibilidad — ADAPTADOR DE LECTURA (no migración de datos).** Se eligió un adaptador
+de lectura, NO reescribir los datos guardados. Razones:
+- Las versiones históricas append-only (`CostConfigVersion`) NO se pueden tocar (regla #5 y #4):
+  deben quedar legibles tal como se escribieron. Una migración que reescribiera configs las
+  pondría en riesgo; un adaptador de lectura las respeta por completo.
+- `normalizeServiceDistribution` convierte en memoria la forma vieja por Records
+  (`toProductive` / `toProductiveFixed` / `toProductiveVariable`, keyed by id) a los pares
+  nuevos, tomando la unión de claves (`fijo`/`variable` del Record discriminado, con fallback
+  al combinado). Se aplica al parsear (schema) y también, defensivamente, en el motor.
+- La config vigente se "migra" sola y sin script: cuando el usuario re-guarda Costos Indirectos,
+  se persiste en la forma nueva por pares (bump de versión append-only, no reescritura de
+  historial). No hace falta migración de base de datos → esta tarea NO agrega ninguna migración
+  ni toca `schema.prisma`, `rls.sql` ni `migration_lock.toml` (regla #6 satisfecha por vacío).
+- **Ambigüedad = fallar fuerte, no adivinar (regla #4).** Si una config legada trae como destino
+  el PROPIO centro (la huella del bug) o un centro que ya no existe (claves posicionales "0"/"1",
+  centro borrado), el adaptador la convierte igual y el motor la RECHAZA al calcular con un 422
+  accionable en español y por NOMBRE humano, en vez de reasignar porcentajes en silencio.
+
+**Lectura para el frontend (contrato que consume F01-B).** `GET /cost-structures/:id`
+(`getById`) normaliza el bloque de Costos Indirectos con `normalizeIndirectConfigForRead`:
+el frontend recibe SIEMPRE `distributions`, aunque la estructura se haya guardado antes del
+cambio. F01-B solo tiene que renderizar y mandar la forma por pares; no necesita su propio
+adaptador de la forma vieja.
+
+**Validaciones agregadas (mensajes 422 en español, por NOMBRE humano, sin exponer ids — reglas
+#5 y #7).** En ambas pasadas (directa y escalonada): (a) el destino tiene que existir;
+(b) no puede ser el propio centro (se mantuvo la validación de auto-reparto, ahora corrida
+contra el `centroDestinoId` real); (c) en la pasada directa un servicio solo reparte a centros
+productivos — si tiene que repartir a otro servicio, hay que definir un orden de cierre (método
+escalonado). El escalonado ya validaba "cerrado no recibe"; se le pusieron nombres humanos.
+
+**Defaults elegidos donde el criterio no estaba escrito (regla #9).**
+- Un par en cero (`fijo = 0` y `variable = 0`) es un no-op: no reparte nada y se ignora, para
+  que una columna vacía no dispare la validación de destino. El fijo y el variable se filtran
+  por separado (un destino puede recibir solo fijo o solo variable).
+- En modo 'base' el fijo y el variable comparten la MISMA base (mismas unidades por centro),
+  igual que en la implementación previa.
+- El auto-reparto se rechaza cuando el propio centro recibe algo (fijo o variable > 0), que es
+  el caso peligroso (la huella del bug). Un par cero-cero sobre el propio centro es ruido
+  inofensivo —no reparte nada— y se descarta sin error.
+
+**Verificación.** `npm run typecheck` limpio. `npm test`: **58 archivos, 483 verdes, 1 skip**
+(el "Can't reach database server" es el test del clasificador que degrada elegante con la DB
+apagada). Test de regresión nuevo (`f01a-prorrateo-secundario-pares.test.ts`, 9 casos):
+reordenar las filas de servicio da números IDÉNTICOS (pasada directa y escalonada), el caso
+de aceptación (2 productivos + 2 de servicio) cierra ambos servicios en 0, una sola fila
+funciona, un destino inexistente da 422 sin exponer el id, y una config legada corrupta falla
+fuerte con el nombre humano.
+
+**Sobre el commit / push.** *Esta tarea NO se pushea* (indicación explícita): altera un
+contrato compartido con el frontend y F01-B tiene que aterrizar junto. Un único commit local
+en `AlanSandbox` (regla #3). Alan pushea a mano cuando ambas mitades estén listas.

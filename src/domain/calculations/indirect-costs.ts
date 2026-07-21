@@ -122,6 +122,7 @@ export function secondaryProration(
   primary: PrimaryProrationResult,
   serviceDistributions: ServiceDistribution[],
 ): Record<string, FixedVariable> {
+  const centerById = new Map(centers.map((c) => [c.id, c]));
   const productiveIds = centers.filter((c) => c.type === 'productive').map((c) => c.id);
   const result: Record<string, FixedVariable> = {};
   for (const id of productiveIds) {
@@ -133,20 +134,44 @@ export function secondaryProration(
     if (!serviceCost) {
       throw new CalcError(`Servicio inexistente en prorrateo: ${dist.serviceCenterId}`);
     }
+    const serviceName = centerById.get(dist.serviceCenterId)?.name ?? dist.serviceCenterId;
 
     // Distribuir costo Fijo
     const fixedDist = dist.toProductiveFixed && Object.keys(dist.toProductiveFixed).length > 0
       ? dist.toProductiveFixed
       : dist.toProductive;
-    const totalBaseFixed = Object.values(fixedDist).reduce(
-      (acc: Decimal, v) => acc.plus(v),
-      new Decimal(0),
-    );
-
     // Distribuir costo Variable
     const variableDist = dist.toProductiveVariable && Object.keys(dist.toProductiveVariable).length > 0
       ? dist.toProductiveVariable
       : dist.toProductive;
+
+    // VALIDACIÓN por id de DESTINO (no por posición): cada destino tiene que
+    // existir, no ser el propio centro, y —en la pasada directa— ser productivo.
+    // El servicio no se reparte a otro servicio sin un orden de cierre (eso es el
+    // método escalonado). Mensajes accionables en español y por NOMBRE humano.
+    for (const targetId of new Set([...Object.keys(fixedDist), ...Object.keys(variableDist)])) {
+      const target = centerById.get(targetId);
+      if (targetId === dist.serviceCenterId) {
+        throw new CalcError(
+          `El centro «${serviceName}» no puede repartirse a sí mismo en el prorrateo secundario. Sacá a «${serviceName}» de su propio reparto y volvé a guardar Costos Indirectos.`,
+        );
+      }
+      if (!target) {
+        throw new CalcError(
+          `El prorrateo secundario de «${serviceName}» reparte a un centro que ya no existe en la estructura. Revisá el reparto de «${serviceName}» y volvé a guardar Costos Indirectos.`,
+        );
+      }
+      if (target.type !== 'productive') {
+        throw new CalcError(
+          `El centro de servicio «${serviceName}» está repartiendo al centro de servicio «${target.name}». En el método directo un servicio solo reparte a centros productivos: definí un orden de cierre (método escalonado) si «${serviceName}» tiene que repartir a otro servicio.`,
+        );
+      }
+    }
+
+    const totalBaseFixed = Object.values(fixedDist).reduce(
+      (acc: Decimal, v) => acc.plus(v),
+      new Decimal(0),
+    );
     const totalBaseVariable = Object.values(variableDist).reduce(
       (acc: Decimal, v) => acc.plus(v),
       new Decimal(0),
@@ -247,11 +272,12 @@ export function secondaryProrationStepwise(
 
   for (const cl of closures) {
     const service = acc[cl.serviceCenterId];
+    const serviceName = centerById.get(cl.serviceCenterId)?.name ?? cl.serviceCenterId;
     if (!service) {
       throw new CalcError(`Cierre de un centro inexistente: ${cl.serviceCenterId}`);
     }
     if (closed.has(cl.serviceCenterId)) {
-      throw new CalcError(`El centro "${cl.serviceCenterId}" figura dos veces en el orden de cierre`);
+      throw new CalcError(`El centro «${serviceName}» figura dos veces en el orden de cierre. Dejalo una sola vez.`);
     }
 
     const fixedDist =
@@ -263,19 +289,23 @@ export function secondaryProrationStepwise(
         ? cl.distributionVariable
         : cl.distribution;
 
-    // Validar destinos: deben existir y NO haber cerrado ya (criterio A.3.c).
+    // Validar destinos por id (no por posición): deben existir, no ser el propio
+    // centro y NO haber cerrado ya (criterio A.3.c). Mensajes por NOMBRE humano.
     for (const targetId of new Set([...Object.keys(fixedDist), ...Object.keys(variableDist)])) {
-      if (!centerById.has(targetId)) {
+      const target = centerById.get(targetId);
+      if (targetId === cl.serviceCenterId) {
         throw new CalcError(
-          `El centro "${cl.serviceCenterId}" reparte a un centro inexistente: ${targetId}`,
+          `El centro «${serviceName}» no puede repartirse a sí mismo en el prorrateo secundario. Sacá a «${serviceName}» de su propio reparto y volvé a guardar Costos Indirectos.`,
         );
       }
-      if (targetId === cl.serviceCenterId) {
-        throw new CalcError(`El centro "${cl.serviceCenterId}" no puede repartirse a sí mismo`);
+      if (!target) {
+        throw new CalcError(
+          `El prorrateo secundario de «${serviceName}» reparte a un centro que ya no existe en la estructura. Revisá el reparto de «${serviceName}» y volvé a guardar Costos Indirectos.`,
+        );
       }
       if (closed.has(targetId)) {
         throw new CalcError(
-          `El centro "${targetId}" ya cerró y no puede recibir del centro "${cl.serviceCenterId}" (método escalonado: cerrado no recibe)`,
+          `El centro «${target.name}» ya cerró y no puede recibir del centro «${serviceName}» (método escalonado: cerrado no recibe). Reordená el cierre para que «${target.name}» cierre después de «${serviceName}».`,
         );
       }
     }
@@ -291,12 +321,12 @@ export function secondaryProrationStepwise(
 
     if (!service.fixed.isZero() && totalBaseFixed.isZero()) {
       throw new CalcError(
-        `El centro "${cl.serviceCenterId}" tiene costo fijo pero su base de reparto suma 0`,
+        `El centro «${serviceName}» tiene costo fijo para repartir pero su reparto secundario está vacío. Cargá a qué centros reparte «${serviceName}» y volvé a guardar Costos Indirectos.`,
       );
     }
     if (!service.variable.isZero() && totalBaseVariable.isZero()) {
       throw new CalcError(
-        `El centro "${cl.serviceCenterId}" tiene costo variable pero su base de reparto suma 0`,
+        `El centro «${serviceName}» tiene costo variable para repartir pero su reparto secundario está vacío. Cargá a qué centros reparte «${serviceName}» y volvé a guardar Costos Indirectos.`,
       );
     }
 

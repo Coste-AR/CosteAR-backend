@@ -380,9 +380,7 @@ function populateIndirectCosts(
     if (!hasDist) {
       cfg.serviceDistributions.push({
         serviceCenterId: sc.id,
-        toProductive: {},
-        toProductiveFixed: {},
-        toProductiveVariable: {}
+        distributions: []
       });
     }
   }

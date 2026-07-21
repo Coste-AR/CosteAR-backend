@@ -16,6 +16,7 @@ import {
   type CostCenter,
   type IndirectCostConcept,
   type FixedVariable,
+  type ServiceDistribution,
   type ServiceClosure,
   type PredeterminedQuota,
   type VarianceAnalysis,
@@ -33,7 +34,9 @@ import type {
   DirectLaborConfig,
   IndirectCostConfig,
   InventoryInput,
+  SecondaryDistributionPair,
 } from '../../shared/schemas/cost.schema.js';
+import { normalizeServiceDistribution } from '../../shared/schemas/cost.schema.js';
 
 /**
  * Versión del motor de cálculo. Sube con cada cambio de fórmula (no con cada
@@ -248,16 +251,16 @@ export function applySecondaryAllocationBases(
     if (d.distributionMode !== 'base' || !d.baseCode) return d;
     const units = resolveUnits(d.baseCode);
     if (!units) return d;
-    const toProductive: Record<string, number> = {};
+    // Se vuelcan las unidades a PARES EXPLÍCITOS por centro destino. En modo
+    // 'base', el fijo y el variable siguen la MISMA base (mismas unidades).
+    const distributions: SecondaryDistributionPair[] = [];
     for (const [centerId, value] of Object.entries(units)) {
       if (centerId === d.serviceCenterId) continue; // un servicio no se reparte a sí mismo
       if (!validIds.has(centerId)) continue; // ignorar centros que no existen
       if (!(value > 0)) continue; // solo unidades positivas suman a la base
-      toProductive[centerId] = value;
+      distributions.push({ centroDestinoId: centerId, fijo: value, variable: value });
     }
-    // El fijo y el variable siguen la MISMA base (se limpian los overrides para
-    // que el motor caiga al fallback `toProductive`).
-    return { ...d, toProductive, toProductiveFixed: {}, toProductiveVariable: {} };
+    return { ...d, distributions };
   });
   return { ...config, serviceDistributions };
 }
@@ -288,6 +291,25 @@ export function computeProductiveBudgets(
  * cargadas). Es la única fuente del presupuesto productivo: el usuario nunca lo
  * tipea (criterio A.3).
  */
+/**
+ * Vuelca los PARES EXPLÍCITOS `{ centroDestinoId, fijo, variable }` a los
+ * Records keyed by id que consume el motor (`toProductiveFixed`/`Variable` en la
+ * pasada directa, `distributionFixed`/`Variable` en el escalonado). Se ignoran
+ * los pares en cero (no reparten nada): así una columna vacía no dispara la
+ * validación de destino. La clave SIEMPRE es el `centroDestinoId` explícito del
+ * par — nunca una posición —, que es lo que elimina el bug de desfasaje.
+ */
+function pairsToFixedRecord(pairs: SecondaryDistributionPair[]): Record<string, number> {
+  const r: Record<string, number> = {};
+  for (const p of pairs) if (p.fijo > 0) r[p.centroDestinoId] = p.fijo;
+  return r;
+}
+function pairsToVariableRecord(pairs: SecondaryDistributionPair[]): Record<string, number> {
+  const r: Record<string, number> = {};
+  for (const p of pairs) if (p.variable > 0) r[p.centroDestinoId] = p.variable;
+  return r;
+}
+
 export function resolveProductiveCip(
   indirectCosts: IndirectCostConfig,
 ): Record<string, FixedVariable> {
@@ -299,29 +321,42 @@ export function resolveProductiveCip(
   }));
   const primary = primaryProration(centers, concepts);
 
+  // Normalizar a PARES EXPLÍCITOS. Es idempotente si la config ya vino parseada
+  // por el schema (caso de producción); también convierte una config LEGADA por
+  // Records (retrocompat) o una armada a mano en un test. Nunca hay mapeo por
+  // posición: la clave es siempre el `centroDestinoId` explícito.
+  const entries = indirectCosts.serviceDistributions.map(normalizeServiceDistribution);
+
   const order = indirectCosts.closureOrder ?? [];
   if (order.length === 0) {
-    // Camino legado: pasada directa servicio→productivo.
-    return secondaryProration(centers, primary, indirectCosts.serviceDistributions);
+    // Pasada directa servicio→productivo. Cada servicio reparte por PARES
+    // EXPLÍCITOS (fijo/variable por centro destino), nunca por posición.
+    const dists: ServiceDistribution[] = entries.map((d) => ({
+      serviceCenterId: d.serviceCenterId,
+      toProductive: {},
+      toProductiveFixed: pairsToFixedRecord(d.distributions),
+      toProductiveVariable: pairsToVariableRecord(d.distributions),
+    }));
+    return secondaryProration(centers, primary, dists);
   }
 
   // Camino escalonado: construir los cierres en el orden pedido.
-  const distById = new Map(
-    indirectCosts.serviceDistributions.map((d) => [d.serviceCenterId, d]),
-  );
+  const distById = new Map(entries.map((d) => [d.serviceCenterId, d]));
+  const nameById = new Map(centers.map((c) => [c.id, c.name]));
   const closures: ServiceClosure[] = order.map((serviceCenterId) => {
     const d = distById.get(serviceCenterId);
     if (!d) {
+      const serviceName = nameById.get(serviceCenterId) ?? serviceCenterId;
       throw new MissingAllocationBaseError(
         serviceCenterId,
-        `El centro de servicio "${serviceCenterId}" está en el orden de cierre pero no tiene base de distribución cargada. Asigná su base de distribución.`,
+        `El centro de servicio «${serviceName}» está en el orden de cierre pero no tiene reparto secundario cargado. Cargá a qué centros reparte «${serviceName}» y volvé a guardar Costos Indirectos.`,
       );
     }
     return {
       serviceCenterId,
-      distribution: d.toProductive ?? {},
-      distributionFixed: d.toProductiveFixed,
-      distributionVariable: d.toProductiveVariable,
+      distribution: {},
+      distributionFixed: pairsToFixedRecord(d.distributions),
+      distributionVariable: pairsToVariableRecord(d.distributions),
       baseName: d.baseCode,
     };
   });

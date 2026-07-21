@@ -7,6 +7,7 @@ import {
   directLaborConfigSchema,
   indirectCostConfigSchema,
   inventorySchema,
+  normalizeIndirectConfigForRead,
   type CreateCostStructureInput,
 } from '../../shared/schemas/cost.schema.js';
 import {
@@ -172,7 +173,17 @@ export class CostStructureService {
   }
 
   async getById(userId: string, id: string) {
-    return this.requireStructure(userId, id);
+    const structure = await this.requireStructure(userId, id);
+    // El frontend recibe SIEMPRE el reparto secundario en la forma canónica por
+    // pares (`distributions`), aunque la estructura se haya guardado antes del
+    // cambio de contrato (F01-A). Conversión en memoria; no se reescribe nada.
+    if (structure.indirectCostConfig) {
+      return {
+        ...structure,
+        indirectCostConfig: normalizeIndirectConfigForRead(structure.indirectCostConfig),
+      };
+    }
+    return structure;
   }
 
   /** Genera el .xlsx de la estructura (datos + Estado de Costos). */
@@ -277,7 +288,11 @@ export class CostStructureService {
     }
     for (const d of config.serviceDistributions) {
       if (d.distributionMode === 'base' && d.baseCode) {
-        unitsByCode.set(d.baseCode, { ...(unitsByCode.get(d.baseCode) ?? {}), ...(d.toProductive ?? {}) });
+        // Las unidades del secundario viven en los PARES `distributions`
+        // (centroDestinoId → fijo). En modo 'base', fijo y variable comparten la
+        // misma base, así que alcanza con `fijo` para sembrar allocation_base_values.
+        const units = Object.fromEntries(d.distributions.map((p) => [p.centroDestinoId, p.fijo]));
+        unitsByCode.set(d.baseCode, { ...(unitsByCode.get(d.baseCode) ?? {}), ...units });
       }
     }
     for (const [code, u] of unitsByCode) {

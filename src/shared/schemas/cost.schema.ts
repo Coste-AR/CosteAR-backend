@@ -131,6 +131,98 @@ export type DirectLaborConfig = z.infer<typeof directLaborConfigSchema>;
 
 const fixedVariableSchema = z.object({ fixed: nonNeg, variable: nonNeg });
 
+/**
+ * Un PAR EXPLÍCITO del reparto secundario (F01-A): a qué centro DESTINO va y
+ * cuánto (base fija y variable). Reemplaza al array posicional cuyo significado
+ * dependía del índice. El id del destino viaja SIEMPRE con el valor.
+ */
+export const secondaryDistributionPairSchema = z.object({
+  centroDestinoId: z.string().min(1).max(60),
+  fijo: nonNeg,
+  variable: nonNeg,
+});
+export type SecondaryDistributionPair = z.infer<typeof secondaryDistributionPairSchema>;
+
+/** Forma canónica de una entrada de reparto secundario (post-normalización). */
+export interface ServiceDistributionEntry {
+  serviceCenterId: string;
+  distributions: SecondaryDistributionPair[];
+  distributionMode: 'manual' | 'base';
+  baseCode?: string;
+}
+
+/**
+ * Normaliza una entrada de reparto secundario a la forma CANÓNICA por PARES
+ * EXPLÍCITOS `{ centroDestinoId, fijo, variable }[]`.
+ *
+ * - Si viene `distributions` (contrato nuevo), se usa tal cual.
+ * - Si no, se reconstruyen los pares desde la forma LEGADA por Records keyed by
+ *   id (`toProductive` combinado + `toProductiveFixed` / `toProductiveVariable`),
+ *   tomando la unión de sus claves. `fijo`/`variable` salen del Record
+ *   discriminado si existe, con fallback al combinado. Así una config vieja se
+ *   lee sin reescribirse (retrocompat de solo lectura): al volver a guardarla
+ *   desde el frontend nuevo queda en la forma por pares.
+ *
+ * La validación de que cada `centroDestinoId` exista y no sea el propio centro
+ * NO se hace acá (este normalizador no conoce la lista de centros): la hace el
+ * motor con los nombres humanos, para dar un 422 accionable. Una config legada
+ * ambigua (claves posicionales "0"/"1", o el propio centro por el bug de
+ * columnas) se convierte igual y FALLA fuerte y claro al calcular, en vez de
+ * reasignar porcentajes al centro equivocado en silencio.
+ */
+export function normalizeServiceDistribution(d: {
+  serviceCenterId: string;
+  distributions?: SecondaryDistributionPair[];
+  distributionMode?: 'manual' | 'base';
+  baseCode?: string;
+  toProductive?: Record<string, number>;
+  toProductiveFixed?: Record<string, number>;
+  toProductiveVariable?: Record<string, number>;
+}): ServiceDistributionEntry {
+  let distributions: SecondaryDistributionPair[];
+  if (d.distributions) {
+    distributions = d.distributions;
+  } else {
+    const combined = d.toProductive ?? {};
+    const fx = d.toProductiveFixed ?? {};
+    const va = d.toProductiveVariable ?? {};
+    const keys = new Set([...Object.keys(combined), ...Object.keys(fx), ...Object.keys(va)]);
+    distributions = [...keys].map((centroDestinoId) => ({
+      centroDestinoId,
+      fijo: fx[centroDestinoId] ?? combined[centroDestinoId] ?? 0,
+      variable: va[centroDestinoId] ?? combined[centroDestinoId] ?? 0,
+    }));
+  }
+  return {
+    serviceCenterId: d.serviceCenterId,
+    distributions,
+    distributionMode: d.distributionMode ?? 'manual',
+    ...(d.baseCode !== undefined ? { baseCode: d.baseCode } : {}),
+  };
+}
+
+/**
+ * Adaptador de LECTURA no destructivo: deja el JSON de Costos Indirectos
+ * almacenado con sus `serviceDistributions` ya en la forma CANÓNICA por PARES,
+ * para que el frontend reciba SIEMPRE `distributions` (una config vieja por
+ * Records se convierte en memoria, sin reescribir lo guardado). Es tolerante:
+ * si el valor no tiene la forma esperada, lo devuelve tal cual (nunca rompe una
+ * lectura). El almacenamiento recién queda en pares cuando el usuario re-guarda.
+ */
+export function normalizeIndirectConfigForRead(config: unknown): unknown {
+  if (!config || typeof config !== 'object') return config;
+  const c = config as Record<string, unknown>;
+  if (!Array.isArray(c.serviceDistributions)) return config;
+  return {
+    ...c,
+    serviceDistributions: c.serviceDistributions.map((d) =>
+      d && typeof d === 'object'
+        ? normalizeServiceDistribution(d as Parameters<typeof normalizeServiceDistribution>[0])
+        : d,
+    ),
+  };
+}
+
 export const indirectCostConfigSchema = z.object({
   centers: z
     .array(
@@ -161,24 +253,46 @@ export const indirectCostConfigSchema = z.object({
     .max(200),
   serviceDistributions: z
     .array(
-      z.object({
-        serviceCenterId: z.string().min(1),
-        toProductive: z.record(z.string(), nonNeg).optional().default({}),
-        toProductiveFixed: z.record(z.string(), nonNeg).optional().default({}),
-        toProductiveVariable: z.record(z.string(), nonNeg).optional().default({}),
-        // Cómo se arma el reparto secundario de este servicio:
-        //  - 'manual' : el costista tipea los % por centro (toProductive*). Es el
-        //               modo por defecto → todo lo ya cargado sigue igual.
-        //  - 'base'   : el motor DERIVA el reparto desde las unidades de una base
-        //               física (`baseCode`); los valores por centro se resuelven
-        //               desde allocation_base_values y se vuelcan a `toProductive`
-        //               en la capa de servicio antes de calcular. El costista no
-        //               tipea porcentajes: salen de la base (trazable).
-        distributionMode: z.enum(['manual', 'base']).optional().default('manual'),
-        // Base física del secundario. Requerida en modo 'base'; en 'manual' es
-        // opcional (solo etiqueta para mostrar en el árbol).
-        baseCode: z.string().max(60).optional(),
-      }),
+      z
+        .object({
+          serviceCenterId: z.string().min(1),
+          /**
+           * CONTRATO NUEVO (F01-A) — PARES EXPLÍCITOS. Cada valor del reparto
+           * secundario viaja con el id del centro DESTINO al que va. Esto
+           * elimina por completo el mapeo POSICIONAL que confundía columnas
+           * entre el frontend y el backend: un valor ya no puede aterrizar en
+           * el centro equivocado (ni sobre el propio centro de la fila) por un
+           * desfasaje de índices. El significado ya no depende de la posición.
+           */
+          distributions: z
+            .array(secondaryDistributionPairSchema)
+            .max(100)
+            .optional(),
+          // Cómo se arma el reparto secundario de este servicio:
+          //  - 'manual' : el costista tipea fijo/variable por centro destino
+          //               (`distributions`). Es el modo por defecto → todo lo ya
+          //               cargado sigue igual.
+          //  - 'base'   : el motor DERIVA el reparto desde las unidades de una
+          //               base física (`baseCode`); los valores por centro se
+          //               resuelven desde allocation_base_values y se vuelcan a
+          //               `distributions` en la capa de servicio antes de
+          //               calcular. El costista no tipea porcentajes: salen de la
+          //               base (trazable).
+          distributionMode: z.enum(['manual', 'base']).optional().default('manual'),
+          // Base física del secundario. Requerida en modo 'base'; en 'manual' es
+          // opcional (solo etiqueta para mostrar en el árbol).
+          baseCode: z.string().max(60).optional(),
+          // --- LEGADO (retrocompat de LECTURA, F01-A) ---
+          // Forma vieja: tres Records keyed by id (toProductive combinado + los
+          // discriminados fijo/variable). Se sigue ACEPTANDO para no romper
+          // estructuras ya guardadas ni las versiones históricas append-only:
+          // el normalizador de abajo las convierte a `distributions`. NO es la
+          // forma que manda el frontend nuevo. Ver DECISIONES.md (F01-A).
+          toProductive: z.record(z.string(), nonNeg).optional(),
+          toProductiveFixed: z.record(z.string(), nonNeg).optional(),
+          toProductiveVariable: z.record(z.string(), nonNeg).optional(),
+        })
+        .transform(normalizeServiceDistribution),
     )
     .max(100),
   // ORDEN DE CIERRE del prorrateo secundario escalonado (Parte 4.4, criterio
