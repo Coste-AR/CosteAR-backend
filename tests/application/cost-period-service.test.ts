@@ -120,6 +120,10 @@ function makeDb(overrides: Record<string, unknown> = {}) {
       findFirst: vi.fn(async () => null),
       create: vi.fn(async () => ({})),
     },
+    // Por defecto no hay datos sin imputar: el cierre no se traba por eso.
+    dataPoint: {
+      findMany: vi.fn(async () => []),
+    },
     ...overrides,
   };
   // La apertura corre en una transacción: acá el "tx" es el mismo mock.
@@ -133,6 +137,7 @@ function makeDb(overrides: Record<string, unknown> = {}) {
       update: ReturnType<typeof vi.fn>;
     };
     costConfigVersion: { findFirst: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> };
+    dataPoint: { findMany: ReturnType<typeof vi.fn> };
     $transaction: ReturnType<typeof vi.fn>;
   };
 }
@@ -373,6 +378,42 @@ describe('CERRAR período', () => {
     const svc = new CostPeriodService(db as never);
     await expect(svc.close(USER, 'per-x', null, ctx)).rejects.toThrow(/Corte/);
     expect(db.costPeriod.update).not.toHaveBeenCalled();
+  });
+
+  it('F04 — no deja cerrar si hay un dato sin imputar, y lo nombra (422, sin endpoints ni ids)', async () => {
+    const db = makeDb();
+    db.costPeriod.findFirst = vi.fn(async () => ({ ...junio, status: 'OPEN' }));
+    // El cierre está completo (E3 ok), pero cuelga un dato sin decidir su período.
+    db.dataPoint.findMany = vi.fn(async () => [
+      { id: 'dp-1', label: 'Compra — Proveedor Sur, 27/06' },
+    ]);
+
+    const svc = new CostPeriodService(db as never);
+
+    await expect(svc.close(USER, 'per-x', null, ctx)).rejects.toMatchObject({
+      statusCode: 422,
+      message: expect.stringContaining('Compra — Proveedor Sur, 27/06'),
+    });
+    // No se cierra nada mientras haya datos sin imputar.
+    expect(db.costPeriod.update).not.toHaveBeenCalled();
+
+    // Regla #7: el mensaje no filtra endpoints ni el id interno del dato.
+    await svc.close(USER, 'per-x', null, ctx).catch((e: Error) => {
+      expect(e.message).not.toMatch(/POST|\/data-points|:id/);
+      expect(e.message).not.toContain('dp-1');
+    });
+  });
+
+  it('F04 — una vez imputado el dato (sin pendientes), el período cierra normalmente', async () => {
+    const db = makeDb();
+    db.costPeriod.findFirst = vi.fn(async () => ({ ...junio, status: 'OPEN' }));
+    db.dataPoint.findMany = vi.fn(async () => []); // ya no hay pendientes
+
+    const svc = new CostPeriodService(db as never);
+    const cerrado = await svc.close(USER, 'per-x', 'run-9', ctx);
+
+    expect(cerrado.status).toBe('CLOSED');
+    expect(cerrado.closedRunId).toBe('run-9');
   });
 
   it('con el cierre completo, congela el período', async () => {

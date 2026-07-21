@@ -14,6 +14,46 @@ import { buildCalculationTree, type TreeNode } from './tree-builder.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
 
 /**
+ * Marca de incompletitud de una corrida (F04). Contrato ADITIVO que consume el
+ * frontend para decidir si pinta una advertencia en vez de un margen "sano".
+ *
+ * Se persiste dentro de `CalculationRun.results.incompletitud` (JSON, no rompe a
+ * ningún consumidor que ya lee `results.grossMargin`, etc.) y se devuelve además
+ * como `incompleto` en el nivel superior de la respuesta.
+ *
+ * Regla #7: `motivos` no lleva endpoints ni identificadores internos. El `id` de
+ * cada dato pendiente es SOLO para que el front abra su ficha; lo que se muestra
+ * es el `nombre` humano.
+ */
+export interface Incompletitud {
+  /** true si el cálculo corrió con datos sin decisión de imputación de período. */
+  incompleto: boolean;
+  /** Motivos legibles para el costista (español, sin endpoints ni ids). */
+  motivos: string[];
+  /** Datos que faltan imputar: `id` para navegar a la ficha, `nombre` para mostrar. */
+  datosPendientes: { id: string; nombre: string }[];
+}
+
+/**
+ * Arma la marca de incompletitud a partir de los datos sin imputar. Sin datos
+ * pendientes, `incompleto: false` (el resultado es confiable).
+ */
+function buildIncompletitud(pending: { id: string; label: string }[]): Incompletitud {
+  if (pending.length === 0) {
+    return { incompleto: false, motivos: [], datosPendientes: [] };
+  }
+  const datosPendientes = pending.map((d) => ({ id: d.id, nombre: d.label }));
+  const nombres = datosPendientes.map((d) => `"${d.nombre}"`).join(', ');
+  const motivos = [
+    `Hay ${pending.length} dato(s) sin decisión de imputación de período (${nombres}). ` +
+      'El costo puede estar dejándolos afuera o mezclando datos de otro mes, así que este ' +
+      'resultado todavía no es confiable. Resolvé la imputación desde la ficha de cada dato ' +
+      'antes de dar el costo por bueno.',
+  ];
+  return { incompleto: true, motivos, datosPendientes };
+}
+
+/**
  * Corridas del motor con árbol persistido (spec sección B + C). Reemplaza,
  * para los endpoints NUEVOS de trazabilidad, al `CostCalculation` legado
  * (que se mantiene intacto para `/cost-structures/:id/calculate` — ver
@@ -42,22 +82,22 @@ export class CalculationRunService {
       throw new MissingInputError('indirectCosts', 'Falta cargar la sección de Costos Indirectos antes de calcular.');
     }
 
-    // Doble período (spec D.3): un dato sin decisión de imputación queda
-    // pendiente y el cálculo NO puede correr hasta que se decida a qué
-    // período pertenece — evita que un dato de otro mes se cuele sin que
-    // nadie lo haya decidido explícitamente.
+    // Doble período (spec D.3): un dato sin decisión de imputación no se puede
+    // asignar con certeza a este mes. F04 — decisión: el cálculo NO se bloquea
+    // (bloquearlo sin una pantalla para imputar dejaría al costista sin acción
+    // posible). Corre igual, pero el resultado se MARCA como incompleto/no
+    // confiable, con el motivo y los datos afectados por su nombre humano, para
+    // que el frontend muestre una advertencia en vez de un margen "sano". El
+    // bloqueo duro se mueve al CIERRE del período (acción irreversible) —
+    // ver `CostPeriodService.close` y DECISIONES.md.
+    // Nota: `take: 20` acota nombres y payload; con >20 pendientes el conteo del
+    // motivo queda en 20 (mismo tope que la detección original).
     const pending = await this.db.dataPoint.findMany({
       where: { structureId, periodoImputado: null, voidedAt: null, status: { not: 'anulado' } },
       select: { id: true, label: true },
       take: 20,
     });
-    if (pending.length > 0) {
-      throw new MissingInputError(
-        'periodoImputado',
-        `Hay ${pending.length} dato(s) sin decisión de imputación de período (ej. "${pending[0]!.label}") — ` +
-          'resolvé con POST /data-points/:id/imputacion antes de calcular.',
-      );
-    }
+    const incompletitud = buildIncompletitud(pending);
 
     const input: CalculationInput = {
       rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
@@ -95,6 +135,11 @@ export class CalculationRunService {
     // tienen el mismo label que ya arma `tree-builder.ts`).
     await this.attachDataPointSources(structureId, tree);
 
+    // La marca de incompletitud viaja DENTRO de `results` (persistida con la
+    // corrida) y también suelta en la respuesta. Es aditiva: `results` sigue
+    // teniendo `grossMargin`, `grossMarginPct`, etc. tal cual.
+    const results = { ...output, incompletitud };
+
     return withTenant(userId, async (tx) => {
       const last = await tx.calculationRun.findFirst({
         where: { structureId },
@@ -111,7 +156,7 @@ export class CalculationRunService {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           inputsSnapshot: input as any,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          results: output as any,
+          results: results as any,
         },
       });
 
@@ -128,7 +173,7 @@ export class CalculationRunService {
         tx,
       );
 
-      return { run, results: output, tree };
+      return { run, results, tree, incompletitud };
     });
   }
 

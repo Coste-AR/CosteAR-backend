@@ -2,6 +2,7 @@ import type { PrismaClient, Prisma, CostPeriod } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
+import { MissingInputError } from '../../domain/errors/calculation-errors.js';
 import {
   periodBounds,
   nextPeriodCode,
@@ -448,6 +449,33 @@ export class CostPeriodService {
       throw new ValidationError(
         `No se puede cerrar "${period.label}": ${missing.length} centro(s) productivo(s) sin el cierre cargado ` +
           `(actividad real y/o CIP real): ${missing.join(', ')}. Cargá esos datos antes de cerrar.`,
+      );
+    }
+
+    // F04 — el cierre es la acción irreversible que consolida el mes: NUNCA
+    // puede pasar sobre datos que todavía no se asignaron a un período. Mientras
+    // el cálculo tolera datos sin imputar (los marca incompletos y sigue), el
+    // cierre los BLOQUEA con un 422 accionable. Los datos cuelgan de la
+    // estructura (no del período); un dato sin imputar podría pertenecer a este
+    // mes, así que hasta resolverlo el cierre no es confiable.
+    const unimputed = await this.db.dataPoint.findMany({
+      where: {
+        structureId: period.structureId,
+        periodoImputado: null,
+        voidedAt: null,
+        status: { not: 'anulado' },
+      },
+      select: { id: true, label: true },
+      take: 20,
+    });
+    if (unimputed.length > 0) {
+      const nombres = unimputed.map((d) => `"${d.label}"`).join(', ');
+      throw new MissingInputError(
+        'periodoImputado',
+        `No se puede cerrar "${period.label}": hay ${unimputed.length} dato(s) sin decisión de imputación ` +
+          `de período (${nombres}). El cierre es definitivo, así que no puede hacerse sobre datos que ` +
+          'todavía no se asignaron a un mes. Imputá cada dato desde su ficha (o anulalo si no corresponde) ' +
+          'y volvé a cerrar.',
       );
     }
 

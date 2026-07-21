@@ -918,3 +918,82 @@ fuerte con el nombre humano.
 **Sobre el commit / push.** *Esta tarea NO se pushea* (indicación explícita): altera un
 contrato compartido con el frontend y F01-B tiene que aterrizar junto. Un único commit local
 en `AlanSandbox` (regla #3). Alan pushea a mano cuando ambas mitades estén listas.
+
+## Sesión 2026-07-21 — F04: nunca un resultado "sano" con datos sin imputar (backend)
+
+**El bug (caja negra, 20/07, reproducido).** Una estructura con datos sin decisión de imputación
+de período avisaba *"Hay 2 dato(s) sin decisión de imputación… antes de calcular"* y, aun así, la
+pantalla mostraba un **margen bruto del 53% con badge verde "MARGEN SANO"** sobre un costo con
+$0 de materia prima y $0 de CIP. El costista leía un número sano que no era ni completo ni
+confiable.
+
+**La causa.** El motor de trazabilidad (`CalculationRunService.calculate`,
+`POST /structures/:id/calculate`) detectaba los datos sin imputar y **tiraba 422**. El frontend
+manejaba mal ese 422 (mostraba un resultado previo/cacheado con badge sano). El bloqueo duro sin
+una pantalla para imputar (que es una tarea posterior) dejaba además al costista sin ninguna
+acción posible.
+
+**Decisión (tomada de antemano, implementada tal cual — no se reabre).**
+- **El cálculo NO se bloquea.** Corre igual, pero el resultado persistido y la respuesta se
+  marcan EXPLÍCITAMENTE como incompletos/no confiables, con el motivo y los datos afectados por
+  su **nombre humano**. El frontend usa esa marca para pintar una advertencia en vez del badge
+  sano. Bloquear sin UI de imputación no era una opción.
+- **El CIERRE del período SÍ se bloquea** (422 accionable) mientras haya un dato sin imputar. El
+  cierre es la acción irreversible que consolida el mes: nunca puede pasar sobre datos sucios.
+  Se agregó como una precondición más de `CostPeriodService.close`, en el mismo estilo que la
+  regla E3 (actividad real y CIP real por centro productivo).
+
+**Forma exacta de la marca de incompletitud (contrato que consume el frontend).** Interfaz
+`Incompletitud` exportada desde `calculation-run-service.ts`:
+
+```ts
+interface Incompletitud {
+  incompleto: boolean;                                 // true si corrió con datos sin imputar
+  motivos: string[];                                   // razones legibles (ES), sin endpoints ni ids
+  datosPendientes: { id: string; nombre: string }[];   // id = navegar a la ficha; nombre = mostrar
+}
+```
+
+Viaja por DOS lados, ambos ADITIVOS (no rompe a ningún consumidor existente):
+- **Persistida** dentro de `CalculationRun.results.incompletitud` (columna JSON; `results` sigue
+  teniendo `grossMargin`, `grossMarginPct`, etc. intactos — `listRuns` y `compare` no se enteran).
+- **En la respuesta** de `POST /structures/:id/calculate`: además de `results.incompletitud`,
+  se expone `data.incompleto` en el nivel superior como atajo para el front.
+
+Sin datos pendientes: `{ incompleto: false, motivos: [], datosPendientes: [] }`.
+
+**Regla #7 (nada de endpoints ni ids en los mensajes).** Se REESCRIBIÓ el mensaje viejo, que
+decía *"resolvé con POST /data-points/:id/imputacion antes de calcular"*. Ahora nombra los datos
+(*"Compra — Proveedor Sur, 27/06"*) y apunta a la acción de UI: *"Resolvé la imputación desde la
+ficha de cada dato antes de dar el costo por bueno"*. Queda correcto también cuando exista la
+pantalla de imputación (tarea posterior). El `id` sí va en `datosPendientes` porque es dato de
+máquina para que el front abra la ficha, no un mensaje.
+
+**Defaults elegidos donde el criterio no estaba escrito (regla #9).**
+- El cierre bloqueado usa `MissingInputError` (**422**, `MISSING_INPUT`) y no `ValidationError`
+  (400) como la precondición E3, porque el criterio de aceptación pide 422 explícito y "falta una
+  decisión de imputación" ES semánticamente un insumo faltante. "Mismo estilo que E3" se
+  interpretó como el mismo patrón (chequear precondición y cortar con mensaje accionable antes de
+  mutar), no la misma clase de error.
+- Los datos cuelgan de la ESTRUCTURA, no del período (`DataPoint.structureId`, sin `periodId`). Un
+  dato sin imputar podría pertenecer al mes que se cierra, así que el cierre se bloquea si hay
+  CUALQUIER dato de la estructura sin imputar (no anulado, no voided).
+- `take: 20` acota nombres y payload; con más de 20 pendientes el conteo del motivo queda en 20
+  (mismo tope que la detección original). Un caso extremo que no se da en la práctica.
+
+**Fuera de alcance (documentado).** El endpoint LEGADO `POST /cost-structures/:id/calculate`
+(`CostStructureService.calculate`, tabla `CostCalculation`) NO participa del modelo de
+doble-período/imputación: corre el motor sobre el JSON de config y no mira data points. No se le
+agregó la marca porque no tiene de dónde sacarla; la pantalla de trazabilidad (la del bug) usa
+`POST /structures/:id/calculate`.
+
+**Verificación.** `npm run typecheck` limpio. `npm test`: **58 archivos, 485 verdes, 1 skip** (el
+"Can't reach database server" es el clasificador degradando elegante con la DB apagada). Tests
+nuevos/actualizados: `imputacion-and-latency.test.ts` (calcular con un dato sin imputar devuelve
+resultado marcado incompleto, con el dato nombrado, y sin endpoints/ids en el motivo; sin
+pendientes queda `incompleto: false`) y `cost-period-service.test.ts` (cerrar con un dato sin
+imputar tira 422 nombrando el dato y no cierra; imputado el dato, el cierre procede).
+
+**Sin cambios de esquema/migración.** No se tocó `schema.prisma`, `prisma/rls.sql`,
+`migration_lock.toml` ni se agregó migración: la marca vive en la columna JSON `results` que ya
+existía (regla #6 satisfecha por vacío).

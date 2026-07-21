@@ -39,7 +39,10 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
       data: {
         runId: result.run.id,
         runN: result.run.runN,
-        results: result.results,
+        results: result.results, // incluye `results.incompletitud`
+        // Atajo en el nivel superior (F04): el front decide con esto si pinta
+        // una advertencia en vez de un margen "sano".
+        incompleto: result.incompletitud,
         tree: result.tree,
       },
     };
