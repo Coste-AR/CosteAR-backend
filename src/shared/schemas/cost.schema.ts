@@ -9,6 +9,10 @@ import { z } from 'zod';
 const nonNeg = z.number().finite().nonnegative();
 const positive = z.number().finite().positive();
 
+// `periodSchema` (mensual/quincenal/trimestral) se define más abajo, junto a
+// `periodCodeRegex`, para no duplicar la definición: esa versión es un
+// superconjunto de "AAAA-MM" y también rechaza meses inválidos como "1999-13".
+
 // --- Materia Prima (Hoja 1) ---
 
 export const stockMovementSchema = z.object({
