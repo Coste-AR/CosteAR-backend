@@ -800,3 +800,50 @@ este proyecto no entrega cosas sin probar.
 `this.apiKey.length > 10`, y el placeholder `'groq_placeholder'` tiene 16 caracteres →
 **pasa el guard**. O sea que en local no degrada elegante: dispara el HTTP igual, se come
 un 401 y lo esconde en un `console.error`. Cuando se toque Whisper, arreglar esto también.
+
+---
+
+## Sesión 2026-07-20 — T00: sincronización de `AlanSandbox` con `staging` (paso previo, bloqueante)
+
+**Objetivo.** Poner `AlanSandbox` al día con `staging` ANTES de arrancar una tanda de
+features nueva, para que cualquier conflicto se resuelva sobre una base limpia y no se
+apile encima de trabajo nuevo.
+
+**Qué se encontró.** `AlanSandbox` no tenía **nada** por delante de `staging` (solo estaba
+atrasado): `staging` había avanzado 2 commits desde el PR #16 (el merge de `AlanSandbox` a
+`staging` + `031e9cf fix(validaciones): validar período real al cargar/editar el Libro de
+Costos`). Como no había nada propio por delante, el `git merge origin/staging` fue un
+**fast-forward** puro: **cero conflictos**, sin commit de merge. Solo se movieron 3 archivos
+(no de esquema): `validaciones-service.ts`, `validaciones.routes.ts`, `cost.schema.ts`.
+
+**Verificación (todo en verde):**
+- `npm run typecheck`: limpio.
+- `npm test`: **57 archivos, 474 tests verdes, 1 skip.** (Los errores de "Can't reach
+  database server" en el log son de un test que degrada elegante cuando la DB está apagada
+  — igual pasa.)
+- Migraciones desde cero contra una **DB de scratch limpia** (`costear_scratch` en el
+  Postgres de Docker, para no ensuciar los datos de desarrollo): `npm run prisma:deploy`
+  aplicó las 40+ migraciones sin error, terminando en
+  `20260713010000_production_quantity_and_purge` (la esperada). `npm run db:rls` aplicó
+  las 37 políticas RLS sin advertencias.
+
+**Decisión — `prisma migrate diff` (contrato de merge-readiness, regla #6).** El diff
+entre la DB migrada y `schema.prisma` NO da vacío, pero **todas** las diferencias son
+patrones intencionales YA presentes en `staging` (no las introdujo este sync, que solo tocó
+3 archivos ajenos al esquema):
+1. `id` de varias tablas: la DB tiene default `gen_random_uuid()` y el schema usa
+   `@default(uuid())` (lado cliente). Es el artefacto clásico de dirección de comparación
+   DB→schema en Prisma; no es drift.
+2. `cost_periods.updatedAt`: default `Now` en DB vs `@updatedAt` (lado cliente). Ídem.
+3. `cost_config_versions`: FK sobre `structureId` presente en la DB pero no en el modelo
+   Prisma. Es **deliberado y está documentado** en el propio `schema.prisma:899`
+   ("Relaciones por scalar UUID (FK a nivel DB en la migración) para no tocar los modelos
+   existentes"). No es drift.
+   → Conclusión: no hay drift real introducido por T00. No se toca nada del esquema ni de
+   las migraciones (reglas #5 y #6: no reinterpretar ni "mejorar").
+
+**Sobre el commit.** El merge fue fast-forward, así que Git no creó commit de merge y el
+árbol quedó limpio (el `npm install` solo reconció `node_modules`; el lockfile ya venía
+actualizado por el fast-forward). Este único commit local de la tarea agrega esta entrada
+de `DECISIONES.md` (regla #8). `AlanSandbox` queda 1 commit por delante de `staging` (solo
+esta documentación). No se hace push ni PR (reglas #1–#3): Alan pushea a mano.
