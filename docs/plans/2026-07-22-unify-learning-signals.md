@@ -5,6 +5,54 @@
 > Este plan lo va a ejecutar otro agente (Antigravity) — está escrito asumiendo
 > cero contexto previo de la conversación en la que se originó.
 
+## Tarea 0 (hacer PRIMERO, antes que todo lo demás): resolver el push pendiente de CosteAR-frontend
+
+`CosteAR-backend` ya está pusheado a `origin/dev` sin problemas — no requiere
+ninguna acción.
+
+`CosteAR-frontend` **no está pusheado**. Estado exacto al momento de escribir
+esto:
+
+- Rama local `dev`, tip en `d1001a5` (2 commits arriba de `c95a503`, que sí
+  está en `origin/dev`):
+  - `6e953e6` — "fix: arregla el chat de la bóveda de conocimiento (RAG) en admin"
+  - `d1001a5` — "feat: permite editar propuestas del pipeline nocturno antes de aprobar/rechazar"
+- `origin/dev` está en `8ef4fc8`, con **11 commits que la rama local no
+  tiene** — trabajo real de otros compañeros (Alan, Santiago, Lautaro) que se
+  mergeó directo a `dev` sin pasar por `staging`. Corré `git log
+  d1001a5..origin/dev --oneline` en `CosteAR-frontend` para verlos.
+- Al intentar `git merge origin/dev` (ya lo probé, después lo aborté con
+  `git merge --abort` para no dejar nada roto a medio resolver) salen
+  **conflictos de contenido en 5 archivos**, porque tanto el refactor grande
+  de Antigravity (ya incluido en los commits de `dev`) como el trabajo de
+  los compañeros tocaron las mismas zonas:
+  - `src/features/companies/CompanyDetailPage.tsx`
+  - `src/features/cost-structures/CostStructurePage.tsx`
+  - `src/features/cost-structures/IndirectCostsForm.tsx`
+  - `src/features/dashboard/CostitaChat.tsx`
+  - `src/features/validaciones/ValidacionesPage.tsx`
+
+**Los 2 commits propios (`6e953e6`, `d1001a5`) NO tocan ninguno de esos 5
+archivos** — el conflicto es enteramente entre el refactor de Antigravity y
+el trabajo de los compañeros, algo previo y ajeno a este plan.
+
+Qué hacer:
+1. `git checkout dev && git merge origin/dev` en `CosteAR-frontend`.
+2. Resolver los 5 conflictos leyendo ambos lados con cuidado — no es
+   mecánico, hay que entender qué hace cada versión en cada sección del
+   archivo y combinar sin perder funcionalidad de ninguno de los dos lados
+   (ni el refactor de componentes de Antigravity, ni las correcciones de los
+   compañeros como F01-B, F05, el fix de "GASTO" como grupo no-costo, etc.).
+3. Después de resolver: `npx tsc --noEmit` limpio, `npm test` sin
+   regresiones (antes del merge: 5/5 tests pasando), y una pasada rápida en
+   el navegador de las pantallas que tocan esos 5 archivos (empresa,
+   estructura de costos, chat del costista, validaciones) para confirmar que
+   no quedó nada roto visualmente.
+4. `git push origin dev`.
+
+No forzar el push (`--force`) bajo ningún concepto — origin/dev tiene
+trabajo real de otras personas que no se puede perder.
+
 ## Contexto: qué es CosteAR y por qué existe este pipeline
 
 CosteAR es un SaaS para costistas argentinos (profesionales que llevan la
