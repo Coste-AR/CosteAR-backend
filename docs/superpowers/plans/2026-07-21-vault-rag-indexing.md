@@ -671,6 +671,16 @@ describe('VaultIndexerService', () => {
 
     await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('VOYAGE_API_KEY');
   });
+
+  it('lanza error si el vault no tiene notas .md, sin borrar nada existente', async () => {
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const service = new VaultIndexerService(repo, embedder);
+
+    // vaultPath está vacío (mkdtemp recién creado, sin escribir ningún .md)
+    await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('No se encontraron notas');
+    expect(repo.chunks.size).toBe(0); // no llamó a deleteOrphanChunks([]) de forma destructiva
+  });
 });
 ```
 
@@ -731,6 +741,15 @@ export class VaultIndexerService {
     }
 
     const absoluteFiles = await listMarkdownFiles(vaultPath);
+    if (absoluteFiles.length === 0) {
+      // Salvaguarda: deleteOrphanChunks([]) borraría TODA la tabla vault_chunks
+      // (ver vault-chunk-repository.ts). Un vault vacío/mal configurado no debe
+      // poder vaciar la bóveda indexada — tratamos "cero notas" como error de
+      // configuración, no como "se borraron todas las notas".
+      throw new Error(
+        `No se encontraron notas .md en ${vaultPath}. Verificá el path — por seguridad no se borra nada de la bóveda indexada.`,
+      );
+    }
     const relativeFiles = absoluteFiles.map((f) => relative(vaultPath, f).replace(/\\/g, '/'));
 
     const result: IndexVaultResult = {
