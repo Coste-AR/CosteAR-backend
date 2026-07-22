@@ -55,8 +55,7 @@ export function chunkMarkdown(filePath: string, rawContent: string): MarkdownChu
   let chunkIndex = 0;
   for (const section of sections) {
     const content = section.lines.join('\n').trim();
-    if (!content && section.headingPath !== null) continue;
-    if (!content && section.headingPath === null && sections.length === 1) continue;
+    if (!content) continue;
     const contentHash = createHash('sha256')
       .update(`${section.headingPath ?? ''}\n${content}`)
       .digest('hex');

@@ -36,7 +36,7 @@ describe('chunkMarkdown', () => {
     const b = chunkMarkdown('x.md', '# X\n\n## Sección\n\nTexto original.\n');
     const c = chunkMarkdown('x.md', '# X\n\n## Sección\n\nTexto modificado.\n');
 
-    expect(a[1]?.contentHash).toBe(b[1]?.contentHash);
-    expect(a[1]?.contentHash).not.toBe(c[1]?.contentHash);
+    expect(a[0]?.contentHash).toBe(b[0]?.contentHash);
+    expect(a[0]?.contentHash).not.toBe(c[0]?.contentHash);
   });
 });
