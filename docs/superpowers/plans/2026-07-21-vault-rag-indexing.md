@@ -822,7 +822,7 @@ export class VaultIndexerService {
 ```bash
 npx vitest run tests/vault-indexer/vault-indexer-service.test.ts
 ```
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 5: Correr toda la suite para verificar que no rompiste nada**
 
