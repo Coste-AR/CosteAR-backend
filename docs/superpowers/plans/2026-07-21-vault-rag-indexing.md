@@ -907,7 +907,7 @@ async function main(): Promise<void> {
   console.log(`Archivos procesados: ${result.filesProcessed}`);
   console.log(`Chunks nuevos/actualizados: ${result.chunksUpserted}`);
   console.log(`Chunks sin cambios (omitidos): ${result.chunksSkippedUnchanged}`);
-  console.log(`Chunks eliminados (huérfanos): ${result.chunksDeleted}`);
+  console.log(`Chunks eliminados (huérfanos o de notas achicadas): ${result.chunksDeleted}`);
   if (result.filesWithErrors.length > 0) {
     console.error(`Archivos con errores: ${result.filesWithErrors.join(', ')}`);
     process.exit(1);
