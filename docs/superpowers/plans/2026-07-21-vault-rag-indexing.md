@@ -884,17 +884,26 @@ git commit -m "feat(vault-indexer): orquestación del indexado (incremental, ide
 Crear `src/application/vault-indexer/cli.ts`:
 
 ```ts
+import { existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { VaultIndexerService } from './vault-indexer-service.js';
 
 function getVaultCommit(vaultPath: string): string {
-  return execSync('git rev-parse HEAD', { cwd: vaultPath }).toString().trim();
+  try {
+    return execSync('git rev-parse HEAD', { cwd: vaultPath }).toString().trim();
+  } catch {
+    throw new Error(`${vaultPath} no es un repositorio Git válido. Verificá que sea un vault clonado correctamente.`);
+  }
 }
 
 async function main(): Promise<void> {
   const vaultPath = process.argv[2];
   if (!vaultPath) {
     console.error('Uso: npm run vault:index -- <path-al-vault-clonado>');
+    process.exit(1);
+  }
+  if (!existsSync(vaultPath)) {
+    console.error(`Error: la ruta no existe: ${vaultPath}`);
     process.exit(1);
   }
 
