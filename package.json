@@ -23,6 +23,7 @@
     "db:seed": "node prisma/seed.mjs",
     "db:setup": "prisma migrate dev --name init && node scripts/apply-rls.mjs",
     "worker": "tsx --env-file=.env src/infrastructure/workers/index.ts",
+    "vault:index": "tsx --env-file=.env src/application/vault-indexer/cli.ts",
     "keys:generate": "node scripts/generate-keys.mjs"
   },
   "dependencies": {
