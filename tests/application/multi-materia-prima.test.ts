@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runCalculation, type CalculationInput } from '@/application/cost-structures/calculate.js';
+import { runCalculation, type CalculationInput } from '@/domain/calculations/calculate.js';
 import { rawMaterialSectionSchema } from '@/shared/schemas/cost.schema.js';
 
 /**

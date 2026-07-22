@@ -4,7 +4,7 @@ import {
   consumedQuantitiesOf,
   type PeriodSide,
 } from '@/application/cost-structures/period-comparison.js';
-import type { FrozenCalculation } from '@/application/cost-structures/calculate.js';
+import type { FrozenCalculation } from '@/domain/calculations/calculate.js';
 
 /**
  * C — Fase 4: la comparación entre períodos.

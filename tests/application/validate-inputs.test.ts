@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateCalculationInputs, toMissingInputError } from '@/application/cost-structures/validate-inputs.js';
 import { MissingInputError } from '@/domain/errors/calculation-errors.js';
-import type { CalculationInput } from '@/application/cost-structures/calculate.js';
+import type { CalculationInput } from '@/domain/calculations/calculate.js';
 
 /**
  * Fix crítico de la spec: el cierre del prorrateo secundario a veces no corría

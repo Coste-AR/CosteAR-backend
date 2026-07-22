@@ -48,6 +48,7 @@ function parseRedisConnection(): ConnectionOptions {
 export const QUEUE_NAMES = {
   macroSync: 'macro-sync',
   recalculate: 'recalculate',
+  nightlyLearning: 'nightly-learning',
 } as const;
 
 /**
@@ -71,6 +72,7 @@ function createQueue(name: string): Queue | null {
 // Si Redis no está disponible quedan en null; server.ts maneja el modo degradado.
 export const macroSyncQueue: Queue = createQueue(QUEUE_NAMES.macroSync) as Queue;
 export const recalculateQueue: Queue = createQueue(QUEUE_NAMES.recalculate) as Queue;
+export const nightlyLearningQueue: Queue = createQueue(QUEUE_NAMES.nightlyLearning) as Queue;
 
 export function getConnection(): ConnectionOptions {
   return parseRedisConnection();

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CostPeriodService } from '@/application/cost-structures/cost-period-service.js';
-import { ENGINE_VERSION } from '@/application/cost-structures/calculate.js';
+import { ENGINE_VERSION } from '@/domain/calculations/calculate.js';
 import { ValidationError } from '@/domain/errors/domain-error.js';
 
 vi.mock('@/application/audit/audit-logger.js', () => ({

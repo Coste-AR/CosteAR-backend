@@ -79,6 +79,12 @@ model User {
   // Trazabilidad Total v1 (ver sección al final del archivo)
   traceAuditLogs TraceAuditLog[]
 
+  // Nightly Learning Pipeline
+  dailySignals   DailySignal[]
+
+  // Chat de consulta a la bóveda (admin RAG chat)
+  vaultChatSessions VaultChatSession[]
+
   @@map("users")
 }
 
@@ -959,9 +965,108 @@ model VaultChunk {
   // Para verificar el estado de las migraciones usar `prisma migrate status`,
   // no `migrate dev`.
   embedding   Unsupported("vector(1024)")?
+  // Columna GENERADA (STORED) a partir de `content`, para full-text search en
+  // español. Mismo caso que `embedding`: Prisma no puede representar columnas
+  // generadas ni su índice GIN, sufre el mismo problema de drift-detection
+  // descrito arriba. Nunca se escribe manualmente, Postgres la recalcula sola.
+  contentTsv  Unsupported("tsvector")?
   createdAt   DateTime                     @default(now())
   updatedAt   DateTime                     @updatedAt
 
   @@unique([sourceFile, chunkIndex])
   @@map("vault_chunks")
+}
+
+// ---------------------------------------------------------------------------
+// Nightly Learning Pipeline (RAG Feedback Loop)
+// ---------------------------------------------------------------------------
+
+enum DailySignalType {
+  RAG_MISS // El usuario preguntó algo que el RAG no pudo responder (no encontró en el vault)
+  USER_CORRECTION // El costista hizo una corrección manual que sugiere una regla nueva
+  IMPROVEMENT_REPORT // El costista reportó explícitamente una falla/mejora
+}
+
+enum DailySignalStatus {
+  PENDING
+  PROCESSED
+  REJECTED // Se determinó que era basura o no aplicable
+}
+
+model DailySignal {
+  id        String            @id @default(uuid()) @db.Uuid
+  type      DailySignalType
+  status    DailySignalStatus @default(PENDING)
+  content   String            // Texto del reporte, de la pregunta (miss) o del JSON de corrección
+  context   Json?             // Metadata extra (ej. rubro de la empresa, query original)
+  userId    String?           @db.Uuid
+  user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([status])
+  @@map("daily_signals")
+}
+
+model VaultEditProposal {
+  id            String   @id @default(uuid()) @db.Uuid
+  title         String   // Título breve de la mejora (para listar en la UI)
+  sourceFile    String   // A qué archivo del vault aplicaría
+  proposedText  String   // El texto sugerido para agregar/reemplazar (en markdown)
+  justification String   // Razón generada por la IA
+  status        DailySignalStatus @default(PENDING) // PENDING -> PROCESSED (Aprobado) o REJECTED
+
+  // true si el LLM tuvo que redactar proposedText desde su propio conocimiento
+  // (típico de señales RAG_MISS sin corrección humana de por medio) en vez de
+  // basarse en una corrección/reporte que un costista efectivamente escribió.
+  // El default conservador es "sí, requiere verificación" para no confiar de más
+  // en propuestas históricas generadas antes de este campo.
+  requiresVerification Boolean @default(true)
+
+  // Array de IDs de las señales que justificaron esta propuesta (trazabilidad)
+  signalsUsed   String[] @db.Uuid
+
+  reviewedAt    DateTime?
+  reviewedBy    String?  @db.Uuid
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@map("vault_edit_proposals")
+}
+
+enum VaultChatRole {
+  USER
+  ASSISTANT
+}
+
+// Sesión de chat del admin RAG (una conversación con historial contra la bóveda).
+model VaultChatSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String   @default("Nueva conversación")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages VaultChatMessage[]
+
+  @@index([userId])
+  @@map("vault_chat_sessions")
+}
+
+model VaultChatMessage {
+  id         String           @id @default(uuid()) @db.Uuid
+  sessionId  String           @db.Uuid
+  session    VaultChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role       VaultChatRole
+  content    String
+  // Rutas de archivos del vault citadas (solo para mensajes ASSISTANT).
+  citations  String[]         @default([])
+  // 'HIGH' | 'LOW' | 'NONE' — confianza de VaultQueryService (solo ASSISTANT).
+  confidence String?
+  createdAt  DateTime         @default(now())
+
+  @@index([sessionId])
+  @@map("vault_chat_messages")
 }

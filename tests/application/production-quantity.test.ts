@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { comparePeriods, type PeriodSide } from '@/application/cost-structures/period-comparison.js';
-import type { FrozenCalculation } from '@/application/cost-structures/calculate.js';
+import type { FrozenCalculation } from '@/domain/calculations/calculate.js';
 
 /**
  * UNIDADES PRODUCIDAS ≠ UNIDADES VENDIDAS.

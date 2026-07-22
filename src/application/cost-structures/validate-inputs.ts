@@ -1,5 +1,5 @@
 import { MissingInputError } from '../../domain/errors/calculation-errors.js';
-import type { CalculationInput } from './calculate.js';
+import type { CalculationInput } from '../../domain/calculations/calculate.js';
 
 /**
  * Chequeos de "¿hay insumos suficientes para calcular?" ANTES de correr el

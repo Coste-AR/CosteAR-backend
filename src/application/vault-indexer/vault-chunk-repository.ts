@@ -27,6 +27,15 @@ export interface VaultChunkRepository {
   /** Borra todo chunk cuyo sourceFile NO esté en `currentSourceFiles`
    *  (notas eliminadas/renombradas). Devuelve cuántos borró. */
   deleteOrphanChunks(currentSourceFiles: string[]): Promise<number>;
+  /** Busca los chunks más similares semánticamente al embedding provisto usando distancia coseno. */
+  searchChunks(queryEmbedding: number[], limit?: number, maxDistance?: number): Promise<Array<{
+    id: string;
+    sourceFile: string;
+    sourceTitle: string;
+    headingPath: string | null;
+    content: string;
+    distance: number;
+  }>>;
 }
 
 export class PrismaVaultChunkRepository implements VaultChunkRepository {
@@ -74,5 +83,40 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
       where: { sourceFile: { notIn: currentSourceFiles } },
     });
     return result.count;
+  }
+
+  async searchChunks(queryEmbedding: number[], limit = 5, maxDistance = 0.35): Promise<Array<{
+    id: string;
+    sourceFile: string;
+    sourceTitle: string;
+    headingPath: string | null;
+    content: string;
+    distance: number;
+  }>> {
+    const vectorLiteral = `[${queryEmbedding.join(',')}]`;
+    
+    // Usamos el operador <=> para distancia coseno en pgvector
+    const result = await this.db.$queryRawUnsafe<any[]>(`
+      SELECT 
+        "id", 
+        "sourceFile", 
+        "sourceTitle", 
+        "headingPath", 
+        "content",
+        ("embedding" <=> $1::vector) as "distance"
+      FROM "vault_chunks"
+      WHERE ("embedding" <=> $1::vector) < $2
+      ORDER BY "embedding" <=> $1::vector ASC
+      LIMIT $3;
+    `, vectorLiteral, maxDistance, limit);
+
+    return result.map(row => ({
+      id: row.id,
+      sourceFile: row.sourceFile,
+      sourceTitle: row.sourceTitle,
+      headingPath: row.headingPath,
+      content: row.content,
+      distance: Number(row.distance)
+    }));
   }
 }

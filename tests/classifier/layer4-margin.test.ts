@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { runLayer4, SECTION_MARGIN } from '../../src/infrastructure/classifier/layers/layer4-business-routing.js';
+import { runLayer4 } from '../../src/infrastructure/classifier/layers/layer4-business-routing.js';
+import { SECTION_MARGIN } from '../../src/infrastructure/classifier/layers/layer4-keywords.js';
 
 describe('runLayer4 — cost-section margin', () => {
   it('routes confidently when one section clearly leads', () => {

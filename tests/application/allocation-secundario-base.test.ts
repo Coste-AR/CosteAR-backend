@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applySecondaryAllocationBases,
   computeProductiveBudgets,
-} from '@/application/cost-structures/calculate.js';
+} from '@/domain/calculations/calculate.js';
 import { indirectCostConfigSchema } from '@/shared/schemas/cost.schema.js';
 
 /**

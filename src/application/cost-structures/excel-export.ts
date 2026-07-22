@@ -4,7 +4,7 @@ import {
   directLaborConfigSchema,
   indirectCostConfigSchema,
 } from '../../shared/schemas/cost.schema.js';
-import { runCalculation, type CalculationInput } from './calculate.js';
+import { runCalculation, type CalculationInput } from '../../domain/calculations/calculate.js';
 
 /**
  * Exporta una estructura de costos a un archivo .xlsx con la estética de

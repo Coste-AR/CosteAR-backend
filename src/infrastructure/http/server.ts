@@ -12,7 +12,8 @@ import { buildApp } from './app.js';
 import { getEnv } from '../config/env.js';
 import { startMacroSyncWorker } from '../workers/macro-sync.worker.js';
 import { startRecalculateWorker } from '../workers/recalculate.worker.js';
-import { macroSyncQueue } from '../workers/queues.js';
+import { startNightlyLearningWorker } from '../workers/nightly-learning.worker.js';
+import { macroSyncQueue, nightlyLearningQueue } from '../workers/queues.js';
 import { scheduleMacroSync } from '../workers/scheduler.js';
 
 /**
@@ -36,11 +37,15 @@ async function main(): Promise<void> {
   // --- Workers BullMQ (degradable — no bloquea el startup) ---
   let macroWorker: Awaited<ReturnType<typeof startMacroSyncWorker>> | null = null;
   let recalcWorker: Awaited<ReturnType<typeof startRecalculateWorker>> | null = null;
+  let nightlyWorker: Awaited<ReturnType<typeof startNightlyLearningWorker>> | null = null;
 
   try {
     macroWorker = startMacroSyncWorker();
     recalcWorker = startRecalculateWorker();
-    app.log.info('Workers BullMQ activos: macro-sync, recalculate');
+    // Sin este worker, /admin/nightly/run encola el job pero nadie lo procesa
+    // (quedaba PENDING para siempre — ver docs/plans para el detalle del bug).
+    nightlyWorker = startNightlyLearningWorker();
+    app.log.info('Workers BullMQ activos: macro-sync, recalculate, nightly-learning');
   } catch (err) {
     app.log.warn({ err }, 'Workers BullMQ no pudieron iniciarse — modo degradado');
   }
@@ -58,10 +63,27 @@ async function main(): Promise<void> {
     }
   }
 
+  // --- Cron del pipeline nocturno (degradable) ---
+  if (nightlyLearningQueue) {
+    try {
+      await nightlyLearningQueue.add(
+        'nightly-pipeline',
+        {},
+        {
+          repeat: { pattern: '0 2 * * *', tz: 'America/Argentina/Buenos_Aires' },
+          jobId: 'scheduled-nightly-learning',
+        },
+      );
+      app.log.info('Cron nightly-learning programado: 0 2 * * *');
+    } catch (err) {
+      app.log.warn({ err }, 'Cron nightly-learning no pudo programarse');
+    }
+  }
+
   // --- Graceful shutdown ---
   const close = async (signal: string): Promise<void> => {
     app.log.info(`Recibido ${signal}, cerrando servidor...`);
-    await Promise.all([macroWorker?.close(), recalcWorker?.close()].filter(Boolean));
+    await Promise.all([macroWorker?.close(), recalcWorker?.close(), nightlyWorker?.close()].filter(Boolean));
     await app.close();
     process.exit(0);
   };

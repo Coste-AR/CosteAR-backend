@@ -9,7 +9,7 @@ import {
   indirectCostConfigSchema,
   inventorySchema,
 } from '../../shared/schemas/cost.schema.js';
-import { runCalculation, ENGINE_VERSION, type CalculationInput } from './calculate.js';
+import { runCalculation, ENGINE_VERSION, type CalculationInput } from '../../domain/calculations/calculate.js';
 import { buildCalculationTree, type TreeNode } from './tree-builder.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
 
