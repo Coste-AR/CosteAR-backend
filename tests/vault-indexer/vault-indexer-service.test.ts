@@ -163,4 +163,21 @@ describe('VaultIndexerService', () => {
     await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('No se encontraron notas');
     expect(repo.chunks.size).toBe(0); // no llamó a deleteOrphanChunks([]) de forma destructiva
   });
+
+  it('ignora el README.md de la raíz del vault (instrucciones del repo, no conocimiento)', async () => {
+    await writeFile(
+      join(vaultPath, 'README.md'),
+      '# costear-knowledge-base\n\nInstrucciones para subir contenido...\n',
+      'utf-8',
+    );
+    await writeFile(join(vaultPath, 'nota.md'), '# Nota real\n\nContenido de costeo.\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const service = new VaultIndexerService(repo, embedder);
+
+    const result = await service.indexVault(vaultPath, 'commit-1');
+
+    expect(result.filesProcessed).toBe(1);
+    expect([...repo.chunks.values()].every((c) => c.sourceFile !== 'README.md')).toBe(true);
+  });
 });

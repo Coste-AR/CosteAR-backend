@@ -23,6 +23,9 @@ async function listMarkdownFiles(rootDir: string): Promise<string[]> {
         if (IGNORED_DIRS.has(entry.name)) continue;
         await walk(join(dir, entry.name));
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        // El README.md de la raíz del repo son instrucciones para el equipo
+        // (cómo subir contenido), no conocimiento de costeo — no se indexa.
+        if (dir === rootDir && entry.name.toLowerCase() === 'readme.md') continue;
         result.push(join(dir, entry.name));
       }
     }
