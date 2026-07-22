@@ -39,4 +39,34 @@ describe('chunkMarkdown', () => {
     expect(a[0]?.contentHash).toBe(b[0]?.contentHash);
     expect(a[0]?.contentHash).not.toBe(c[0]?.contentHash);
   });
+
+  it('no interpreta headings dentro de un bloque de código como secciones reales', () => {
+    const raw = [
+      '# Nota',
+      '',
+      '## Sintaxis Markdown',
+      '',
+      'Así se documenta un heading de nivel 2:',
+      '',
+      '```',
+      '## Ejemplo',
+      'Esto no es una sección real.',
+      '```',
+      '',
+      'Texto después del bloque.',
+      '',
+    ].join('\n');
+
+    const chunks = chunkMarkdown('sintaxis.md', raw);
+
+    // Un único chunk para "Sintaxis Markdown": el contenido del fence
+    // (incluida la línea "## Ejemplo") queda dentro de ese mismo chunk,
+    // no genera una sección "Ejemplo" separada.
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.headingPath).toBe('Sintaxis Markdown');
+    expect(chunks[0]?.content).toContain('## Ejemplo');
+    expect(chunks[0]?.content).toContain('Esto no es una sección real.');
+    expect(chunks[0]?.content).toContain('Texto después del bloque.');
+    expect(chunks.some((c) => c.headingPath === 'Ejemplo')).toBe(false);
+  });
 });
