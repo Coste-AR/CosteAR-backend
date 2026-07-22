@@ -69,4 +69,85 @@ describe('chunkMarkdown', () => {
     expect(chunks[0]?.content).toContain('Texto después del bloque.');
     expect(chunks.some((c) => c.headingPath === 'Ejemplo')).toBe(false);
   });
+
+  it('descarta el frontmatter YAML: no aparece en ningún chunk', () => {
+    const raw = [
+      '---',
+      'title: "Clase 1 — Introducción a la contabilidad de gestión"',
+      'tags: [costear, clasesmirta]',
+      'fecha_clase: 2026-06-29',
+      '---',
+      '',
+      '### Contabilidad Tradicional vs. Contabilidad de Gestión',
+      '',
+      'Texto de la sección.',
+      '',
+    ].join('\n');
+
+    const chunks = chunkMarkdown('1. Introducción.md', raw);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.content).toBe('Texto de la sección.');
+    expect(chunks[0]?.content).not.toContain('title:');
+    expect(chunks[0]?.content).not.toContain('tags:');
+    expect(chunks[0]?.content).not.toContain('---');
+  });
+
+  it('usa el title del frontmatter como sourceTitle cuando no hay H1', () => {
+    const raw = [
+      '---',
+      'title: "Clase 10 — Capacidad de producción"',
+      'materia: "Costos I"',
+      '---',
+      '',
+      '### Presencia en fábrica',
+      '',
+      'Texto.',
+      '',
+    ].join('\n');
+
+    const chunks = chunkMarkdown('10. Capacidad.md', raw);
+
+    expect(chunks[0]?.sourceTitle).toBe('Clase 10 — Capacidad de producción');
+  });
+
+  it('el H1 sigue teniendo prioridad sobre el title del frontmatter', () => {
+    const raw = [
+      '---',
+      'title: "Título del frontmatter"',
+      '---',
+      '',
+      '# Título real de la nota',
+      '',
+      'Texto.',
+      '',
+    ].join('\n');
+
+    const chunks = chunkMarkdown('nota.md', raw);
+
+    expect(chunks[0]?.sourceTitle).toBe('Título real de la nota');
+  });
+
+  it('nota real con frontmatter y solo headings de nivel 3 (sin H2): headingPath sin separador colgante', () => {
+    const raw = [
+      '---',
+      'title: "Clase real"',
+      '---',
+      '',
+      '### Primer tema',
+      '',
+      'Contenido del primer tema.',
+      '',
+      '### Segundo tema',
+      '',
+      'Contenido del segundo tema.',
+      '',
+    ].join('\n');
+
+    const chunks = chunkMarkdown('clase.md', raw);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({ headingPath: 'Primer tema', content: 'Contenido del primer tema.' });
+    expect(chunks[1]).toMatchObject({ headingPath: 'Segundo tema', content: 'Contenido del segundo tema.' });
+  });
 });
