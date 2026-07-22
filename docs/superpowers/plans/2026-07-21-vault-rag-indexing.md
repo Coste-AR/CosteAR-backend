@@ -465,8 +465,9 @@ export interface VaultChunkRepository {
   listBySourceFile(sourceFile: string): Promise<VaultChunkIdentity[]>;
   upsertChunk(input: UpsertChunkInput): Promise<void>;
   /** Borra los chunks de `sourceFile` cuyo chunkIndex sea mayor a `keepUpTo`
-   *  (la nota se achicó). Pasar -1 borra todos los chunks de ese archivo. */
-  deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<void>;
+   *  (la nota se achicó). Pasar -1 borra todos los chunks de ese archivo.
+   *  Devuelve cuántos borró. */
+  deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<number>;
   /** Borra todo chunk cuyo sourceFile NO esté en `currentSourceFiles`
    *  (notas eliminadas/renombradas). Devuelve cuántos borró. */
   deleteOrphanChunks(currentSourceFiles: string[]): Promise<number>;
@@ -501,10 +502,11 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
     `;
   }
 
-  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<void> {
-    await this.db.vaultChunk.deleteMany({
+  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<number> {
+    const result = await this.db.vaultChunk.deleteMany({
       where: { sourceFile, chunkIndex: { gt: keepUpTo } },
     });
+    return result.count;
   }
 
   async deleteOrphanChunks(currentSourceFiles: string[]): Promise<number> {
@@ -572,12 +574,15 @@ class FakeRepository implements VaultChunkRepository {
     this.chunks.set(`${input.sourceFile}#${input.chunkIndex}`, input);
   }
 
-  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<void> {
+  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<number> {
+    let count = 0;
     for (const [key, chunk] of this.chunks) {
       if (chunk.sourceFile === sourceFile && chunk.chunkIndex > keepUpTo) {
         this.chunks.delete(key);
+        count++;
       }
     }
+    return count;
   }
 
   async deleteOrphanChunks(currentSourceFiles: string[]): Promise<number> {
@@ -668,6 +673,27 @@ describe('VaultIndexerService', () => {
 
     expect(result.chunksDeleted).toBe(1);
     expect(repo.chunks.size).toBe(1); // solo queda el chunk de permanente.md
+  });
+
+  it('achica una nota con menos secciones y borra los chunks sobrantes', async () => {
+    const filePath = join(vaultPath, 'nota.md');
+    await writeFile(
+      filePath,
+      '# Nota\n\nIntro.\n\n## Uno\n\nTexto uno.\n\n## Dos\n\nTexto dos.\n',
+      'utf-8',
+    );
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const service = new VaultIndexerService(repo, embedder);
+
+    await service.indexVault(vaultPath, 'commit-1');
+    expect(repo.chunks.size).toBe(3);
+
+    await writeFile(filePath, '# Nota\n\nSolo esto queda.\n', 'utf-8');
+    const result = await service.indexVault(vaultPath, 'commit-2');
+
+    expect(repo.chunks.size).toBe(1);
+    expect(result.chunksDeleted).toBe(2);
   });
 
   it('lanza error si Voyage no está configurado', async () => {
@@ -819,7 +845,7 @@ export class VaultIndexerService {
       }
     }
 
-    await this.repo.deleteChunksBeyondIndex(sourceFile, chunks.length - 1);
+    result.chunksDeleted += await this.repo.deleteChunksBeyondIndex(sourceFile, chunks.length - 1);
   }
 }
 ```
@@ -829,14 +855,14 @@ export class VaultIndexerService {
 ```bash
 npx vitest run tests/vault-indexer/vault-indexer-service.test.ts
 ```
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Correr toda la suite para verificar que no rompiste nada**
 
 ```bash
 npm test
 ```
-Expected: todos los tests pasan (158 + 9 nuevos = 167).
+Expected: todos los tests pasan, 0 failures (el número total exacto no importa — lo que importa es 0 failures).
 
 - [ ] **Step 6: Commit**
 
