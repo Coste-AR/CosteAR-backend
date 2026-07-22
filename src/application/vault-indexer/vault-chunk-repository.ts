@@ -21,8 +21,9 @@ export interface VaultChunkRepository {
   listBySourceFile(sourceFile: string): Promise<VaultChunkIdentity[]>;
   upsertChunk(input: UpsertChunkInput): Promise<void>;
   /** Borra los chunks de `sourceFile` cuyo chunkIndex sea mayor a `keepUpTo`
-   *  (la nota se achicó). Pasar -1 borra todos los chunks de ese archivo. */
-  deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<void>;
+   *  (la nota se achicó). Pasar -1 borra todos los chunks de ese archivo.
+   *  Devuelve cuántos borró. */
+  deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<number>;
   /** Borra todo chunk cuyo sourceFile NO esté en `currentSourceFiles`
    *  (notas eliminadas/renombradas). Devuelve cuántos borró. */
   deleteOrphanChunks(currentSourceFiles: string[]): Promise<number>;
@@ -57,10 +58,11 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
     `;
   }
 
-  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<void> {
-    await this.db.vaultChunk.deleteMany({
+  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<number> {
+    const result = await this.db.vaultChunk.deleteMany({
       where: { sourceFile, chunkIndex: { gt: keepUpTo } },
     });
+    return result.count;
   }
 
   async deleteOrphanChunks(currentSourceFiles: string[]): Promise<number> {

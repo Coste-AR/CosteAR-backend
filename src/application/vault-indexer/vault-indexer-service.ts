@@ -114,6 +114,6 @@ export class VaultIndexerService {
       }
     }
 
-    await this.repo.deleteChunksBeyondIndex(sourceFile, chunks.length - 1);
+    result.chunksDeleted += await this.repo.deleteChunksBeyondIndex(sourceFile, chunks.length - 1);
   }
 }

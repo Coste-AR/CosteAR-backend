@@ -23,12 +23,15 @@ class FakeRepository implements VaultChunkRepository {
     this.chunks.set(`${input.sourceFile}#${input.chunkIndex}`, input);
   }
 
-  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<void> {
+  async deleteChunksBeyondIndex(sourceFile: string, keepUpTo: number): Promise<number> {
+    let count = 0;
     for (const [key, chunk] of this.chunks) {
       if (chunk.sourceFile === sourceFile && chunk.chunkIndex > keepUpTo) {
         this.chunks.delete(key);
+        count++;
       }
     }
+    return count;
   }
 
   async deleteOrphanChunks(currentSourceFiles: string[]): Promise<number> {
@@ -119,6 +122,27 @@ describe('VaultIndexerService', () => {
 
     expect(result.chunksDeleted).toBe(1);
     expect(repo.chunks.size).toBe(1); // solo queda el chunk de permanente.md
+  });
+
+  it('cuenta los chunks borrados cuando una nota se achica', async () => {
+    const filePath = join(vaultPath, 'nota.md');
+    await writeFile(
+      filePath,
+      '# Nota\n\nIntro.\n\n## Sección A\n\nContenido A.\n\n## Sección B\n\nContenido B.\n',
+      'utf-8',
+    );
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const service = new VaultIndexerService(repo, embedder);
+
+    await service.indexVault(vaultPath, 'commit-1');
+    expect(repo.chunks.size).toBe(3);
+
+    await writeFile(filePath, '# Nota\n\nIntro.\n', 'utf-8');
+    const result = await service.indexVault(vaultPath, 'commit-2');
+
+    expect(repo.chunks.size).toBe(1);
+    expect(result.chunksDeleted).toBe(2);
   });
 
   it('lanza error si Voyage no está configurado', async () => {
