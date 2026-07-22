@@ -647,6 +647,13 @@ describe('VaultIndexerService', () => {
   });
 
   it('borra los chunks huérfanos de notas eliminadas', async () => {
+    // Se mantiene una segunda nota en el vault a propósito: borrar la ÚLTIMA
+    // nota dejaría el vault en cero archivos .md, que es exactamente el caso
+    // que bloquea la salvaguarda de "vault vacío" de arriba (indistinguible
+    // de un path mal configurado). Ese escenario ya lo cubre el test
+    // "lanza error si el vault no tiene notas .md" — acá probamos borrado de
+    // huérfanos cuando el vault sigue teniendo contenido válido.
+    await writeFile(join(vaultPath, 'permanente.md'), '# Permanente\n\nEsta nota se queda.\n', 'utf-8');
     const filePath = join(vaultPath, 'temporal.md');
     await writeFile(filePath, '# Temporal\n\nEsto se va a borrar.\n', 'utf-8');
     const repo = new FakeRepository();
@@ -654,13 +661,13 @@ describe('VaultIndexerService', () => {
     const service = new VaultIndexerService(repo, embedder);
 
     await service.indexVault(vaultPath, 'commit-1');
-    expect(repo.chunks.size).toBe(1);
+    expect(repo.chunks.size).toBe(2); // 1 chunk de permanente.md + 1 de temporal.md
 
     await rm(filePath);
     const result = await service.indexVault(vaultPath, 'commit-2');
 
     expect(result.chunksDeleted).toBe(1);
-    expect(repo.chunks.size).toBe(0);
+    expect(repo.chunks.size).toBe(1); // solo queda el chunk de permanente.md
   });
 
   it('lanza error si Voyage no está configurado', async () => {
