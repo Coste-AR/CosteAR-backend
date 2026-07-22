@@ -4,6 +4,7 @@
  * exclusivamente para convertir texto a vectores.
  */
 import { getEnv } from '../config/env.js';
+import { voyageFetch } from './voyage-rate-limiter.js';
 
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings';
 const EMBEDDING_MODEL = 'voyage-4-large';
@@ -39,7 +40,7 @@ export class VoyageService implements Embedder {
     if (texts.length === 0) return [];
 
     try {
-      const res = await fetch(VOYAGE_API_URL, {
+      const res = await voyageFetch(VOYAGE_API_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
