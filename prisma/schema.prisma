@@ -710,7 +710,7 @@ model CalculationNode {
 // ---------------------------------------------------------------------------
 
 model VaultChunk {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String                       @id @default(uuid()) @db.Uuid
   sourceFile  String // path relativo dentro del vault, ej: "Costeo/Metodo-FIFO.md"
   sourceTitle String // título de la nota (H1 o nombre de archivo)
   headingPath String? // ej: "Costeo por Procesos > Método FIFO"
@@ -729,9 +729,9 @@ model VaultChunk {
   // ofrecer generar una migración que lo borre: SIEMPRE rechazar ese prompt.
   // Para verificar el estado de las migraciones usar `prisma migrate status`,
   // no `migrate dev`.
-  embedding Unsupported("vector(1024)")?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  embedding   Unsupported("vector(1024)")?
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
 
   @@unique([sourceFile, chunkIndex])
   @@map("vault_chunks")
