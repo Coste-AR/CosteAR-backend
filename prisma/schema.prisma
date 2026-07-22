@@ -933,3 +933,35 @@ model AllocationBaseValue {
   @@index([structureId])
   @@map("allocation_base_values")
 }
+
+// ---------------------------------------------------------------------------
+// Bóveda de conocimiento (RAG)
+// ---------------------------------------------------------------------------
+
+model VaultChunk {
+  id          String                       @id @default(uuid()) @db.Uuid
+  sourceFile  String // path relativo dentro del vault, ej: "Costeo/Metodo-FIFO.md"
+  sourceTitle String // título de la nota (H1 o nombre de archivo)
+  headingPath String? // ej: "Costeo por Procesos > Método FIFO"
+  content     String
+  contentHash String // sha256 de headingPath+content — evita re-embedear sin cambios
+  chunkIndex  Int
+  vaultCommit String // sha del commit del vault de origen (trazabilidad)
+  // Embedding de voyage-4-large (1024 dims). Prisma no tiene tipo nativo para
+  // `vector`: se lee/escribe con SQL crudo (ver vault-chunk-repository.ts).
+  // No lleva RLS: es conocimiento compartido, no dato de un tenant (mismo
+  // criterio que MacroSnapshot).
+  // ADVERTENCIA: el índice HNSW sobre esta columna (vault_chunks_embedding_idx)
+  // vive solo en el SQL de la migración — Prisma no puede representar índices
+  // sobre campos Unsupported en este schema, así que es invisible para su
+  // drift-detection. `prisma migrate dev` lo va a marcar como "drift" y puede
+  // ofrecer generar una migración que lo borre: SIEMPRE rechazar ese prompt.
+  // Para verificar el estado de las migraciones usar `prisma migrate status`,
+  // no `migrate dev`.
+  embedding   Unsupported("vector(1024)")?
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+
+  @@unique([sourceFile, chunkIndex])
+  @@map("vault_chunks")
+}
