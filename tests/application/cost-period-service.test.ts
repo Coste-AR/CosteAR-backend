@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CostPeriodService } from '@/application/cost-structures/cost-period-service.js';
+import { CostPeriodPropagationService } from '@/application/cost-structures/cost-period-propagation-service.js';
 import { ENGINE_VERSION } from '@/domain/calculations/calculate.js';
 import { ValidationError } from '@/domain/errors/domain-error.js';
 
@@ -176,7 +177,7 @@ describe('ABRIR período', () => {
   it('abre el mes siguiente al último cerrado (junio → julio)', async () => {
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const nuevo = await svc.openNext(USER, STRUCTURE, { recipe: true }, ctx);
 
     expect(nuevo.code).toBe('2026-07');
@@ -187,7 +188,7 @@ describe('ABRIR período', () => {
   it('NO arrastra lo que es del mes: compras, consumos, actividad real ni CIP real', async () => {
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const nuevo = (await svc.openNext(USER, STRUCTURE, { recipe: true }, ctx)) as never as NuevoPeriodo;
 
     // Los movimientos de junio NO viajan a julio.
@@ -205,7 +206,7 @@ describe('ABRIR período', () => {
   it('🔑 la existencia final de junio es la existencia inicial de julio, al PPP de cierre', async () => {
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const nuevo = (await svc.openNext(USER, STRUCTURE, { recipe: true }, ctx)) as never as NuevoPeriodo;
 
     // 100 @ 1000 + 400 @ 1200 = 500 u a PPP 1160; se consumen 200 → quedan 300 @ 1160.
@@ -218,7 +219,7 @@ describe('ABRIR período', () => {
   it('deja la estructura lista para el mes nuevo (la pantalla amanece en julio)', async () => {
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     await svc.openNext(USER, STRUCTURE, { recipe: true }, ctx);
 
     expect(db.costStructure.update).toHaveBeenCalledTimes(1);
@@ -251,7 +252,7 @@ describe('ABRIR período', () => {
       where.status === 'OPEN' ? null : roto,
     );
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     await expect(svc.openNext(USER, STRUCTURE, { recipe: true }, ctx)).rejects.toThrow(/Chapa/);
     expect(db.costPeriod.create).not.toHaveBeenCalled();
     expect(db.costStructure.update).not.toHaveBeenCalled();
@@ -260,7 +261,7 @@ describe('ABRIR período', () => {
   it('sin pedir arrastre de importes, los importes arrancan en cero', async () => {
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const nuevo = (await svc.openNext(
       USER,
       STRUCTURE,
@@ -277,7 +278,7 @@ describe('ABRIR período', () => {
   it('si el costista pide arrastrar los importes, vienen los del mes anterior', async () => {
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const nuevo = (await svc.openNext(
       USER,
       STRUCTURE,
@@ -291,7 +292,7 @@ describe('ABRIR período', () => {
 
   it('el PRIMER período fotografía lo que ya hay cargado y no toca la pantalla', async () => {
     // Sin períodos previos: no hay de dónde arrastrar.
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const nuevo = (await svc.openNext(USER, STRUCTURE, { recipe: true }, ctx)) as never as NuevoPeriodo;
 
     expect(nuevo.code).toBe('2026-06'); // el período histórico tipeado de la estructura
@@ -308,7 +309,7 @@ describe('ABRIR período', () => {
   it('no deja abrir un período nuevo si hay uno abierto', async () => {
     db.costPeriod.findFirst = vi.fn(async () => ({ ...junio, status: 'OPEN', label: 'Junio 2026' }));
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     await expect(svc.openNext(USER, STRUCTURE, { recipe: true }, ctx)).rejects.toThrow(ValidationError);
   });
 });
@@ -318,7 +319,7 @@ describe('PREVIEW de apertura (qué voy a traer del mes anterior)', () => {
     const db = makeDb();
     afterJunio(db);
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const preview = await svc.previewNext(USER, STRUCTURE);
 
     expect(preview.isFirst).toBe(false);
@@ -355,7 +356,7 @@ describe('PREVIEW de apertura (qué voy a traer del mes anterior)', () => {
           },
     );
 
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodPropagationService(db as never);
     const preview = await svc.previewNext(USER, STRUCTURE);
 
     expect(preview.openingStock).toEqual([]);
