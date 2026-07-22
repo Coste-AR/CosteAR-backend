@@ -722,6 +722,13 @@ model VaultChunk {
   // `vector`: se lee/escribe con SQL crudo (ver vault-chunk-repository.ts).
   // No lleva RLS: es conocimiento compartido, no dato de un tenant (mismo
   // criterio que MacroSnapshot).
+  // ADVERTENCIA: el índice HNSW sobre esta columna (vault_chunks_embedding_idx)
+  // vive solo en el SQL de la migración — Prisma no puede representar índices
+  // sobre campos Unsupported en este schema, así que es invisible para su
+  // drift-detection. `prisma migrate dev` lo va a marcar como "drift" y puede
+  // ofrecer generar una migración que lo borre: SIEMPRE rechazar ese prompt.
+  // Para verificar el estado de las migraciones usar `prisma migrate status`,
+  // no `migrate dev`.
   embedding Unsupported("vector(1024)")?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
