@@ -4,7 +4,7 @@ import { VaultIndexerService } from './vault-indexer-service.js';
 
 function getVaultCommit(vaultPath: string): string {
   try {
-    return execSync('git rev-parse HEAD', { cwd: vaultPath }).toString().trim();
+    return execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
   } catch {
     throw new Error(`${vaultPath} no es un repositorio Git válido. Verificá que sea un vault clonado correctamente.`);
   }
