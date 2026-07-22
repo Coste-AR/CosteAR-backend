@@ -73,6 +73,24 @@ export class ProposalService {
     return updated;
   }
 
+  async updateProposal(
+    proposalId: string,
+    data: { title?: string; sourceFile?: string; proposedText?: string; justification?: string },
+  ) {
+    const proposal = await prisma.vaultEditProposal.findUnique({ where: { id: proposalId } });
+    if (!proposal) throw new NotFoundError('Propuesta no encontrada');
+    if (proposal.status !== 'PENDING') throw new UnprocessableEntityError('La propuesta ya fue procesada');
+
+    return prisma.vaultEditProposal.update({
+      where: { id: proposalId },
+      data: {
+        ...data,
+        // Un admin editó el contenido a mano: ya no es un borrador de IA sin verificar.
+        requiresVerification: false,
+      },
+    });
+  }
+
   async rejectProposal(userId: string, proposalId: string) {
     const proposal = await prisma.vaultEditProposal.findUnique({ where: { id: proposalId } });
     if (!proposal) throw new NotFoundError('Propuesta no encontrada');

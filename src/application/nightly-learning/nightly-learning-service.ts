@@ -12,6 +12,8 @@ Reglas Estrictas:
 {
   "proposals": [
     {
+      "action": "create",
+      "mergeIntoProposalId": null,
       "title": "Breve título de la propuesta (ej: Agregar concepto de Mano de Obra)",
       "sourceFile": "Ruta del archivo (ej. Costeo/Mano-de-Obra.md)",
       "proposedText": "El texto exacto en Markdown puro que sugerís agregar al final del archivo",
@@ -23,7 +25,8 @@ Reglas Estrictas:
 }
 2. Si las señales son irrelevantes (ej: saludos o spam), devolvé un array vacío \`[]\`.
 3. Tu propuesta NO se aplicará automáticamente. Será revisada por un Humano. Asegurate de que el 'proposedText' sea perfecto, con buena ortografía y formato Markdown (listas, negritas).
-4. CERO ALUCINACIONES: "groundedInSignals" debe ser \`true\` ÚNICAMENTE si el 'proposedText' es una transcripción fiel de lo que un costista escribió en una señal de tipo USER_CORRECTION o IMPROVEMENT_REPORT (contenido humano real). Si la señal es un RAG_MISS (una pregunta que nadie contestó) y tuviste que redactar la definición o explicación usando TU PROPIO conocimiento general (no un texto que un humano haya escrito en las señales), "groundedInSignals" DEBE ser \`false\`. No inventes definiciones técnicas específicas de la cátedra (siglas, fórmulas, porcentajes) y las marques como confiables — es preferible marcar \`false\` y dejar que un humano la redacte o la verifique.`;
+4. CERO ALUCINACIONES: "groundedInSignals" debe ser \`true\` ÚNICAMENTE si el 'proposedText' es una transcripción fiel de lo que un costista escribió en una señal de tipo USER_CORRECTION o IMPROVEMENT_REPORT (contenido humano real). Si la señal es un RAG_MISS (una pregunta que nadie contestó) y tuviste que redactar la definición o explicación usando TU PROPIO conocimiento general (no un texto que un humano haya escrito en las señales), "groundedInSignals" DEBE ser \`false\`. No inventes definiciones técnicas específicas de la cátedra (siglas, fórmulas, porcentajes) y las marques como confiables — es preferible marcar \`false\` y dejar que un humano la redacte o la verifique.
+5. SIN PROPUESTAS DUPLICADAS: te paso una lista de "PROPUESTAS YA PENDIENTES DE VALIDACIÓN" (todavía no las revisó un humano). Antes de crear una propuesta nueva, fijate si el tema de la señal YA está cubierto por alguna de esas propuestas pendientes (aunque el archivo destino o el título estén redactados distinto — juzgá por el TEMA, no por coincidencia textual exacta). Si ya está cubierto: usá "action": "merge", poné el id de la propuesta existente en "mergeIntoProposalId", y dejá "title"/"sourceFile"/"proposedText"/"justification" como string vacío "" (no se usan en un merge, solo importa "signalsUsedIds"). Si es un tema nuevo: usá "action": "create" y "mergeIntoProposalId": null como en el ejemplo.`;
 
 export class NightlyLearningService {
   private ai: GroqService;
@@ -55,11 +58,25 @@ export class NightlyLearningService {
       signalsStr += `ID: ${signal.id} | Tipo: ${signal.type} | Contenido: ${signal.content}\n`;
     }
 
-    const userPrompt = `SEÑALES RECOPILADAS HOY:\n\n${signalsStr}\n\nAnalizá estas señales y devolvé las propuestas de edición JSON.`;
+    // Propuestas que ya están esperando revisión humana — se las pasamos al LLM
+    // para que no genere una segunda propuesta sobre el mismo tema en cada corrida.
+    const existingPending = await prisma.vaultEditProposal.findMany({
+      where: { status: 'PENDING' },
+      select: { id: true, title: true, sourceFile: true, proposedText: true }
+    });
+    const existingPendingStr = existingPending.length === 0
+      ? '(ninguna)'
+      : existingPending
+          .map((p) => `ID: ${p.id} | Archivo: ${p.sourceFile} | Título: ${p.title} | Extracto: ${p.proposedText.slice(0, 140)}`)
+          .join('\n');
+
+    const userPrompt = `SEÑALES RECOPILADAS HOY:\n\n${signalsStr}\n\nPROPUESTAS YA PENDIENTES DE VALIDACIÓN:\n\n${existingPendingStr}\n\nAnalizá estas señales y devolvé las propuestas de edición JSON.`;
 
     // 3. Consultar a Groq AI
     const result = await this.ai.completeJSON<{
       proposals: {
+        action: 'create' | 'merge';
+        mergeIntoProposalId: string | null;
         title: string;
         sourceFile: string;
         proposedText: string;
@@ -74,8 +91,25 @@ export class NightlyLearningService {
       return;
     }
 
-    // 4. Guardar las propuestas como Pending VaultEditProposals
+    // 4. Guardar las propuestas: si el LLM pidió "merge" contra una propuesta pendiente
+    // real, solo sumamos trazabilidad (signalsUsed) sin crear una fila nueva. Si pidió
+    // "merge" contra un ID inválido (alucinado), lo tratamos como "create" igual —
+    // preferimos una propuesta de más antes que perder la señal silenciosamente.
+    const pendingIds = new Set(existingPending.map((p) => p.id));
+    const createdProposals: { title: string; sourceFile: string; justification: string; groundedInSignals: boolean }[] = [];
     for (const prop of result.proposals) {
+      if (prop.action === 'merge' && prop.mergeIntoProposalId && pendingIds.has(prop.mergeIntoProposalId)) {
+        const target = await prisma.vaultEditProposal.findUnique({ where: { id: prop.mergeIntoProposalId } });
+        if (target) {
+          const mergedSignals = Array.from(new Set([...target.signalsUsed, ...prop.signalsUsedIds]));
+          await prisma.vaultEditProposal.update({
+            where: { id: prop.mergeIntoProposalId },
+            data: { signalsUsed: mergedSignals }
+          });
+        }
+        continue;
+      }
+
       await prisma.vaultEditProposal.create({
         data: {
           title: prop.title,
@@ -87,6 +121,7 @@ export class NightlyLearningService {
           requiresVerification: !prop.groundedInSignals
         }
       });
+      createdProposals.push({ title: prop.title, sourceFile: prop.sourceFile, justification: prop.justification, groundedInSignals: prop.groundedInSignals });
     }
 
     // 5. Marcar las señales procesadas
@@ -116,13 +151,19 @@ export class NightlyLearningService {
       const todayDate = new Date().toISOString().split('T')[0];
       const reportFile = path.join(reportsDir, `${todayDate}-Resumen.md`);
       
+      const mergedCount = result.proposals.length - createdProposals.length;
+
       let reportContent = `# Reporte Nocturno: ${todayDate}\n\n`;
       reportContent += `**Señales procesadas:** ${pendingSignals.length}\n`;
-      reportContent += `**Propuestas generadas:** ${result.proposals.length}\n\n`;
-      
-      if (result.proposals.length > 0) {
+      reportContent += `**Propuestas nuevas:** ${createdProposals.length}\n`;
+      if (mergedCount > 0) {
+        reportContent += `**Señales fusionadas a propuestas ya pendientes (sin duplicar):** ${mergedCount}\n`;
+      }
+      reportContent += `\n`;
+
+      if (createdProposals.length > 0) {
         reportContent += `## Propuestas esperando Validación Humana\n\n`;
-        for (const p of result.proposals) {
+        for (const p of createdProposals) {
           reportContent += `### ${p.title}\n`;
           reportContent += `- **Archivo Destino:** \`${p.sourceFile}\`\n`;
           reportContent += `- **Justificación IA:** ${p.justification}\n`;
@@ -143,6 +184,6 @@ export class NightlyLearningService {
       console.error('[nightly-learning] Error escribiendo el reporte nocturno:', err);
     }
 
-    console.info(`Nightly Pipeline terminado. ${result.proposals.length} propuestas generadas.`);
+    console.info(`Nightly Pipeline terminado. ${createdProposals.length} propuestas nuevas, ${result.proposals.length - createdProposals.length} fusionadas.`);
   }
 }
