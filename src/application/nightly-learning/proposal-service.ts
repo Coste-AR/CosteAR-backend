@@ -2,9 +2,10 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { UnprocessableEntityError, NotFoundError } from '../../domain/errors/domain-error.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { getEnv } from '../../infrastructure/config/env.js';
+import { VaultIndexerService } from '../vault-indexer/vault-indexer-service.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -69,6 +70,24 @@ export class ProposalService {
         reviewedAt: new Date()
       }
     });
+
+    // 4. Disparar el indexador en segundo plano
+    try {
+      const indexer = new VaultIndexerService();
+      let vaultCommit = 'unknown';
+      try {
+        vaultCommit = execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      } catch (e) {
+        console.warn('No se pudo obtener el commit para indexación.');
+      }
+      
+      // Lanzamos la indexación sin await para no frenar la respuesta HTTP
+      indexer.indexVault(resolvedVaultPath, vaultCommit)
+        .then(res => console.log(`[Auto-Index] Bóveda reindexada: ${res.chunksUpserted} chunks nuevos/actualizados.`))
+        .catch(err => console.error('[Auto-Index] Error reindexando bóveda:', err));
+    } catch (err) {
+      console.error('Error al instanciar el indexador automático:', err);
+    }
 
     return updated;
   }
