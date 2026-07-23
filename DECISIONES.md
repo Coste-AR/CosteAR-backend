@@ -1238,3 +1238,43 @@ de mensajes ya por nombre no cambian de comportamiento (el fallback genérico so
 incluidos los que verifican mensajes por nombre humano, siguen verdes). Nota de entorno: `prisma generate`
 dentro de `npm run build` falló por un lock de Windows (EPERM al renombrar el `query_engine`.dll); es
 transitorio y ajeno al cambio —el `tsc` compila limpio y el cliente ya generado corre los 503 tests—.
+
+## B01 — Se persiste el `costingSystem` al crear la estructura (compuerta de Costeo por Procesos)
+
+La columna `CostStructure.costingSystem` (enum `ORDERS | PROCESSES`, default `ORDERS`) y el schema de
+alta (`createCostStructureSchema`) ya aceptaban el campo, pero `CostStructureService.create()` lo
+descartaba: el `data` de `costStructure.create()` solo incluía `companyId, userId, productName, period`.
+Resultado: TODA estructura nacía como `ORDERS`, sin importar lo que mandara el cliente, y nada aguas
+abajo podía distinguir los dos sistemas. Es la compuerta de toda la feature de Costeo por Procesos.
+
+**Cambio 1 — persistencia en el alta.** Se agregó `costingSystem: input.costingSystem ?? 'ORDERS'` al
+`data`. El default defensivo en la capa de servicio es redundante con el `.default('ORDERS')` del Zod
+(el schema ya lo garantiza en la ruta), pero cubre cualquier llamador interno que arme el input a mano.
+
+**Cambio 2 — cambiar el sistema solo si NO hay cálculos (nuevo `PATCH
+/cost-structures/:id/costing-system`).** Se puede cambiar el sistema de costeo mientras la estructura no
+tenga historia de cálculo. Si ya la tiene, se devuelve un **422** accionable en castellano ("No se puede
+cambiar el sistema de costeo de una estructura que ya tiene cálculos…"), nunca un 500.
+**Rationale:** mezclar el rastro de dos motores distintos (órdenes vs procesos) sobre una misma
+estructura corrompería el árbol de derivación.
+
+**Decisión (ambigüedad → default conservador): "tener cálculos" abarca los DOS registros de historia.**
+La tarea nombraba `CalculationRun` (los runs trazables de Trazabilidad v1). Se bloquea el cambio si existe
+**cualquiera** de los dos: `CalculationRun` (árbol de derivación) **o** `CostCalculation` (snapshot del
+motor legado). Es la opción más segura para la integridad: ambos son "historia de cálculo", y ninguno de
+los dos debería quedar con el sistema cambiado por debajo. No sobre-bloquea ningún flujo existente porque
+el endpoint es nuevo (ningún test previo lo usaba).
+
+**Auditoría** en la misma transacción, siguiendo el patrón `recordAudit` del servicio: acción
+`cost_structure.costing_system.update`, con `oldValue`/`newValue` del sistema. El chequeo de cálculos y el
+`update` van dentro del mismo `$transaction`.
+
+**Sin migración:** la columna `costingSystem` ya existía en `CostStructure`. No se corrió `prisma migrate
+dev` (regla del repo: siempre `npm run prisma:deploy`; esta tarea no necesitó ninguna migración).
+
+**Verificación.** `tsc --noEmit` ✅ + `vitest run` **508 ✅ / 1 skip** (antes ~503; +5 tests nuevos, sin
+regresión). Tests nuevos (`tests/application/costing-system-persist.test.ts`): (1) crear con
+`PROCESSES` lo persiste; (2) crear sin el campo cae en `ORDERS`; (3) cambiar el sistema sin cálculos
+funciona; (4) con un `CalculationRun` devuelve 422 en castellano y no toca la estructura; (5) idem con un
+`CostCalculation` legado. Verificación a nivel de servicio (unit) por ser cambio backend puro sobre una
+compuerta sin UI todavía; la ruta es un wrapper delgado sobre `updateCostingSystem`.

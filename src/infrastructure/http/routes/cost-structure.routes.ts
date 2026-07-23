@@ -46,6 +46,23 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     return { data: structure };
   });
 
+  // Cambiar el SISTEMA DE COSTEO (órdenes / procesos). Solo se permite mientras
+  // la estructura no tenga cálculos: si ya los tiene, el servicio devuelve un 422
+  // accionable en castellano (nunca un 500). Ver DECISIONES.md (B01).
+  app.patch('/cost-structures/:id/costing-system', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const { costingSystem } = z
+      .object({ costingSystem: z.enum(['ORDERS', 'PROCESSES']) })
+      .parse(request.body);
+    const updated = await service.updateCostingSystem(
+      request.authUser!.id,
+      id,
+      costingSystem,
+      auditContext(request),
+    );
+    return { data: updated };
+  });
+
   // Borrar (soft-delete) y recuperar — ambas requieren confirmación en el front.
   app.delete('/cost-structures/:id', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
