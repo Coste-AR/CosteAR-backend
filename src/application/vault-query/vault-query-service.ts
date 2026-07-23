@@ -30,15 +30,11 @@ Contexto extraído de la Bóveda:
 `;
 
 export class VaultQueryService {
-  private readonly embedder: VoyageService;
-  private readonly ai: GroqService;
-  private readonly repo: PrismaVaultChunkRepository;
-
-  constructor() {
-    this.embedder = new VoyageService();
-    this.ai = new GroqService();
-    this.repo = new PrismaVaultChunkRepository();
-  }
+  constructor(
+    private readonly embedder: VoyageService = new VoyageService(),
+    private readonly ai: GroqService = new GroqService(),
+    private readonly repo: PrismaVaultChunkRepository = new PrismaVaultChunkRepository(),
+  ) {}
 
   async query(question: string, maxResults = 5): Promise<VaultQueryResult> {
     if (!this.embedder.isConfigured || !this.ai.isConfigured) {
