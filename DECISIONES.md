@@ -1195,3 +1195,24 @@ la ficha). (3) Click en el pill → abre el modal con "TEST F06…" y las dos op
 a 2026-07" → el pill desaparece, el movimiento queda como fila normal, y en DB los 2 data points pasan
 a `periodoImputado = 2026-07`; "sin imputar" de la estructura = 0. Suites: backend `typecheck` ✅ +
 `vitest` 503✅/1 skip; frontend `typecheck` ✅, `build` ✅, `vitest` 22✅.
+
+## F07 — Doble fecha (fecha_hecho / fecha_captación) en la ficha PPP — parte backend
+
+**Contexto (STEP 0, hallazgo).** El write path YA persistía ambas fechas: `DataPointService.create`
+guarda `fechaHecho` desde el cliente (la fecha del movimiento) y `fechaCaptacion` es un `TIMESTAMPTZ
+NOT NULL DEFAULT now()` que pone Postgres (regla dura #3 / manual §3). O sea: NINGÚN movimiento viejo
+perdió su fecha de hecho real; el hueco de F07 era puramente de **presentación** (la captación no se
+mostraba en ninguna parte y la columna se llamaba sólo "Fecha"). No hizo falta migración de esquema.
+
+**Cambio.** `listMpMovements` (GET `/structures/:id/mp-movements`) ahora expone también
+`fechaCaptacion: string` (ISO) por movimiento, para que la ficha la muestre en sólo lectura. Como un
+movimiento son dos data points hermanos (cantidad + precio) creados juntos, se toma la captación **más
+temprana** de los hermanos como "cuándo entró el movimiento al sistema". `fechaHecho` sigue viajando
+como `YYYY-MM-DD` (o `null` si el dato nunca la tuvo — retrocompat: el front la muestra "—").
+
+**Sin cambios en imputación:** la regla §3 (`proposeImputation` en el front, decisión `POST
+/data-points/:id/imputacion` en el back) ya estaba y se reusa tal cual; F07 no toca esa lógica.
+
+**Verificación.** `typecheck` ✅ + `vitest` 503✅/1 skip (sin regresión; el test de latencia por área,
+que ya leía `fechaCaptacion`, sigue verde). Flujo end-to-end en navegador: ver más abajo / DECISIONES
+del frontend.

@@ -457,6 +457,9 @@ export class DataPointService {
       detail: string;
       type: 'purchase' | 'consumption';
       fechaHecho: string | null;
+      // fecha_captación (§3): timestamp que puso el servidor al entrar el dato.
+      // Read-only, nunca del reloj del cliente. Siempre presente (default now()).
+      fechaCaptacion: string;
       periodoImputado: string | null;
       pending: boolean;
       dataPointIds: string[];
@@ -473,10 +476,15 @@ export class DataPointService {
         ? 'purchase'
         : 'consumption';
       const fechaHecho = dp.fechaHecho ? dp.fechaHecho.toISOString().slice(0, 10) : null;
+      const fechaCaptacion = dp.fechaCaptacion.toISOString();
 
       const existing = byMovement.get(movementId);
       if (existing) {
         existing.dataPointIds.push(dp.id);
+        // Los hermanos de un movimiento (cantidad + precio) se crean juntos;
+        // como captación es la que puso el servidor, tomamos la más temprana
+        // para representar "cuándo entró el movimiento al sistema".
+        if (fechaCaptacion < existing.fechaCaptacion) existing.fechaCaptacion = fechaCaptacion;
         if (dp.periodoImputado === null) {
           existing.pending = true;
           existing.periodoImputado = null;
@@ -488,6 +496,7 @@ export class DataPointService {
           detail: this.stripMovementPrefix(dp.label),
           type,
           fechaHecho,
+          fechaCaptacion,
           periodoImputado: dp.periodoImputado,
           pending: dp.periodoImputado === null,
           dataPointIds: [dp.id],
