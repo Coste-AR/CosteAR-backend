@@ -119,4 +119,22 @@ describe('VaultQueryService.query', () => {
     const svc = new VaultQueryService(mockEmbedder as never, mockAi as never, mockRepo as never);
     await expect(svc.query('¿Qué es el ITCS?')).rejects.toThrow(/no está configurado/);
   });
+
+  it('capa el contexto a MAX_CONTEXT_CHARS antes de armar el prompt del LLM', async () => {
+    const { VaultQueryService } = await import('@/application/vault-query/vault-query-service.js');
+    const hugeChunk = { ...CHUNK, content: 'x'.repeat(20_000) };
+    mockRepo.searchChunks.mockResolvedValueOnce([hugeChunk, hugeChunk, hugeChunk]);
+    mockAi.completeJSON.mockResolvedValue({
+      answer: 'ok',
+      citations: [],
+      answeredFromContext: true,
+    });
+
+    const svc = new VaultQueryService(mockEmbedder as never, mockAi as never, mockRepo as never);
+    await svc.query('pregunta con contexto enorme');
+
+    const [, userPrompt] = mockAi.completeJSON.mock.calls[0] as [string, string];
+    const contextPart = userPrompt.split('CONTEXTO:\n')[1] ?? '';
+    expect(contextPart.length).toBeLessThanOrEqual(12_000 + 200);
+  });
 });
