@@ -1081,3 +1081,55 @@ todo limpio.
 migración **sin trackear** `prisma/migrations/20260721144831_init/` y `package-lock.json` modificado
 de antes; no los toqué ni commiteé (no son de esta tarea). Conviene revisar con el equipo si ese
 `_init` local debería existir.
+
+---
+
+## Sesión 2026-07-23 — M-STRAY: limpieza de la migración `_init` colgada (cierre del flag anterior)
+
+Cierre del pendiente que dejó M-VAULT: la carpeta sin trackear
+`prisma/migrations/20260721144831_init/`.
+
+**Diagnóstico.** NO era un `_init` de esquema completo. Su `migration.sql` era un diff que Prisma
+generó en un `prisma migrate dev` local y que DROPea drift benigno:
+`DROP CONSTRAINT cost_config_versions_structureId_fkey` + `ALTER COLUMN ... DROP DEFAULT` sobre los
+`id` (gen_random_uuid) de `allocation_base_values`, `allocation_bases`, `cost_config_versions`,
+`cost_periods` y el `updatedAt` de `cost_periods`. Es exactamente el "ruido benigno" que ya estaba
+documentado (la FK `structureId` es DB-only a propósito y los defaults los pone Prisma Client).
+
+**Hallazgo inesperado (importante).** No era sólo una carpeta suelta: estaba **APLICADA** en la DB
+local (`_prisma_migrations` la tenía con `finished_at` no nulo). Verifiqué el efecto real: la FK
+`cost_config_versions_structureId_fkey` y el default de `cost_config_versions.id` estaban
+efectivamente **borrados en la DB local de dev**. En origin/dev NO existe la carpeta (puramente
+local). No es bug del equipo: es un `migrate dev` que alguien corrió el 21/07 (trampa conocida de
+este repo: schema.prisma no modela esa FID/defaults, así que `migrate dev` quiere "corregir" el
+drift intencional).
+
+**Qué hice.**
+1. `git checkout -- package-lock.json`: el cambio era ruido de lockfile (quitaba flags `"peer": true`
+   de devDeps por reserialización de otra versión de npm), no un cambio real de dependencias.
+2. Borré la carpeta sin trackear `20260721144831_init/` (untracked → no se pierde nada de git).
+3. Borré la fila huérfana de `_prisma_migrations` (`migration_name='20260721144831_init'`, exacta) —
+   la mitad de la migración colgada que vivía en la DB. Sin esto, tras borrar la carpeta el
+   `migrate status` de la DB de dev reportaría divergencia. NO es un `reset` ni se perdió dato de
+   negocio; es des-registrar una migración local nunca commiteada.
+
+**Decisión: NO restauré la FK/defaults en la DB de dev local.** Motivos: (a) la tarea era limpiar el
+artefacto, no reparar la DB; (b) son ítems benignos (Prisma Client igual genera uuid/updatedAt; la FK
+es DB-only); (c) restaurarlos RE-INTRODUCE el mismo drift que originó este stray, con lo que el
+próximo `migrate dev` lo volvería a generar. El estado actual de la DB local queda SIN drift respecto
+de schema.prisma (más limpio para generar futuras migraciones). Consecuencia documentada: la DB local
+carece de la FK DB-only `cost_config_versions_structureId_fkey` que sí tienen dev/prod; es una
+diferencia local benigna (y encima `cost_config_versions` tiene trigger append-only que bloquea
+DELETE, así que el CASCADE de esa FK casi no aplica). Si alguna vez se quiere paridad exacta:
+`ALTER TABLE "cost_config_versions" ADD CONSTRAINT "cost_config_versions_structureId_fkey" FOREIGN KEY ("structureId") REFERENCES "cost_structures"("id") ON DELETE CASCADE ON UPDATE CASCADE;`
+
+**Lección de raíz.** En este repo NUNCA correr `prisma migrate dev` (regenera este stray por el drift
+intencional). Para aplicar migraciones usar SIEMPRE `npm run prisma:deploy`.
+
+**Verificación (aceptación).** Working tree limpio (sin artefactos sin trackear). `migrate status` en
+la DB de dev = "Database schema is up to date!", 0 fallidas, 0 filas de `_init`. Además probé de CERO
+en una DB vacía temporal (`costear_scratch`) con `npm run prisma:deploy` end-to-end: **31 migraciones
+aplicadas, 0 fallidas**, y esa DB fresca SÍ tiene la FK `cost_config_versions_structureId_fkey` — lo
+que prueba que la historia commiteada es la canónica y que la "pérdida" de la FK es sólo local. Luego
+se dropeó la DB temporal. Sin cambios de código; el único cambio commiteado es esta entrada de
+DECISIONES.
