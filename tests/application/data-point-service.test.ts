@@ -137,6 +137,43 @@ describe('DataPointService — R1/R2', () => {
     expect(mockTx.traceAuditLog.create.mock.calls[0]![0].data.action).toBe('imputar');
   });
 
+  it('create() NUNCA fija periodoImputado — un dato nace pendiente (NULL) hasta que se decide (F04)', async () => {
+    // El eslabón "crear → NULL" que el bug F04 rompía aguas arriba (el front
+    // nunca llegaba a crear el dato). Acá se fija el contrato del backend: la
+    // creación no imputa sola — ni siquiera cuando la fecha del hecho cae fuera
+    // del período. Queda NULL (pendiente) y solo `imputar()` la resuelve; así el
+    // motor la marca incompleta y el cierre la bloquea. Si alguien "arreglara"
+    // esto poniéndole el período actual por defecto, esta prueba falla.
+    const { DataPointService } = await import('@/application/trazabilidad/data-point-service.js');
+    const service = new DataPointService(mockTx as never);
+
+    mockTx.costStructure.findFirst.mockResolvedValue({ id: 'st-1', userId: 'user-1' });
+    mockTx.dataPoint.create.mockResolvedValue({ id: 'dp-1' });
+    mockTx.dataPointVersion.create.mockResolvedValue({ id: 'v1' });
+
+    await service.create(
+      'user-1',
+      'st-1',
+      {
+        element: 'MP',
+        fieldKey: 'mp.compra.cantidad',
+        label: 'Compra — Chapa BWG 18',
+        unit: 'u',
+        sourceArea: 'deposito',
+        method: 'manual',
+        valueNum: 100,
+        fechaHecho: '2026-05-15', // fuera del período 2026-07
+      },
+      actor,
+    );
+
+    const createData = mockTx.dataPoint.create.mock.calls[0]![0].data;
+    // No se manda periodoImputado en la creación → aplica el default NULL del schema.
+    expect(createData.periodoImputado ?? null).toBeNull();
+    // Y sí queda la fecha del hecho (la que dispara la decisión de imputación).
+    expect(createData.fechaHecho).toBeInstanceOf(Date);
+  });
+
   it('validate() es idempotente: si ya estaba validado, no reescribe ni audita de nuevo', async () => {
     const { DataPointService } = await import('@/application/trazabilidad/data-point-service.js');
     const service = new DataPointService(mockTx as never);

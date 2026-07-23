@@ -399,9 +399,16 @@ describe('CERRAR período', () => {
     expect(db.costPeriod.update).not.toHaveBeenCalled();
 
     // Regla #7: el mensaje no filtra endpoints ni el id interno del dato.
-    await svc.close(USER, 'per-x', null, ctx).catch((e: Error) => {
+    // F05 — el 422 adjunta la lista ESTRUCTURADA de pendientes en `details`
+    // para que el front los resuelva en el lugar del bloqueo (sin caer a la
+    // lista vieja del último cálculo). El id solo abre la ficha; se muestra el
+    // nombre.
+    await svc.close(USER, 'per-x', null, ctx).catch((e: Error & { details?: unknown }) => {
       expect(e.message).not.toMatch(/POST|\/data-points|:id/);
       expect(e.message).not.toContain('dp-1');
+      expect((e.details as { datosPendientes?: unknown }).datosPendientes).toEqual([
+        { id: 'dp-1', nombre: 'Compra — Proveedor Sur, 27/06' },
+      ]);
     });
   });
 
