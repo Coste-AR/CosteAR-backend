@@ -1,4 +1,4 @@
-import type { CalculationInput, CalculationOutput } from './calculate.js';
+import type { CalculationInput, CalculationOutput } from '../../domain/calculations/calculate.js';
 
 /**
  * Arma el árbol de derivación {label, formula, value, unit, children[]} a

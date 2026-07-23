@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeProductiveBudgets } from '@/application/cost-structures/calculate.js';
+import { computeProductiveBudgets } from '@/domain/calculations/calculate.js';
 import {
   indirectCostConfigSchema,
   normalizeIndirectConfigForRead,

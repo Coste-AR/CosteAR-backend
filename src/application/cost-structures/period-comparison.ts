@@ -1,5 +1,5 @@
 import { Decimal } from 'decimal.js';
-import type { FrozenCalculation } from './calculate.js';
+import type { FrozenCalculation } from '../../domain/calculations/calculate.js';
 import { materialsOf } from '../../domain/periods/closing-stock.js';
 
 /**

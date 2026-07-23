@@ -8,3 +8,4 @@ coverage/
 prisma/*.db
 keys/
 graphify-out/
+.claude/worktrees/

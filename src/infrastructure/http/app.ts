@@ -22,6 +22,9 @@ import { registerAdvisorRoutes } from './routes/advisor.routes.js';
 import { registerTrazabilidadRoutes } from './routes/trazabilidad.routes.js';
 import { registerAllocationBaseRoutes } from './routes/allocation-base.routes.js';
 import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
+import { registerVaultRoutes } from './routes/vault.routes.js';
+import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
+import { registerAdminRoutes } from './routes/admin.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -156,6 +159,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerTrazabilidadRoutes(api);
       await registerAllocationBaseRoutes(api);
       await registerCostPeriodRoutes(api);
+      await registerVaultRoutes(api);
+      await registerVaultProposalRoutes(api);
+      await registerAdminRoutes(api);
     },
     { prefix },
   );

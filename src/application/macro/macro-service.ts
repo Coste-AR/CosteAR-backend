@@ -1,6 +1,6 @@
 import type { PrismaClient, MacroSource } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
-import { runCalculation, type CalculationInput } from '../cost-structures/calculate.js';
+import { runCalculation, type CalculationInput } from '../../domain/calculations/calculate.js';
 import {
   rawMaterialSectionSchema,
   directLaborConfigSchema,

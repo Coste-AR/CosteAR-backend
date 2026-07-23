@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { CostStructureService } from '../../../application/cost-structures/cost-structure-service.js';
+import { CostStructureDeletionService } from '../../../application/cost-structures/cost-structure-deletion-service.js';
 import { ValidationError } from '../../../domain/errors/domain-error.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
 import {
@@ -13,6 +14,7 @@ const companyIdParam = z.object({ companyId: z.string().uuid() });
 
 export async function registerCostStructureRoutes(app: FastifyInstance): Promise<void> {
   const service = new CostStructureService();
+  const deletionService = new CostStructureDeletionService();
 
   app.get(
     '/companies/:companyId/cost-structures',
@@ -47,7 +49,7 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
   // Borrar (soft-delete) y recuperar — ambas requieren confirmación en el front.
   app.delete('/cost-structures/:id', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
-    const deleted = await service.softDelete(request.authUser!.id, id, auditContext(request));
+    const deleted = await deletionService.softDelete(request.authUser!.id, id, auditContext(request));
     return { data: deleted };
   });
 
@@ -72,13 +74,13 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
       );
     }
 
-    const purged = await service.purge(request.authUser!.id, id, auditContext(request));
+    const purged = await deletionService.purge(request.authUser!.id, id, auditContext(request));
     return { data: purged };
   });
 
   app.post('/cost-structures/:id/restore', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
-    const restored = await service.restore(request.authUser!.id, id, auditContext(request));
+    const restored = await deletionService.restore(request.authUser!.id, id, auditContext(request));
     return { data: restored };
   });
 

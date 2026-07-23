@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { CostPeriodService } from '../../../application/cost-structures/cost-period-service.js';
+import { CostPeriodPropagationService } from '../../../application/cost-structures/cost-period-propagation-service.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -31,6 +32,7 @@ const compareQuery = z.object({
  */
 export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<void> {
   const service = new CostPeriodService();
+  const propagationService = new CostPeriodPropagationService();
 
   // Todos los períodos de una estructura (del más nuevo al más viejo).
   app.get('/structures/:id/periods', { preHandler: authenticate }, async (request) => {
@@ -51,7 +53,7 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
   // apertura (Fase 3) — no modifica nada.
   app.get('/structures/:id/periods/next-preview', { preHandler: authenticate }, async (request) => {
     const { id: structureId } = idParam.parse(request.params);
-    const preview = await service.previewNext(request.authUser!.id, structureId);
+    const preview = await propagationService.previewNext(request.authUser!.id, structureId);
     return { data: preview };
   });
 
@@ -68,7 +70,7 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
   app.post('/structures/:id/periods', { preHandler: authenticate }, async (request, reply) => {
     const { id: structureId } = idParam.parse(request.params);
     const { carryAmounts } = openSchema.parse(request.body ?? {});
-    const created = await service.openNext(
+    const created = await propagationService.openNext(
       request.authUser!.id,
       structureId,
       { recipe: true, amounts: carryAmounts },

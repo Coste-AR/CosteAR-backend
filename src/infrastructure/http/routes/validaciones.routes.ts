@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ValidacionesService } from '../../../application/validaciones/validaciones-service.js';
+import { ValidacionesLedgerService } from '../../../application/validaciones/validaciones-ledger-service.js';
 import { EmpresaConnectionService } from '../../../application/empresa/empresa-connection-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import { periodSchema } from '../../../shared/schemas/cost.schema.js';
@@ -31,6 +32,7 @@ const submitViaKeySchema = z.object({
 
 export async function registerValidacionesRoutes(app: FastifyInstance): Promise<void> {
   const svc = new ValidacionesService();
+  const ledgerSvc = new ValidacionesLedgerService();
   const connSvc = new EmpresaConnectionService();
 
   // ----- Conexiones empresa -----
@@ -141,48 +143,47 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
   // Libro mayor de costos respaldado por documentos (trazabilidad)
   app.get('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
     const { companyId, period } = request.query as { companyId?: string; period?: string };
-    const ledger = await svc.getLedger(request.authUser!.id, { companyId, period });
+    const ledger = await ledgerSvc.getLedger(request.authUser!.id, { companyId, period });
     return reply.send({ data: ledger });
   });
 
-  // Carga manual de una línea del libro mayor
   const manualLedgerSchema = z.object({
     companyId: z.string().uuid(),
-    period: periodSchema,
-    costSection: z.enum(COST_SECTIONS),
-    description: z.string().min(1).max(200),
-    amount: z.number().finite().positive().max(9_999_999_999_999),
-    supplier: z.string().max(120).optional(),
-    currency: z.string().max(8).optional(),
+    period: z.string().regex(/^\d{4}-\d{2}$/),
+    costSection: z.string().min(1),
+    description: z.string().min(1),
+    amount: z.number().positive(),
+    supplier: z.string().optional(),
+    currency: z.string().optional(),
     docDate: z.string().optional(),
   });
+
   app.post('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
     const input = manualLedgerSchema.parse(request.body);
-    const created = await svc.createManualLedgerEntry(request.authUser!.id, input);
+    const created = await ledgerSvc.createManualLedgerEntry(request.authUser!.id, input);
     return reply.status(201).send({ data: created });
   });
 
-  // Editar una línea del libro mayor
   const updateLedgerSchema = z.object({
-    costSection: z.enum(COST_SECTIONS).optional(),
-    description: z.string().min(1).max(200).optional(),
-    amount: z.number().finite().positive().max(9_999_999_999_999).optional(),
-    supplier: z.string().max(120).nullable().optional(),
-    period: periodSchema.optional(),
-    currency: z.string().max(8).optional(),
+    costSection: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    amount: z.number().positive().optional(),
+    supplier: z.string().nullable().optional(),
+    period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+    currency: z.string().optional(),
     docDate: z.string().nullable().optional(),
   });
+
   app.patch('/validaciones/ledger/:id', { preHandler: authenticate }, async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
     const input = updateLedgerSchema.parse(request.body);
-    const updated = await svc.updateLedgerEntry(request.authUser!.id, id, input);
+    const updated = await ledgerSvc.updateLedgerEntry(request.authUser!.id, id, input);
     return reply.send({ data: updated });
   });
 
-  // Borrar una línea del libro mayor
   app.delete('/validaciones/ledger/:id', { preHandler: authenticate }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const result = await svc.deleteLedgerEntry(request.authUser!.id, id);
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const result = await ledgerSvc.deleteLedgerEntry(request.authUser!.id, id);
     return reply.send({ data: result });
   });
 
