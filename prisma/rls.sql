@@ -145,3 +145,35 @@ CREATE POLICY tenant_isolation ON unit_movement_schedules
     JOIN cost_structures cs ON cs.id = pd."structureId"
     WHERE cs."userId" = current_app_user_id()
   ));
+
+-- ---------------------------------------------------------------------------
+-- Costeo por Procesos (B05) — Costos conjuntos.
+-- Ni joint_cost_allocations ni joint_cost_by_product_lines tienen userId
+-- propio; el tenant se resuelve por la cadena estructura → dueño (mismo patrón
+-- que process_departments), y las líneas por la cadena línea → reparto →
+-- estructura → dueño.
+-- ---------------------------------------------------------------------------
+
+-- joint_cost_allocations
+ALTER TABLE joint_cost_allocations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE joint_cost_allocations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON joint_cost_allocations;
+CREATE POLICY tenant_isolation ON joint_cost_allocations
+  USING ("structureId" IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id()))
+  WITH CHECK ("structureId" IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id()));
+
+-- joint_cost_by_product_lines: aislamiento vía join reparto → estructura → dueño.
+ALTER TABLE joint_cost_by_product_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE joint_cost_by_product_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON joint_cost_by_product_lines;
+CREATE POLICY tenant_isolation ON joint_cost_by_product_lines
+  USING ("allocationId" IN (
+    SELECT jca.id FROM joint_cost_allocations jca
+    JOIN cost_structures cs ON cs.id = jca."structureId"
+    WHERE cs."userId" = current_app_user_id()
+  ))
+  WITH CHECK ("allocationId" IN (
+    SELECT jca.id FROM joint_cost_allocations jca
+    JOIN cost_structures cs ON cs.id = jca."structureId"
+    WHERE cs."userId" = current_app_user_id()
+  ));

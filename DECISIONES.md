@@ -1456,3 +1456,85 @@ adopción estándar de Prisma Migrate sobre una DB existente.
   `vault_chunks`) es **pre-existente de la branch** (M-DRIFT), no lo introduce esta tarea.
 - Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
 - Cero carpetas de migración basura en el árbol; jamás se corrió `prisma migrate dev`.
+
+## B05 — Migración + modelos `JointCostAllocation` + `ByProductLine` (costos conjuntos)
+
+Tercera "pieza de datos" del batch de Costeo por Procesos. En un **punto de separación** un proceso rinde
+varios productos a partir de un **costo conjunto** (compartido): **coproductos** (principales),
+**subproductos** (secundarios) y **desechos**. El costo conjunto se reparte entre ellos por uno de cuatro
+métodos. Se crean **dos tablas**: `joint_cost_allocations` (cabecera del reparto) y
+`joint_cost_by_product_lines` (una fila por línea de producto). **Esta tarea solo crea el esquema**; la
+matemática de los cuatro métodos llega en **B11** y se conecta al motor en **B17** — no hay lógica de
+negocio ni endpoints todavía.
+
+**Enum (`prisma/schema.prisma`).** `JointAllocationMethod` con los cuatro métodos de la cátedra:
+`PHYSICAL_UNITS` (unidades físicas), `TECHNICAL_YIELD` (rendimiento técnico), `MARKET_VALUE` (valor de
+mercado en el punto de separación) y `NET_REALIZABLE_VALUE` (valor neto de realización).
+
+**Modelos.**
+- `JointCostAllocation` → `@@map("joint_cost_allocations")`. Cabecera: `structureId` → `CostStructure`,
+  `departmentId` → `ProcessDepartment` (depto. donde ocurre el punto de separación) y `periodId` →
+  `CostPeriod`, las tres FK `onDelete: Cascade`. `method JointAllocationMethod`, `jointCostTotal
+  Decimal(18,4)` (MP + conversión acumulados hasta el punto de separación), `createdAt`, y la relación
+  `products ByProductLine[]`. `@@unique([departmentId, periodId])`: un solo reparto por depto. y período.
+- `ByProductLine` → `@@map("joint_cost_by_product_lines")`. `allocationId` → `JointCostAllocation`
+  `onDelete: Cascade`. `productName`, `kind` (`'coproduct' | 'byproduct' | 'waste'`), `unitsObtained
+  Decimal(18,4)`; magnitudes por método, todas opcionales: `yieldPct Decimal(9,4)` (TECHNICAL_YIELD),
+  `marketPrice Decimal(18,4)` (MARKET_VALUE / NET_REALIZABLE_VALUE), `sellingCostVarPct Decimal(9,4)` y
+  `sellingCostFixedPerUnit Decimal(18,4)` (NET_REALIZABLE_VALUE), `byproductRecognition` (`'at_sale' |
+  'at_production'`, solo `kind='byproduct'`); y los resultados calculados `allocatedCost` /
+  `unitCost Decimal(18,4)`.
+- Relaciones inversas `jointCostAllocations JointCostAllocation[]` agregadas en `CostStructure`,
+  `CostPeriod` y `ProcessDepartment`, según el spec.
+
+**Decisiones de tipos (documentadas por ambigüedad, default más simple).**
+- Porcentajes (`yieldPct`, `sellingCostVarPct`) → `Decimal(9,4)`, mismo criterio que los avances de B04.
+  Montos (`jointCostTotal`, `marketPrice`, `sellingCostFixedPerUnit`, `allocatedCost`, `unitCost`) y
+  cantidades (`unitsObtained`) → `Decimal(18,4)`, ancho estándar del dominio.
+- `kind` y `byproductRecognition` se modelan como `String` (no enum): el spec los describe como cadenas
+  con valores fijos y la validación de dominio vive en la capa de aplicación (B11), no en la tabla —
+  mantiene la tabla flexible y evita un enum extra para un campo que aún no tiene lógica.
+- `JointCostAllocation` lleva `createdAt` pero **no** `updatedAt` (el spec solo pide `createdAt`), y
+  `ByProductLine` no lleva ninguno de los dos: son datos de un reparto puntual del período, no entidades
+  de catálogo. Sin `deletedAt` por el mismo motivo (igual criterio que B04).
+- Índices añadidos: `@@index([structureId])` en la cabecera (lookups por estructura) y
+  `@@index([allocationId])` en las líneas (FK sin unique). El `@@unique([departmentId, periodId])` ya cubre
+  el índice sobre `departmentId`.
+
+**RLS (obligatorio, ambas tablas).** Ninguna tabla tiene `userId` propio; el tenant se resuelve por la
+cadena de propiedad, mismo patrón que B03/B04. `joint_cost_allocations`: aislamiento directo por
+`structureId IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id())`.
+`joint_cost_by_product_lines`: aislamiento por join **línea → reparto → estructura → dueño**
+(`allocationId IN (SELECT jca.id FROM joint_cost_allocations jca JOIN cost_structures cs ON cs.id =
+jca."structureId" WHERE cs."userId" = current_app_user_id())`). Ambas con `ENABLE` + `FORCE ROW LEVEL
+SECURITY` y política `tenant_isolation` en `prisma/rls.sql`.
+
+**Timestamp de la migración.** `20260723203711` (hora UTC real de la corrida), estrictamente mayor que la
+última carpeta existente (`20260723195013_add_unit_movement_schedules`, B04). SQL escrito **a mano**,
+aditivo e idempotente. El **enum** es el punto delicado: Postgres no admite `CREATE TYPE IF NOT EXISTS`, así
+que se envuelve en `DO $$ BEGIN CREATE TYPE … EXCEPTION WHEN duplicate_object THEN NULL; END $$` — la
+segunda corrida ignora el error y no rompe. Tablas con `CREATE TABLE IF NOT EXISTS`, índices con `CREATE
+[UNIQUE] INDEX IF NOT EXISTS`, y las cuatro FK guardadas con `DO $$ … EXCEPTION WHEN duplicate_object $$`.
+Nunca se corrió `prisma migrate dev`. No se tocó `migration_lock.toml` ni ninguna migración commiteada.
+
+**Verificación.**
+- **Desde cero sobre una DB vacía** (`costear_b05_scratch` creada al vuelo): `prisma migrate deploy` aplica
+  las **34** migraciones sin error; `db:rls` corre limpio (**53** statements); `migrate diff` contra el
+  schema no muestra ninguna línea `joint*`. DB descartable eliminada al terminar.
+- `npm run prisma:deploy` sobre la DB local: aplica **solo** la migración nueva.
+- **Idempotencia probada**: se re-ejecutó el `migration.sql` completo una segunda vez con `prisma db
+  execute` → `Script executed successfully`, sin error en el enum ni en nada. Sobrevive dos corridas.
+- `npm run db:rls`: 53 statements; ambas políticas nuevas presentes (`tenant_isolation` sobre las dos
+  tablas), verificado por consulta a `pg_policies` (2/2).
+- `prisma migrate diff --from-url <DB local> --to-schema-datamodel …`: **ninguna** línea menciona
+  `joint_cost_*` ni `JointAllocationMethod` → **cero drift nuevo** por estas tablas. El drift residual
+  (`allocation_base_values`, `allocation_bases`, `cost_config_versions`, `cost_periods`, `vault_chunks`) es
+  **pre-existente de la branch** (M-DRIFT), no lo introduce esta tarea.
+- Objetos confirmados por consulta a los catálogos de Postgres: 2 tablas, 1 enum, 2 políticas, 1 índice
+  único `joint_cost_allocations_departmentId_periodId_key`.
+- Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
+- Cero carpetas de migración basura; jamás se corrió `prisma migrate dev`.
+- **Nota (entorno):** `prisma generate` no pudo renombrar el `query_engine-windows.dll` (`EPERM`) porque
+  hay procesos node del usuario usando el engine; no se mataron. La migración, el schema (`prisma
+  validate` OK) y los tests no dependen de esa regeneración; el cliente se regenera solo en el próximo
+  arranque limpio.
