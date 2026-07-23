@@ -1330,3 +1330,61 @@ regresión — todos los fixtures de Órdenes pasan con valores idénticos). Tes
 (`CostingSystemNotAvailableError`, `statusCode 422`, mensaje en castellano) y no toca la persistencia
 (ni corrida, ni nodos, ni auditoría); (2) una estructura `ORDERS` no cae en el placeholder (sigue al
 motor de Órdenes).
+
+## B03 — Migración + modelo `ProcessDepartment` (departamento de la cadena de Procesos)
+
+Primera tabla del batch de Costeo por Procesos. Un `ProcessDepartment` es un departamento/etapa de un
+proceso productivo **secuencial** (depto 1 → depto 2 → …): el costo terminado de un departamento se
+transfiere al siguiente y cada uno produce su propio "cuadro de movimiento de unidades" e informe de
+costos. Es **distinto** de los `centers[]` de `indirectCostConfig`, que solo prorratean CIF y no tienen
+orden/precedencia. Esta tarea crea **solo** la tabla del departamento; el cuadro de movimiento
+(`UnitMovementSchedule`) y los costos conjuntos llegan en B04/B05.
+
+**Fuente del modelo.** Se leyó la §5.2 del plan
+(`Plan-Implementacion-Costeo-Ordenes-y-Procesos.md`), accesible en disco (carpeta de outputs de una
+sesión local, no en la ruta del vault del prompt). Los campos son idénticos a la spec.
+
+**Se omitió la relación `schedules UnitMovementSchedule[]` que la §5.2 muestra en el modelo.** Esa
+relación apunta a `UnitMovementSchedule`, tabla que no existe hasta B04. Incluirla ahora rompería la
+compilación del schema. El propio enunciado de B03 acota el alcance a "solo la tabla del departamento" y
+su spec de campos ya la omite. Se agregará en B04 junto con la tabla destino.
+
+**Tipos de columna: se copió exactamente el patrón de `CostStructure`** (no el de `cost_periods`).
+`id UUID` sin `DEFAULT` (el uuid lo genera Prisma en la app, `@default(uuid())`), `createdAt TIMESTAMP(3)
+DEFAULT CURRENT_TIMESTAMP`, `updatedAt TIMESTAMP(3)` sin default, `deletedAt TIMESTAMP(3)` nullable
+(soft-delete = papelera recuperable). Para garantizar **cero drift**, el SQL de la tabla se generó con
+`prisma migrate diff` (salida canónica de Prisma) y recién después se lo volvió idempotente a mano.
+
+**Idempotencia.** `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE UNIQUE INDEX IF
+NOT EXISTS`, y la FK envuelta en un bloque `DO $$ … EXCEPTION WHEN duplicate_object THEN NULL $$`
+(ADD CONSTRAINT no admite IF NOT EXISTS). Verificado: el `migration.sql` corre dos veces seguidas contra
+una DB que ya tiene la tabla, exit 0 ambas veces (skips por NOTICE, ningún error). Esto es porque
+`scripts/migrate-deploy.mjs` puede re-aplicar una migración marcada como rolled-back.
+
+**RLS (obligatorio — sin esto la tabla es una fuga de datos entre tenants).** `process_departments` no
+tiene `userId` propio; el tenant se define por la estructura a la que pertenece. Se agregó la política
+`tenant_isolation` a `prisma/rls.sql` con el patrón de tabla-alcanzada-por-`structureId` (idéntico a
+`data_points` / `calculation_runs`): `"structureId" IN (SELECT id FROM cost_structures WHERE "userId" =
+current_app_user_id())`, con `ENABLE`+`FORCE ROW LEVEL SECURITY`. Verificado en la DB: `relrowsecurity`
+y `relforcerowsecurity` = `t`, policy `tenant_isolation` presente.
+
+**Timestamp de la migración.** `20260723182912` (hora UTC real de la corrida), estrictamente mayor que la
+última carpeta existente (`20260723120000_add_daily_signal_source`) y que el piso de la tarea
+(`20260713010000`). Se creó la carpeta y el SQL **a mano**; nunca se corrió `prisma migrate dev` (en este
+repo genera una `_init` basura por drift intencional). No se tocó `migration_lock.toml` ni ninguna
+migración ya commiteada.
+
+**Verificación.**
+- `npm run prisma:deploy`: aplica limpio sobre la DB local (1 migración nueva, cero fallidas).
+- **Desde cero sobre una DB vacía** (`costear_scratch` creada al vuelo): `prisma:deploy` aplica las 32
+  migraciones sin error y `db:rls` corre limpio (41 statements). DB descartable eliminada al terminar.
+- `npm run db:rls`: 41 statements aplicados, política nueva presente.
+- `prisma migrate diff --from-migrations … --to-schema-datamodel …` (con shadow DB descartable): la
+  tabla `process_departments` **no aparece** en el diff → cero drift para B03. El drift residual que sí
+  reporta (`allocation_bases`, `cost_config_versions`, `cost_periods`, `vault_chunks`) es **pre-existente
+  de la branch**: se probó corriendo el mismo diff con los cambios de B03 stasheados y da exactamente las
+  mismas 5 tablas, sin `process_departments`. No lo introduce esta tarea.
+- Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
+- `@@unique([structureId, sequence])` presente como índice único en la DB (`process_departments_
+  structureId_sequence_key`); FK a `cost_structures` con `ON DELETE CASCADE`; índice por `structureId`.
+- Cero carpetas de migración basura en el árbol; jamás se corrió `prisma migrate dev`.

@@ -295,6 +295,8 @@ model CostStructure {
   calculationRuns CalculationRun[]
   // Modelo de períodos (problema C).
   periods         CostPeriod[]
+  // Costeo por Procesos (B03): departamentos de la cadena secuencial.
+  processDepartments ProcessDepartment[]
 
   @@index([companyId])
   @@index([userId])
@@ -1077,4 +1079,35 @@ model VaultChatMessage {
 
   @@index([sessionId])
   @@map("vault_chat_messages")
+}
+
+// ---------------------------------------------------------------------------
+// Costeo por Procesos (B03)
+// ---------------------------------------------------------------------------
+// Un departamento/etapa de un proceso productivo SECUENCIAL: el costo terminado
+// de un departamento se transfiere al siguiente (depto 1 → depto 2 → …). Es la
+// unidad que produce un "cuadro de movimiento de unidades" y un informe de
+// costos propios. DISTINTO de los `centers[]` dentro de `indirectCostConfig`,
+// que solo existen para prorratear CIF (no tienen orden/precedencia).
+// El "cuadro de movimiento" y los costos conjuntos llegan en B04/B05.
+model ProcessDepartment {
+  id          String        @id @default(uuid()) @db.Uuid
+  structureId String        @db.Uuid
+  structure   CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  name        String
+  // 1 = primer departamento de la cadena. Un depto. inicial no tiene "recibidas
+  // del departamento anterior" ni "aumento de número de unidades".
+  sequence    Int
+  // true  = una sola columna "Costo de Conversión".
+  // false = MO y CIF se siguen por separado.
+  defaultConversionAvanceEqualsMO Boolean @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  // Soft-delete: mismo patrón que CostStructure (papelera recuperable).
+  deletedAt   DateTime?
+
+  @@unique([structureId, sequence])
+  @@index([structureId])
+  @@map("process_departments")
 }

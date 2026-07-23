@@ -114,3 +114,17 @@ CREATE POLICY tenant_isolation ON calculation_nodes
     JOIN cost_structures cs ON cs.id = cr."structureId"
     WHERE cs."userId" = current_app_user_id()
   ));
+
+-- ---------------------------------------------------------------------------
+-- Costeo por Procesos (B03) — aislamiento vía join a cost_structures.userId
+-- (process_departments no tiene userId propio; el tenant se define por la
+-- estructura de costos a la que pertenece, mismo patrón que calculation_runs).
+-- ---------------------------------------------------------------------------
+
+-- process_departments
+ALTER TABLE process_departments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE process_departments FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON process_departments;
+CREATE POLICY tenant_isolation ON process_departments
+  USING ("structureId" IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id()))
+  WITH CHECK ("structureId" IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id()));
