@@ -1028,3 +1028,56 @@ eslabón "create → NULL". Agregados: `data-point-service.test.ts` fija que `cr
 **Verificación.** `npm run typecheck` limpio; `npm test`: **58 archivos, 486 verdes, 1 skip**.
 Sin cambios de esquema/migración. El flujo completo se validó extremo a extremo en el navegador
 (ver DECISIONES del front).
+
+---
+
+## Sesión 2026-07-23 — M-VAULT: migración `add_vault_chunks` fallida en la DB local (CASO B, entorno)
+
+**Diagnóstico.** La migración `20260722004906_add_vault_chunks` (módulo RAG/vault del equipo, no
+nuestra) quedó FALLIDA en la DB local, y Prisma no aplica NINGUNA migración nueva mientras haya una
+fallida — bloqueaba nuestro próximo trabajo de backend.
+
+- **¿Le falta el `CREATE EXTENSION`?** No. El SQL trae `CREATE EXTENSION IF NOT EXISTS vector;` en
+  la línea 1, antes de usar el tipo `vector(1024)` y el índice `hnsw ... vector_cosine_ops`. El SQL
+  está bien escrito.
+- **Estado en `_prisma_migrations`:** `finished_at = NULL`, `rolled_back_at = NULL`,
+  `applied_steps_count = 0` → fallida antes de aplicar el primer paso (no dejó nada a medias).
+- **Error exacto (columna `logs`):** `Database error code: 0A000 — ERROR: extension "vector" is not
+  available. DETAIL: Could not open extension control file
+  "/usr/local/share/postgresql/extension/vector.control": No such file or directory. HINT: The
+  extension must first be installed on the system where PostgreSQL is running.`
+
+**CASO B — SÓLO ENTORNO LOCAL (no es bug del equipo).** `docker-compose.yml` ya declara la imagen
+correcta `pgvector/pgvector:pg16`, pero el contenedor `costear-postgres` que estaba corriendo era
+`postgres:16-alpine` (imagen común, SIN el binario de pgvector) — un contenedor viejo creado antes
+de que el compose apuntara a pgvector (llevaba 35 h levantado). Por eso `CREATE EXTENSION` no
+encuentra `vector.control` y falla. NO es CASO A: si fuera un bug del SQL, fallaría en TODOS los
+entornos con `type "vector" does not exist`; acá el error es "extension is not available" (binario
+ausente en esta imagen), un problema de entorno.
+
+**Qué hice (fix local, sin tocar la migración del equipo).**
+1. `docker pull pgvector/pgvector:pg16` + `docker compose up -d postgres`: recreó el contenedor con
+   la imagen correcta **manteniendo el volumen `postgres_data`** → **sin pérdida de datos** (verifiqué:
+   `companies=4` y 27 migraciones previas intactas; contenedor `healthy`; `vector.control` presente;
+   extensión `vector 0.8.5` instalada).
+2. `npx prisma migrate resolve --rolled-back 20260722004906_add_vault_chunks` (como no aplicó ningún
+   paso, marcarla "rolled back" deja que Prisma la re-aplique limpia).
+3. `npm run prisma:deploy` → aplicó las 5 pendientes (incluida `add_vault_chunks`) sin error.
+4. `npm run db:rls` (37 statements) y `npm run db:seed` OK.
+
+**No se editó ninguna migración commiteada** (rompería el checksum en `_prisma_migrations` en todos
+lados). El único cambio de repo es un **comentario en `docker-compose.yml`** avisando que la imagen
+con pgvector es obligatoria y cómo recrear un contenedor viejo — para que el equipo no vuelva a
+pisar esto. `scripts/migrate-deploy.mjs` NO se tocó: su `FAILED_MIGRATIONS` es para fallos de
+PRODUCCIÓN; este fallo era sólo local y no debe resolverse a ciegas en otros entornos.
+
+**Verificación (aceptación).** `npx prisma migrate status` → "Database schema is up to date!";
+`_prisma_migrations` con 0 fallidas. Además probé de CERO en una DB vacía temporal
+(`costear_scratch`) con un `prisma migrate deploy` plano: **32 migraciones aplicadas, 0 fallidas**
+(luego se dropeó la DB temporal). Confirma que en un entorno fresco con la imagen pgvector aplica
+todo limpio.
+
+**A vigilar (fuera de alcance, lo dejo flagueado):** el working tree local tiene una carpeta de
+migración **sin trackear** `prisma/migrations/20260721144831_init/` y `package-lock.json` modificado
+de antes; no los toqué ni commiteé (no son de esta tarea). Conviene revisar con el equipo si ese
+`_init` local debería existir.
