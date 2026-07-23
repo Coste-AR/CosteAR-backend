@@ -1388,3 +1388,71 @@ migración ya commiteada.
 - `@@unique([structureId, sequence])` presente como índice único en la DB (`process_departments_
   structureId_sequence_key`); FK a `cost_structures` con `ON DELETE CASCADE`; índice por `structureId`.
 - Cero carpetas de migración basura en el árbol; jamás se corrió `prisma migrate dev`.
+
+## B04 — Migración + modelo `UnitMovementSchedule` (cuadro de movimiento de unidades)
+
+Segunda tabla del batch de Costeo por Procesos. Una fila por **(departamento, período)** que resume el
+movimiento de unidades del período: existencia inicial de producción en proceso (EI), puestas en
+elaboración / recibidas del departamento anterior / aumento de número de unidades, terminadas y
+transferidas, terminadas en existencia, pérdidas (normal / real total / extraordinaria), existencia final
+de producción en proceso (EF), el grado de avance por elemento del costo (MP y Conversión) tanto de la EI
+como de la EF, y los costos del período por elemento (MP / MO / CIF), incluyendo el costo $ arrastrado en
+la EI. Es el insumo que el motor (B17) convertirá en producción equivalente e informe de costos. **Esta
+tarea solo crea la tabla**; no hay lógica de negocio ni endpoints todavía.
+
+**Modelo (`prisma/schema.prisma`).** `UnitMovementSchedule` → `@@map("unit_movement_schedules")`. FK
+`departmentId` → `ProcessDepartment` y FK `periodId` → `CostPeriod`, ambas `onDelete: Cascade`. Se
+agregaron las relaciones inversas `schedules UnitMovementSchedule[]` en `ProcessDepartment` y
+`unitMovementSchedules UnitMovementSchedule[]` en `CostPeriod`. `@@unique([departmentId, periodId])`: un
+solo cuadro por departamento y período.
+
+**Decisiones de tipos (documentadas por ambigüedad, default más simple).**
+- Todas las cantidades de unidades → `Decimal(18,4)` (mismo ancho que las cantidades del resto del
+  dominio, p.ej. `CostPeriod.productionQuantity`).
+- Todos los grados de avance (`*Avance`) → `Decimal(9,4)`, según el enunciado.
+- `normalLossPct` es un **porcentaje**, no una cantidad → se modeló como `Decimal(9,4)` (mismo criterio
+  que los avances). Los seis campos de costo del período (`periodCost*`, `initialWipCost*`) son montos →
+  `Decimal(18,4)`.
+- Campos derivables por diferencia (`transferredOut`, `finalWip`, `normalLoss`, `extraordinaryLoss`) y
+  todos los inputs condicionales por `sequence` quedan **opcionales**; solo `initialWip` y
+  `finishedInStock` son `NOT NULL DEFAULT 0`, como pide el spec. La regla de "no editable"
+  (`normalLoss`) es una restricción de la capa de aplicación (B17), no de la tabla; acá es nullable.
+- `createdAt`/`updatedAt` siguen el estilo de `process_departments` (`TIMESTAMP(3)`), no el `Timestamptz`
+  de `cost_periods`, para mantener consistencia dentro del batch de Procesos.
+- Sin `deletedAt`: el spec no lo pide y el `@@unique` ya garantiza una fila por (depto, período); si se
+  necesita reemplazar, se actualiza la fila. B03 sí tiene soft-delete porque un departamento es una
+  entidad de catálogo; un cuadro de movimiento es un dato del período.
+
+**RLS (obligatorio).** `unit_movement_schedules` no tiene `userId` ni `structureId` propios: el tenant se
+resuelve por la cadena **departamento → estructura → dueño**. Política `tenant_isolation` en
+`prisma/rls.sql` con `USING`/`WITH CHECK` sobre `departmentId IN (SELECT pd.id FROM process_departments pd
+JOIN cost_structures cs ON cs.id = pd."structureId" WHERE cs."userId" = current_app_user_id())` — mismo
+patrón de join que usan `calculation_nodes` y la nota de B03. `ENABLE` + `FORCE ROW LEVEL SECURITY`.
+
+**Timestamp de la migración.** `20260723195013` (hora UTC real de la corrida), estrictamente mayor que la
+última carpeta existente (`20260723182912_add_process_departments`) y que el piso indicado por la tarea.
+SQL escrito **a mano**, idempotente (`CREATE TABLE IF NOT EXISTS`, `CREATE UNIQUE INDEX IF NOT EXISTS`,
+`ADD CONSTRAINT` guardado con `DO $$ … EXCEPTION WHEN duplicate_object THEN NULL $$`) y aditivo. Nunca se
+corrió `prisma migrate dev`. No se tocó `migration_lock.toml` ni ninguna migración ya commiteada.
+
+**Nota sobre la DB local (pre-existente, no la introduce esta tarea).** La DB de desarrollo `costear`
+estaba construida con `prisma db push` (tenía las 35 tablas pero **sin** tabla de historial
+`_prisma_migrations`), por lo que `prisma migrate deploy` fallaba con P3005 ("schema is not empty"). Se
+**baselineó** la DB marcando las 32 migraciones previas como aplicadas (`prisma migrate resolve
+--applied …`, sin re-ejecutar SQL, operación no destructiva) para que `prisma:deploy` pueda correr. Es la
+adopción estándar de Prisma Migrate sobre una DB existente.
+
+**Verificación.**
+- **Desde cero sobre una DB vacía** (`costear_b04_verify` creada al vuelo): `prisma migrate deploy` aplica
+  las **33** migraciones sin error y `db:rls` corre limpio (45 statements). La tabla, el índice único
+  `unit_movement_schedules_departmentId_periodId_key`, la política `tenant_isolation` y `rowsecurity`/
+  `forcerowsecurity` quedan presentes. DB descartable eliminada al terminar.
+- `npm run prisma:deploy` sobre la DB local (post-baseline): aplica **solo** la migración nueva; una
+  segunda corrida da "No pending migrations to apply" (idempotente).
+- `npm run db:rls`: 45 statements aplicados, política nueva presente sobre la DB local.
+- `prisma migrate diff --from-migrations … --to-schema-datamodel …` (con shadow DB descartable): ninguna
+  línea menciona `unit_movement_schedules`/`schedule` → **cero drift nuevo** por esta tabla. El drift
+  residual (`allocation_base_values`, `allocation_bases`, `cost_config_versions`, `cost_periods`,
+  `vault_chunks`) es **pre-existente de la branch** (M-DRIFT), no lo introduce esta tarea.
+- Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
+- Cero carpetas de migración basura en el árbol; jamás se corrió `prisma migrate dev`.

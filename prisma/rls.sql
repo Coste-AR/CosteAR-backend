@@ -128,3 +128,20 @@ DROP POLICY IF EXISTS tenant_isolation ON process_departments;
 CREATE POLICY tenant_isolation ON process_departments
   USING ("structureId" IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id()))
   WITH CHECK ("structureId" IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id()));
+
+-- unit_movement_schedules (B04): no tiene userId ni structureId propios; el
+-- tenant se resuelve por la cadena departamento → estructura → dueño.
+ALTER TABLE unit_movement_schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE unit_movement_schedules FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON unit_movement_schedules;
+CREATE POLICY tenant_isolation ON unit_movement_schedules
+  USING ("departmentId" IN (
+    SELECT pd.id FROM process_departments pd
+    JOIN cost_structures cs ON cs.id = pd."structureId"
+    WHERE cs."userId" = current_app_user_id()
+  ))
+  WITH CHECK ("departmentId" IN (
+    SELECT pd.id FROM process_departments pd
+    JOIN cost_structures cs ON cs.id = pd."structureId"
+    WHERE cs."userId" = current_app_user_id()
+  ));

@@ -253,6 +253,9 @@ model CostPeriod {
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt
 
+  // Costeo por Procesos (B04): cuadros de movimiento de unidades del período.
+  unitMovementSchedules UnitMovementSchedule[]
+
   @@unique([structureId, code])
   @@index([companyId, code])
   @@index([structureId, status])
@@ -1107,7 +1110,79 @@ model ProcessDepartment {
   // Soft-delete: mismo patrón que CostStructure (papelera recuperable).
   deletedAt   DateTime?
 
+  // Costeo por Procesos (B04): cuadro de movimiento de unidades por período.
+  schedules   UnitMovementSchedule[]
+
   @@unique([structureId, sequence])
   @@index([structureId])
   @@map("process_departments")
+}
+
+// Costeo por Procesos (B04) — cuadro de movimiento de unidades.
+//
+// Una fila por (departamento, período): resume cuántas unidades entran, se
+// terminan, se transfieren, se pierden y quedan en proceso, con su grado de
+// avance por elemento del costo, más los costos del período por elemento. Es
+// la entrada que el motor (B17) convierte en producción equivalente e informe
+// de costos. Esta tarea solo crea la tabla.
+model UnitMovementSchedule {
+  id           String            @id @default(uuid()) @db.Uuid
+  departmentId String            @db.Uuid
+  department   ProcessDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  periodId     String            @db.Uuid
+  period       CostPeriod        @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  // --- ENTRADAS (unidades) ---
+  /** Existencia inicial de producción en proceso (EI), en unidades. */
+  initialWip           Decimal  @default(0) @db.Decimal(18, 4)
+  /** % de avance de la EI en Materia Prima, arrastrado del período anterior. */
+  initialWipMpAvance   Decimal? @db.Decimal(9, 4)
+  /** % de avance de la EI en Conversión, arrastrado del período anterior. */
+  initialWipConvAvance Decimal? @db.Decimal(9, 4)
+  /** Puestas en elaboración — solo departamento inicial (sequence = 1). */
+  startedInProduction  Decimal? @db.Decimal(18, 4)
+  /** Recibidas del departamento anterior — solo sequence > 1. */
+  receivedFromPrevious Decimal? @db.Decimal(18, 4)
+  /** Aumento de número de unidades — solo sequence > 1. */
+  unitIncrease         Decimal? @db.Decimal(18, 4)
+
+  // --- SALIDAS (unidades) ---
+  /** Terminadas y transferidas al depto. siguiente (puede derivarse por diferencia). */
+  transferredOut     Decimal? @db.Decimal(18, 4)
+  /** Terminadas y en existencia (no transferidas). */
+  finishedInStock    Decimal  @default(0) @db.Decimal(18, 4)
+  /** % de pérdida normal admitido. */
+  normalLossPct      Decimal? @db.Decimal(9, 4)
+  /** Pérdida normal en unidades (calculada, no editable por el usuario). */
+  normalLoss         Decimal? @db.Decimal(18, 4)
+  /** Pérdida real total del período (input del usuario). */
+  totalLossReported  Decimal? @db.Decimal(18, 4)
+  /** Pérdida extraordinaria (derivada: pérdida real total − normal). */
+  extraordinaryLoss  Decimal? @db.Decimal(18, 4)
+  /** Existencia final de producción en proceso (EF) (puede derivarse por diferencia). */
+  finalWip           Decimal? @db.Decimal(18, 4)
+  /** % de avance de la EF en Materia Prima. */
+  finalWipMpAvance   Decimal? @db.Decimal(9, 4)
+  /** % de avance de la EF en Conversión. */
+  finalWipConvAvance Decimal? @db.Decimal(9, 4)
+
+  // --- COSTOS DEL PERÍODO (por elemento) ---
+  /** Costo de Materia Prima incurrido en el período. */
+  periodCostMp      Decimal? @db.Decimal(18, 4)
+  /** Costo de Mano de Obra incurrido en el período. */
+  periodCostMo      Decimal? @db.Decimal(18, 4)
+  /** Costo de Carga Fabril (CIF) incurrido en el período. */
+  periodCostCif     Decimal? @db.Decimal(18, 4)
+  /** Costo $ de MP arrastrado en la EI. */
+  initialWipCostMp  Decimal? @db.Decimal(18, 4)
+  /** Costo $ de MO arrastrado en la EI. */
+  initialWipCostMo  Decimal? @db.Decimal(18, 4)
+  /** Costo $ de CIF arrastrado en la EI. */
+  initialWipCostCif Decimal? @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([departmentId, periodId])
+  @@map("unit_movement_schedules")
 }
