@@ -1216,3 +1216,25 @@ como `YYYY-MM-DD` (o `null` si el dato nunca la tuvo — retrocompat: el front l
 **Verificación.** `typecheck` ✅ + `vitest` 503✅/1 skip (sin regresión; el test de latencia por área,
 que ya leía `fechaCaptacion`, sigue verde). Flujo end-to-end en navegador: ver más abajo / DECISIONES
 del frontend.
+
+## F09-4 — Ningún mensaje 422 expone el id interno de un centro (siempre el nombre humano)
+
+Parte backend del pulido F09 (regla del proyecto #7: nunca `serv3`/`prod2` en texto de usuario).
+Casi todos los mensajes del prorrateo (`indirect-costs.ts`, `calculate.ts`) ya usaban `«${serviceName}»`
+(nombre humano). Quedaban DOS `CalcError` (que mapean a **422**, visibles al usuario) que interpolaban el
+id crudo:
+- `Servicio inexistente en prorrateo: ${dist.serviceCenterId}` (secundario directo).
+- `Cierre de un centro inexistente: ${cl.serviceCenterId}` (escalonado).
+
+**Cambio.** En `secondaryProration` se computa `serviceName` ANTES del chequeo y su fallback pasó de
+`?? id` a `|| 'un centro de servicio'` (nunca el id), y el mensaje se reescribió en términos de cátedra
+("no tiene costo del prorrateo primario para repartir…"). En `stepwiseProration`, como el centro es
+literalmente inexistente y no se puede nombrar con certeza, el mensaje quedó genérico y accionable ("el
+orden de cierre incluye un centro que ya no existe… revisá el orden de cierre") sin ningún id. El resto
+de mensajes ya por nombre no cambian de comportamiento (el fallback genérico solo aplica en el caso
+—casi imposible— de un centro ausente del catálogo).
+
+**Verificación.** `typecheck` (tsc) ✅ + `vitest` 503✅/1 skip, sin regresión (los tests de prorrateo,
+incluidos los que verifican mensajes por nombre humano, siguen verdes). Nota de entorno: `prisma generate`
+dentro de `npm run build` falló por un lock de Windows (EPERM al renombrar el `query_engine`.dll); es
+transitorio y ajeno al cambio —el `tsc` compila limpio y el cliente ya generado corre los 503 tests—.
