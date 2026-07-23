@@ -420,6 +420,89 @@ export class DataPointService {
     }
   }
 
+  /**
+   * F06 — Movimientos de MP (compras/consumos) tal como viven en el store de
+   * trazabilidad, agrupados por `movementId`, INCLUYENDO los que todavía no
+   * tienen decisión de imputación (`periodoImputado = null`).
+   *
+   * La ficha PPP se dibujaba SOLO con el JSON de la sección (`rawMaterialConfig`),
+   * que no sabe nada de imputación: un movimiento sin imputar quedaba sin marca
+   * (o directamente invisible si el JSON y los data points se desincronizaban),
+   * aunque el motor lo contara como "dato sin imputar" (F04). Esta lista es la
+   * fuente de verdad del estado de imputación para que la ficha marque cada
+   * pendiente y lo haga accionable, sin ocultar ninguno.
+   *
+   * NO filtra por período: mostrar TODOS es justamente el fix. Un movimiento es
+   * `pending` si alguno de sus data points hermanos sigue sin imputar (cantidad
+   * y precio se imputan juntos, así que en la práctica es todo-o-nada).
+   */
+  async listMpMovements(userId: string, structureId: string) {
+    await this.requireStructureOwned(userId, structureId);
+
+    const points = await this.db.dataPoint.findMany({
+      where: {
+        structureId,
+        element: 'MP',
+        fieldKey: { in: ['mp.compra.cantidad', 'mp.compra.precio', 'mp.consumo.cantidad'] },
+        voidedAt: null,
+        status: { not: 'anulado' },
+      },
+      include: { versions: { orderBy: { versionN: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    type MpMovement = {
+      movementId: string;
+      label: string;
+      detail: string;
+      type: 'purchase' | 'consumption';
+      fechaHecho: string | null;
+      periodoImputado: string | null;
+      pending: boolean;
+      dataPointIds: string[];
+    };
+    const byMovement = new Map<string, MpMovement>();
+
+    for (const dp of points) {
+      const vJson = (dp.versions[0]?.valueJson ?? null) as Record<string, unknown> | null;
+      const movementId = vJson?.movementId as string | undefined;
+      // Solo movimientos reales: la config migrada (mp.config) no lleva movementId.
+      if (!movementId) continue;
+
+      const type: 'purchase' | 'consumption' = dp.fieldKey.startsWith('mp.compra')
+        ? 'purchase'
+        : 'consumption';
+      const fechaHecho = dp.fechaHecho ? dp.fechaHecho.toISOString().slice(0, 10) : null;
+
+      const existing = byMovement.get(movementId);
+      if (existing) {
+        existing.dataPointIds.push(dp.id);
+        if (dp.periodoImputado === null) {
+          existing.pending = true;
+          existing.periodoImputado = null;
+        }
+      } else {
+        byMovement.set(movementId, {
+          movementId,
+          label: dp.label,
+          detail: this.stripMovementPrefix(dp.label),
+          type,
+          fechaHecho,
+          periodoImputado: dp.periodoImputado,
+          pending: dp.periodoImputado === null,
+          dataPointIds: [dp.id],
+        });
+      }
+    }
+
+    return Array.from(byMovement.values());
+  }
+
+  /** 'Compra — Factura A-1' → 'Factura A-1' (mismo detalle que la fila de la sección). */
+  private stripMovementPrefix(label: string): string {
+    return label.replace(/^(Compra|Consumo)\s+—\s+/, '');
+  }
+
   /** Bitácora paginada de una estructura (todas sus acciones de trazabilidad). */
   async getAudit(userId: string, structureId: string, page: number, pageSize: number) {
     await this.requireStructureOwned(userId, structureId);

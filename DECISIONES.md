@@ -1133,3 +1133,65 @@ aplicadas, 0 fallidas**, y esa DB fresca SÍ tiene la FK `cost_config_versions_s
 que prueba que la historia commiteada es la canónica y que la "pérdida" de la FK es sólo local. Luego
 se dropeó la DB temporal. Sin cambios de código; el único cambio commiteado es esta entrada de
 DECISIONES.
+
+---
+
+## F06 — La ficha PPP tiene que mostrar TODOS los movimientos (incluidos los sin imputar)
+
+**Diagnóstico (STEP 1 — en qué capa se ocultaba).** La ficha PPP se dibuja SÓLO con el JSON de la
+sección (`rawMaterialConfig.materials[].movements`), que NO sabe nada de imputación y no tiene ningún
+vínculo con el store de trazabilidad (`data_points`). El estado "pendiente" (`periodoImputado = null`)
+vive EXCLUSIVAMENTE en `data_points` — el mismo store que cuenta el motor para la marca F04. La ficha
+nunca leía ese store, así que un movimiento sin imputar aparecía sin marca (o directamente invisible si
+el JSON y los data points se desincronizaban). **No era un filtro `periodoImputado != null` en el
+backend ni un filtro en el componente: no había NINGÚN endpoint que listara los movimientos por su
+estado de imputación. El dato no se filtraba, simplemente nunca se cruzaba.** La capa culpable es el
+flujo de datos del frontend (lee la sección, ignora los data points).
+
+**Fix (STEP 2).**
+1. **Backend (append-only, read-only):** nuevo `GET /structures/:id/mp-movements` +
+   `DataPointService.listMpMovements`. Agrupa los data points de MP por `valueJson.movementId`
+   (compra = cantidad + precio hermanos), INCLUYE los `periodoImputado = null` (mostrar todos es el
+   fix) y marca `pending` si algún hermano sigue sin imputar. No filtra por período. Sólo lee.
+2. **Frontend:** la tabla de movimientos de la sección se enriquece con ese estado. Cada fila cuyo
+   movimiento guardado casa con un movimiento pendiente muestra el pill **"Pendiente de imputar"**;
+   el pill ES el botón que abre el modal de imputación (se reusa `ImputacionModal` + `useImputar` +
+   `proposeImputation` ya montados en el componente — NO se creó un segundo modal). Al resolver, la
+   lista se refresca (invalidación de `['structures', id]`, que `useImputar` ya dispara) y el pill
+   desaparece; el movimiento queda como una fila normal ya imputada. Los movimientos imputados no
+   cambian su presentación.
+
+**Decisión — casar sección ↔ data points por clave natural.** La fila de la sección NO guarda
+`movementId` (sólo fecha/tipo/detalle/cantidad/precio), así que se casa por `(tipo · detalle · fecha)`,
+que es justo lo que la registración copia al `label` (`"Compra — {detalle}"`) y a `fechaHecho`. Detalle
+vacío → `'(sin detalle)'` en ambos lados. Es una clave natural robusta; una colisión exacta
+(mismo tipo, mismo detalle, misma fecha) sería, a efectos prácticos, el mismo movimiento. Se descartó
+escribir `movementId` de vuelta en el JSON de la sección por ser un cambio más invasivo y fuera de
+alcance.
+
+**Decisión — pendientes "huérfanos".** Si un pendiente que el motor cuenta NO tiene fila propia en la
+sección (desincronización histórica: p. ej. datos creados antes del fix F04, o una fila borrada de la
+sección con su data point vivo por append-only), se renderiza igual como fila extra marcada
+"Pendiente de imputar", en sólo lectura y accionable. Así **ningún** dato sin imputar queda invisible
+y el total de pendientes de la ficha iguala el conteo del motor. Nota multi-materia: como los data
+points de MP cuelgan de la estructura (no de la materia), un huérfano podría verse en la ficha de otra
+materia de la misma estructura; se prioriza "nunca ocultar un pendiente" sobre esa rareza (los
+huérfanos son raros post-fix F04, porque un movimiento nuevo hoy queda en AMBOS stores).
+
+**Fix incidental (bloqueaba el build, NO es F06).** Al re-sincronizar `AlanSandbox` con `origin/staging`
+(rule #1) el `typecheck` del backend estaba en ROJO por un break PREEXISTENTE en
+`cost-period-service.ts` (commit `20f4300`, de AlanSandbox, no del merge): dos `alert.create` usaban
+`title` y `severity`, campos que NO existen en el modelo `Alert` (tiene `type` + `message`). Se
+reemplazaron por `type: 'COST_SPIKE'` (enum válido, encaja con "anomalía de costo") plegando el título
+al `message`. Sin esto no se podía compilar ni verificar F06. Sin riesgo de pérdida de datos → se
+arregló y se documenta (rule #9).
+
+**Verificación (aceptación, navegador contra dev + DB real).** Estructura "Pieza V-F1 Prorrateo"
+(período 2026-07): agregué una compra fechada 2026-01-15 ("TEST F06 — enero fuera de periodo") y elegí
+"Decidir más tarde". (1) Aparece en la ficha PPP con el pill "Pendiente de imputar"; los 5 movimientos
+imputados siguen sin marca. (2) En DB: 2 data points (cantidad + precio) con `periodoImputado = null`;
+el conteo de "sin imputar" de la estructura = 2 = ese único movimiento pendiente (iguala lo que muestra
+la ficha). (3) Click en el pill → abre el modal con "TEST F06…" y las dos opciones. (4) Elegí "Imputar
+a 2026-07" → el pill desaparece, el movimiento queda como fila normal, y en DB los 2 data points pasan
+a `periodoImputado = 2026-07`; "sin imputar" de la estructura = 0. Suites: backend `typecheck` ✅ +
+`vitest` 503✅/1 skip; frontend `typecheck` ✅, `build` ✅, `vitest` 22✅.

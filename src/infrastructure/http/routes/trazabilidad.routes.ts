@@ -75,6 +75,14 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     return reply.status(201).send({ data: dp });
   });
 
+  // F06 — movimientos de MP con su estado de imputación (incluye los pendientes),
+  // para que la ficha PPP los muestre y los haga accionables sin ocultar ninguno.
+  app.get('/structures/:id/mp-movements', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const movements = await service.listMpMovements(request.authUser!.id, id);
+    return { data: movements };
+  });
+
   app.get('/data-points/:id/trace', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
     const trace = await service.getTrace(request.authUser!.id, id);

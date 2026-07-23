@@ -225,9 +225,8 @@ export class CostPeriodService {
                 userId,
                 companyId: period.companyId,
                 costStructureId: period.structureId,
-                title: 'Alerta de Anomalía: Materia Prima',
-                message: `El costo unitario de Materia Prima ($${currentMP.toFixed(2)}) subió un ${(devMP * 100).toFixed(1)}% respecto al promedio histórico ($${avgMP.toFixed(2)}). Te recomendamos revaluar el precio de venta sugerido en el Simulador de Escenarios.`,
-                severity: 'HIGH',
+                type: 'COST_SPIKE',
+                message: `Anomalía en Materia Prima: el costo unitario ($${currentMP.toFixed(2)}) subió un ${(devMP * 100).toFixed(1)}% respecto al promedio histórico ($${avgMP.toFixed(2)}). Te recomendamos revaluar el precio de venta sugerido en el Simulador de Escenarios.`,
               },
             });
           }
@@ -238,9 +237,8 @@ export class CostPeriodService {
                 userId,
                 companyId: period.companyId,
                 costStructureId: period.structureId,
-                title: 'Alerta de Anomalía: Mano de Obra',
-                message: `El costo unitario de Mano de Obra ($${currentMOD.toFixed(2)}) subió un ${(devMOD * 100).toFixed(1)}% respecto al promedio histórico ($${avgMOD.toFixed(2)}). Revisá la productividad o paritarias.`,
-                severity: 'HIGH',
+                type: 'COST_SPIKE',
+                message: `Anomalía en Mano de Obra: el costo unitario ($${currentMOD.toFixed(2)}) subió un ${(devMOD * 100).toFixed(1)}% respecto al promedio histórico ($${avgMOD.toFixed(2)}). Revisá la productividad o paritarias.`,
               },
             });
           }
