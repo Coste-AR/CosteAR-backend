@@ -997,3 +997,34 @@ imputar tira 422 nombrando el dato y no cierra; imputado el dato, el cierre proc
 **Sin cambios de esquema/migración.** No se tocó `schema.prisma`, `prisma/rls.sql`,
 `migration_lock.toml` ni se agregó migración: la marca vive en la columna JSON `results` que ya
 existía (regla #6 satisfecha por vacío).
+
+---
+
+## F04-FIX (2026-07-22) — La causa raíz estaba en el frontend; acá solo un ajuste de contrato
+
+**Diagnóstico.** El bug "no se puede crear un dato sin imputar de punta a punta" NO estaba en el
+backend. `DataPointService.create` deja `periodoImputado = NULL` (default del schema; `imputar()`
+es el único que lo setea), y tanto `calculation-run-service` como `cost-period-service` detectan los
+pendientes con `WHERE periodoImputado IS NULL` — la misma fuente de verdad. El eslabón roto era el
+alta desde la UI (race en `RawMaterialForm.tsx`, ver DECISIONES del front): nunca se llamaba a
+`POST /structures/:id/data-points`, así que no había NULL que marcar ni bloquear.
+
+**Ajuste de contrato (el único cambio de runtime del back).** El 422 de cierre por datos sin
+imputar (`MissingInputError` en `cost-period-service.close`) ahora adjunta
+`details.datosPendientes: {id, nombre}[]`. El front ya lo leía (`unimputedDatosFromError`); sin
+esto, la resolución in-situ del bloqueo caía a la lista del último cálculo, que puede estar vieja
+(mostraba datos ya imputados o no incluía los recién agregados). Se extendió el constructor de
+`MissingInputError(field, message, datosPendientes?)` para incluirlo en `details`. Sigue sin
+filtrar ids ni endpoints al usuario (regla #6): el `id` solo sirve para abrir la ficha, se muestra
+el nombre. El mensaje en español no cambió.
+
+**Tests (el hueco que dejó pasar el bug).** Los tests viejos MOCKEABAN un data point pendiente en
+`dataPoint.findMany`, así que probaban "NULL → marca/bloqueo" dando por hecho el NULL — nunca el
+eslabón "create → NULL". Agregados: `data-point-service.test.ts` fija que `create()` NO setea
+`periodoImputado` (nace pendiente) ni siquiera con `fechaHecho` fuera de período; y
+`cost-period-service.test.ts` verifica que el 422 de cierre adjunta `datosPendientes` con
+`{id, nombre}` correctos.
+
+**Verificación.** `npm run typecheck` limpio; `npm test`: **58 archivos, 486 verdes, 1 skip**.
+Sin cambios de esquema/migración. El flujo completo se validó extremo a extremo en el navegador
+(ver DECISIONES del front).

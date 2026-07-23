@@ -476,6 +476,10 @@ export class CostPeriodService {
           `de período (${nombres}). El cierre es definitivo, así que no puede hacerse sobre datos que ` +
           'todavía no se asignaron a un mes. Imputá cada dato desde su ficha (o anulalo si no corresponde) ' +
           'y volvé a cerrar.',
+        // Lista estructurada para resolver EN EL LUGAR del bloqueo (F05): sin
+        // esto el front cae a los pendientes del último cálculo, que puede estar
+        // viejo (ej. datos ya imputados o recién agregados).
+        unimputed.map((d) => ({ id: d.id, nombre: d.label })),
       );
     }
 
