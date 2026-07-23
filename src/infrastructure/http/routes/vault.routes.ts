@@ -136,4 +136,23 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.status(200).send({ data: { success: true } });
   });
+
+  app.post('/vault/index', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+    const { VaultIndexerService } = await import('../../../application/vault-indexer/vault-indexer-service.js');
+    const { execSync } = await import('node:child_process');
+    const path = await import('node:path');
+    
+    const vaultPath = process.env.VAULT_PATH || '../CosteAR-vault';
+    const resolvedVaultPath = path.resolve(vaultPath);
+    let vaultCommit = 'unknown';
+    try {
+      vaultCommit = execSync('git rev-parse HEAD', { cwd: resolvedVaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch (e) {
+      console.warn('No se pudo obtener el commit para indexación manual.');
+    }
+    
+    const indexer = new VaultIndexerService();
+    const result = await indexer.indexVault(resolvedVaultPath, vaultCommit);
+    return reply.status(200).send({ data: result });
+  });
 }
