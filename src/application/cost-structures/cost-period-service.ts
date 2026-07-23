@@ -188,6 +188,65 @@ export class CostPeriodService {
         tx,
       );
 
+      // FASE 2: Detección Proactiva de Anomalías (Alertas Tempranas)
+      const lastPeriods = await tx.costPeriod.findMany({
+        where: { structureId: period.structureId, status: 'CLOSED', id: { not: periodId } },
+        orderBy: { code: 'desc' },
+        take: 3,
+      });
+
+      if (lastPeriods.length > 0) {
+        let sumMP = 0;
+        let sumMOD = 0;
+        let validPeriodsCount = 0;
+
+        for (const p of lastPeriods) {
+          if (p.resultSnapshot) {
+            const snap = p.resultSnapshot as any;
+            sumMP += Number(snap.rawMaterialConsumed || 0);
+            sumMOD += Number(snap.directLaborTotal || 0);
+            validPeriodsCount++;
+          }
+        }
+
+        if (validPeriodsCount > 0) {
+          const avgMP = sumMP / validPeriodsCount;
+          const avgMOD = sumMOD / validPeriodsCount;
+
+          const currentMP = Number(frozen.rawMaterialConsumed || 0);
+          const currentMOD = Number(frozen.directLaborTotal || 0);
+
+          const devMP = avgMP > 0 ? (currentMP - avgMP) / avgMP : 0;
+          const devMOD = avgMOD > 0 ? (currentMOD - avgMOD) / avgMOD : 0;
+
+          if (devMP > 0.1) {
+            await tx.alert.create({
+              data: {
+                userId,
+                companyId: period.companyId,
+                costStructureId: period.structureId,
+                title: 'Alerta de Anomalía: Materia Prima',
+                message: `El costo unitario de Materia Prima ($${currentMP.toFixed(2)}) subió un ${(devMP * 100).toFixed(1)}% respecto al promedio histórico ($${avgMP.toFixed(2)}). Te recomendamos revaluar el precio de venta sugerido en el Simulador de Escenarios.`,
+                severity: 'HIGH',
+              },
+            });
+          }
+
+          if (devMOD > 0.1) {
+            await tx.alert.create({
+              data: {
+                userId,
+                companyId: period.companyId,
+                costStructureId: period.structureId,
+                title: 'Alerta de Anomalía: Mano de Obra',
+                message: `El costo unitario de Mano de Obra ($${currentMOD.toFixed(2)}) subió un ${(devMOD * 100).toFixed(1)}% respecto al promedio histórico ($${avgMOD.toFixed(2)}). Revisá la productividad o paritarias.`,
+                severity: 'HIGH',
+              },
+            });
+          }
+        }
+      }
+
       return updated;
     });
 

@@ -582,4 +582,42 @@ export class EmpresaPortalService {
       },
     });
   }
+
+  // ── Operador: Métricas (Fase 4) ───────────────────────────────────────────
+
+  async getStructureMetrics(operatorId: string, connectionId: string, structureId: string) {
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId, connectionId, isActive: true },
+      include: { connection: { select: { companyId: true } } },
+    });
+    if (!membership) throw new ForbiddenError('No tenés acceso a esta empresa.');
+
+    // Verificar que la estructura pertenece a esa empresa
+    const structure = await this.db.costStructure.findFirst({
+      where: { id: structureId, companyId: membership.connection.companyId, deletedAt: null },
+      select: { id: true, productName: true }
+    });
+    if (!structure) throw new NotFoundError('Estructura no encontrada o no pertenece a la empresa.');
+
+    // Traer el último CostCalculation para esta estructura
+    const latestCalc = await this.db.costCalculation.findFirst({
+      where: { costStructureId: structureId },
+      orderBy: { calculatedAt: 'desc' }
+    });
+
+    if (!latestCalc) {
+      return null;
+    }
+
+    return {
+      productName: structure.productName,
+      productionCost: Number(latestCalc.productionCost),
+      grossMargin: Number(latestCalc.grossMargin),
+      grossMarginPct: Number(latestCalc.grossMarginPct),
+      rawMaterialConsumed: Number(latestCalc.rawMaterialConsumed),
+      directLaborTotal: Number(latestCalc.directLaborTotal),
+      indirectCostsApplied: Number(latestCalc.indirectCostsApplied),
+      calculatedAt: latestCalc.calculatedAt
+    };
+  }
 }

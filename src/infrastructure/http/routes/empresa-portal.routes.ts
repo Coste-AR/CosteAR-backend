@@ -127,4 +127,17 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
       return reply.send({ data: items });
     },
   );
+
+  // ── Operador: Métricas de Estructura (Dashboard) ───────────────────────────
+  app.get(
+    '/empresa-portal/connections/:connectionId/structures/:structureId/metrics',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { connectionId, structureId } = z
+        .object({ connectionId: z.string().uuid(), structureId: z.string().uuid() })
+        .parse(request.params);
+      const metrics = await svc.getStructureMetrics(request.authUser!.id, connectionId, structureId);
+      return reply.send({ data: metrics });
+    },
+  );
 }
