@@ -29,11 +29,7 @@ Reglas Estrictas:
 5. SIN PROPUESTAS DUPLICADAS: te paso una lista de "PROPUESTAS YA PENDIENTES DE VALIDACIÓN" (todavía no las revisó un humano). Antes de crear una propuesta nueva, fijate si el tema de la señal YA está cubierto por alguna de esas propuestas pendientes (aunque el archivo destino o el título estén redactados distinto — juzgá por el TEMA, no por coincidencia textual exacta). Si ya está cubierto: usá "action": "merge", poné el id de la propuesta existente en "mergeIntoProposalId", y dejá "title"/"sourceFile"/"proposedText"/"justification" como string vacío "" (no se usan en un merge, solo importa "signalsUsedIds"). Si es un tema nuevo: usá "action": "create" y "mergeIntoProposalId": null como en el ejemplo.`;
 
 export class NightlyLearningService {
-  private ai: GroqService;
-
-  constructor() {
-    this.ai = new GroqService();
-  }
+  constructor(private readonly ai: GroqService = new GroqService()) {}
 
   async runNightlyPipeline(): Promise<void> {
     if (!this.ai.isConfigured) {
