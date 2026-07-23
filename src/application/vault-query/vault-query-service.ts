@@ -71,6 +71,7 @@ export class VaultQueryService {
       await prisma.dailySignal.create({
         data: {
           type: 'RAG_MISS',
+          source: 'COSTISTA_CHAT',
           content: question,
           context: { reason: 'No chunks found above similarity threshold' }
         }
@@ -111,6 +112,7 @@ export class VaultQueryService {
       await prisma.dailySignal.create({
         data: {
           type: 'RAG_MISS',
+          source: 'COSTISTA_CHAT',
           content: question,
           context: { reason: 'LLM generated refusal (answeredFromContext=false)' }
         }

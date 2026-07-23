@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 const SYSTEM_PROMPT = `Sos un experto en sistemas RAG y metodologías de costeo para PyMEs.
-Tu tarea es analizar un lote de señales de hoy (preguntas sin respuesta del RAG, y sugerencias/correcciones de los usuarios)
+Tu tarea es analizar un lote de señales de hoy originadas de diferentes fuentes (PIPELINE_NOCTURNO, COSTISTA_CHAT, VALIDACIONES_CORRECCION)
 y sugerir UNA o VARIAS ediciones concretas a los archivos Markdown de la Bóveda de Costeo (CosteAR-vault).
 
 Reglas Estrictas:
@@ -55,7 +55,7 @@ export class NightlyLearningService {
     // 2. Armar el prompt con todas las señales (batch simple para V1)
     let signalsStr = '';
     for (const signal of pendingSignals) {
-      signalsStr += `ID: ${signal.id} | Tipo: ${signal.type} | Contenido: ${signal.content}\n`;
+      signalsStr += `ID: ${signal.id} | Origen: ${signal.source} | Tipo: ${signal.type} | Contenido: ${signal.content}\n`;
     }
 
     // Propuestas que ya están esperando revisión humana — se las pasamos al LLM

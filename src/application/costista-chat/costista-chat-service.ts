@@ -101,13 +101,50 @@ export class CostitaChatService {
 
     if (!groqChat.isConfigured) return fallback;
 
-    const result = await groqChat.interpret(
-      input.message,
-      portfolio,
-      input.conversationHistory ?? [],
-    );
+    try {
+      const result = await groqChat.interpret(
+        input.message,
+        portfolio,
+        input.conversationHistory ?? [],
+      );
 
-    return result ?? fallback;
+      if (!result) {
+        await this.db.dailySignal.create({
+          data: {
+            type: 'ASSISTANT_MISS',
+            source: 'COSTISTA_CHAT',
+            content: input.message,
+            context: { reason: 'LLM returned empty or invalid response' },
+            userId
+          }
+        });
+        return fallback;
+      }
+      return result;
+    } catch (err: any) {
+      await this.db.dailySignal.create({
+        data: {
+          type: 'ASSISTANT_MISS',
+          source: 'COSTISTA_CHAT',
+          content: input.message,
+          context: { reason: 'Exception during interpret', error: err.message },
+          userId
+        }
+      });
+      return fallback;
+    }
+  }
+
+  async submitFeedback(userId: string, input: { message: string; type: 'ASSISTANT_MISS' | 'IMPROVEMENT_REPORT'; details?: string }) {
+    await this.db.dailySignal.create({
+      data: {
+        type: input.type,
+        source: 'COSTISTA_CHAT',
+        content: input.message,
+        context: input.details ? { details: input.details } : undefined,
+        userId
+      }
+    });
   }
 
   /**

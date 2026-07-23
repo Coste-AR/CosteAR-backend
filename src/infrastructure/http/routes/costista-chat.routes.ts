@@ -64,4 +64,19 @@ export async function registerCostitaChatRoutes(app: FastifyInstance): Promise<v
     const result = await svc.confirm(request.authUser!.id, input);
     return reply.status(201).send({ data: result });
   });
+
+  /**
+   * POST /costista-chat/feedback
+   * El costista reporta explícitamente un error o sugerencia.
+   */
+  app.post('/costista-chat/feedback', { preHandler: authenticate }, async (request, reply) => {
+    const feedbackSchema = z.object({
+      message: z.string().min(1),
+      type: z.enum(['ASSISTANT_MISS', 'IMPROVEMENT_REPORT']),
+      details: z.string().optional()
+    });
+    const input = feedbackSchema.parse(request.body);
+    await svc.submitFeedback(request.authUser!.id, input);
+    return reply.status(201).send({ success: true });
+  });
 }

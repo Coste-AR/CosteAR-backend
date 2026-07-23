@@ -38,6 +38,18 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const misses = await prisma.dailySignal.count({ where: { type: 'RAG_MISS' } });
     const corrections = await prisma.dailySignal.count({ where: { type: 'USER_CORRECTION' } });
 
+    const sourceGroups = await prisma.dailySignal.groupBy({
+      by: ['source'],
+      _count: { _all: true },
+    });
+    
+    const signalsBySource = {
+      PIPELINE_NOCTURNO: 0,
+      COSTISTA_CHAT: 0,
+      VALIDACIONES_CORRECCION: 0,
+      ...Object.fromEntries(sourceGroups.map(g => [g.source, g._count._all]))
+    };
+
     return reply.status(200).send({
       data: {
         saas: {
@@ -50,7 +62,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           totalSignals,
           pendingSignals,
           ragMisses: misses,
-          userCorrections: corrections
+          userCorrections: corrections,
+          signalsBySource
         }
       }
     });

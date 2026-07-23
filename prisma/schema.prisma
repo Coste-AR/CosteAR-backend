@@ -981,10 +981,17 @@ model VaultChunk {
 // Nightly Learning Pipeline (RAG Feedback Loop)
 // ---------------------------------------------------------------------------
 
+enum DailySignalSource {
+  PIPELINE_NOCTURNO // El motor viejo, extrae conceptos del CostLedger
+  COSTISTA_CHAT     // Señales originadas en el chat con Costita (e.g., fallas)
+  VALIDACIONES_CORRECCION // Cuando un humano corrige al LLM en una validación (Admin)
+}
+
 enum DailySignalType {
   RAG_MISS // El usuario preguntó algo que el RAG no pudo responder (no encontró en el vault)
   USER_CORRECTION // El costista hizo una corrección manual que sugiere una regla nueva
   IMPROVEMENT_REPORT // El costista reportó explícitamente una falla/mejora
+  ASSISTANT_MISS // El LLM erró, alucinó, o respondió mal y el usuario lo marcó
 }
 
 enum DailySignalStatus {
@@ -996,6 +1003,7 @@ enum DailySignalStatus {
 model DailySignal {
   id        String            @id @default(uuid()) @db.Uuid
   type      DailySignalType
+  source    DailySignalSource @default(PIPELINE_NOCTURNO)
   status    DailySignalStatus @default(PENDING)
   content   String            // Texto del reporte, de la pregunta (miss) o del JSON de corrección
   context   Json?             // Metadata extra (ej. rubro de la empresa, query original)

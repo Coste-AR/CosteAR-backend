@@ -1,0 +1,8 @@
+-- CreateEnum
+CREATE TYPE "DailySignalSource" AS ENUM ('PIPELINE_NOCTURNO', 'COSTISTA_CHAT', 'VALIDACIONES_CORRECCION');
+
+-- AlterEnum
+ALTER TYPE "DailySignalType" ADD VALUE 'ASSISTANT_MISS';
+
+-- AlterTable
+ALTER TABLE "daily_signals" ADD COLUMN     "source" "DailySignalSource" NOT NULL DEFAULT 'PIPELINE_NOCTURNO';

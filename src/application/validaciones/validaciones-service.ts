@@ -174,6 +174,23 @@ export class ValidacionesService {
             },
           });
 
+          if (overrode && (truthDocumentType !== audit.documentType || truthCostSection !== audit.costSection)) {
+            await tx.dailySignal.create({
+              data: {
+                type: 'USER_CORRECTION',
+                source: 'VALIDACIONES_CORRECCION',
+                content: 'El costista corrigió la clasificación del documento.',
+                context: {
+                  entryId,
+                  original: { type: audit.documentType, section: audit.costSection },
+                  correction: { type: truthDocumentType, section: truthCostSection },
+                  explanation: audit.explanation
+                },
+                userId: costistId
+              }
+            });
+          }
+
           // ── Cerrar el círculo: el documento aprobado entra al libro mayor ──────
           // Línea de costo trazable (monto, período, sección) linkeada a su
           // documento de origen. Solo si hay un monto utilizable; si no, queda
