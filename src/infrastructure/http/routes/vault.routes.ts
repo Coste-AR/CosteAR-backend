@@ -32,7 +32,10 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
   
   app.get('/vault/sessions', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
     const sessions = await prisma.vaultChatSession.findMany({
-      where: { userId: request.authUser!.id },
+      where: { 
+        userId: request.authUser!.id,
+        messages: { some: {} }
+      },
       orderBy: { createdAt: 'desc' }
     });
     return reply.status(200).send({ data: sessions });
