@@ -1278,3 +1278,55 @@ regresión). Tests nuevos (`tests/application/costing-system-persist.test.ts`): 
 funciona; (4) con un `CalculationRun` devuelve 422 en castellano y no toca la estructura; (5) idem con un
 `CostCalculation` legado. Verificación a nivel de servicio (unit) por ser cambio backend puro sobre una
 compuerta sin UI todavía; la ruta es un wrapper delgado sobre `updateCostingSystem`.
+
+## B02 — Se extrae la interfaz `CostingEngine` y se envuelve el motor de Órdenes (patrón Strategy)
+
+Preparación para el Costeo por Procesos SIN tocar el comportamiento del motor de Órdenes. La regla
+número uno de la tarea: el cálculo por Órdenes tiene que dar **byte-idéntico** después del refactor.
+Ni un número de los fixtures (fx3-dorado, r5-fixtures, allocation-primario/secundario/escalonado,
+multi-materia-prima, production-quantity, etc.) se movió.
+
+**Decisión de diseño: Strategy, NO un `if (costingSystem === 'PROCESSES')` dentro del cálculo.**
+La función `runCalculation` (Hojas 1-4) está verificada al centavo contra la cátedra; ramificar por
+dentro es la vía más rápida a una regresión silenciosa. En su lugar se introdujo un contrato común y se
+despacha por fuera.
+
+**Forma de la interfaz `CostingEngine`** (`src/application/cost-structures/costing-engine.ts`), que el
+motor de Procesos (B17) implementará tal cual:
+- `readonly engineVersion: string` — la versión con la que se calculó, que se persiste en
+  `CalculationRun.engineVersion`. Cada motor expone la suya (el de Órdenes devuelve `ENGINE_VERSION`,
+  hoy `v1.0.0`; Procesos tendrá la propia). Antes el servicio leía la constante importada directamente;
+  ahora la toma del motor elegido → para Órdenes es el mismo valor, byte-idéntico.
+- `run(input: CalculationInput): CostingResult` — función **pura** (sin DB ni red). `CalculationInput`
+  son los insumos ya resueltos (config de la estructura + datos del período). `CostingResult` es
+  **exactamente** lo que el camino actual ya producía, sin inventar forma nueva:
+  `{ results: CalculationOutput; tree: TreeNode[] }` — `results` es el output consolidado de
+  `runCalculation`; `tree` es el árbol de derivación de `buildCalculationTree` (todavía sin persistir).
+  La incompletitud (F04), la persistencia (`CalculationRun` + `CalculationNode`) y la auditoría **quedan
+  fuera del motor**, en el servicio: son orquestación común a cualquier sistema de costeo, no cálculo.
+
+**`OrdersCostingEngine`** (`orders-costing-engine.ts`) es una **extracción, no una reescritura**: su
+`run()` llama `runCalculation` y `buildCalculationTree` sin tocar una sola fórmula ni ninguna llamada de
+dominio (MP, MOD, CIF, estado de costos, bases de asignación, prorrateo primario/secundario/escalonado).
+
+**Despacho en `CalculationRunService.calculate()`**: `selectCostingEngine(s.costingSystem)` se llama
+**antes** de validar las secciones de Órdenes. Así una estructura de Procesos corta con un **422**
+accionable en castellano (`CostingSystemNotAvailableError`: "El costeo por procesos todavía no está
+disponible…") en vez de confundir al costista con "Falta cargar la sección de Materia Prima". Es un
+placeholder temporal que reemplazará el motor de Procesos (B17), nunca un 500 ni un crash. Cualquier
+valor que no sea `PROCESSES` (incluido `ORDERS` o el campo ausente en estructuras/mocks viejos) cae en el
+motor de Órdenes → cero regresión.
+
+**Persistencia de trazabilidad intacta**: el camino de Órdenes sigue armando `tree` con
+`buildCalculationTree`, enriqueciéndolo con `attachDataPointSources`, y persistiendo `CalculationRun` +
+`CalculationNode` en la misma transacción, exactamente como antes. Solo cambió de dónde salen `results`
+y `tree` (del motor en vez de las dos llamadas sueltas) y de dónde sale `engineVersion` (del motor).
+
+**Sin migración:** refactor puro, ningún cambio de schema. No se corrió `prisma migrate dev`.
+
+**Verificación.** `tsc --noEmit` ✅ + `vitest run` **510 ✅ / 1 skip** (antes 508; +2 tests nuevos, cero
+regresión — todos los fixtures de Órdenes pasan con valores idénticos). Test nuevo
+(`tests/application/costing-engine-dispatch.test.ts`): (1) una estructura `PROCESSES` corta con 422
+(`CostingSystemNotAvailableError`, `statusCode 422`, mensaje en castellano) y no toca la persistencia
+(ni corrida, ni nodos, ni auditoría); (2) una estructura `ORDERS` no cae en el placeholder (sigue al
+motor de Órdenes).

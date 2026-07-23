@@ -9,8 +9,9 @@ import {
   indirectCostConfigSchema,
   inventorySchema,
 } from '../../shared/schemas/cost.schema.js';
-import { runCalculation, ENGINE_VERSION, type CalculationInput } from '../../domain/calculations/calculate.js';
-import { buildCalculationTree, type TreeNode } from './tree-builder.js';
+import { type CalculationInput } from '../../domain/calculations/calculate.js';
+import { type TreeNode } from './tree-builder.js';
+import { selectCostingEngine } from './costing-engine.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
 
 /**
@@ -72,6 +73,13 @@ export class CalculationRunService {
   async calculate(userId: string, structureId: string, actor: TraceActor) {
     const s = await this.requireStructure(userId, structureId);
 
+    // DESPACHO por sistema de costeo (patrón Strategy, B02). Se elige el motor
+    // ANTES de validar las secciones de Órdenes: si la estructura es Procesos,
+    // corta acá con un 422 accionable en castellano (placeholder que reemplaza
+    // B17), sin confundir al costista con "falta cargar Materia Prima". Para
+    // Órdenes —o estructuras viejas sin el campo— devuelve el motor de Órdenes.
+    const engine = selectCostingEngine(s.costingSystem);
+
     if (!s.rawMaterialConfig) {
       throw new MissingInputError('rawMaterial', 'Falta cargar la sección de Materia Prima antes de calcular.');
     }
@@ -118,8 +126,7 @@ export class CalculationRunService {
     let output;
     let tree: TreeNode[];
     try {
-      output = runCalculation(input);
-      tree = buildCalculationTree(input, output);
+      ({ results: output, tree } = engine.run(input));
     } catch (err) {
       if (err instanceof MissingInputError) throw err;
       throw toMissingInputError(err);
@@ -151,7 +158,7 @@ export class CalculationRunService {
         data: {
           structureId,
           runN,
-          engineVersion: ENGINE_VERSION,
+          engineVersion: engine.engineVersion,
           executedBy: actor.id,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           inputsSnapshot: input as any,

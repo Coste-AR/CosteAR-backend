@@ -20,6 +20,23 @@ export class MissingInputError extends UnprocessableEntityError {
 }
 
 /**
+ * La estructura está configurada con un sistema de costeo que el motor todavía
+ * no sabe calcular (hoy: Procesos — llega con B17). 422 con mensaje accionable en
+ * español, NUNCA un 500 ni un crash: la estructura se pudo crear como Procesos
+ * (B01), pero calcularla no está disponible aún. Placeholder temporal que el
+ * motor de Procesos reemplazará. Ver DECISIONES.md (B02).
+ */
+export class CostingSystemNotAvailableError extends UnprocessableEntityError {
+  override readonly code = 'COSTING_SYSTEM_NOT_AVAILABLE';
+
+  constructor(
+    message = 'El costeo por procesos todavía no está disponible. Por ahora podés calcular estructuras de costeo por órdenes.',
+  ) {
+    super(message);
+  }
+}
+
+/**
  * Falta la base de asignación (o su orden de cierre) de un centro de servicio,
  * así que el prorrateo secundario no puede correr (Parte 4.5). 422 con link
  * accionable al formulario de bases — nunca un 500.
