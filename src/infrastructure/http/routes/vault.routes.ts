@@ -147,15 +147,8 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     
     const vaultPath = process.env.VAULT_PATH || '../CosteAR-vault';
     const resolvedVaultPath = path.resolve(vaultPath);
-    let vaultCommit = 'unknown';
-    try {
-      vaultCommit = execSync('git rev-parse HEAD', { cwd: resolvedVaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch (e) {
-      console.warn('No se pudo obtener el commit para indexación manual.');
-    }
-    
     const indexer = new VaultIndexerService();
-    const result = await indexer.indexVault(resolvedVaultPath, vaultCommit);
+    const result = await indexer.indexVault(resolvedVaultPath);
     return reply.status(200).send({ data: result });
   });
 }

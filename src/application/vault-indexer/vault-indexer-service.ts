@@ -1,5 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { execSync } from 'node:child_process';
 import { chunkMarkdown } from './markdown-chunker.js';
 import { PrismaVaultChunkRepository, type VaultChunkRepository } from './vault-chunk-repository.js';
 import { VoyageService, type Embedder } from '../../infrastructure/ai/voyage-service.js';
@@ -41,9 +43,28 @@ export class VaultIndexerService {
     private readonly embedder: Embedder = new VoyageService(),
   ) {}
 
-  async indexVault(vaultPath: string, vaultCommit: string): Promise<IndexVaultResult> {
+  async indexVault(vaultPath: string): Promise<IndexVaultResult> {
     if (!this.embedder.isConfigured) {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
+    }
+
+    if (!existsSync(vaultPath)) {
+      console.log(`[vault-indexer] Bóveda no encontrada en ${vaultPath}. Clonando de GitHub...`);
+      execSync(`git clone https://github.com/Coste-AR/costear-knowledge-base.git "${vaultPath}"`, { stdio: 'inherit' });
+    } else {
+      try {
+        console.log(`[vault-indexer] Actualizando bóveda en ${vaultPath}...`);
+        execSync('git pull', { cwd: vaultPath, stdio: 'ignore' });
+      } catch (err) {
+        console.warn('[vault-indexer] No se pudo hacer git pull, se usará la versión local.');
+      }
+    }
+
+    let vaultCommit = 'unknown';
+    try {
+      vaultCommit = execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch (e) {
+      console.warn('[vault-indexer] No se pudo obtener el commit actual del vault.');
     }
 
     const absoluteFiles = await listMarkdownFiles(vaultPath);

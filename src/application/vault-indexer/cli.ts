@@ -1,14 +1,5 @@
-import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { VaultIndexerService } from './vault-indexer-service.js';
-
-function getVaultCommit(vaultPath: string): string {
-  try {
-    return execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {
-    throw new Error(`${vaultPath} no es un repositorio Git válido. Verificá que sea un vault clonado correctamente.`);
-  }
-}
 
 async function main(): Promise<void> {
   const vaultPath = process.argv[2];
@@ -22,11 +13,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const vaultCommit = getVaultCommit(vaultPath);
-  console.log(`Indexando bóveda en ${vaultPath} (commit ${vaultCommit.slice(0, 7)})...`);
+  console.log(`Indexando bóveda en ${vaultPath}...`);
 
   const service = new VaultIndexerService();
-  const result = await service.indexVault(vaultPath, vaultCommit);
+  const result = await service.indexVault(vaultPath);
 
   console.log(`Archivos procesados: ${result.filesProcessed}`);
   console.log(`Chunks nuevos/actualizados: ${result.chunksUpserted}`);
