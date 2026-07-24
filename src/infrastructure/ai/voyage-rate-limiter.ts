@@ -12,7 +12,7 @@
  * no hace falta semáforo de concurrencia — solo retry con espera en 429.
  */
 
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 25;
 const RETRY_DELAY_MS = 21_000; // > 20s (ventana de 3 req/min sin billing)
 
 /**

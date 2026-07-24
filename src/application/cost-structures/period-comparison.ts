@@ -86,6 +86,15 @@ export interface MaterialDelta extends LineDelta {
   quantityEffect: number;
 }
 
+export interface MacroContrast {
+  indicatorCode: string;
+  indicatorLabel: string;
+  deltaPct: number;
+  monthsUsed: number;
+  /** Los snapshots mensuales que se compusieron, para que el número se pueda auditar a ojo. */
+  snapshots: { value: number; effectiveDate: string }[];
+}
+
 export interface PeriodComparison {
   from: PeriodRef;
   to: PeriodRef;
@@ -108,6 +117,7 @@ export interface PeriodComparison {
    */
   offsetting: boolean;
   warnings: string[];
+  macroContrast: MacroContrast | null;
 }
 
 export interface PeriodRef {
@@ -349,6 +359,7 @@ export function comparePeriods(from: PeriodSide, to: PeriodSide): PeriodComparis
     centers,
     offsetting,
     warnings,
+    macroContrast: null,
   };
 }
 

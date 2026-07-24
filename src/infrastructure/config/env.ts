@@ -35,6 +35,9 @@ const envSchema = z.object({
   // IA — Voyage AI (embeddings para indexar la bóveda de costeo)
   VOYAGE_API_KEY: z.string().min(1).default('voyage_placeholder'),
 
+  WHATSAPP_VERIFY_TOKEN: z.string().min(1).default('whatsapp_verify_placeholder'),
+  WHATSAPP_API_TOKEN: z.string().min(1).default('whatsapp_api_placeholder'),
+
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),
   INDEC_API_URL: z.string().url().default('https://apis.datos.gob.ar/series/api'),
   // dolarapi.com: API pública sin key para el dólar blue (el BCRA no lo publica).

@@ -13,6 +13,7 @@ export interface IndexVaultResult {
 }
 
 const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
+const BATCH_SIZE = 20;
 
 async function listMarkdownFiles(rootDir: string): Promise<string[]> {
   const result: string[] = [];
@@ -65,58 +66,65 @@ export class VaultIndexerService {
       filesWithErrors: [],
     };
 
+    const toEmbedQueue: { sourceFile: string; chunk: ReturnType<typeof chunkMarkdown>[number] }[] = [];
+    const maxChunksPerFile = new Map<string, number>();
+
+    // Fase 1: Identificar qué chunks cambiaron
     for (let i = 0; i < absoluteFiles.length; i++) {
       const absoluteFile = absoluteFiles[i]!;
       const sourceFile = relativeFiles[i]!;
       try {
-        await this.indexFile(absoluteFile, sourceFile, vaultCommit, result);
+        const rawContent = await readFile(absoluteFile, 'utf-8');
+        const chunks = chunkMarkdown(sourceFile, rawContent);
+        maxChunksPerFile.set(sourceFile, chunks.length);
+
+        const existing = await this.repo.listBySourceFile(sourceFile);
+        const existingByIndex = new Map(existing.map((e) => [e.chunkIndex, e.contentHash]));
+
+        const toEmbed = chunks.filter((c) => existingByIndex.get(c.chunkIndex) !== c.contentHash);
+        result.chunksSkippedUnchanged += chunks.length - toEmbed.length;
+
+        for (const chunk of toEmbed) {
+          toEmbedQueue.push({ sourceFile, chunk });
+        }
         result.filesProcessed++;
       } catch (err) {
-        console.error(`[vault-indexer] Error indexando ${sourceFile}:`, err);
+        console.error(`[vault-indexer] Error leyendo ${sourceFile}:`, err);
         result.filesWithErrors.push(sourceFile);
       }
     }
 
-    result.chunksDeleted += await this.repo.deleteOrphanChunks(relativeFiles);
-
-    return result;
-  }
-
-  private async indexFile(
-    absoluteFile: string,
-    sourceFile: string,
-    vaultCommit: string,
-    result: IndexVaultResult,
-  ): Promise<void> {
-    const rawContent = await readFile(absoluteFile, 'utf-8');
-    const chunks = chunkMarkdown(sourceFile, rawContent);
-    const existing = await this.repo.listBySourceFile(sourceFile);
-    const existingByIndex = new Map(existing.map((e) => [e.chunkIndex, e.contentHash]));
-
-    const toEmbed = chunks.filter((c) => existingByIndex.get(c.chunkIndex) !== c.contentHash);
-    result.chunksSkippedUnchanged += chunks.length - toEmbed.length;
-
-    if (toEmbed.length > 0) {
-      const embeddings = await this.embedder.embed(toEmbed.map((c) => c.content), 'document');
+    // Fase 2: Embeddear en batches
+    for (let i = 0; i < toEmbedQueue.length; i += BATCH_SIZE) {
+      const batch = toEmbedQueue.slice(i, i + BATCH_SIZE);
+      const embeddings = await this.embedder.embed(batch.map((item) => item.chunk.content), 'document');
+      
       if (!embeddings) {
-        throw new Error(`Voyage no devolvió embeddings para ${sourceFile}`);
+        throw new Error('Voyage no devolvió embeddings para un lote de chunks');
       }
-      for (let i = 0; i < toEmbed.length; i++) {
-        const chunk = toEmbed[i]!;
+
+      for (let j = 0; j < batch.length; j++) {
+        const item = batch[j]!;
         await this.repo.upsertChunk({
-          sourceFile,
-          sourceTitle: chunk.sourceTitle,
-          headingPath: chunk.headingPath,
-          content: chunk.content,
-          contentHash: chunk.contentHash,
-          chunkIndex: chunk.chunkIndex,
+          sourceFile: item.sourceFile,
+          sourceTitle: item.chunk.sourceTitle,
+          headingPath: item.chunk.headingPath,
+          content: item.chunk.content,
+          contentHash: item.chunk.contentHash,
+          chunkIndex: item.chunk.chunkIndex,
           vaultCommit,
-          embedding: embeddings[i]!,
+          embedding: embeddings[j]!,
         });
         result.chunksUpserted++;
       }
     }
 
-    result.chunksDeleted += await this.repo.deleteChunksBeyondIndex(sourceFile, chunks.length - 1);
+    // Fase 3: Limpiar chunks viejos
+    for (const [sourceFile, totalChunks] of maxChunksPerFile.entries()) {
+      result.chunksDeleted += await this.repo.deleteChunksBeyondIndex(sourceFile, totalChunks - 1);
+    }
+    result.chunksDeleted += await this.repo.deleteOrphanChunks(relativeFiles);
+
+    return result;
   }
 }

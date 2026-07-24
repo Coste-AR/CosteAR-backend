@@ -15,6 +15,8 @@
 
 import { getEnv } from '../config/env.js';
 import { groqFetch } from './groq-rate-limiter.js';
+import { getRedisClient } from '../redis/client.js';
+import { createHash } from 'node:crypto';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const TEXT_MODEL   = 'llama-3.3-70b-versatile';
@@ -140,6 +142,23 @@ Variables macro actuales: ${macroSummary}`;
       ...conversationHistory.slice(-6), // últimos 3 intercambios
     ];
 
+    const cacheKey = `costear:rag:cache:${createHash('sha256').update(JSON.stringify(messages)).digest('hex')}`;
+    const redis = getRedisClient();
+
+    try {
+      if (redis.status === 'ready') {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached) as CostitaChatResponse;
+          // Anotar en un log (stdout por ahora) que se usó caché
+          console.log(`[groq-costista-chat] Cache hit para key ${cacheKey}`);
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('[groq-costista-chat] Redis cache error:', e);
+    }
+
     try {
       const res = await groqFetch(GROQ_API_URL, {
         method: 'POST',
@@ -171,6 +190,15 @@ Variables macro actuales: ${macroSummary}`;
         if (!valid) {
           parsed.proposedEntry.companyId = '';
         }
+      }
+
+      // Guardar en caché por 24h
+      try {
+        if (redis.status === 'ready') {
+          await redis.setex(cacheKey, 86400, JSON.stringify(parsed));
+        }
+      } catch (e) {
+        console.warn('[groq-costista-chat] Falló al guardar en caché:', e);
       }
 
       return parsed;

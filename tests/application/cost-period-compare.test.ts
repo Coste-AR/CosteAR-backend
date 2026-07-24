@@ -48,6 +48,8 @@ function period(o: {
   status?: 'OPEN' | 'CLOSED';
   snap?: ReturnType<typeof snapshot> | null;
   units?: number;
+  startDate?: Date;
+  endDate?: Date;
 }) {
   return {
     id: `per-${o.code}`,
@@ -57,11 +59,13 @@ function period(o: {
     label: o.label,
     status: o.status ?? 'CLOSED',
     resultSnapshot: o.snap ?? null,
-    rawMaterialConfig: { materials: [] },
-    directLaborConfig: {},
+    rawMaterialConfig: { materials: [{ id: 'm1', name: 'M1', unit: 'kg', expectedYield: 1, initialStock: { quantity: 0, unitCost: 0 }, initialStockQty: 0, initialStockValue: 0, stockPolicy: { type: 'FIFO', minConsumption: 1, maxConsumption: 1, minLeadTime: 1, maxLeadTime: 1, safetyStock: 1 }, wilson: { annualDemand: 1, orderCost: 1, holdingRate: 0.1, unitCost: 1, calculatedEOQ: 1 }, purchases: [], movements: [] }] },
+    directLaborConfig: { workingDays: { expected: 1, actual: 1, paid: 1, dailyHours: 1 }, itcs: { percentage: 0.1, type: 'CERTAIN' }, departments: [] },
     indirectCostConfig: { centers: [] },
     salesUnitPrice: 5000,
     salesQuantity: o.units ?? 100,
+    startDate: o.startDate ?? new Date(`${o.code}-01`),
+    endDate: o.endDate ?? new Date(`${o.code}-28`),
   };
 }
 
@@ -142,5 +146,60 @@ describe('COMPARAR períodos (servicio)', () => {
     const svc = new CostPeriodService(db as never);
 
     await expect(svc.compare(USER, STRUCTURE, '2026-06', '2026-06')).rejects.toThrow(/distintos/i);
+  });
+});
+
+describe('COMPARAR períodos — contraste macro', () => {
+  it('macroContrast va null si alguno de los dos períodos no está CLOSED (regla de oro: nunca datos parciales)', async () => {
+    const db = makeDb([
+      period({ code: '2026-06', label: 'Junio 2026', snap: null, status: 'OPEN' }),
+      mayo,
+    ]);
+    const mockMacro = { cumulativeInflation: vi.fn() };
+    const svc = new CostPeriodService(db as never, mockMacro as never);
+
+    const c = await svc.compare(USER, STRUCTURE);
+
+    expect(c.macroContrast).toBeNull();
+    expect(mockMacro.cumulativeInflation).not.toHaveBeenCalled();
+  });
+
+  it('macroContrast trae la inflación compuesta cuando los dos períodos están CLOSED', async () => {
+    const db = makeDb([junio, mayo]);
+    const mockMacro = {
+      cumulativeInflation: vi.fn().mockResolvedValue({
+        deltaPct: 10.25,
+        monthsUsed: 2,
+        snapshots: [
+          { value: 5, effectiveDate: new Date('2026-05-28') },
+          { value: 5, effectiveDate: new Date('2026-06-28') },
+        ],
+      }),
+    };
+    const svc = new CostPeriodService(db as never, mockMacro as never);
+
+    const c = await svc.compare(USER, STRUCTURE);
+
+    expect(mockMacro.cumulativeInflation).toHaveBeenCalledWith(mayo.endDate, junio.endDate);
+    expect(c.macroContrast).toEqual({
+      indicatorCode: 'IPC_NACIONAL',
+      indicatorLabel: 'Inflación nacional (IPC)',
+      deltaPct: 10.25,
+      monthsUsed: 2,
+      snapshots: [
+        { value: 5, effectiveDate: '2026-05-28' },
+        { value: 5, effectiveDate: '2026-06-28' },
+      ],
+    });
+  });
+
+  it('sin datos de IPC en el rango, macroContrast es null aunque los dos períodos estén CLOSED', async () => {
+    const db = makeDb([junio, mayo]);
+    const mockMacro = { cumulativeInflation: vi.fn().mockResolvedValue(null) };
+    const svc = new CostPeriodService(db as never, mockMacro as never);
+
+    const c = await svc.compare(USER, STRUCTURE);
+
+    expect(c.macroContrast).toBeNull();
   });
 });

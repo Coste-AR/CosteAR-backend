@@ -80,7 +80,7 @@ model User {
   traceAuditLogs TraceAuditLog[]
 
   // Nightly Learning Pipeline
-  dailySignals   DailySignal[]
+  dailySignals DailySignal[]
 
   // Chat de consulta a la bóveda (admin RAG chat)
   vaultChatSessions VaultChatSession[]
@@ -147,9 +147,28 @@ model Company {
   alerts             Alert[]
   empresaConnections EmpresaConnection[]
   costPeriods        CostPeriod[]
+  targetBudget       CompanyTargetBudget?
 
   @@index([userId])
   @@map("companies")
+}
+
+// ---------------------------------------------------------------------------
+// Objetivos de la Empresa (Target Budget)
+// ---------------------------------------------------------------------------
+
+model CompanyTargetBudget {
+  id              String   @id @default(uuid()) @db.Uuid
+  companyId       String   @unique @db.Uuid
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rawMaterialsPct Float    @default(0) // Porcentaje deseado para materia prima/insumos
+  laborPct        Float    @default(0) // Porcentaje deseado para mano de obra
+  cifPct          Float    @default(0) // Porcentaje deseado para costos indirectos
+  marginPct       Float    @default(0) // Porcentaje deseado de ganancia neta
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("company_target_budgets")
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +202,9 @@ enum CostingSystem {
 // un byte. Se limpian recién cuando todo esté probado.
 // ---------------------------------------------------------------------------
 
-/** Ritmo de costeo de la empresa. */
+/**
+ * Ritmo de costeo de la empresa.
+ */
 enum Periodicity {
   MONTHLY
   BIWEEKLY
@@ -203,11 +224,17 @@ model CostPeriod {
   company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   userId      String        @db.Uuid // denormalizado para RLS
 
-  /** Código estable y ordenable: "2026-07" | "2026-07-Q1" (quincena) | "2026-Q3". */
-  code  String
-  /** Cómo se muestra en pantalla: "Julio 2026". */
-  label String
-  /** Límites reales del período (los usa la imputación de documentos por fecha). */
+  /**
+   * Código estable y ordenable: "2026-07" | "2026-07-Q1" (quincena) | "2026-Q3".
+   */
+  code      String
+  /**
+   * Cómo se muestra en pantalla: "Julio 2026".
+   */
+  label     String
+  /**
+   * Límites reales del período (los usa la imputación de documentos por fecha).
+   */
   startDate DateTime @db.Date
   endDate   DateTime @db.Date
 
@@ -218,7 +245,9 @@ model CostPeriod {
   directLaborConfig  Json?
   indirectCostConfig Json?
   salesUnitPrice     Decimal? @db.Decimal(18, 4)
-  /** Unidades VENDIDAS: con esto se factura (precio × cantidad) y sale el margen. */
+  /**
+   * Unidades VENDIDAS: con esto se factura (precio × cantidad) y sale el margen.
+   */
   salesQuantity      Decimal? @db.Decimal(18, 4)
   /**
    * Unidades PRODUCIDAS: con esto se saca el COSTO UNITARIO.
@@ -275,10 +304,14 @@ model CostStructure {
   indirectCostConfig Json?
 
   // Datos de venta para el cálculo de margen.
-  salesUnitPrice Decimal? @db.Decimal(18, 4)
-  /** Unidades VENDIDAS (facturación y margen). */
-  salesQuantity  Decimal? @db.Decimal(18, 4)
-  /** Unidades PRODUCIDAS (costo unitario). Si no está, se cae a las vendidas. */
+  salesUnitPrice     Decimal? @db.Decimal(18, 4)
+  /**
+   * Unidades VENDIDAS (facturación y margen).
+   */
+  salesQuantity      Decimal? @db.Decimal(18, 4)
+  /**
+   * Unidades PRODUCIDAS (costo unitario). Si no está, se cae a las vendidas.
+   */
   productionQuantity Decimal? @db.Decimal(18, 4)
 
   createdAt DateTime  @default(now())
@@ -418,6 +451,7 @@ model EmpresaConnection {
   costistId String   @db.Uuid
   costist   User     @relation("costist_connections", fields: [costistId], references: [id], onDelete: Cascade)
   apiKey    String   @unique @default(uuid()) // clave para que la empresa suba datos
+  whatsappPhoneNumber String?  @unique // formato E.164, ej "5493815551234". Null si no usa este canal.
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -983,7 +1017,7 @@ model VaultChunk {
 
 enum DailySignalSource {
   PIPELINE_NOCTURNO // El motor viejo, extrae conceptos del CostLedger
-  COSTISTA_CHAT     // Señales originadas en el chat con Costita (e.g., fallas)
+  COSTISTA_CHAT // Señales originadas en el chat con Costita (e.g., fallas)
   VALIDACIONES_CORRECCION // Cuando un humano corrige al LLM en una validación (Admin)
 }
 
@@ -1005,8 +1039,8 @@ model DailySignal {
   type      DailySignalType
   source    DailySignalSource @default(PIPELINE_NOCTURNO)
   status    DailySignalStatus @default(PENDING)
-  content   String            // Texto del reporte, de la pregunta (miss) o del JSON de corrección
-  context   Json?             // Metadata extra (ej. rubro de la empresa, query original)
+  content   String // Texto del reporte, de la pregunta (miss) o del JSON de corrección
+  context   Json? // Metadata extra (ej. rubro de la empresa, query original)
   userId    String?           @db.Uuid
   user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime          @default(now())
@@ -1017,11 +1051,11 @@ model DailySignal {
 }
 
 model VaultEditProposal {
-  id            String   @id @default(uuid()) @db.Uuid
-  title         String   // Título breve de la mejora (para listar en la UI)
-  sourceFile    String   // A qué archivo del vault aplicaría
-  proposedText  String   // El texto sugerido para agregar/reemplazar (en markdown)
-  justification String   // Razón generada por la IA
+  id            String            @id @default(uuid()) @db.Uuid
+  title         String // Título breve de la mejora (para listar en la UI)
+  sourceFile    String // A qué archivo del vault aplicaría
+  proposedText  String // El texto sugerido para agregar/reemplazar (en markdown)
+  justification String // Razón generada por la IA
   status        DailySignalStatus @default(PENDING) // PENDING -> PROCESSED (Aprobado) o REJECTED
 
   // true si el LLM tuvo que redactar proposedText desde su propio conocimiento
@@ -1032,12 +1066,12 @@ model VaultEditProposal {
   requiresVerification Boolean @default(true)
 
   // Array de IDs de las señales que justificaron esta propuesta (trazabilidad)
-  signalsUsed   String[] @db.Uuid
+  signalsUsed String[] @db.Uuid
 
-  reviewedAt    DateTime?
-  reviewedBy    String?  @db.Uuid
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  reviewedAt DateTime?
+  reviewedBy String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([status])
   @@map("vault_edit_proposals")

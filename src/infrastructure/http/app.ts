@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import { Redis } from 'ioredis';
+import { getRedisClient } from '../redis/client.js';
 import { getEnv } from '../config/env.js';
 import { errorHandler } from './error-handler.js';
 import { registerAuthRoutes } from './routes/auth.routes.js';
@@ -25,6 +25,8 @@ import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 import { registerVaultRoutes } from './routes/vault.routes.js';
 import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
+import { registerBenchmarkRoutes } from './routes/benchmark.routes.js';
+import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -100,15 +102,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   if (env.NODE_ENV !== 'test') {
     // retryStrategy: null → falla inmediato si no hay conexión, no reintenta.
     // connectTimeout: 4 000 ms → no bloquea el startup indefinidamente.
-    const redis = new Redis(env.REDIS_URL, {
-      maxRetriesPerRequest: 0,
-      retryStrategy: () => null,
-      lazyConnect: true,
-      connectTimeout: 4_000,
-    });
-    await redis.connect().catch(() => {
-      app.log.warn('Redis no disponible: rate limit usará memoria local');
-    });
+    const redis = getRedisClient();
     await app.register(rateLimit, {
       global: true,
       max: 120,
@@ -141,6 +135,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   }
 
+  // --- Webhooks ---
+  await app.register(registerWhatsappRoutes);
+
   // --- Rutas de la API (versionadas) ---
   const prefix = `/api/${env.API_VERSION}`;
   await app.register(
@@ -154,6 +151,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerUserRoutes(api);
       await registerValidacionesRoutes(api);
       await registerEmpresaPortalRoutes(api);
+      await registerBenchmarkRoutes(api);
       await registerCostitaChatRoutes(api);
       await registerAdvisorRoutes(api);
       await registerTrazabilidadRoutes(api);

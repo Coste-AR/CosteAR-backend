@@ -67,6 +67,24 @@ export class EmpresaConnectionService {
     await this.db.empresaConnection.delete({ where: { id: connectionId } });
   }
 
+  async setWhatsappNumber(costistId: string, connectionId: string, phoneNumber: string) {
+    const conn = await this.db.empresaConnection.findFirst({
+      where: { id: connectionId, costistId },
+    });
+    if (!conn) throw new NotFoundError('Conexión no encontrada');
+
+    return this.db.empresaConnection.update({
+      where: { id: connectionId },
+      data: { whatsappPhoneNumber: phoneNumber },
+    });
+  }
+
+  async findByWhatsappNumber(phoneNumber: string) {
+    return this.db.empresaConnection.findUnique({
+      where: { whatsappPhoneNumber: phoneNumber, isActive: true },
+    });
+  }
+
   /**
    * Endpoint público: la empresa sube un dato usando su apiKey.
    * No requiere JWT — usa la apiKey embebida.

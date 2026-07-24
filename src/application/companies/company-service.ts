@@ -6,6 +6,8 @@ import type {
   CreateCompanyInput,
   UpdateCompanyInput,
 } from '../../shared/schemas/company.schema.js';
+import { PREDEFINED_INDUSTRIES } from '../../shared/schemas/company.schema.js';
+import type { UpdateTargetBudgetInput } from '../../shared/schemas/target-budget.schema.js';
 
 /**
  * Gestión de la cartera de PyMEs del costista.
@@ -42,6 +44,23 @@ export class CompanyService {
         periodicity: input.periodicity ?? 'MONTHLY',
       },
     });
+
+    // Pipeline de aprendizaje (Fase 1): Si el rubro no es uno de los predefinidos y no está vacío,
+    // es un rubro manual ingresado por el usuario ("Otro").
+    // Disparamos una DailySignal inmediata para procesarlo.
+    if (input.industry && !PREDEFINED_INDUSTRIES.includes(input.industry)) {
+      await this.db.dailySignal.create({
+        data: {
+          type: 'IMPROVEMENT_REPORT',
+          source: 'PIPELINE_NOCTURNO',
+          status: 'PENDING',
+          content: `Nuevo rubro detectado: ${input.industry}`,
+          context: { action: 'NEW_INDUSTRY', industry: input.industry, companyId: company.id },
+          userId,
+        }
+      });
+    }
+
     await recordAudit(
       { ...ctx, userId, action: 'company.create', entityType: 'Company', entityId: company.id, newValue: input },
       this.db,
@@ -97,5 +116,52 @@ export class CompanyService {
       { ...ctx, userId, action: 'company.delete', entityType: 'Company', entityId: id },
       this.db,
     );
+  }
+
+  // --- Target Budget (Objetivos de la Empresa) ---
+
+  async getTargetBudget(userId: string, companyId: string) {
+    await this.getById(userId, companyId); // Validar pertenencia
+    
+    let budget = await this.db.companyTargetBudget.findUnique({
+      where: { companyId }
+    });
+
+    // Crear por defecto si no existe
+    if (!budget) {
+      budget = await this.db.companyTargetBudget.create({
+        data: { companyId }
+      });
+    }
+
+    return budget;
+  }
+
+  async updateTargetBudget(userId: string, companyId: string, input: UpdateTargetBudgetInput, ctx: AuditContext) {
+    await this.getById(userId, companyId); // Validar pertenencia
+
+    const budget = await this.db.companyTargetBudget.upsert({
+      where: { companyId },
+      create: {
+        companyId,
+        rawMaterialsPct: input.rawMaterialsPct,
+        laborPct: input.laborPct,
+        cifPct: input.cifPct,
+        marginPct: input.marginPct,
+      },
+      update: {
+        rawMaterialsPct: input.rawMaterialsPct,
+        laborPct: input.laborPct,
+        cifPct: input.cifPct,
+        marginPct: input.marginPct,
+      }
+    });
+
+    await recordAudit(
+      { ...ctx, userId, action: 'company.update_budget', entityType: 'CompanyTargetBudget', entityId: budget.id, newValue: input },
+      this.db,
+    );
+
+    return budget;
   }
 }

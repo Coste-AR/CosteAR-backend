@@ -1,5 +1,6 @@
 import type { PrismaClient, MacroSource } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
+import { Decimal } from 'decimal.js';
 import { runCalculation, type CalculationInput } from '../../domain/calculations/calculate.js';
 import {
   rawMaterialSectionSchema,
@@ -63,6 +64,36 @@ export class MacroService {
       orderBy: { effectiveDate: 'asc' },
       take: 500,
     });
+  }
+
+  /**
+   * Inflación NACIONAL acumulada entre dos fechas, componiendo las tasas
+   * mensuales de IPC_NACIONAL (no las suma: dos meses al 5% dan 10.25%, no 10%).
+   *
+   * Devuelve null si no hay NINGÚN snapshot de IPC en el rango — nunca se
+   * inventa un número ni se aproxima con datos parciales silenciosos.
+   */
+  async cumulativeInflation(
+    from: Date,
+    to: Date,
+  ): Promise<{ deltaPct: number; monthsUsed: number; snapshots: { value: number; effectiveDate: Date }[] } | null> {
+    const rows = await this.db.macroSnapshot.findMany({
+      where: { indicatorCode: 'IPC_NACIONAL', effectiveDate: { gte: from, lte: to } },
+      orderBy: { effectiveDate: 'asc' },
+    });
+
+    if (rows.length === 0) return null;
+
+    let factor = new Decimal(1);
+    for (const row of rows) {
+      factor = factor.times(new Decimal(1).plus(new Decimal(row.value.toString()).dividedBy(100)));
+    }
+
+    return {
+      deltaPct: factor.minus(1).times(100).toDecimalPlaces(2, Decimal.ROUND_HALF_EVEN).toNumber(),
+      monthsUsed: rows.length,
+      snapshots: rows.map((r) => ({ value: Number(r.value), effectiveDate: r.effectiveDate })),
+    };
   }
 
   /**
