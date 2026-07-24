@@ -9,7 +9,7 @@ const createAdminSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   name: z.string().min(2),
-  role: z.enum(['ADMIN', 'COSTISTA', 'EMPRESA_OPERATOR']).default('ADMIN')
+  role: z.literal('ADMIN').default('ADMIN')
 });
 
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
