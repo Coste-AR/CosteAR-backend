@@ -5,6 +5,7 @@ import { VaultQueryService } from '../../../application/vault-query/vault-query-
 import { authenticate, requireRole } from '../plugins/authenticate.js';
 import { prisma } from '../../database/prisma.js';
 import { GroqService } from '../../ai/groq-service.js';
+import { UnprocessableEntityError } from '../../../domain/errors/domain-error.js';
 
 const vaultQuerySchema = z.object({
   question: z.string().min(3).max(1000)
@@ -147,15 +148,19 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     
     const vaultPath = process.env.VAULT_PATH || '../CosteAR-vault';
     const resolvedVaultPath = path.resolve(vaultPath);
-    let vaultCommit = 'unknown';
-    try {
-      vaultCommit = execSync('git rev-parse HEAD', { cwd: resolvedVaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch (e) {
-      console.warn('No se pudo obtener el commit para indexación manual.');
-    }
-    
     const indexer = new VaultIndexerService();
-    const result = await indexer.indexVault(resolvedVaultPath, vaultCommit);
-    return reply.status(200).send({ data: result });
+    try {
+      const result = await indexer.indexVault(resolvedVaultPath);
+      return reply.status(200).send({ data: result });
+    } catch (err) {
+      // Este endpoint es solo-admin (requireRole('ADMIN') arriba): a diferencia
+      // del resto de la API, acá SÍ tiene sentido que el motivo real del fallo
+      // llegue al panel — es información operativa para quien mantiene el
+      // sistema, no un dato sensible de un tenant. Sin esto, cualquier falla acá
+      // (rate limit de Voyage, git clone caído, etc.) se ve en el admin como un
+      // "Error interno del servidor" genérico y sin ninguna pista de qué pasó.
+      const message = err instanceof Error ? err.message : 'Error desconocido al reindexar la bóveda';
+      throw new UnprocessableEntityError(message);
+    }
   });
 }

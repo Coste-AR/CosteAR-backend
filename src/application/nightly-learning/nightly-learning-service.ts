@@ -187,17 +187,10 @@ export class NightlyLearningService {
     try {
       console.info('[nightly-learning] Iniciando reindexación automática de la Bóveda...');
       const { VaultIndexerService } = await import('../vault-indexer/vault-indexer-service.js');
-      const { execSync } = await import('node:child_process');
       const vaultPath = process.env.VAULT_PATH || '../CosteAR-vault';
       const resolvedVaultPath = path.resolve(vaultPath);
-      let vaultCommit = 'unknown';
-      try {
-        vaultCommit = execSync('git rev-parse HEAD', { cwd: resolvedVaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-      } catch (e) {
-        console.warn('[nightly-learning] No se pudo obtener el commit para indexación.');
-      }
       const indexer = new VaultIndexerService();
-      const indexResult = await indexer.indexVault(resolvedVaultPath, vaultCommit);
+      const indexResult = await indexer.indexVault(resolvedVaultPath);
       console.info(`[nightly-learning] Reindexación completada: ${indexResult.chunksUpserted} chunks nuevos/actualizados.`);
     } catch (err) {
       console.error('[nightly-learning] Error en la reindexación nocturna:', err);

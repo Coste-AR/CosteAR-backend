@@ -74,15 +74,8 @@ export class ProposalService {
     // 4. Disparar el indexador en segundo plano
     try {
       const indexer = new VaultIndexerService();
-      let vaultCommit = 'unknown';
-      try {
-        vaultCommit = execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-      } catch (e) {
-        console.warn('No se pudo obtener el commit para indexación.');
-      }
-      
       // Lanzamos la indexación sin await para no frenar la respuesta HTTP
-      indexer.indexVault(resolvedVaultPath, vaultCommit)
+      indexer.indexVault(resolvedVaultPath)
         .then(res => console.log(`[Auto-Index] Bóveda reindexada: ${res.chunksUpserted} chunks nuevos/actualizados.`))
         .catch(err => console.error('[Auto-Index] Error reindexando bóveda:', err));
     } catch (err) {

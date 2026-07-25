@@ -1,5 +1,7 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { execSync } from 'node:child_process';
 import { chunkMarkdown } from './markdown-chunker.js';
 import { PrismaVaultChunkRepository, type VaultChunkRepository } from './vault-chunk-repository.js';
 import { VoyageService, type Embedder } from '../../infrastructure/ai/voyage-service.js';
@@ -10,10 +12,25 @@ export interface IndexVaultResult {
   chunksSkippedUnchanged: number;
   chunksDeleted: number;
   filesWithErrors: string[];
+  /** Diagnóstico: dónde miró y qué encontró, para depurar sin acceso a los logs del server. */
+  debug: {
+    vaultPath: string;
+    hadGitFolder: boolean;
+    vaultCommit: string;
+    totalFilesFound: number;
+  };
 }
 
 const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
 const BATCH_SIZE = 20;
+
+// Módulo-nivel a propósito: hay varios disparadores de indexVault que corren
+// en el mismo proceso (botón manual del admin, cron nocturno, aprobar una
+// propuesta) y todos comparten el mismo cupo de rate limit de Voyage (3
+// req/min sin billing). Si dos corridas se superponen, ninguna de las dos
+// termina nunca — cada una le come el cupo a la otra. Un flag por instancia
+// no alcanza porque cada caller crea su propio `new VaultIndexerService()`.
+let indexingInProgress = false;
 
 async function listMarkdownFiles(rootDir: string): Promise<string[]> {
   const result: string[] = [];
@@ -41,9 +58,60 @@ export class VaultIndexerService {
     private readonly embedder: Embedder = new VoyageService(),
   ) {}
 
-  async indexVault(vaultPath: string, vaultCommit: string): Promise<IndexVaultResult> {
+  async indexVault(vaultPath: string): Promise<IndexVaultResult> {
+    if (indexingInProgress) {
+      throw new Error(
+        'Ya hay una indexación en curso (disparada por otro botón, otra pestaña, o el cron nocturno). ' +
+          'Esperá a que termine antes de reintentar — correr dos al mismo tiempo compite por el mismo ' +
+          'límite de tasa de Voyage y hace que ninguna de las dos termine nunca.',
+      );
+    }
+    indexingInProgress = true;
+
+    try {
+      return await this.doIndexVault(vaultPath);
+    } finally {
+      indexingInProgress = false;
+    }
+  }
+
+  private async doIndexVault(vaultPath: string): Promise<IndexVaultResult> {
     if (!this.embedder.isConfigured) {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
+    }
+
+    const cloneUrl = 'https://github.com/Coste-AR/costear-knowledge-base.git';
+    const hadGitFolder = existsSync(join(vaultPath, '.git')); // estado ANTES de tocar nada, para diagnóstico
+
+    if (!existsSync(vaultPath)) {
+      console.log(`[vault-indexer] Bóveda no encontrada en ${vaultPath}. Clonando de GitHub...`);
+      execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
+    } else if (hadGitFolder) {
+      try {
+        console.log(`[vault-indexer] Actualizando bóveda en ${vaultPath}...`);
+        execSync('git pull', { cwd: vaultPath, stdio: 'inherit' });
+      } catch (err) {
+        // Hay un .git pero el pull falla: checkout corrupto o divergido (clone
+        // previo interrumpido a mitad de camino, disco efímero de Railway
+        // reseteado entre deploys, etc.). Seguir con lo que haya en disco es
+        // EXACTAMENTE lo que deja la bóveda pegada en un puñado de archivos
+        // viejos sin que nadie se entere — se borra el checkout entero y se
+        // clona de cero en vez de usarlo a ciegas.
+        console.warn(`[vault-indexer] git pull falló en ${vaultPath} (checkout roto). Reclonando de cero...`);
+        await rm(vaultPath, { recursive: true, force: true });
+        execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
+      }
+    } else {
+      // El directorio existe pero no es un checkout git (típico en tests, o si
+      // el vault se provee por otro medio) — se usa el contenido tal cual está.
+      console.log(`[vault-indexer] ${vaultPath} no tiene .git — se usa el contenido tal cual está.`);
+    }
+
+    let vaultCommit = 'unknown';
+    try {
+      vaultCommit = execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch (e) {
+      console.warn('[vault-indexer] No se pudo obtener el commit actual del vault.');
     }
 
     const absoluteFiles = await listMarkdownFiles(vaultPath);
@@ -58,12 +126,30 @@ export class VaultIndexerService {
     }
     const relativeFiles = absoluteFiles.map((f) => relative(vaultPath, f).replace(/\\/g, '/'));
 
+    // Salvaguarda contra checkout parcial/roto: si el número de notas que
+    // encontramos ahora cayó drásticamente contra lo que YA está indexado,
+    // no es "el equipo borró contenido" — es un clone/pull incompleto (disco
+    // lleno, corte de red a mitad del `git clone`, deploy interrumpido). Sin
+    // esto, la Fase 3 de abajo trataría cada nota "faltante" como huérfana y
+    // borraría la bóveda entera por un problema de infraestructura, no de
+    // contenido real.
+    const alreadyIndexed = await this.repo.countDistinctSourceFiles();
+    if (alreadyIndexed > 5 && relativeFiles.length < alreadyIndexed * 0.5) {
+      throw new Error(
+        `Se encontraron solo ${relativeFiles.length} notas en ${vaultPath}, pero la bóveda indexada tiene ` +
+          `${alreadyIndexed} archivos distintos. Parece un checkout parcial o incompleto del vault (git clone/pull ` +
+          `cortado a mitad de camino), no una limpieza real de contenido — por seguridad no se borra nada. ` +
+          `Verificá el checkout en ${vaultPath} y reintentá.`,
+      );
+    }
+
     const result: IndexVaultResult = {
       filesProcessed: 0,
       chunksUpserted: 0,
       chunksSkippedUnchanged: 0,
       chunksDeleted: 0,
       filesWithErrors: [],
+      debug: { vaultPath, hadGitFolder, vaultCommit, totalFilesFound: absoluteFiles.length },
     };
 
     const toEmbedQueue: { sourceFile: string; chunk: ReturnType<typeof chunkMarkdown>[number] }[] = [];

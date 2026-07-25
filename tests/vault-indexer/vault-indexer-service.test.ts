@@ -19,6 +19,10 @@ class FakeRepository implements VaultChunkRepository {
       .map((c) => ({ chunkIndex: c.chunkIndex, contentHash: c.contentHash }));
   }
 
+  async countDistinctSourceFiles(): Promise<number> {
+    return new Set([...this.chunks.values()].map((c) => c.sourceFile)).size;
+  }
+
   async upsertChunk(input: UpsertChunkInput): Promise<void> {
     this.chunks.set(`${input.sourceFile}#${input.chunkIndex}`, input);
   }
@@ -162,6 +166,73 @@ describe('VaultIndexerService', () => {
     // vaultPath está vacío (mkdtemp recién creado, sin escribir ningún .md)
     await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('No se encontraron notas');
     expect(repo.chunks.size).toBe(0); // no llamó a deleteOrphanChunks([]) de forma destructiva
+  });
+
+  it('NO borra los chunks existentes si de golpe aparecen muchos menos archivos que los ya indexados (checkout parcial/roto)', async () => {
+    // Simula un vault sano con 10 notas, ya indexado (por encima del piso de
+    // la salvaguarda — con vaults chicos de pocas notas, un vaivén normal de
+    // contenido no debe disparar el error).
+    const NOTE_COUNT = 10;
+    for (let i = 0; i < NOTE_COUNT; i++) {
+      await writeFile(join(vaultPath, `nota-${i}.md`), `# Nota ${i}\n\nContenido ${i}.\n`, 'utf-8');
+    }
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const service = new VaultIndexerService(repo, embedder);
+
+    await service.indexVault(vaultPath, 'commit-1');
+    expect(repo.chunks.size).toBe(NOTE_COUNT); // 1 chunk por nota
+
+    // Simula un checkout parcial/roto: de las 10 notas, solo quedan 2 en disco
+    // (ej. un `git clone`/`git pull` que se cortó a mitad de camino en el
+    // deploy, dejando el working tree incompleto pero no vacío). El directorio
+    // SIGUE EXISTIENDO y SIGUE TENIENDO contenido, así que la salvaguarda de
+    // "vault vacío" no dispara.
+    for (let i = 2; i < NOTE_COUNT; i++) {
+      await rm(join(vaultPath, `nota-${i}.md`));
+    }
+
+    // No debe indexar "exitosamente" borrando las 8 notas restantes como si
+    // fueran eliminadas de verdad: eso destruiría 80% de la bóveda por un
+    // problema de infraestructura, no una limpieza real de contenido.
+    await expect(service.indexVault(vaultPath, 'commit-2')).rejects.toThrow(/checkout (parcial|incompleto)/i);
+    expect(repo.chunks.size).toBe(NOTE_COUNT); // nada se borró
+  });
+
+  it('rechaza un segundo indexVault mientras el primero todavía está corriendo (evita competir por el rate limit)', async () => {
+    await writeFile(join(vaultPath, 'a.md'), '# A\n\nContenido A.\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    // El embedder no resuelve hasta que el test lo libera explícitamente,
+    // simulando una llamada a Voyage que todavía está en el aire.
+    let releaseEmbed!: () => void;
+    const embedGate = new Promise<void>((resolve) => { releaseEmbed = resolve; });
+    const originalEmbed = embedder.embed.bind(embedder);
+    embedder.embed = async (texts: string[]) => {
+      await embedGate;
+      return originalEmbed(texts);
+    };
+    const service = new VaultIndexerService(repo, embedder);
+
+    const first = service.indexVault(vaultPath, 'commit-1'); // no await: queda "en vuelo"
+    await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow(/ya hay una indexación en curso/i);
+
+    releaseEmbed();
+    await first; // deja terminar al primero, para no dejar handles colgando entre tests
+  });
+
+  it('permite un indexVault nuevo una vez que el anterior ya terminó (incluso si falló)', async () => {
+    await writeFile(join(vaultPath, 'a.md'), '# A\n\nContenido A.\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    embedder.isConfigured = false; // fuerza que el primer intento falle rápido
+    const service = new VaultIndexerService(repo, embedder);
+
+    await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('VOYAGE_API_KEY');
+
+    embedder.isConfigured = true;
+    const result = await service.indexVault(vaultPath, 'commit-2'); // no debe seguir "trabado"
+    expect(result.chunksUpserted).toBe(1);
   });
 
   it('ignora el README.md de la raíz del vault (instrucciones del repo, no conocimiento)', async () => {
