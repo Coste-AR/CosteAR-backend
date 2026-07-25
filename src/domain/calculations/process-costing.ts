@@ -249,6 +249,201 @@ export function buildUnitMovementSchedule(input: UnitMovementInput): UnitMovemen
   };
 }
 
+/* ========================================================================== *
+ * COSTEO POR PROCESOS · PRODUCCIÓN EQUIVALENTE (B07)
+ * ========================================================================== */
+
+/**
+ * Elemento del costo (o agrupación) que encabeza una columna de la producción
+ * equivalente. La cátedra sigue tres elementos —MP (materia prima), MOD (mano
+ * de obra directa) y CIP (costos indirectos de producción)— y, cuando MOD y CIP
+ * comparten grado de avance, los unifica en una sola columna "Costo de
+ * Conversión (CC)".
+ */
+export type EquivalentProductionElement = 'MP' | 'MOD' | 'CIP' | 'CC';
+
+/**
+ * Una columna del cuadro de producción equivalente: un elemento del costo con
+ * el grado de avance que se aplicó a la existencia final y la producción
+ * realmente procesada (equivalente) resultante.
+ */
+export interface EquivalentProductionColumn {
+  /** Elemento (o agrupación CC) que encabeza la columna. */
+  element: EquivalentProductionElement;
+  /** Etiqueta de la cátedra, tal cual se muestra en la hoja de costos. */
+  label: string;
+  /** Grado de avance de la EF aplicado en esta columna, como FRACCIÓN (0.80 = 80 %). */
+  finalWipAvance: Decimal;
+  /** Producción realmente procesada (equivalente) del elemento, en unidades. */
+  equivalentUnits: Decimal;
+}
+
+/**
+ * Cuadro de producción equivalente resuelto: una columna por elemento del costo
+ * (dos si MOD y CIP van unificados en CC; tres si van separados), más las
+ * unidades que entran al 100 % —comunes a todas las columnas— para que el
+ * llamador arme la hoja de costos y verifique el cálculo.
+ */
+export interface EquivalentProductionSchedule {
+  /** Columnas en el orden de la cátedra: MP primero, luego CC o MOD/CIP. */
+  columns: EquivalentProductionColumn[];
+  /**
+   * Unidades computadas al 100 % en TODAS las columnas: terminadas y
+   * transferidas + terminadas en existencia + pérdidas extraordinarias (R2).
+   * Las pérdidas normales NO entran (R1).
+   */
+  unitsAtFullCompletion: Decimal;
+}
+
+/** Insumos comunes a las dos formas de agrupar la conversión. */
+interface EquivalentProductionInputBase {
+  /** Cuadro de movimiento de unidades ya resuelto (`buildUnitMovementSchedule`, B06). */
+  schedule: UnitMovementSchedule;
+  /**
+   * Grado de avance de la EF en Materia Prima, como FRACCIÓN. La MP se
+   * incorpora al inicio del proceso, así que por DEFAULT es 1 (100 %); se puede
+   * sobrescribir cuando la MP no está toda al inicio (R3).
+   */
+  mpAvance?: Decimal.Value;
+}
+
+/**
+ * Insumos de la producción equivalente. La forma de agrupar MOD y CIP la decide
+ * la configuración del departamento (`ProcessDepartment.defaultConversionAvanceEqualsMO`):
+ *
+ *  - `conversionUnified: true`  → MOD y CIP comparten avance ⇒ una sola columna
+ *    "Costo de Conversión (CC)".
+ *  - `conversionUnified: false` → avances distintos ⇒ columnas MOD y CIP separadas.
+ *
+ * Todos los grados de avance van como FRACCIÓN (0.80 = 80 %) por coherencia con
+ * `normalLossPct` del cuadro (B06).
+ */
+export type EquivalentProductionInput =
+  | (EquivalentProductionInputBase & {
+      conversionUnified: true;
+      /** Grado de avance de la EF en la conversión (MOD = CIP), como fracción. */
+      conversionAvance: Decimal.Value;
+    })
+  | (EquivalentProductionInputBase & {
+      conversionUnified: false;
+      /** Grado de avance de la EF en Mano de Obra Directa, como fracción. */
+      modAvance: Decimal.Value;
+      /** Grado de avance de la EF en Costos Indirectos de Producción, como fracción. */
+      cipAvance: Decimal.Value;
+    });
+
+/** Etiquetas de la cátedra para cada columna. */
+const ELEMENT_LABELS: Record<EquivalentProductionElement, string> = {
+  MP: 'Materia Prima (MP)',
+  MOD: 'Mano de Obra Directa (MOD)',
+  CIP: 'Costos Indirectos de Producción (CIP)',
+  CC: 'Costo de Conversión (CC)',
+};
+
+/**
+ * PRODUCCIÓN EQUIVALENTE de un departamento para un período (B07).
+ *
+ * Expresa, en términos de unidades terminadas, cuánto se procesó realmente en
+ * el período. Se computa UNA COLUMNA POR ELEMENTO DEL COSTO. Para cada columna:
+ *
+ *   Terminadas y transferidas   × 100 %
+ *   Terminadas en existencia    × 100 %
+ *   Pérdidas extraordinarias    × 100 %   (primero se terminan, después se pierden)
+ *   Existencia final (EF)       × (grado de avance de ESE elemento)
+ *   ─────────────────────────────────────
+ *   = Producción realmente procesada (equivalente) del elemento
+ *
+ * Reglas (source of truth: cátedra; ver DECISIONES.md B07):
+ *  - R1: las pérdidas NORMALES no entran (las absorben las unidades buenas).
+ *  - R2: las pérdidas EXTRAORDINARIAS sí entran, al 100 %.
+ *  - R3: la MP va al 100 % en la EF por default (se incorpora al inicio),
+ *        salvo que se informe otro `mpAvance`.
+ *  - R4: la EF es la ÚNICA fila multiplicada por un grado de avance; todas las
+ *        demás filas van al 100 %.
+ *
+ * Función PURA: sin Prisma, sin HTTP, sin servicios. Lanza `ProcessValidationError`
+ * (422) si algún grado de avance cae fuera de [0, 1] — nunca un 500 crudo.
+ *
+ * Caso ancla: Azur Alcoholes, Destilado, abril → MP 34.400 / CC 33.720.
+ */
+export function calcEquivalentProduction(
+  input: EquivalentProductionInput,
+): EquivalentProductionSchedule {
+  const { schedule } = input;
+
+  // --- Unidades al 100 %, comunes a todas las columnas (R1, R2, R4) ---
+  // Terminadas y transferidas + terminadas en existencia + pérdidas
+  // extraordinarias. Las pérdidas normales quedan afuera a propósito (R1).
+  const unitsAtFullCompletion = schedule.transferredOut
+    .plus(schedule.finishedInStock)
+    .plus(schedule.extraordinaryLoss);
+
+  const finalWip = schedule.finalWip;
+
+  // --- PE de un elemento = unidades al 100 % + EF × avance del elemento (R4) ---
+  const equivalentUnitsFor = (avance: Decimal): Decimal =>
+    unitsAtFullCompletion.plus(finalWip.times(avance));
+
+  // R3: MP al 100 % por default, overridable.
+  const mpAvance = validateAvance(withDefault(input.mpAvance, 1), 'materia prima', 'mpAvance');
+
+  const columns: EquivalentProductionColumn[] = [
+    {
+      element: 'MP',
+      label: ELEMENT_LABELS.MP,
+      finalWipAvance: mpAvance,
+      equivalentUnits: equivalentUnitsFor(mpAvance),
+    },
+  ];
+
+  if (input.conversionUnified) {
+    // MOD y CIP comparten avance ⇒ una sola columna "Costo de Conversión (CC)".
+    const ccAvance = validateAvance(new Decimal(input.conversionAvance), 'costo de conversión', 'conversionAvance');
+    columns.push({
+      element: 'CC',
+      label: ELEMENT_LABELS.CC,
+      finalWipAvance: ccAvance,
+      equivalentUnits: equivalentUnitsFor(ccAvance),
+    });
+  } else {
+    // Avances distintos ⇒ columnas MOD y CIP separadas.
+    const modAvance = validateAvance(new Decimal(input.modAvance), 'mano de obra directa', 'modAvance');
+    const cipAvance = validateAvance(new Decimal(input.cipAvance), 'costos indirectos de producción', 'cipAvance');
+    columns.push(
+      {
+        element: 'MOD',
+        label: ELEMENT_LABELS.MOD,
+        finalWipAvance: modAvance,
+        equivalentUnits: equivalentUnitsFor(modAvance),
+      },
+      {
+        element: 'CIP',
+        label: ELEMENT_LABELS.CIP,
+        finalWipAvance: cipAvance,
+        equivalentUnits: equivalentUnitsFor(cipAvance),
+      },
+    );
+  }
+
+  return { columns, unitsAtFullCompletion };
+}
+
+/**
+ * Un grado de avance es una FRACCIÓN en [0, 1]. Fuera de ese rango casi siempre
+ * significa que se cargó un porcentaje (80) en lugar de la fracción (0.80): se
+ * corta con un 422 accionable en vez de arrastrar un cálculo silenciosamente mal.
+ */
+function validateAvance(avance: Decimal, label: string, field: string): Decimal {
+  if (avance.lt(0) || avance.gt(1)) {
+    throw new ProcessValidationError(
+      `El grado de avance de ${label} (${avance.toString()}) debe estar entre 0 y 1 ` +
+        '(es una fracción: 0.80 = 80 %). Revisá el valor cargado.',
+      { field, avance: avance.toNumber() },
+    );
+  }
+  return avance;
+}
+
 /**
  * Un valor derivado por diferencia que sale negativo significa que las salidas
  * conocidas ya superan a las entradas: el cuadro es imposible.

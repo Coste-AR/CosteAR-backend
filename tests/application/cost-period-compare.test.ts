@@ -60,8 +60,25 @@ function period(o: {
     status: o.status ?? 'CLOSED',
     resultSnapshot: o.snap ?? null,
     rawMaterialConfig: { materials: [{ id: 'm1', name: 'M1', unit: 'kg', expectedYield: 1, initialStock: { quantity: 0, unitCost: 0 }, initialStockQty: 0, initialStockValue: 0, stockPolicy: { type: 'FIFO', minConsumption: 1, maxConsumption: 1, minLeadTime: 1, maxLeadTime: 1, safetyStock: 1 }, wilson: { annualDemand: 1, orderCost: 1, holdingRate: 0.1, unitCost: 1, calculatedEOQ: 1 }, purchases: [], movements: [] }] },
-    directLaborConfig: { workingDays: { expected: 1, actual: 1, paid: 1, dailyHours: 1 }, itcs: { percentage: 0.1, type: 'CERTAIN' }, departments: [] },
-    indirectCostConfig: { centers: [] },
+    // Config VÁLIDA por los esquemas actuales (post B40): un período OPEN se
+    // recalcula en la comparación (toSide → computeResult), así que la ficha
+    // tiene que parsear entera, no alcanza con un placeholder. Los períodos
+    // CLOSED leen su snapshot y no tocan estos configs.
+    directLaborConfig: {
+      workingDays: {
+        totalDaysPerYear: 365,
+        unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 0, holidaysOnWeekend: 0 },
+        paidAbsence: { holidays: 15, vacations: 14, sickness: 5, specialLeaves: 2, workAccidents: 0 },
+      },
+      itcs: { derivationBase: 0.23, fixedArt: 0.05, uncertainRemunerative: [], uncertainNonRemunerative: [] },
+      departments: [{ name: 'Corte', basicRemuneration: 800000, hoursWorked: 160 }],
+    },
+    indirectCostConfig: {
+      centers: [{ id: 'corte', name: 'Corte', type: 'productive' }],
+      concepts: [{ name: 'Alquiler', amount: { fixed: 300000, variable: 0 }, distribution: { corte: 40 } }],
+      serviceDistributions: [],
+      productiveSettings: [{ centerId: 'corte', normalCapacity: 160, actualActivity: 150, actualCip: 350000 }],
+    },
     salesUnitPrice: 5000,
     salesQuantity: o.units ?? 100,
     startDate: o.startDate ?? new Date(`${o.code}-01`),

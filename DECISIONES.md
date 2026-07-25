@@ -1598,3 +1598,83 @@ en el inicial, dos casos); R5 (desbalance, con la diferencia = 500 nombrada); R1
 **caso ancla de la cátedra (Azur Alcoholes, Destilado, abril)** que reproduce exactamente
 30.000 + 600 + 1.000 + 3.400 = 35.000. Suite completa: **518 passed / 1 skipped** (63 archivos), cero
 regresión. Sin migración, sin `prisma migrate dev` (B06 es dominio puro, no toca schema ni DB).
+
+## B07 — Dominio: `calcEquivalentProduction` (producción equivalente, función pura)
+
+Segundo paso del Costeo por Procesos, el más importante después del cuadro: la **producción equivalente**
+expresa, en términos de unidades terminadas, cuánto se procesó realmente en el período. Si sale mal, toda
+la hoja de costos sale mal. Vive en el **mismo archivo** que B06
+(`src/domain/calculations/process-costing.ts`), 100 % pura (sin Prisma, HTTP ni servicios), misma
+convención: `Decimal` de decimal.js, identificadores en inglés que calzan 1:1 con `UnitMovementSchedule`,
+JSDoc/comentarios/mensajes en español con terminología de la cátedra.
+
+**Toma el cuadro ya resuelto (`UnitMovementSchedule` de B06), no lo recalcula.** La entrada es el cuadro
+que devuelve `buildUnitMovementSchedule` más los grados de avance de la existencia final por elemento. Así
+las dos funciones componen sin duplicar la aritmética del cuadro, que es la que ya está testeada.
+
+**Una columna por elemento; el fórmula es la misma para todas.** Para cada columna:
+`terminadas y transferidas + terminadas en existencia + pérdidas extraordinarias` (todas al 100 %, es el
+campo `unitsAtFullCompletion`, común a todas las columnas) `+ EF × (grado de avance de ESE elemento)`.
+
+**Reglas implementadas (fuente de verdad = cátedra):**
+- **R1 — las pérdidas NORMALES no entran.** Las absorben las unidades buenas; no aparecen en ninguna
+  columna. Un test con pérdida normal grande (1.000) y EF = 0 lo fija: la PE es exactamente las terminadas
+  (9.000), no 10.000.
+- **R2 — las pérdidas EXTRAORDINARIAS sí entran, al 100 %.** La cátedra lo marca explícitamente como
+  fuente de error frecuente. Se suman dentro de `unitsAtFullCompletion`. Test de contraste: en la CC del
+  caso ancla, contarlas da 33.720 y no contarlas daría 32.720 — el delta es exactamente las 1.000
+  extraordinarias.
+- **R3 — la MP va al 100 % en la EF por default, overridable.** La materia prima se incorpora al inicio
+  del proceso, así que `mpAvance` es 1 por default; se puede sobrescribir cuando la MP no está toda al
+  inicio. Dos sub-casos en los tests: default (MP = 34.400) y override al 50 % (MP = 32.700).
+- **R4 — la EF es la ÚNICA fila multiplicada por un grado de avance.** Todas las demás filas van al 100 %.
+  Sale directo de la fórmula: solo `finalWip` se multiplica por el avance.
+
+**Agrupación de la conversión = flag del departamento, modelada como unión discriminada
+(`conversionUnified`).** `ProcessDepartment.defaultConversionAvanceEqualsMO` decide:
+`conversionUnified: true` → una sola columna **"Costo de Conversión (CC)"** (MOD y CIP comparten avance);
+`conversionUnified: false` → columnas separadas **MOD** y **CIP** con avances distintos. El tipo obliga a
+dar `conversionAvance` en el primer caso y `modAvance`/`cipAvance` en el segundo — imposible olvidarse un
+dato en tiempo de compilación.
+
+**"Costo primo" (MP+MOD agrupados) queda fuera de B07 — deferido a propósito.** La consigna lo menciona
+como agrupación posible, pero (a) ningún test lo pide, (b) el esquema de la DB solo distingue avance de MP
+y avance de Conversión para la EF (`finalWipMpAvance` / `finalWipConvAvance`), no un avance de MOD separado
+que habilite juntar MP+MOD, y (c) la decisión que sí codifica el modelo es CC-unificada vs. separada. Se
+implementa lo que el modelo soporta hoy (regla #8: default más simple que cumple el spec, documentado);
+costo primo llega cuando el modelo lo necesite.
+
+**"CIP" en el dominio, aunque la tabla diga "Cif".** La consigna (fuente de verdad) nombra los tres
+elementos MP / MOD / **CIP** (costos indirectos de producción). Se usan esas etiquetas de cátedra en el
+código nuevo; los campos de la tabla `UnitMovementSchedule` siguen diciendo `periodCostCif` /
+`finalWipConvAvance` (B04, no se tocan). El motor de Procesos (B17) mapea uno a otro.
+
+**Validación de grados de avance: fracción en [0, 1] o 422.** Un avance fuera de rango casi siempre es un
+porcentaje sin normalizar (80 en vez de 0.80). Se corta con `ProcessValidationError` (422, nunca 500)
+accionable, mismo criterio que `normalLossPct` en B06.
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 7 casos B07 (15 en total): caso
+ancla **Azur Alcoholes, Destilado, abril → MP 34.400 / CC 33.720 exacto**; R2 (extraordinarias al 100 %,
+con contraste 33.720 vs 32.720); R1 (normales excluidas); R3 (MP default 100 % y override); tres elementos
+separados con tres columnas distintas; y avance fuera de [0,1] → 422. Suite completa: **556 passed /
+1 skipped** (71 archivos), cero regresión. Sin migración, sin `prisma migrate dev` (dominio puro).
+
+**Re-sync con `origin/staging` + un test rojo pre-existente de staging.** Antes de empezar se mergeó
+`origin/staging` (rule #1c). Conflicto en `cost-period-service.ts`: solo texto de mensajes de alerta de
+anomalía — se tomó la redacción estandarizada de staging (`[Alerta de Anomalía: …]`) para no regresar su
+cambio intencional. Además, al correr la suite completa apareció **1 test rojo que ya venía roto en
+`origin/staging`** (probado: los archivos involucrados son byte-idénticos a staging): en
+`tests/application/cost-period-compare.test.ts`, el caso de `macroContrast` con un período **OPEN** fuerza
+el recálculo (`toSide → computeResult`), y el fixture de ese archivo traía un `directLaborConfig`/
+`indirectCostConfig` con forma vieja que ya no valida contra los esquemas actuales (post B40:
+`itcs.uncertainRemunerative`/`uncertainNonRemunerative` requeridos, `centers.min(1)`). Los períodos CLOSED
+leen su snapshot y nunca parsean esos configs, por eso el test pasaba antes de que staging agregara el caso
+OPEN. Fix **solo de datos de test** (sin tocar lógica de producto): se le dio al fixture un
+`directLaborConfig`/`indirectCostConfig` válido y recomputable, restaurando la intención del autor del test.
+Con eso la suite queda verde de punta a punta.
+
+**Nota de entorno (no es del código):** `tsc --noEmit` marca errores de cliente Prisma desactualizado
+(`companyTargetBudget`, `whatsappPhoneNumber`) que trajo el merge de staging; se arreglan con
+`prisma generate` (lo corre el script `build`), pero acá el `.dll` del query engine está tomado por un
+proceso node en ejecución (dev server) y el generate da `EPERM`. No se mató el proceso del usuario. El
+código nuevo de B07 es type-clean y toda la suite de tests pasa.
