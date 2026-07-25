@@ -1854,3 +1854,50 @@ por redondeo de $2 dentro de tolerancia que se acepta y registra; y las guardas 
 inicial no la lleva, depto. posterior sin ella → 422). Suite completa: **573 passed / 1 skipped** (71
 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev` (dominio puro,
 no toca schema ni DB).
+
+## B11 — Costos conjuntos: los 4 métodos de reparto (dominio puro)
+
+**Qué se hizo.** `src/domain/calculations/joint-costs.ts` (función pura, sin Prisma/HTTP/servicios): reparte
+el costo conjunto (MP + conversión acumulados hasta el punto de separación — el TODO) entre los productos que
+emergen en el punto de separación. Cuatro funciones con la MISMA firma `(products, jointCostTotal)` —
+`allocateByPhysicalUnits`, `allocateByTechnicalYield`, `allocateByMarketValue`, `allocateByNetRealizableValue`—
+y un dispatcher `allocateJointCosts(products, method, jointCostTotal)`. Ningún método es "el correcto": el
+usuario elige y cada uno da un costo unitario distinto. Nombres de campo alineados a `ByProductLine` (B05) para
+que el motor (B17) mapee sin traducir.
+
+**Diseño — núcleo compartido.** Los cuatro métodos difieren SOLO en la "base de reparto" de cada línea; el
+resto (participación = base ÷ Σ bases; asignado = participación × total; unitario = asignado ÷ unidades; y los
+dos controles) vive UNA sola vez en `allocate(...)`, al que cada método le pasa su `baseOf`. Evita divergencia
+entre métodos y garantiza firma/salida idénticas.
+
+**Ambigüedad resuelta (regla #8) — factor técnico sin `rawMaterialKg`.** El spec define kilos obtenidos(p) =
+kg MP × % rendimiento(p), pero los kg de MP son un FACTOR COMÚN a todas las líneas y se cancelan en la
+participación (kilos obtenidos ratio = rendimiento ratio). La firma fija de tres parámetros del dispatcher no
+lleva kg de MP, así que la base de reparto del método es directamente `yieldPct` (rendimiento). Da igual
+fracción o porcentaje mientras sea consistente entre líneas. Las `unitsObtained` de la línea son los kilos
+obtenidos y hacen de denominador del costo unitario. Reproduce las participaciones del ancla M2 exacto sin
+pedir un dato extra.
+
+**Diseño — controles de la cátedra como aserción dura.** `assertAllocationConsistency` verifica Σ
+participaciones = 100 % (tol. 1e-9) y Σ costos asignados = costo conjunto total (tol. $0,01). Se cumplen por
+construcción; la cota solo absorbe el residuo de redondeo al dividir. Que fallen sería un error de
+programación, no de datos. Validaciones de datos rotos (sí accionables, 422 `ProcessValidationError`, nunca un
+500): sin productos, unidades ≤ 0, costo conjunto negativo, falta un campo del método (precio/rendimiento),
+base total ≤ 0 (p. ej. todos los precios en 0) y VNR negativo (gastos de comercialización > valor de venta).
+
+**Casos ancla FX-J1 reproducidos EXACTO** (`tests/domain/joint-costs.test.ts`):
+- **M1 (unidades físicas):** costo conjunto $570.000; A 2.500 / B 3.000 / C 4.000 (buenas 9.500; desperdicio
+  500 NO se lista) → $60/kg → A $150.000, B $180.000, C $240.000. Control $570.000.
+- **M3 (valor de mercado):** $570.000; bases $300.000 / $510.000 / $900.000 (Σ $1.710.000) → A $100.000
+  ($40/kg), B $170.000 ($56,67/kg), C $300.000 ($75/kg). Control $570.000.
+- **M4 (VNR):** $110.000; var 3 % sobre valor de venta + fija $10/kg → VNR $56.200 / $113.400 / $190.000 (Σ
+  $359.600) → A $17.191,32 ($85,96/kg), B $34.688,54, C $58.120,13. Control $110.000. Nota: la cátedra imprime
+  el unitario de B/C redondeado a pesos enteros ($115 y $145); los tests comparan el asignado (que es el que
+  reproduce el ancla) y el unitario con la precisión que corresponde.
+- **M2 (factor técnico):** MP 1.000 kg; rendimientos 6 % / 0,50 % / 5 % → kilos 60/5/50 (Σ 115) →
+  participaciones 52,17 % / 4,35 % / 43,48 %; asignado = participación × costo conjunto total.
+
+**Verificación.** 10 casos nuevos: los 4 anclas + "los 4 métodos sobre el MISMO dataset dan costo unitario
+distinto" (los 4 unitarios de A son todos diferentes) + controles y datos rotos que lanzan 422. Suite completa:
+**583 passed / 1 skipped** (72 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma
+migrate dev` (dominio puro, no toca schema ni DB).
