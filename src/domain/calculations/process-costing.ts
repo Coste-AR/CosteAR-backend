@@ -114,6 +114,134 @@ function withDefault(value: Decimal.Value | undefined | null, fallback: number):
   return opt(value) ?? new Decimal(fallback);
 }
 
+/* ========================================================================== *
+ * COSTEO POR PROCESOS · PÉRDIDAS NORMALES Y EXTRAORDINARIAS (B08)
+ * ========================================================================== */
+
+/**
+ * Insumos para determinar las pérdidas de un departamento en un período. La
+ * base de la pérdida normal —las "unidades del período"— DIFIERE según la
+ * posición del departamento en la cadena (R1), así que necesitamos la secuencia
+ * y los drivers de cada posición. La pérdida extraordinaria NO se ingresa: se
+ * deriva (R2), por eso solo pedimos el % normal y la pérdida real total.
+ */
+export interface NormalAndExtraordinaryLossInput {
+  /** Posición del departamento en la cadena. 1 = departamento inicial. */
+  sequence: number;
+  /** Puestas en elaboración — base del período en el depto. inicial (seq 1). */
+  startedInProduction?: Decimal.Value;
+  /** Recibidas del departamento anterior — parte de la base en seq > 1. */
+  receivedFromPrevious?: Decimal.Value;
+  /** Aumento de número de unidades — parte de la base en seq > 1. */
+  unitIncrease?: Decimal.Value;
+  /** % de pérdida normal admitido, como FRACCIÓN (0.02 = 2 %). Default 0. */
+  normalLossPct?: Decimal.Value;
+  /**
+   * Pérdida real total informada del período (unidades). La extraordinaria sale
+   * de acá por diferencia (R2). Sin dato ⇒ default = pérdida normal (es decir,
+   * sin pérdida extraordinaria).
+   */
+  totalLossReported?: Decimal.Value;
+}
+
+/**
+ * Pérdidas resueltas de un departamento para un período, más las banderas de
+ * TRATAMIENTO (R3) que los pasos siguientes aplican. Esta función computa las
+ * CANTIDADES; la valuación ocurre después: B09 reasigna la pérdida normal de los
+ * departamentos posteriores (CAUP/CAUO), y la extraordinaria se valúa al Estado
+ * de Resultados (no al costo del producto).
+ */
+export interface NormalAndExtraordinaryLoss {
+  /** Base de la pérdida normal (R1). NUNCA incluye la existencia inicial. */
+  periodUnits: Decimal;
+  /** Pérdida normal = % normal × unidades del período. */
+  normalLoss: Decimal;
+  /** Pérdida extraordinaria = pérdida real total − pérdida normal (R2). */
+  extraordinaryLoss: Decimal;
+  /** Pérdida real total del período (normal + extraordinaria). */
+  totalLoss: Decimal;
+  /**
+   * R3 · La pérdida normal la absorben las unidades buenas SIN cálculo adicional
+   * porque es el departamento inicial (seq 1). Cuando es `false`, la absorción
+   * se instrumenta recalculando el costo unitario (CAUP/CAUO) en B09.
+   */
+  normalLossAbsorbedAutomatically: boolean;
+  /**
+   * R3 · La pérdida normal de un departamento posterior (seq > 1) genera el
+   * CAUP/CAUO en B09. Complementario de `normalLossAbsorbedAutomatically`.
+   */
+  normalLossGeneratesCaup: boolean;
+}
+
+/**
+ * PÉRDIDAS NORMALES Y EXTRAORDINARIAS de un departamento para un período (B08).
+ *
+ * Fuente ÚNICA de la regla de pérdidas en Costeo por Procesos: `buildUnitMovementSchedule`
+ * (B06) delega acá, y el informe (B10) y el CAUP/CAUO (B09) consumen esta salida,
+ * para que la regla no viva —ni diverja— en dos lugares.
+ *
+ * Reglas (source of truth: cátedra; ver DECISIONES.md B08):
+ *  - R1: pérdida normal = % normal × "unidades del período", cuya base DIFIERE
+ *        por la posición del departamento:
+ *          · Departamento inicial (seq 1): base = puestas en elaboración.
+ *          · Departamento posterior (seq > 1): base = recibidas del anterior +
+ *            aumento de número de unidades.
+ *        NUNCA se computa el % sobre la existencia inicial (son unidades del
+ *        período anterior). Regla explícita y muy tomada de la cátedra.
+ *  - R2: pérdida extraordinaria = pérdida real total informada − pérdida normal
+ *        (POR DIFERENCIA). Nunca se ingresa directa. Si la real < normal ⇒
+ *        ProcessValidationError (una extraordinaria negativa es imposible).
+ *  - R3: tratamiento (banderas de salida). La normal la absorben las unidades
+ *        buenas: en el depto. inicial, automáticamente; en los posteriores, vía
+ *        CAUP/CAUO (B09). La extraordinaria va al 100 % a la producción
+ *        equivalente (B07) y se valúa al Estado de Resultados, no al costo.
+ *
+ * Función PURA: sin Prisma, sin HTTP, sin servicios. Lanza `ProcessValidationError`
+ * (422) — nunca un 500 crudo.
+ *
+ * Casos ancla (Azur Alcoholes, abril):
+ *  - Destilado (seq 1): puestas 30.000, % 2 % → normal 600; real 1.600 → extra 1.000.
+ *  - Purificado (seq 2): recibidas 30.000 + aumento 2.000, % 1 % → normal 320.
+ */
+export function calcNormalAndExtraordinaryLosses(
+  input: NormalAndExtraordinaryLossInput,
+): NormalAndExtraordinaryLoss {
+  const isFirstDepartment = input.sequence === 1;
+
+  // --- R1: unidades del período (base de la pérdida normal). NUNCA la EI. ---
+  // El % se aplica sobre las puestas en elaboración (depto. inicial) o sobre las
+  // recibidas + aumento (depto. posterior), jamás sobre la existencia inicial.
+  const periodUnits = isFirstDepartment
+    ? withDefault(input.startedInProduction, 0)
+    : withDefault(input.receivedFromPrevious, 0).plus(withDefault(input.unitIncrease, 0));
+
+  // --- Pérdida normal = % normal × unidades del período ---
+  const normalLossPct = withDefault(input.normalLossPct, 0);
+  const normalLoss = normalLossPct.times(periodUnits);
+
+  // --- R2: pérdida extraordinaria = pérdida real total − pérdida normal ---
+  // Nunca se ingresa directa. Sin total informado ⇒ no hay extraordinaria.
+  const totalLoss = opt(input.totalLossReported) ?? normalLoss;
+  const extraordinaryLoss = totalLoss.minus(normalLoss);
+  if (extraordinaryLoss.isNegative()) {
+    throw new ProcessValidationError(
+      `La pérdida real total (${totalLoss.toString()}) es menor que la pérdida normal (${normalLoss.toString()}); ` +
+        'la pérdida extraordinaria no puede ser negativa. Revisá el % de pérdida normal o la pérdida total informada.',
+      { field: 'totalLossReported', normalLoss: normalLoss.toNumber(), extraordinaryLoss: extraordinaryLoss.toNumber() },
+    );
+  }
+
+  return {
+    periodUnits,
+    normalLoss,
+    extraordinaryLoss,
+    totalLoss,
+    // R3 · tratamiento de la pérdida normal según la posición del departamento.
+    normalLossAbsorbedAutomatically: isFirstDepartment,
+    normalLossGeneratesCaup: !isFirstDepartment,
+  };
+}
+
 /**
  * Resuelve el cuadro de movimiento de unidades de un departamento para un
  * período. Ver reglas R1-R5 en el cuerpo. Lanza `ProcessValidationError`
@@ -156,27 +284,20 @@ export function buildUnitMovementSchedule(input: UnitMovementInput): UnitMovemen
   const receivedFromPrevious = isFirstDepartment ? new Decimal(0) : withDefault(input.receivedFromPrevious, 0);
   const unitIncrease = isFirstDepartment ? new Decimal(0) : withDefault(input.unitIncrease, 0);
 
-  // --- R2: unidades del período (base de la pérdida normal) ---
-  // NUNCA se computa el % sobre la EI (esas son unidades del período anterior).
-  const periodUnits = isFirstDepartment
-    ? startedInProduction
-    : receivedFromPrevious.plus(unitIncrease);
-
-  // --- Pérdida normal = % × unidades del período ---
-  const normalLossPct = withDefault(input.normalLossPct, 0);
-  const normalLoss = normalLossPct.times(periodUnits);
-
-  // --- R3: pérdida extraordinaria = pérdida real total − pérdida normal ---
-  // Nunca se ingresa directa. Sin total informado ⇒ no hay extraordinaria.
-  const totalLossReported = opt(input.totalLossReported) ?? normalLoss;
-  const extraordinaryLoss = totalLossReported.minus(normalLoss);
-  if (extraordinaryLoss.isNegative()) {
-    throw new ProcessValidationError(
-      `La pérdida real total (${totalLossReported.toString()}) es menor que la pérdida normal (${normalLoss.toString()}); ` +
-        'la pérdida extraordinaria no puede ser negativa. Revisá el % de pérdida normal o la pérdida total informada.',
-      { field: 'totalLossReported', normalLoss: normalLoss.toNumber(), extraordinaryLoss: extraordinaryLoss.toNumber() },
-    );
-  }
+  // --- R2/R3: pérdidas normales y extraordinarias (delegadas a B08) ---
+  // La regla de pérdidas —base "unidades del período" según la posición, y la
+  // extraordinaria por diferencia— vive en UN solo lugar (`calcNormalAndExtraordinaryLosses`).
+  // El cuadro solo consume las cantidades ya resueltas. Se pasan las entradas ya
+  // corregidas por posición: la base "unidades del período" (que NUNCA incluye la
+  // EI) queda idéntica sin duplicar la regla.
+  const { periodUnits, normalLoss, extraordinaryLoss } = calcNormalAndExtraordinaryLosses({
+    sequence: input.sequence,
+    startedInProduction,
+    receivedFromPrevious,
+    unitIncrease,
+    normalLossPct: input.normalLossPct,
+    totalLossReported: input.totalLossReported,
+  });
 
   // --- Total a justificar (Σ entradas) ---
   const totalToAccount = initialWip

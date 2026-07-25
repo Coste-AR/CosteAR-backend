@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildUnitMovementSchedule,
   calcEquivalentProduction,
+  calcNormalAndExtraordinaryLosses,
   type EquivalentProductionElement,
   type UnitMovementSchedule,
 } from '@/domain/calculations/process-costing.js';
@@ -159,6 +160,141 @@ describe('Costeo por Procesos — cuadro de movimiento de unidades (B06)', () =>
     expect(r.transferredOut.toNumber()).toBe(30000);
     expect(r.totalAccounted.toNumber()).toBe(35000);
     expect(r.totalToAccount.toNumber()).toBe(r.totalAccounted.toNumber());
+  });
+});
+
+describe('Costeo por Procesos — pérdidas normales y extraordinarias (B08)', () => {
+  it('R1: pérdida normal sobre las puestas en elaboración en el depto. inicial (Destilado 600)', () => {
+    // Destilado (seq 1), abril: puestas 30.000, % normal 2 % → normal = 600.
+    const r = calcNormalAndExtraordinaryLosses({
+      sequence: 1,
+      startedInProduction: 30000,
+      normalLossPct: 0.02,
+      totalLossReported: 1600,
+    });
+
+    expect(r.periodUnits.toNumber()).toBe(30000);
+    expect(r.normalLoss.toNumber()).toBe(600); // 2 % × 30.000
+    // Depto. inicial: la normal la absorben las unidades buenas automáticamente.
+    expect(r.normalLossAbsorbedAutomatically).toBe(true);
+    expect(r.normalLossGeneratesCaup).toBe(false);
+  });
+
+  it('R2: pérdida extraordinaria por diferencia en el depto. inicial (Destilado 1.000)', () => {
+    // Real total 1.600 − normal 600 = extraordinaria 1.000.
+    const r = calcNormalAndExtraordinaryLosses({
+      sequence: 1,
+      startedInProduction: 30000,
+      normalLossPct: 0.02,
+      totalLossReported: 1600,
+    });
+
+    expect(r.normalLoss.toNumber()).toBe(600);
+    expect(r.extraordinaryLoss.toNumber()).toBe(1000); // 1.600 − 600
+    expect(r.totalLoss.toNumber()).toBe(1600);
+  });
+
+  it('R1: en un depto. posterior la base es "recibidas + aumento" (Purificado 320)', () => {
+    // Purificado (seq 2), abril: recibidas 30.000 + aumento 2.000 = base 32.000.
+    // % normal 1 % → normal = 320 (el valor que usa el CAUP en B09).
+    const r = calcNormalAndExtraordinaryLosses({
+      sequence: 2,
+      receivedFromPrevious: 30000,
+      unitIncrease: 2000,
+      normalLossPct: 0.01,
+    });
+
+    expect(r.periodUnits.toNumber()).toBe(32000); // 30.000 + 2.000
+    expect(r.normalLoss.toNumber()).toBe(320); // 1 % × 32.000
+    expect(r.normalLoss.toNumber()).not.toBe(300); // 1 % × 30.000 (sin el aumento)
+    // Depto. posterior: la normal genera el CAUP/CAUO (B09).
+    expect(r.normalLossAbsorbedAutomatically).toBe(false);
+    expect(r.normalLossGeneratesCaup).toBe(true);
+  });
+
+  it('R1: la existencia inicial NUNCA entra en la base, aun cuando el cuadro la lleva (Purificado 320)', () => {
+    // Prueba fuerte de la regla: mismo Purificado, pero con una EI NO trivial
+    // (8.000). Si la base incluyera —erróneamente— la EI, la pérdida normal
+    // cambiaría; debe seguir siendo 320 = 1 % × (30.000 + 2.000).
+    const conEI = buildUnitMovementSchedule({
+      sequence: 2,
+      initialWip: 8000, // NO trivial, y NO debe mover la base
+      receivedFromPrevious: 30000,
+      unitIncrease: 2000,
+      transferredOut: 30000,
+      normalLossPct: 0.01,
+    });
+    const sinEI = buildUnitMovementSchedule({
+      sequence: 2,
+      initialWip: 0,
+      receivedFromPrevious: 30000,
+      unitIncrease: 2000,
+      transferredOut: 30000,
+      normalLossPct: 0.01,
+    });
+
+    expect(conEI.periodUnits.toNumber()).toBe(32000); // no cambia con la EI
+    expect(conEI.normalLoss.toNumber()).toBe(320); // 1 % × 32.000
+    // Bases equivocadas que este test descarta:
+    expect(conEI.normalLoss.toNumber()).not.toBe(400); // 1 % × (8.000 + 30.000 + 2.000)
+    expect(conEI.normalLoss.toNumber()).not.toBe(80); // 1 % × 8.000 (solo la EI)
+    // La EI mueve el total a justificar, pero NO la pérdida normal.
+    expect(conEI.totalToAccount.toNumber()).not.toBe(sinEI.totalToAccount.toNumber());
+    expect(conEI.normalLoss.toNumber()).toBe(sinEI.normalLoss.toNumber());
+  });
+
+  it('R2: pérdida real total menor que la normal lanza ProcessValidationError', () => {
+    // normal = 2 % × 30.000 = 600; real informada 500 < 600 ⇒ extraordinaria negativa.
+    let error: unknown;
+    try {
+      calcNormalAndExtraordinaryLosses({
+        sequence: 1,
+        startedInProduction: 30000,
+        normalLossPct: 0.02,
+        totalLossReported: 500,
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ProcessValidationError);
+    const err = error as ProcessValidationError;
+    expect(err.message).toContain('no puede ser negativa');
+    expect((err.details as { normalLoss: number }).normalLoss).toBe(600);
+  });
+
+  it('Sin pérdida real total informada ⇒ no hay extraordinaria (default = normal)', () => {
+    const r = calcNormalAndExtraordinaryLosses({
+      sequence: 1,
+      startedInProduction: 30000,
+      normalLossPct: 0.02,
+    });
+    expect(r.normalLoss.toNumber()).toBe(600);
+    expect(r.extraordinaryLoss.toNumber()).toBe(0);
+    expect(r.totalLoss.toNumber()).toBe(600);
+  });
+
+  it('B06 delega en B08: el cuadro y la función pura dan las MISMAS pérdidas (sin regla duplicada)', () => {
+    // El cuadro ancla (Destilado) y la función pura deben coincidir célula a
+    // célula: es la prueba de que la regla vive en un solo lugar.
+    const schedule = buildUnitMovementSchedule({
+      sequence: 1,
+      initialWip: 5000,
+      startedInProduction: 30000,
+      transferredOut: 30000,
+      finishedInStock: 0,
+      normalLossPct: 0.02,
+      totalLossReported: 1600,
+    });
+    const losses = calcNormalAndExtraordinaryLosses({
+      sequence: 1,
+      startedInProduction: 30000,
+      normalLossPct: 0.02,
+      totalLossReported: 1600,
+    });
+
+    expect(schedule.periodUnits.toNumber()).toBe(losses.periodUnits.toNumber());
+    expect(schedule.normalLoss.toNumber()).toBe(losses.normalLoss.toNumber());
+    expect(schedule.extraordinaryLoss.toNumber()).toBe(losses.extraordinaryLoss.toNumber());
   });
 });
 

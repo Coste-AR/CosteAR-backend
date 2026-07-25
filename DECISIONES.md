@@ -1678,3 +1678,52 @@ Con eso la suite queda verde de punta a punta.
 `prisma generate` (lo corre el script `build`), pero acá el `.dll` del query engine está tomado por un
 proceso node en ejecución (dev server) y el generate da `EPERM`. No se mató el proceso del usuario. El
 código nuevo de B07 es type-clean y toda la suite de tests pasa.
+
+## B08 — Dominio: `calcNormalAndExtraordinaryLosses` (pérdidas normales y extraordinarias, función pura)
+
+**Qué hace.** Determina las pérdidas **normales** y **extraordinarias** de un departamento para un
+período. Función pura, mismo archivo que B06/B07 (`src/domain/calculations/process-costing.ts`), sin
+Prisma/HTTP/servicios. La consumen el cuadro (B06), el CAUP/CAUO (B09) y el informe (B10).
+
+**Fuente ÚNICA de la regla de pérdidas (el punto central de la tarea).** B06 ya calculaba las pérdidas
+*inline* dentro de `buildUnitMovementSchedule` (base "unidades del período", pérdida normal y
+extraordinaria por diferencia). Eso era exactamente la duplicación que la consigna pedía eliminar. Se
+**extrajo** esa lógica a `calcNormalAndExtraordinaryLosses` y **B06 ahora delega** en ella (le pasa las
+entradas ya corregidas por posición y desestructura `periodUnits`/`normalLoss`/`extraordinaryLoss`). La
+regla vive en un solo lugar; no hay forma de que B06 y B08 diverjan. Un test lo prueba célula a célula
+(cuadro ancla vs. función pura → mismas pérdidas).
+
+**Reglas modeladas (source of truth: cátedra):**
+- **R1 — base "unidades del período", que DIFIERE por posición:** depto. inicial (seq 1) → puestas en
+  elaboración; depto. posterior (seq > 1) → recibidas del anterior + aumento de número de unidades. **El %
+  NUNCA se computa sobre la existencia inicial** (son unidades del período anterior). Regla explícita y muy
+  tomada. En la función pura, la EI **ni siquiera es un campo del input**: es estructuralmente imposible
+  que entre en la base. Además hay un test a nivel cuadro que pasa una EI no trivial (8.000) y comprueba
+  que la pérdida normal no se mueve.
+- **R2 — extraordinaria por diferencia:** `extraordinaria = pérdida real total informada − pérdida normal`.
+  Nunca se ingresa directa; los únicos inputs son el % normal y la pérdida real total. Si la real < normal
+  ⇒ `ProcessValidationError` (422 accionable en español), porque una extraordinaria negativa es imposible.
+  Sin pérdida real informada ⇒ default = normal (sin extraordinaria).
+- **R3 — tratamiento (banderas de salida).** La función computa **cantidades**; la valuación es de pasos
+  posteriores. Se exponen `normalLossAbsorbedAutomatically` (true en el depto. inicial: la absorben las
+  unidades buenas sin cálculo extra) y `normalLossGeneratesCaup` (true en deptos. posteriores: la normal
+  genera el CAUP/CAUO en B09). La extraordinaria ya la consume B07 al 100 % en la producción equivalente y
+  se valúa al Estado de Resultados, no al costo del producto.
+
+**Decisión de diseño — B06 pasa entradas ya corregidas por posición.** `buildUnitMovementSchedule` ya
+resuelve los ceros que impone la posición (un depto. inicial no tiene recibidas/aumento; uno posterior no
+tiene puestas). Le pasa esos Decimals ya corregidos a B08. Como B08 vuelve a ramificar por `sequence` para
+elegir la base, el resultado es idéntico y la regla de "qué base según posición" queda escrita una sola vez
+(en B08). No se movió la validación R4 de coherencia de entradas: sigue en B06, que es el que arma el cuadro.
+
+**Casos ancla reproducidos exactos.** Destilado (seq 1): puestas 30.000, 2 % → normal **600**; real 1.600 →
+extraordinaria **1.000**. Purificado (seq 2): recibidas 30.000 + aumento 2.000 = base 32.000, 1 % → normal
+**320** (el valor que usa el CAUP en B09), con test que descarta las bases equivocadas (300 sin aumento,
+400 con EI, 80 solo EI).
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 7 casos B08 (22 en total): R1 base
+inicial (600); R2 extraordinaria por diferencia (1.000); R1 base posterior "recibidas + aumento" (320);
+R1 la EI nunca entra aunque el cuadro la lleve (Purificado con EI 8.000 → sigue 320); R2 real < normal →
+422; default sin extraordinaria; y la delegación B06→B08 (mismas pérdidas). Suite completa: **563 passed /
+1 skipped** (71 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev`
+(dominio puro, no toca schema ni DB).
