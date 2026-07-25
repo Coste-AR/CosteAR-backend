@@ -1960,3 +1960,64 @@ crea un DataPoint y el derivado NO; auditoría del cuadro en la misma transacci�
 reproduce el resultado B07; endpoints sobre Órdenes → 422; re-save sin cambio no versiona y con cambio versiona.
 Suite completa: **592 passed / 1 skipped** (73 archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el
 script `npm run lint` está roto a nivel repo —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
+
+## B16 — Application: `joint-cost-service` (costos conjuntos como servicio + trazabilidad)
+
+**Qué se hizo.** CRUD del reparto de costos conjuntos por (departamento punto de separación, período), apoyado
+en la función PURA del dominio `allocateJointCosts` (B11): el servicio
+`src/application/cost-structures/process-costing/joint-cost-service.ts` orquesta (validar → repartir →
+persistir → auditar → trazar), NUNCA reimplementa la matemática de los cuatro métodos (PHYSICAL_UNITS /
+TECHNICAL_YIELD / MARKET_VALUE / NET_REALIZABLE_VALUE). Dos endpoints protegidos por auth, solo para
+estructuras `costingSystem = 'PROCESSES'`:
+- `GET /structures/:id/process/periods/:periodId/joint-costs?deptId=…` — configuración guardada + resultado recalculado.
+- `PUT /structures/:id/process/periods/:periodId/joint-costs` — persiste, computa y devuelve el reparto.
+
+**Decisión — el departamento viaja en query/body, no en el path.** El enunciado fijó los paths scopeados por
+estructura+período (`…/process/periods/:periodId/joint-costs`), sin segmento de departamento, pero un reparto
+es único por `(departmentId, periodId)` y la FK exige un departamento. Para honrar el path literal del enunciado
+SIN perder el departamento, `deptId` viaja como query param en el GET y como campo del body en el PUT. Es un
+identificador de recurso (no se muestra en ningún mensaje), así que no viola la regla de no exponer ids.
+
+**Decisión — FX-J2: la pérdida se MUESTRA, nunca se descarta.** Un método (típicamente el factor técnico, que
+reparte por rendimiento e ignora el precio) puede asignarle a un producto un costo mayor a su valor de mercado.
+Ese producto queda con MARGEN NEGATIVO, pero el reparto es válido. El servicio devuelve cada línea con TODOS sus
+números (costo asignado, costo unitario, `marketValue`, `margin`) y una bandera `isLoss = margin < 0`; jamás
+filtra la línea. El `margin` queda en `null` si no hay precio de mercado cargado (no se inventa un valor de
+venta). El dominio solo corta con 422 el caso IMPOSIBLE de repartir (VNR negativo, base total 0), no la pérdida.
+
+**Decisión — `method` de reparto vs. `captureMethod` de trazabilidad.** El body usa `method` para el método de
+REPARTO (como pidió el contrato `save(...{ method, jointCostTotal, products })`) y `captureMethod` para el
+método de CAPTURA del dato trazable, evitando la colisión con el `method` de `captureMethodSchema` que usa el
+resto de Trazabilidad.
+
+**Decisión — líneas reemplazadas, no append-only.** La cabecera `JointCostAllocation` se hace upsert y las
+`ByProductLine` se borran y recrean en cada save (el reparto es una CONFIGURACIÓN editable, igual que el cuadro
+de movimiento B15, no un log). La append-only vive donde corresponde: en los `DataPoint` de trazabilidad, que
+versionan sin pisar. Los resultados calculados (`allocatedCost`, `unitCost`) se persisten en la línea pero NO
+son DataPoints (son derivados, no ingresados).
+
+**Decisión — trazabilidad de los insumos manuales.** Se persiste como `DataPoint` versionado (vía
+`DataPointService`, mismo mecanismo que B15) el costo conjunto total y, por línea, cada insumo cargado
+(`unitsObtained`, `yieldPct`, `marketPrice`, `sellingCostVarPct`, `sellingCostFixedPerUnit`). `fieldKey` con
+scope `proceso.costos-conjuntos.{periodId}.{departmentId}.[jointCostTotal | producto.{nombre}.{campo}]` — clave
+interna de máquina (nunca se muestra; lo que se ve es el `label` humano). El `element` del DataPoint mapea al
+`CostElement` que mejor describe el impacto: cifras de costo/físicas (costo total, unidades, rendimiento) → MP;
+cifras de venta (precio, gastos de comercialización) → VENTA, para que la ficha muestre los impactos correctos.
+Un re-save con el mismo valor no versiona (sin ruido); con un valor distinto agrega la versión n+1.
+
+**Decisión — errores accionables en español, nunca un 500.** Los `ProcessValidationError` del dominio (Σ% ≠
+100 %, base de reparto total 0, VNR negativo, falta de precio/rendimiento) se re-emiten anteponiendo el NOMBRE
+del departamento (nunca su id) → 422. Sobre una estructura de Órdenes, un 422 que nombra el producto y explica
+que el reparto solo aplica a Procesos.
+
+**Sin migración.** Las tablas `joint_cost_allocations` y `joint_cost_by_product_lines` y su RLS ya existen
+(B05). Cero `prisma migrate dev`.
+
+**Verificación.** 9 tests nuevos de aplicación (Prisma mockeado, mismo patrón que `unit-movement-service.test.ts`):
+round-trip save+get (ancla M1); los 4 métodos con los números ancla FX-J1 (M2 participaciones, M3 costos
+asignados/unitarios, M4 VNR); FX-J2 la línea con costo > valor de mercado se muestra con `isLoss=true` y no se
+descarta; dataset roto (base 0) → 422 nombrando el depto; cada insumo manual crea un DataPoint (total + los de
+la línea) y los resultados NO; auditoría del reparto en la misma transacción; endpoints sobre Órdenes → 422; get
+sin reparto → `exists=false`; re-save sin cambio no versiona. Suite completa: **601 passed / 1 skipped** (74
+archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el script `npm run lint` sigue roto a nivel repo
+—ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
