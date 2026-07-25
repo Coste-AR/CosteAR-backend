@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { execSync } from 'node:child_process';
@@ -73,16 +73,30 @@ export class VaultIndexerService {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
     }
 
+    const cloneUrl = 'https://github.com/Coste-AR/costear-knowledge-base.git';
+
     if (!existsSync(vaultPath)) {
       console.log(`[vault-indexer] Bóveda no encontrada en ${vaultPath}. Clonando de GitHub...`);
-      execSync(`git clone https://github.com/Coste-AR/costear-knowledge-base.git "${vaultPath}"`, { stdio: 'inherit' });
-    } else {
+      execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
+    } else if (existsSync(join(vaultPath, '.git'))) {
       try {
         console.log(`[vault-indexer] Actualizando bóveda en ${vaultPath}...`);
-        execSync('git pull', { cwd: vaultPath, stdio: 'ignore' });
+        execSync('git pull', { cwd: vaultPath, stdio: 'inherit' });
       } catch (err) {
-        console.warn('[vault-indexer] No se pudo hacer git pull, se usará la versión local.');
+        // Hay un .git pero el pull falla: checkout corrupto o divergido (clone
+        // previo interrumpido a mitad de camino, disco efímero de Railway
+        // reseteado entre deploys, etc.). Seguir con lo que haya en disco es
+        // EXACTAMENTE lo que deja la bóveda pegada en un puñado de archivos
+        // viejos sin que nadie se entere — se borra el checkout entero y se
+        // clona de cero en vez de usarlo a ciegas.
+        console.warn(`[vault-indexer] git pull falló en ${vaultPath} (checkout roto). Reclonando de cero...`);
+        await rm(vaultPath, { recursive: true, force: true });
+        execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
       }
+    } else {
+      // El directorio existe pero no es un checkout git (típico en tests, o si
+      // el vault se provee por otro medio) — se usa el contenido tal cual está.
+      console.log(`[vault-indexer] ${vaultPath} no tiene .git — se usa el contenido tal cual está.`);
     }
 
     let vaultCommit = 'unknown';
