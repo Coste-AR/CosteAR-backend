@@ -1785,3 +1785,72 @@ celdas de la matriz —(aumento Sí, normales No) con dilución; (No, Sí) prome
 ancla Purificado 3,50/0,032/3,532; (No, No) devuelve el previo sin cambios— más el control de dilución
 (aumento con modificado ≥ previo → 422). Suite completa: **568 passed / 1 skipped** (71 archivos), cero
 regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev` (dominio puro, no toca schema ni DB).
+
+## B10 — Dominio: `buildProductionCostReport` (informe de costos de producción, función pura)
+
+**Qué hace.** Ensambla la hoja de costos de UN departamento para UN período: los números finales
+valuados. Cierra la matemática por departamento a partir de las piezas de B06-B09 (cuadro de movimiento,
+producción equivalente, pérdidas, costo transferido). Función pura, mismo archivo que B06/B07/B08/B09
+(`src/domain/calculations/process-costing.ts`), sin Prisma/HTTP/servicios. La consumirá el motor de
+Procesos (B17).
+
+**Función ENSAMBLADORA, no calculadora.** El punto de la tarea es que B10 NO recalcula nada: toma el
+`UnitMovementSchedule` (B06), el `EquivalentProductionSchedule` (B07) y los costos por elemento (más el
+costo transferido de B09 en seq > 1) ya resueltos, y los combina. Así la regla de cada pieza vive en un
+solo lugar y B10 no puede divergir de sus insumos.
+
+**Las tres partes de la hoja (source of truth: cátedra):**
+- **PARTE 1 — COSTO A JUSTIFICAR.** Sección A (costo del departamento anterior, SOLO seq > 1) + Sección B
+  (costos del departamento, abiertos por elemento en inventario inicial y período). Costo unitario del
+  elemento = `(costo inv. inicial + costo del período) ÷ producción realmente procesada` (**promedio
+  ponderado**, único método acá). Costo unitario total acumulado = Σ costos unitarios (+ costo transferido
+  en seq > 1). Costo acumulado a justificar = Σ de todos los costos totales.
+- **PARTE 2 — JUSTIFICACIÓN.** Terminadas y transferidas, terminadas en stock y pérdidas extraordinarias,
+  cada una × costo unitario total acumulado. La **existencia final se obtiene POR DIFERENCIA** (costo a
+  justificar − las tres líneas): es la única línea que no se computa directo, porque las unidades en
+  proceso no están terminadas y no se les aplica el costo de la unidad terminada.
+- **PARTE 3 — VALUACIÓN DE LA EF (verificación).** Recomputa la EF por el OTRO camino, por elemento:
+  `Σ (unidades equivalentes de la EF del elemento × costo unitario del elemento)` (+ en seq > 1) `unidades
+  EF × costo transferido del anterior` (siempre al 100 %).
+
+**Doble verificación (assertion dura).** La valuación por elemento (Parte 3) DEBE igualar la EF por
+diferencia (Parte 2) dentro de una tolerancia de redondeo. Si difieren más que la tolerancia ⇒
+`ProcessValidationError` (422 accionable en español); NUNCA se devuelve un informe inconsistente. Un ajuste
+de pocos pesos por redondeo de los costos unitarios se **acepta y se registra** (`ajustePorRedondeo`); uno
+desproporcionado al total delata un error previo (costos, costo transferido o cuadro) y corta.
+
+**Decisión de diseño — la Sección A se pasa explícita (costo unitario + costo total).** En seq > 1 el
+costo del departamento anterior necesita el costo unitario transferido (B09, para el costo unitario total
+acumulado y la valuación al 100 % de la Parte 3) y el costo total acumulado (para el costo a justificar).
+Se piden los DOS por separado en `previousDepartmentCost` en vez de reconstruir la semántica del CAUP
+(total = unidades buenas × costo transferido) dentro de B10: mantiene a B10 como ensamblador y deja que la
+inconsistencia entre ambos —si el llamador se equivoca— la atrape la doble verificación. En seq 1 la
+Sección A va en blanco: informarla es error, y omitirla en seq > 1 también (guardas simétricas, criterio
+de la R4 de B06).
+
+**Decisión de diseño — tolerancia de redondeo absoluta, configurable.** `DEFAULT_ROUNDING_TOLERANCE = 5`
+pesos, sobrescribible por `roundingTolerance`. La cátedra habla de "unos pocos pesos"; una cota absoluta
+simple alcanza para distinguir el residuo de redondeo de un error real (que es de orden mucho mayor). El
+`ajustePorRedondeo` se computa siempre como `EF por diferencia − EF por elemento` y viaja en la salida;
+la Parte 2 (por diferencia) queda como la EF oficial y la Parte 3 reconcilia con ese ajuste.
+
+**Ambigüedad resuelta (regla #8).** El split inventario inicial / período de cada elemento NO cambia el
+costo unitario (solo entra la SUMA); se conserva la apertura porque la hoja la muestra en dos subsecciones,
+pero los tests eligen libremente el reparto. Documentado; sin riesgo de pérdida de datos.
+
+**Casos ancla reproducidos EXACTO.** Azur Alcoholes, abril:
+- **Destilado (seq 1):** costo unitario MP $2,00 + CC $1,75 = **$3,75**; costo acumulado a justificar
+  **$127.810**; terminadas 30.000 × $3,75 = $112.500; extraordinarias 1.000 × $3,75 = $3.750; **EF por
+  diferencia $11.560** = por elemento (MP 3.400 × $2,00 = $6.800 + CC 2.720 × $1,75 = $4.760). Ambos
+  caminos $11.560, ajuste $0.
+- **Purificado (seq 2):** costo unitario total **$6,532** ($3,532 transferido + $1,00 MP + $2,00 CC); **EF
+  por elemento $31.992** (anterior 6.000 × $3,532 = $21.192 + MP 6.000 × $1,00 = $6.000 + CC 2.400 × $2,00
+  = $4.800), coincide con la EF por diferencia.
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 5 casos B10 (32 en total): los dos
+anclas (EF por AMBOS caminos en Destilado; costo total $6,532 y EF $31.992 en Purificado); la doble
+verificación que lanza 422 al forzar una inconsistencia (Sección A corrompida, ajuste $26.380); un ajuste
+por redondeo de $2 dentro de tolerancia que se acepta y registra; y las guardas de Sección A (depto.
+inicial no la lleva, depto. posterior sin ella → 422). Suite completa: **573 passed / 1 skipped** (71
+archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev` (dominio puro,
+no toca schema ni DB).

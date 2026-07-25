@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildProductionCostReport,
   buildUnitMovementSchedule,
   calcEquivalentProduction,
   calcNormalAndExtraordinaryLosses,
   calcTransferredCost,
   type EquivalentProductionElement,
+  type ProductionCostReportInput,
   type UnitMovementSchedule,
 } from '@/domain/calculations/process-costing.js';
 import { ProcessValidationError } from '@/domain/errors/calculation-errors.js';
@@ -536,5 +538,188 @@ describe('Costeo por Procesos — costo transferido = costo modificado + CAUP (B
     const err = error as ProcessValidationError;
     expect(err.message).toContain('ESTRICTAMENTE MENOR');
     expect((err.details as { previousUnitCost: number }).previousUnitCost).toBe(3);
+  });
+});
+
+describe('Costeo por Procesos — informe de costos de producción (B10)', () => {
+  /**
+   * Ancla Destilado (seq 1), abril. Cuadro y producción equivalente ya resueltos
+   * por B06/B07 (MP 34.400 / CC 33.720, EF 3.400). Los costos por elemento suman
+   * $68.800 (MP) y $59.010 (CC): el informe solo usa la SUMA (inicial + período),
+   * así que la apertura es libre; se elige una para mostrar las dos subsecciones.
+   *   MP: $68.800 ÷ 34.400 = $2,00 · CC: $59.010 ÷ 33.720 = $1,75.
+   */
+  const destiladoReportInput = (): ProductionCostReportInput => {
+    const schedule = buildUnitMovementSchedule({
+      sequence: 1,
+      initialWip: 5000,
+      startedInProduction: 30000,
+      transferredOut: 30000,
+      finishedInStock: 0,
+      normalLossPct: 0.02, // 600 normal
+      totalLossReported: 1600, // 600 normal + 1000 extraordinaria
+      // finalWip derivada = 3.400
+    });
+    const equivalentProduction = calcEquivalentProduction({
+      schedule,
+      conversionUnified: true,
+      conversionAvance: 0.8, // MP 34.400 / CC 33.720
+    });
+    return {
+      sequence: 1,
+      schedule,
+      equivalentProduction,
+      elementCosts: [
+        { element: 'MP', costoInventarioInicial: 8800, costoDelPeriodo: 60000 }, // 68.800
+        { element: 'CC', costoInventarioInicial: 6510, costoDelPeriodo: 52500 }, // 59.010
+      ],
+      // seq 1 ⇒ sin Sección A.
+    };
+  };
+
+  /**
+   * Ancla Purificado (seq 2), abril. EI 3.320 + recibidas 30.000 + aumento 2.000 =
+   * 35.320 a justificar; terminadas 29.000, normal 320 (1 % × 32.000), EF 6.000.
+   * PE: MP 35.000 / CC 31.400 (CC al 40 %). Costos por elemento: MP $35.000 (÷
+   * 35.000 = $1,00), CC $62.800 (÷ 31.400 = $2,00). Costo transferido del anterior
+   * $3,532 (B09) sobre 35.000 unidades buenas ⇒ Sección A $123.620.
+   */
+  const purificadoReportInput = (
+    previousDepartmentCost = { costoUnitarioTransferido: 3.532, costoTotal: 123620 },
+  ): ProductionCostReportInput => {
+    const schedule = buildUnitMovementSchedule({
+      sequence: 2,
+      initialWip: 3320,
+      receivedFromPrevious: 30000,
+      unitIncrease: 2000,
+      transferredOut: 29000,
+      finishedInStock: 0,
+      normalLossPct: 0.01, // normal 320; sin pérdida extraordinaria
+      // finalWip derivada = 6.000
+    });
+    const equivalentProduction = calcEquivalentProduction({
+      schedule,
+      conversionUnified: true,
+      conversionAvance: 0.4, // MP 35.000 / CC 31.400
+    });
+    return {
+      sequence: 2,
+      schedule,
+      equivalentProduction,
+      elementCosts: [
+        { element: 'MP', costoInventarioInicial: 5000, costoDelPeriodo: 30000 }, // 35.000
+        { element: 'CC', costoInventarioInicial: 12800, costoDelPeriodo: 50000 }, // 62.800
+      ],
+      previousDepartmentCost,
+    };
+  };
+
+  it('Caso ancla — Destilado (seq 1): costos $2,00/$1,75/$3,75 y EF $11.560 por AMBOS caminos', () => {
+    const report = buildProductionCostReport(destiladoReportInput());
+
+    // Sección A en blanco en el departamento inicial.
+    expect(report.previousDepartment).toBeUndefined();
+
+    // Parte 1 · costos unitarios por elemento y total acumulado.
+    const mp = report.elements.find((e) => e.element === 'MP')!;
+    const cc = report.elements.find((e) => e.element === 'CC')!;
+    expect(mp.costoUnitario.toNumber()).toBe(2); // 68.800 ÷ 34.400
+    expect(cc.costoUnitario.toNumber()).toBe(1.75); // 59.010 ÷ 33.720
+    expect(report.costoUnitarioTotalAcumulado.toNumber()).toBe(3.75);
+    expect(report.costoAcumuladoAJustificar.toNumber()).toBe(127810); // 68.800 + 59.010
+
+    // Parte 2 · justificación.
+    expect(report.costoTerminadasYTransferidas.toNumber()).toBe(112500); // 30.000 × 3,75
+    expect(report.costoPerdidasExtraordinarias.toNumber()).toBe(3750); // 1.000 × 3,75
+    // EF por diferencia = 127.810 − (112.500 + 0 + 3.750) = 11.560.
+    expect(report.costoExistenciaFinalPorDiferencia.toNumber()).toBe(11560);
+    // El informe cuadra: justificación = costo a justificar.
+    expect(report.totalJustificado.toNumber()).toBe(127810);
+
+    // Parte 3 · valuación por elemento (el OTRO camino) da lo mismo.
+    expect(mp.unidadesEquivalentesEF.toNumber()).toBe(3400); // 3.400 × 100 %
+    expect(mp.valuacionEF.toNumber()).toBe(6800); // 3.400 × 2,00
+    expect(cc.unidadesEquivalentesEF.toNumber()).toBe(2720); // 3.400 × 80 %
+    expect(cc.valuacionEF.toNumber()).toBe(4760); // 2.720 × 1,75
+    expect(report.valuacionExistenciaFinalPorElemento.toNumber()).toBe(11560);
+
+    // Los DOS caminos coinciden exactamente: sin ajuste.
+    expect(report.ajustePorRedondeo.toNumber()).toBe(0);
+    expect(report.valuacionExistenciaFinalPorElemento.toNumber()).toBe(
+      report.costoExistenciaFinalPorDiferencia.toNumber(),
+    );
+  });
+
+  it('Caso ancla — Purificado (seq 2): costo total $6,532 y EF $31.992 por elemento', () => {
+    const report = buildProductionCostReport(purificadoReportInput());
+
+    // Sección A presente en un departamento posterior.
+    expect(report.previousDepartment).toBeDefined();
+    expect(report.previousDepartment!.costoUnitarioTransferido.toNumber()).toBe(3.532);
+    expect(report.previousDepartment!.costoTotal.toNumber()).toBe(123620);
+    // La EF del anterior se valúa al 100 %: 6.000 × 3,532 = 21.192.
+    expect(report.previousDepartment!.valuacionEF.toNumber()).toBe(21192);
+
+    // Parte 1 · costo unitario total = 3,532 + 1,00 + 2,00 = 6,532.
+    const mp = report.elements.find((e) => e.element === 'MP')!;
+    const cc = report.elements.find((e) => e.element === 'CC')!;
+    expect(mp.costoUnitario.toNumber()).toBe(1); // 35.000 ÷ 35.000
+    expect(cc.costoUnitario.toNumber()).toBe(2); // 62.800 ÷ 31.400
+    expect(report.costoUnitarioTotalAcumulado.toNumber()).toBe(6.532);
+
+    // Parte 3 · EF por elemento: anterior 21.192 + MP 6.000 + CC 4.800 = 31.992.
+    expect(mp.valuacionEF.toNumber()).toBe(6000); // 6.000 × 1,00
+    expect(cc.unidadesEquivalentesEF.toNumber()).toBe(2400); // 6.000 × 40 %
+    expect(cc.valuacionEF.toNumber()).toBe(4800); // 2.400 × 2,00
+    expect(report.valuacionExistenciaFinalPorElemento.toNumber()).toBe(31992);
+
+    // Y coincide con la EF por diferencia (Parte 2), sin ajuste.
+    expect(report.costoExistenciaFinalPorDiferencia.toNumber()).toBe(31992);
+    expect(report.ajustePorRedondeo.toNumber()).toBe(0);
+  });
+
+  it('Doble verificación: si los dos caminos difieren MÁS que la tolerancia ⇒ ProcessValidationError', () => {
+    // Se fuerza la inconsistencia corrompiendo la Sección A: el costo total del
+    // anterior queda muy por encima de lo que corresponde al costo transferido.
+    let error: unknown;
+    try {
+      buildProductionCostReport(
+        purificadoReportInput({ costoUnitarioTransferido: 3.532, costoTotal: 150000 }),
+      );
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ProcessValidationError);
+    const err = error as ProcessValidationError;
+    expect(err.message).toContain('no cierra');
+    // La diferencia real ($26.380) viaja en details para el indicador del front.
+    expect((err.details as { ajuste: number }).ajuste).toBe(26380);
+  });
+
+  it('Un ajuste por redondeo dentro de la tolerancia se acepta y se registra', () => {
+    // La Sección A trae $2 de más (residuo de redondear el costo transferido):
+    // EF por diferencia = 31.994, por elemento = 31.992 ⇒ ajuste $2 ≤ tolerancia $5.
+    const report = buildProductionCostReport(
+      purificadoReportInput({ costoUnitarioTransferido: 3.532, costoTotal: 123622 }),
+    );
+
+    expect(report.costoExistenciaFinalPorDiferencia.toNumber()).toBe(31994);
+    expect(report.valuacionExistenciaFinalPorElemento.toNumber()).toBe(31992);
+    // El ajuste se registra en vez de romper el informe.
+    expect(report.ajustePorRedondeo.toNumber()).toBe(2);
+  });
+
+  it('Sección A: el depto. inicial no la lleva; un depto. posterior sin ella ⇒ ProcessValidationError', () => {
+    // Depto. inicial con Sección A informada ⇒ error (no le corresponde).
+    const conSeccionAIndebida = {
+      ...destiladoReportInput(),
+      previousDepartmentCost: { costoUnitarioTransferido: 1, costoTotal: 1000 },
+    };
+    expect(() => buildProductionCostReport(conSeccionAIndebida)).toThrow(ProcessValidationError);
+
+    // Depto. posterior SIN Sección A ⇒ error (falta el costo transferido).
+    const sinSeccionA = purificadoReportInput();
+    delete sinSeccionA.previousDepartmentCost;
+    expect(() => buildProductionCostReport(sinSeccionA)).toThrow(ProcessValidationError);
   });
 });

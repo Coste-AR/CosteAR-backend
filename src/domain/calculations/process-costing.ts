@@ -787,6 +787,356 @@ export function calcTransferredCost(input: TransferredCostInput): TransferredCos
   return assemble(computeCostoModificado(), zero, step1Modifies, false);
 }
 
+/* ========================================================================== *
+ * COSTEO POR PROCESOS · INFORME DE COSTOS DE PRODUCCIÓN (B10)
+ * ========================================================================== */
+
+/**
+ * Tolerancia de redondeo (en pesos) del cierre entre las dos formas de valuar la
+ * existencia final. La cátedra acepta un "ajuste" de unos pocos pesos por
+ * redondeo de los costos unitarios; un ajuste desproporcionado al total delata
+ * un error previo (costos, costo transferido o cuadro de unidades). Se puede
+ * sobrescribir por (departamento, período) con `roundingTolerance`.
+ */
+const DEFAULT_ROUNDING_TOLERANCE = 5;
+
+/**
+ * Costo de UN elemento del costo (o de la agrupación CC) que ENTRA al informe.
+ * `element` debe coincidir con una columna de la producción equivalente (B07):
+ * de ahí sale la producción realmente procesada (denominador del costo unitario)
+ * y el grado de avance de la EF (para la valuación por elemento de la Parte 3).
+ * Los dos costos son TOTALES en pesos; el informe solo usa la SUMA para el costo
+ * unitario (promedio ponderado), pero conserva la apertura porque la hoja de
+ * costos la muestra en dos subsecciones.
+ */
+export interface ProductionCostElementCost {
+  /** Elemento (o agrupación CC) que encabeza la columna. Debe existir en la PE (B07). */
+  element: EquivalentProductionElement;
+  /** Costo TOTAL del inventario inicial de ESE elemento (lo que traían las unidades en proceso). Default 0. */
+  costoInventarioInicial?: Decimal.Value;
+  /** Costo TOTAL del período de ESE elemento (lo generado durante el mes). Default 0. */
+  costoDelPeriodo?: Decimal.Value;
+}
+
+/**
+ * Sección A · Costo del departamento anterior. Solo existe en departamentos
+ * posteriores (seq > 1): es el costo transferido de B09 (costo modificado + CAUP)
+ * y el costo total acumulado que arrastra ese departamento hacia adelante.
+ */
+export interface PreviousDepartmentCostInput {
+  /** Costo UNITARIO transferido del depto. anterior (B09 `costoTransferido`). */
+  costoUnitarioTransferido: Decimal.Value;
+  /**
+   * Costo TOTAL del departamento anterior acumulado en este departamento
+   * (unidades buenas × costo transferido, de B09). Es la Sección A del costo a
+   * justificar. Se pasa explícito para no reconstruir la semántica del CAUP acá.
+   */
+  costoTotal: Decimal.Value;
+}
+
+/**
+ * Insumos del informe de costos de un (departamento, período). Es un ENSAMBLADOR
+ * puro: toma el cuadro de unidades (B06), la producción equivalente (B07) y los
+ * costos por elemento (más el costo transferido de B09 en seq > 1) ya resueltos,
+ * y arma la hoja de costos. No recalcula ninguno de esos insumos.
+ */
+export interface ProductionCostReportInput {
+  /** Posición del departamento en la cadena. 1 = departamento inicial (sin Sección A). */
+  sequence: number;
+  /** Cuadro de movimiento de unidades ya resuelto (`buildUnitMovementSchedule`, B06). */
+  schedule: UnitMovementSchedule;
+  /** Producción equivalente ya resuelta (`calcEquivalentProduction`, B07). */
+  equivalentProduction: EquivalentProductionSchedule;
+  /** Costos por elemento (uno por columna de la producción equivalente). */
+  elementCosts: ProductionCostElementCost[];
+  /** Sección A — costo del departamento anterior. OBLIGATORIO en seq > 1, PROHIBIDO en seq 1. */
+  previousDepartmentCost?: PreviousDepartmentCostInput;
+  /** Tolerancia de redondeo (pesos) del cierre de la Parte 3. Default 5. */
+  roundingTolerance?: Decimal.Value;
+}
+
+/** Línea de un elemento del costo en el informe (Sección B + verificación de la Parte 3). */
+export interface ProductionCostElementLine {
+  element: EquivalentProductionElement;
+  /** Etiqueta de la cátedra (viene de la columna de la PE). */
+  label: string;
+  /** Costo del inventario inicial del elemento. */
+  costoInventarioInicial: Decimal;
+  /** Costo del período del elemento. */
+  costoDelPeriodo: Decimal;
+  /** Costo total del elemento = inventario inicial + período. */
+  costoTotal: Decimal;
+  /** Producción realmente procesada del elemento (equivalente, de B07). */
+  produccionProcesada: Decimal;
+  /** Costo unitario del elemento = costo total ÷ producción procesada (promedio ponderado). */
+  costoUnitario: Decimal;
+  /** Parte 3 · unidades equivalentes de la EF del elemento = EF × grado de avance. */
+  unidadesEquivalentesEF: Decimal;
+  /** Parte 3 · valuación de la EF del elemento = unidades equivalentes × costo unitario. */
+  valuacionEF: Decimal;
+}
+
+/** Sección A resuelta (solo seq > 1). */
+export interface PreviousDepartmentLine {
+  /** Costo unitario transferido del depto. anterior (B09). */
+  costoUnitarioTransferido: Decimal;
+  /** Costo total acumulado del depto. anterior (Sección A del costo a justificar). */
+  costoTotal: Decimal;
+  /** Parte 3 · unidades de la EF valuadas al costo del anterior (SIEMPRE al 100 %). */
+  unidadesEF: Decimal;
+  /** Parte 3 · valuación de la EF al costo del anterior = EF × costo transferido. */
+  valuacionEF: Decimal;
+}
+
+/**
+ * Hoja de costos resuelta de un departamento para un período: las TRES partes de
+ * la cátedra (costo a justificar, justificación y valuación de la existencia
+ * final), con el ajuste por redondeo del cierre ya verificado. NUNCA se devuelve
+ * un informe inconsistente: si las dos formas de valuar la EF difieren más que la
+ * tolerancia, `buildProductionCostReport` lanza `ProcessValidationError`.
+ */
+export interface ProductionCostReport {
+  sequence: number;
+
+  // --- PARTE 1 · COSTO A JUSTIFICAR ---
+  /** Sección A · costo del departamento anterior. `undefined` en el depto. inicial (seq 1). */
+  previousDepartment?: PreviousDepartmentLine;
+  /** Sección B · una línea por elemento del costo, en el orden de la cátedra (MP primero). */
+  elements: ProductionCostElementLine[];
+  /** Costo unitario total acumulado = Σ costos unitarios de los elementos (+ costo transferido en seq > 1). */
+  costoUnitarioTotalAcumulado: Decimal;
+  /** Costo acumulado a justificar = Σ costos totales (Sección A + Sección B). */
+  costoAcumuladoAJustificar: Decimal;
+
+  // --- PARTE 2 · JUSTIFICACIÓN DEL COSTO ---
+  /** Terminadas y transferidas × costo unitario total acumulado. */
+  costoTerminadasYTransferidas: Decimal;
+  /** Terminadas en existencia (stock) × costo unitario total acumulado. */
+  costoTerminadasEnStock: Decimal;
+  /** Pérdidas extraordinarias × costo unitario total acumulado. */
+  costoPerdidasExtraordinarias: Decimal;
+  /** Existencia final de producción en proceso, POR DIFERENCIA (la EF oficial del informe). */
+  costoExistenciaFinalPorDiferencia: Decimal;
+  /** Σ de la justificación (= costo acumulado a justificar; el informe SIEMPRE cuadra). */
+  totalJustificado: Decimal;
+
+  // --- PARTE 3 · VALUACIÓN DE LA EXISTENCIA FINAL (verificación) ---
+  /** EF recomputada por elemento (Σ elementos + depto. anterior), antes del ajuste. */
+  valuacionExistenciaFinalPorElemento: Decimal;
+  /**
+   * Ajuste por redondeo = EF por diferencia − EF por elemento. Dentro de la
+   * tolerancia; recorta el residuo de redondear los costos unitarios. Un ajuste
+   * mayor a la tolerancia NO llega acá: la función lanza antes.
+   */
+  ajustePorRedondeo: Decimal;
+}
+
+/**
+ * INFORME DE COSTOS DE PRODUCCIÓN de un departamento para un período (B10).
+ *
+ * Cierra la matemática por departamento: ensambla la hoja de costos —los números
+ * finales valuados— a partir de las piezas de B06-B09. Función ENSAMBLADORA
+ * pura: no recalcula el cuadro de unidades, la producción equivalente ni el costo
+ * transferido; los toma ya resueltos y los combina.
+ *
+ * La hoja tiene TRES partes (source of truth: cátedra; ver DECISIONES.md B10):
+ *
+ * PARTE 1 — COSTO A JUSTIFICAR (cuánto costó producir todo lo que tenemos):
+ *   · Sección A — costo del departamento anterior: SOLO seq > 1 (en blanco en el
+ *     inicial). Es el costo transferido de B09.
+ *   · Sección B — costos del departamento (todos), abiertos por elemento en dos
+ *     subsecciones (inventario inicial y período).
+ *   · Costo unitario del elemento = (costo inv. inicial + costo del período) ÷
+ *     producción realmente procesada del elemento (PROMEDIO PONDERADO, único método acá).
+ *   · Costo unitario total acumulado = Σ costos unitarios (+ costo transferido en seq > 1).
+ *   · COSTO ACUMULADO A JUSTIFICAR = Σ de todos los costos totales.
+ *
+ * PARTE 2 — JUSTIFICACIÓN DEL COSTO (a dónde fue ese costo; debe IGUALAR la Parte 1):
+ *   · Terminadas y transferidas × costo unitario total acumulado.
+ *   · Terminadas en stock × costo unitario total acumulado.
+ *   · Pérdidas extraordinarias × costo unitario total acumulado.
+ *   · Existencia final de producción en proceso → POR DIFERENCIA (costo acumulado a
+ *     justificar − las tres líneas anteriores). Es la única línea que no se computa
+ *     directo: las unidades en proceso no están terminadas, no se les aplica el
+ *     costo de la unidad terminada.
+ *
+ * PARTE 3 — VALUACIÓN DE LA EXISTENCIA FINAL (verificación de la Parte 2):
+ *   Recomputa la EF por el OTRO camino, por elemento:
+ *     Σ (unidades equivalentes de la EF del elemento × costo unitario del elemento)
+ *     (+ en seq > 1) unidades EF × costo transferido del anterior (SIEMPRE al 100 %).
+ *   ASSERTION DURA: esta valuación por elemento DEBE igualar la EF por diferencia
+ *   de la Parte 2 dentro de una tolerancia de redondeo (unos pocos pesos). Si NO
+ *   coinciden ⇒ `ProcessValidationError` (422 accionable en español). NUNCA se
+ *   devuelve un informe inconsistente. Un ajuste de pocos pesos por redondeo se
+ *   acepta y se registra (`ajustePorRedondeo`); uno desproporcionado al total
+ *   delata un error previo y corta.
+ *
+ * Función PURA: sin Prisma, sin HTTP, sin servicios. Lanza `ProcessValidationError`
+ * (422) — nunca un 500 crudo.
+ *
+ * Casos ancla (Azur Alcoholes, abril):
+ *  - Destilado (seq 1): costo unitario MP $2,00 + CC $1,75 = $3,75; costo acumulado a
+ *    justificar $127.810; EF por diferencia $11.560 = por elemento (MP 3.400×$2,00 +
+ *    CC 2.720×$1,75) ✓.
+ *  - Purificado (seq 2): costo unitario total $6,532 ($3,532 transferido + $1,00 MP +
+ *    $2,00 CC); EF por elemento $31.992 (anterior 6.000×$3,532 + MP 6.000×$1,00 +
+ *    CC 2.400×$2,00) ✓.
+ */
+export function buildProductionCostReport(input: ProductionCostReportInput): ProductionCostReport {
+  const isFirstDepartment = input.sequence === 1;
+
+  // --- Coherencia de la Sección A según la posición del departamento ---
+  if (isFirstDepartment && input.previousDepartmentCost) {
+    throw new ProcessValidationError(
+      'El departamento inicial (secuencia 1) no tiene costo del departamento anterior (Sección A); no debe informarse.',
+      { field: 'previousDepartmentCost' },
+    );
+  }
+  if (!isFirstDepartment && !input.previousDepartmentCost) {
+    throw new ProcessValidationError(
+      'Falta el costo del departamento anterior (Sección A) de un departamento posterior (secuencia > 1). ' +
+        'Es el costo transferido del departamento previo (B09).',
+      { field: 'previousDepartmentCost' },
+    );
+  }
+
+  // --- PARTE 1 · Sección B · líneas por elemento (en el orden de la PE: MP primero) ---
+  // Cada columna de la producción equivalente aporta la producción procesada y el
+  // grado de avance de la EF; se busca su costo por elemento (mismo `element`).
+  const columns = input.equivalentProduction.columns;
+  if (input.elementCosts.length !== columns.length) {
+    throw new ProcessValidationError(
+      `Los costos por elemento (${input.elementCosts.length}) no coinciden con las columnas de la producción ` +
+        `equivalente (${columns.length}). Debe haber un costo por cada elemento del cuadro.`,
+      { field: 'elementCosts' },
+    );
+  }
+
+  const finalWip = input.schedule.finalWip;
+
+  const elements: ProductionCostElementLine[] = columns.map((column) => {
+    const cost = input.elementCosts.find((c) => c.element === column.element);
+    if (!cost) {
+      throw new ProcessValidationError(
+        `Falta el costo del elemento ${column.element} presente en la producción equivalente. ` +
+          'Cargá el costo (inventario inicial y período) de ese elemento.',
+        { field: 'elementCosts' },
+      );
+    }
+
+    const costoInventarioInicial = withDefault(cost.costoInventarioInicial, 0);
+    const costoDelPeriodo = withDefault(cost.costoDelPeriodo, 0);
+    const costoTotal = costoInventarioInicial.plus(costoDelPeriodo);
+    const produccionProcesada = column.equivalentUnits;
+
+    // Costo unitario = costo total ÷ producción procesada (promedio ponderado). Sin
+    // producción procesada no se puede repartir un costo > 0 (evita dividir por cero).
+    if (produccionProcesada.isZero()) {
+      if (!costoTotal.isZero()) {
+        throw new ProcessValidationError(
+          `El elemento ${column.element} tiene costo ($${costoTotal.toString()}) pero 0 unidades de producción ` +
+            'procesada: no se puede calcular su costo unitario. Revisá el cuadro de unidades y la producción equivalente.',
+          { field: 'elementCosts', element: column.element },
+        );
+      }
+      // 0 costo y 0 producción: elemento inerte, costo unitario 0.
+    }
+    const costoUnitario = produccionProcesada.isZero()
+      ? new Decimal(0)
+      : costoTotal.div(produccionProcesada);
+
+    // Parte 3 · unidades equivalentes de la EF del elemento = EF × grado de avance.
+    const unidadesEquivalentesEF = finalWip.times(column.finalWipAvance);
+    const valuacionEF = unidadesEquivalentesEF.times(costoUnitario);
+
+    return {
+      element: column.element,
+      label: column.label,
+      costoInventarioInicial,
+      costoDelPeriodo,
+      costoTotal,
+      produccionProcesada,
+      costoUnitario,
+      unidadesEquivalentesEF,
+      valuacionEF,
+    };
+  });
+
+  // --- PARTE 1 · Sección A · costo del departamento anterior (solo seq > 1) ---
+  let previousDepartment: PreviousDepartmentLine | undefined;
+  if (input.previousDepartmentCost) {
+    const costoUnitarioTransferido = new Decimal(input.previousDepartmentCost.costoUnitarioTransferido);
+    const costoTotal = new Decimal(input.previousDepartmentCost.costoTotal);
+    previousDepartment = {
+      costoUnitarioTransferido,
+      costoTotal,
+      // La EF del anterior se valúa SIEMPRE al 100 % (las unidades ya vinieron enteras).
+      unidadesEF: finalWip,
+      valuacionEF: finalWip.times(costoUnitarioTransferido),
+    };
+  }
+
+  // --- PARTE 1 · totales ---
+  const zero = new Decimal(0);
+  const costoUnitarioElementos = elements.reduce((acc, e) => acc.plus(e.costoUnitario), zero);
+  const costoUnitarioTotalAcumulado = costoUnitarioElementos.plus(
+    previousDepartment?.costoUnitarioTransferido ?? zero,
+  );
+
+  const costoTotalElementos = elements.reduce((acc, e) => acc.plus(e.costoTotal), zero);
+  const costoAcumuladoAJustificar = costoTotalElementos.plus(previousDepartment?.costoTotal ?? zero);
+
+  // --- PARTE 2 · justificación del costo ---
+  const costoTerminadasYTransferidas = input.schedule.transferredOut.times(costoUnitarioTotalAcumulado);
+  const costoTerminadasEnStock = input.schedule.finishedInStock.times(costoUnitarioTotalAcumulado);
+  const costoPerdidasExtraordinarias = input.schedule.extraordinaryLoss.times(costoUnitarioTotalAcumulado);
+  // EF POR DIFERENCIA: es la única línea que no se computa directo.
+  const costoExistenciaFinalPorDiferencia = costoAcumuladoAJustificar
+    .minus(costoTerminadasYTransferidas)
+    .minus(costoTerminadasEnStock)
+    .minus(costoPerdidasExtraordinarias);
+
+  // --- PARTE 3 · valuación de la EF por elemento (verificación) ---
+  const valuacionExistenciaFinalPorElemento = elements
+    .reduce((acc, e) => acc.plus(e.valuacionEF), zero)
+    .plus(previousDepartment?.valuacionEF ?? zero);
+
+  // --- ASSERTION DURA · las dos formas de valuar la EF deben coincidir ---
+  const ajustePorRedondeo = costoExistenciaFinalPorDiferencia.minus(valuacionExistenciaFinalPorElemento);
+  const tolerance = withDefault(input.roundingTolerance, DEFAULT_ROUNDING_TOLERANCE);
+  if (ajustePorRedondeo.abs().gt(tolerance)) {
+    throw new ProcessValidationError(
+      `La valuación de la existencia final no cierra: por diferencia da $${costoExistenciaFinalPorDiferencia.toString()} ` +
+        `y por elemento $${valuacionExistenciaFinalPorElemento.toString()} (difieren en $${ajustePorRedondeo.toString()}, ` +
+        `más que la tolerancia de redondeo de $${tolerance.toString()}). Un ajuste tan grande delata un error previo: ` +
+        'revisá los costos por elemento, el costo transferido del departamento anterior o el cuadro de unidades.',
+      {
+        field: 'elementCosts',
+        porDiferencia: costoExistenciaFinalPorDiferencia.toNumber(),
+        porElemento: valuacionExistenciaFinalPorElemento.toNumber(),
+        ajuste: ajustePorRedondeo.toNumber(),
+        tolerancia: tolerance.toNumber(),
+      },
+    );
+  }
+
+  return {
+    sequence: input.sequence,
+    previousDepartment,
+    elements,
+    costoUnitarioTotalAcumulado,
+    costoAcumuladoAJustificar,
+    costoTerminadasYTransferidas,
+    costoTerminadasEnStock,
+    costoPerdidasExtraordinarias,
+    costoExistenciaFinalPorDiferencia,
+    // La justificación SIEMPRE cuadra: la EF se derivó por diferencia justamente para eso.
+    totalJustificado: costoAcumuladoAJustificar,
+    valuacionExistenciaFinalPorElemento,
+    ajustePorRedondeo,
+  };
+}
+
 /**
  * Un grado de avance es una FRACCIÓN en [0, 1]. Fuera de ese rango casi siempre
  * significa que se cargó un porcentaje (80) en lugar de la fracción (0.80): se
