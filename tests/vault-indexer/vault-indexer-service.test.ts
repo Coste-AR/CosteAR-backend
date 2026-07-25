@@ -199,6 +199,42 @@ describe('VaultIndexerService', () => {
     expect(repo.chunks.size).toBe(NOTE_COUNT); // nada se borró
   });
 
+  it('rechaza un segundo indexVault mientras el primero todavía está corriendo (evita competir por el rate limit)', async () => {
+    await writeFile(join(vaultPath, 'a.md'), '# A\n\nContenido A.\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    // El embedder no resuelve hasta que el test lo libera explícitamente,
+    // simulando una llamada a Voyage que todavía está en el aire.
+    let releaseEmbed!: () => void;
+    const embedGate = new Promise<void>((resolve) => { releaseEmbed = resolve; });
+    const originalEmbed = embedder.embed.bind(embedder);
+    embedder.embed = async (texts: string[]) => {
+      await embedGate;
+      return originalEmbed(texts);
+    };
+    const service = new VaultIndexerService(repo, embedder);
+
+    const first = service.indexVault(vaultPath, 'commit-1'); // no await: queda "en vuelo"
+    await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow(/ya hay una indexación en curso/i);
+
+    releaseEmbed();
+    await first; // deja terminar al primero, para no dejar handles colgando entre tests
+  });
+
+  it('permite un indexVault nuevo una vez que el anterior ya terminó (incluso si falló)', async () => {
+    await writeFile(join(vaultPath, 'a.md'), '# A\n\nContenido A.\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    embedder.isConfigured = false; // fuerza que el primer intento falle rápido
+    const service = new VaultIndexerService(repo, embedder);
+
+    await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('VOYAGE_API_KEY');
+
+    embedder.isConfigured = true;
+    const result = await service.indexVault(vaultPath, 'commit-2'); // no debe seguir "trabado"
+    expect(result.chunksUpserted).toBe(1);
+  });
+
   it('ignora el README.md de la raíz del vault (instrucciones del repo, no conocimiento)', async () => {
     await writeFile(
       join(vaultPath, 'README.md'),

@@ -17,6 +17,14 @@ export interface IndexVaultResult {
 const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
 const BATCH_SIZE = 20;
 
+// Módulo-nivel a propósito: hay varios disparadores de indexVault que corren
+// en el mismo proceso (botón manual del admin, cron nocturno, aprobar una
+// propuesta) y todos comparten el mismo cupo de rate limit de Voyage (3
+// req/min sin billing). Si dos corridas se superponen, ninguna de las dos
+// termina nunca — cada una le come el cupo a la otra. Un flag por instancia
+// no alcanza porque cada caller crea su propio `new VaultIndexerService()`.
+let indexingInProgress = false;
+
 async function listMarkdownFiles(rootDir: string): Promise<string[]> {
   const result: string[] = [];
   async function walk(dir: string): Promise<void> {
@@ -44,6 +52,23 @@ export class VaultIndexerService {
   ) {}
 
   async indexVault(vaultPath: string): Promise<IndexVaultResult> {
+    if (indexingInProgress) {
+      throw new Error(
+        'Ya hay una indexación en curso (disparada por otro botón, otra pestaña, o el cron nocturno). ' +
+          'Esperá a que termine antes de reintentar — correr dos al mismo tiempo compite por el mismo ' +
+          'límite de tasa de Voyage y hace que ninguna de las dos termine nunca.',
+      );
+    }
+    indexingInProgress = true;
+
+    try {
+      return await this.doIndexVault(vaultPath);
+    } finally {
+      indexingInProgress = false;
+    }
+  }
+
+  private async doIndexVault(vaultPath: string): Promise<IndexVaultResult> {
     if (!this.embedder.isConfigured) {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
     }
