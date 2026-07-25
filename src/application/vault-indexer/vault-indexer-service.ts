@@ -58,7 +58,7 @@ export class VaultIndexerService {
     private readonly embedder: Embedder = new VoyageService(),
   ) {}
 
-  async indexVault(vaultPath: string): Promise<IndexVaultResult> {
+  async indexVault(vaultPath: string, options: { forceClone?: boolean } = {}): Promise<IndexVaultResult> {
     if (indexingInProgress) {
       throw new Error(
         'Ya hay una indexación en curso (disparada por otro botón, otra pestaña, o el cron nocturno). ' +
@@ -69,19 +69,31 @@ export class VaultIndexerService {
     indexingInProgress = true;
 
     try {
-      return await this.doIndexVault(vaultPath);
+      return await this.doIndexVault(vaultPath, options.forceClone ?? false);
     } finally {
       indexingInProgress = false;
     }
   }
 
-  private async doIndexVault(vaultPath: string): Promise<IndexVaultResult> {
+  private async doIndexVault(vaultPath: string, forceClone: boolean): Promise<IndexVaultResult> {
     if (!this.embedder.isConfigured) {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
     }
 
     const cloneUrl = 'https://github.com/Coste-AR/costear-knowledge-base.git';
     const hadGitFolder = existsSync(join(vaultPath, '.git')); // estado ANTES de tocar nada, para diagnóstico
+
+    if (forceClone && existsSync(vaultPath)) {
+      // Botón explícito de "forzar re-clone completo": el checkout existente
+      // puede no tener .git en absoluto (no viene de un clone previo interrumpido,
+      // sino de un directorio creado por otro medio — exactamente lo que dejó la
+      // bóveda de staging pegada en 1 archivo suelto sin ninguna señal de "roto"
+      // que las salvaguardas automáticas puedan detectar solas). A diferencia del
+      // resto de esta función, esto es una acción PEDIDA explícitamente por un
+      // admin, no una heurística automática — por eso puede ser más agresiva.
+      console.warn(`[vault-indexer] forceClone=true: borrando ${vaultPath} y reclonando de cero...`);
+      await rm(vaultPath, { recursive: true, force: true });
+    }
 
     if (!existsSync(vaultPath)) {
       console.log(`[vault-indexer] Bóveda no encontrada en ${vaultPath}. Clonando de GitHub...`);

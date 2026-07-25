@@ -103,6 +103,38 @@ describe('VaultIndexerService — auto-reparación de checkout roto', () => {
     expect(cloneCalls).toHaveLength(1); // reclonó después del pull fallido
   });
 
+  it('forceClone=true borra y reclona aunque NO haya .git (el caso real: carpeta creada por otro medio, sin ninguna señal de "roto")', async () => {
+    // Este es el escenario real encontrado en staging: /app/vault-data/... existe,
+    // tiene 1 archivo suelto, y NO tiene .git — nada en las salvaguardas
+    // automáticas lo distingue de "vault provisto por otro medio a propósito".
+    // forceClone es la vía explícita para un admin que ya sabe que hay que
+    // tirar todo y volver a clonar, sin depender de que el estado "se vea roto".
+    await writeFile(join(vaultPath, 'vieja-suelta.md'), '# Vieja\n\nUn archivo suelto sin .git.\n', 'utf-8');
+
+    execSyncMock.mockImplementation((cmd: string) => {
+      if (cmd.startsWith('git clone')) {
+        mkdirSync(vaultPath, { recursive: true });
+        return Buffer.from('');
+      }
+      if (cmd === 'git rev-parse HEAD') return Buffer.from('def456\n');
+      return Buffer.from('');
+    });
+
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const { VaultIndexerService } = await import('@/application/vault-indexer/vault-indexer-service.js');
+    const service = new VaultIndexerService(repo, embedder);
+
+    // El mock de clone no escribe nada real: tras el reclone el directorio
+    // queda vacío, prueba de que efectivamente se borró "vieja-suelta.md".
+    await expect(service.indexVault(vaultPath, { forceClone: true })).rejects.toThrow('No se encontraron notas');
+
+    const pullCalls = execSyncMock.mock.calls.filter(([cmd]) => cmd === 'git pull');
+    const cloneCalls = execSyncMock.mock.calls.filter(([cmd]) => typeof cmd === 'string' && cmd.startsWith('git clone'));
+    expect(pullCalls).toHaveLength(0); // no intenta pull, va directo a borrar+clonar
+    expect(cloneCalls).toHaveLength(1);
+  });
+
   it('si NO hay .git, no intenta pull ni clone — usa el contenido tal cual (compat con el resto de los tests)', async () => {
     await writeFile(join(vaultPath, 'nota.md'), '# Nota\n\nContenido real, sin git.\n', 'utf-8');
 
