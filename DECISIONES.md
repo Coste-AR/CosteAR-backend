@@ -2021,3 +2021,79 @@ la línea) y los resultados NO; auditoría del reparto en la misma transacción;
 sin reparto → `exists=false`; re-save sin cambio no versiona. Suite completa: **601 passed / 1 skipped** (74
 archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el script `npm run lint` sigue roto a nivel repo
 —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
+
+---
+
+## B17 — Application: `ProcessCostingEngine` (motor que hace calculable Costeo por Procesos de punta a punta)
+
+**Qué se hizo.** El motor de Costeo por Procesos (patrón Strategy, implementa el `CostingEngine` de B02)
+que orquesta el cálculo por estructura reutilizando las funciones PURAS del dominio (B06-B11) y el reparto
+de costos conjuntos (B11). Reemplaza el placeholder 422 de `selectCostingEngine('PROCESSES')`.
+- `src/application/cost-structures/process-costing/process-costing-engine.ts` — motor PURO (sin Prisma ni
+  HTTP, como el de Órdenes). `run(input) → { results, tree }`. Recorre los departamentos EN ORDEN DE
+  SECUENCIA y por cada uno encadena: cuadro de movimiento (B06) → producción equivalente (B07) → pérdidas
+  (B08, ya resueltas dentro del cuadro) → costo transferido = modificado + CAUP del anterior (B09) →
+  informe con doble verificación de la EF (B10); y donde hay `JointCostAllocation`, reparte con
+  `allocateJointCosts` (B11). El "terminadas y transferidas" del depto. N alimenta el "costo del
+  departamento anterior" de N+1; el primero no tiene costo previo.
+- `src/application/cost-structures/process-costing/process-calculation-service.ts` — borde de aplicación:
+  resuelve estructura (tenant + que sea Procesos) y período, carga cuadros y repartos de cada depto., arma
+  el insumo del motor, corre, marca incompletitud (F04) y persiste con la MISMA persistencia compartida.
+- `src/infrastructure/http/routes/process-calculation.routes.ts` — dos endpoints con auth, solo Procesos:
+  `POST /structures/:id/process/periods/:periodId/calculate` (traza y persiste la corrida) y
+  `GET /structures/:id/process/periods/:periodId/production-report` (informe para mostrar/exportar).
+
+**Decisión — despacho y guardia del endpoint de Órdenes.** `selectCostingEngine('PROCESSES')` ya devuelve el
+`ProcessCostingEngine` (sobrecargas de tipo para que el llamador reciba el motor correcto); cualquier otro
+valor sigue devolviendo el de Órdenes (default histórico, cero regresión). El guardia que antes vivía DENTRO
+de `selectCostingEngine` (tirar 422 para Procesos) se movió a `CalculationRunService.calculate`: ese endpoint
+es el cálculo de UNA estructura de Órdenes (un solo número), y Procesos se calcula por período/departamento
+con su propio motor; una estructura de Procesos que caiga ahí va por el camino equivocado y se corta con el
+mismo `CostingSystemNotAvailableError` (test de despacho intacto).
+
+**Decisión — NO se duplica la persistencia de la corrida.** Se extrajo
+`src/application/cost-structures/calculation-run-persistence.ts` (`persistCalculationRun` + `persistTree`) de
+`calculation-run-service.ts` SIN cambiar una query, y ahora la usan los dos caminos (Órdenes y Procesos): una
+sola definición de "cómo se guarda una corrida + su árbol + su auditoría, en la misma transacción". El motor
+de Órdenes quedó byte-idéntico (sus fixtures pasan sin cambios). `results`/`inputsSnapshot` se guardan como
+JSON: cada motor tiene su propia forma de resultado (Órdenes `CalculationOutput`, Procesos el informe por
+departamento) y la tabla no se casa con ninguna. La marca de incompletitud (`buildIncompletitud`, F04) se
+exporta y se reutiliza tal cual.
+
+**Decisión — árbol de derivación con UNA RAÍZ POR DEPARTAMENTO.** Cada raíz ("Departamento 1º — Destilado",
+"Departamento 2º — Purificado", …) abre sub-nodos por MP / conversión (CC o MOD/CIP) / costo transferido
+(con su apertura costo modificado + CAUP) / justificación del costo, y —como hojas— los datos del cuadro
+cargados a mano. Cada hoja lleva una `traceFieldKey` (`proceso.cuadro.{periodId}.{deptId}.{campo}`, la MISMA
+que persiste `UnitMovementService` en B15); el servicio la resuelve a `sourceDataPointId` con UNA query y la
+guarda en `sourceDpVersionIds`, para que el `DerivationTree` del front drille de la hoja hasta la ficha del
+dato origen. Se agregó el campo opcional `traceFieldKey` al `TreeNode` (aditivo: matcheo determinístico por
+clave, en vez del matcheo por `label` que usa el motor de Órdenes; un árbol sin la clave se comporta igual).
+
+**Decisión — "costo del anterior arrastrado en la EI" sin columna (sin migración).** Para reproducir el costo
+modificado $3,50 de la cátedra, B09 necesita el costo TOTAL del departamento anterior embebido en la
+existencia inicial (Purificado: $11.120). La tabla `UnitMovementSchedule` NO tiene una columna para ese valor
+(las `initialWipCost*` son los costos por elemento del propio depto., no el transferido), y agregarla sería
+una migración —fuera del alcance de B17—. Resolución: el motor PURO lo modela como input
+(`initialWipTransferredCost`), así FX-P1 se reproduce de punta a punta; el endpoint, que hoy no cablea la
+valuación de la EI entre períodos, lo pasa 0 (caso común sin EI transferida). Es un follow-up acotado
+(agregar la columna) el día que se necesite EI transferida vía endpoint.
+
+**Decisión — costo del anterior derivado en la cadena.** El "costo del anterior del período" que consume B09
+se deriva de la cadena: `unidades recibidas × costo unitario transferido del departamento previo`. La Sección A
+del informe (B10) es `unidades buenas × costo transferido` (semántica del CAUP). Ninguno de los dos se pide
+como input redundante: salen del recorrido secuencial.
+
+**Sin migración.** Todas las tablas (`ProcessDepartment` B03, `UnitMovementSchedule` B04, `JointCostAllocation`
+/ `ByProductLine` B05, `CalculationRun` / `CalculationNode`) ya existen. Cero `prisma migrate dev`.
+
+**Verificación.** 12 tests nuevos. Motor puro (`process-costing-engine.test.ts`): FX-P1 end to end sobre 2
+departamentos reproduce Destilado $2,00 / $1,75 / **$3,75** y EF **$11.560**, y Purificado costo modificado
+**$3,50** / CAUP **$0,032** / transferido **$3,532** / total **$6,532** y EF **$31.992**; cadena de 3
+departamentos transfiere el costo 1→2→3 (2,00 → 3,00 → 4,00); una raíz por departamento con sus hojas
+`traceFieldKey`; `selectCostingEngine('PROCESSES')` devuelve el motor y ORDERS/null/undefined el de Órdenes.
+Servicio (`process-calculation-service.test.ts`, Prisma mockeado): datos sin imputar → resultado marcado
+`incompleto` (F04); hojas enlazadas a su DataPoint por `traceFieldKey` (nodo persistido con
+`sourceDpVersionIds`); estructura de Órdenes → 422 accionable; informe recalcula sin persistir. Suite completa:
+**613 passed / 1 skipped** (76 archivos), cero regresión — los fixtures de Órdenes (fx3-dorado, r5-fixtures,
+allocation-*) y el test de despacho B02 pasan byte-idénticos. `tsc --noEmit` limpio. (El script `npm run lint`
+sigue roto a nivel repo —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
