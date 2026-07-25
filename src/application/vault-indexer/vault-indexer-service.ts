@@ -79,6 +79,23 @@ export class VaultIndexerService {
     }
     const relativeFiles = absoluteFiles.map((f) => relative(vaultPath, f).replace(/\\/g, '/'));
 
+    // Salvaguarda contra checkout parcial/roto: si el número de notas que
+    // encontramos ahora cayó drásticamente contra lo que YA está indexado,
+    // no es "el equipo borró contenido" — es un clone/pull incompleto (disco
+    // lleno, corte de red a mitad del `git clone`, deploy interrumpido). Sin
+    // esto, la Fase 3 de abajo trataría cada nota "faltante" como huérfana y
+    // borraría la bóveda entera por un problema de infraestructura, no de
+    // contenido real.
+    const alreadyIndexed = await this.repo.countDistinctSourceFiles();
+    if (alreadyIndexed > 5 && relativeFiles.length < alreadyIndexed * 0.5) {
+      throw new Error(
+        `Se encontraron solo ${relativeFiles.length} notas en ${vaultPath}, pero la bóveda indexada tiene ` +
+          `${alreadyIndexed} archivos distintos. Parece un checkout parcial o incompleto del vault (git clone/pull ` +
+          `cortado a mitad de camino), no una limpieza real de contenido — por seguridad no se borra nada. ` +
+          `Verificá el checkout en ${vaultPath} y reintentá.`,
+      );
+    }
+
     const result: IndexVaultResult = {
       filesProcessed: 0,
       chunksUpserted: 0,

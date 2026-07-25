@@ -19,6 +19,10 @@ class FakeRepository implements VaultChunkRepository {
       .map((c) => ({ chunkIndex: c.chunkIndex, contentHash: c.contentHash }));
   }
 
+  async countDistinctSourceFiles(): Promise<number> {
+    return new Set([...this.chunks.values()].map((c) => c.sourceFile)).size;
+  }
+
   async upsertChunk(input: UpsertChunkInput): Promise<void> {
     this.chunks.set(`${input.sourceFile}#${input.chunkIndex}`, input);
   }
@@ -162,6 +166,37 @@ describe('VaultIndexerService', () => {
     // vaultPath está vacío (mkdtemp recién creado, sin escribir ningún .md)
     await expect(service.indexVault(vaultPath, 'commit-1')).rejects.toThrow('No se encontraron notas');
     expect(repo.chunks.size).toBe(0); // no llamó a deleteOrphanChunks([]) de forma destructiva
+  });
+
+  it('NO borra los chunks existentes si de golpe aparecen muchos menos archivos que los ya indexados (checkout parcial/roto)', async () => {
+    // Simula un vault sano con 10 notas, ya indexado (por encima del piso de
+    // la salvaguarda — con vaults chicos de pocas notas, un vaivén normal de
+    // contenido no debe disparar el error).
+    const NOTE_COUNT = 10;
+    for (let i = 0; i < NOTE_COUNT; i++) {
+      await writeFile(join(vaultPath, `nota-${i}.md`), `# Nota ${i}\n\nContenido ${i}.\n`, 'utf-8');
+    }
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const service = new VaultIndexerService(repo, embedder);
+
+    await service.indexVault(vaultPath, 'commit-1');
+    expect(repo.chunks.size).toBe(NOTE_COUNT); // 1 chunk por nota
+
+    // Simula un checkout parcial/roto: de las 10 notas, solo quedan 2 en disco
+    // (ej. un `git clone`/`git pull` que se cortó a mitad de camino en el
+    // deploy, dejando el working tree incompleto pero no vacío). El directorio
+    // SIGUE EXISTIENDO y SIGUE TENIENDO contenido, así que la salvaguarda de
+    // "vault vacío" no dispara.
+    for (let i = 2; i < NOTE_COUNT; i++) {
+      await rm(join(vaultPath, `nota-${i}.md`));
+    }
+
+    // No debe indexar "exitosamente" borrando las 8 notas restantes como si
+    // fueran eliminadas de verdad: eso destruiría 80% de la bóveda por un
+    // problema de infraestructura, no una limpieza real de contenido.
+    await expect(service.indexVault(vaultPath, 'commit-2')).rejects.toThrow(/checkout (parcial|incompleto)/i);
+    expect(repo.chunks.size).toBe(NOTE_COUNT); // nada se borró
   });
 
   it('ignora el README.md de la raíz del vault (instrucciones del repo, no conocimiento)', async () => {

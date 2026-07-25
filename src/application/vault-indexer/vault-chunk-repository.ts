@@ -19,6 +19,8 @@ export interface UpsertChunkInput {
 
 export interface VaultChunkRepository {
   listBySourceFile(sourceFile: string): Promise<VaultChunkIdentity[]>;
+  /** Cuántos archivos DISTINTOS tienen al menos un chunk indexado hoy. */
+  countDistinctSourceFiles(): Promise<number>;
   upsertChunk(input: UpsertChunkInput): Promise<void>;
   /** Borra los chunks de `sourceFile` cuyo chunkIndex sea mayor a `keepUpTo`
    *  (la nota se achicó). Pasar -1 borra todos los chunks de ese archivo.
@@ -46,6 +48,14 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
       where: { sourceFile },
       select: { chunkIndex: true, contentHash: true },
     });
+  }
+
+  async countDistinctSourceFiles(): Promise<number> {
+    const rows = await this.db.vaultChunk.findMany({
+      distinct: ['sourceFile'],
+      select: { sourceFile: true },
+    });
+    return rows.length;
   }
 
   async upsertChunk(input: UpsertChunkInput): Promise<void> {
