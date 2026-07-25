@@ -48,3 +48,22 @@ export class MissingAllocationBaseError extends UnprocessableEntityError {
     super(message, { field });
   }
 }
+
+/**
+ * El cuadro de movimiento de unidades de Costeo por Procesos no se puede
+ * resolver o no cuadra: dos incógnitas a la vez, un departamento inicial con
+ * datos que no le corresponden (recibidas/aumento), pérdida real menor a la
+ * normal, o Σ unidades a justificar ≠ Σ unidades justificadas (B06, reglas
+ * R1-R5). 422 con mensaje accionable en español — nunca un 500.
+ *
+ * `details` lleva la diferencia numérica (`difference`) y/o el campo en falta
+ * (`field`) para que el front pinte el indicador "cuadra / no cuadra" y ubique
+ * el dato exacto. El motor de Procesos (B17) lo consumirá tal cual.
+ */
+export class ProcessValidationError extends UnprocessableEntityError {
+  override readonly code = 'PROCESS_VALIDATION';
+
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, details);
+  }
+}

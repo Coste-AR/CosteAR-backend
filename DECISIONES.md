@@ -1538,3 +1538,63 @@ Nunca se corrió `prisma migrate dev`. No se tocó `migration_lock.toml` ni ning
   hay procesos node del usuario usando el engine; no se mataron. La migración, el schema (`prisma
   validate` OK) y los tests no dependen de esa regeneración; el cliente se regenera solo en el próximo
   arranque limpio.
+
+## B06 — Dominio: `buildUnitMovementSchedule` (cuadro de movimiento de unidades, función pura)
+
+Primer paso, fundacional, del Costeo por Procesos: resuelve el cuadro de movimiento de unidades de UN
+departamento para UN período. Todo lo de aguas abajo (producción equivalente, informe de costos —
+B11/B17) depende de que este cuadro cuadre. Vive en `src/domain/calculations/process-costing.ts`,
+100 % puro (sin Prisma, HTTP ni servicios), al estilo de `raw-material.ts` / `indirect-costs.ts`:
+`Decimal` de decimal.js para toda cantidad, JSDoc en español con terminología de la cátedra, mensajes
+de error en español.
+
+**Nombres de campo en inglés, no en español.** La consigna pide "terminología exacta de la cátedra en
+español". Se resolvió: los identificadores replican **exactamente** los de la tabla `UnitMovementSchedule`
+(B04) — `initialWip`, `startedInProduction`, `receivedFromPrevious`, `unitIncrease`, `transferredOut`,
+`finishedInStock`, `normalLossPct`, `normalLoss`, `totalLossReported`, `extraordinaryLoss`, `finalWip` —
+y la terminología de la cátedra ("existencia inicial de producción en proceso", "puestas en elaboración",
+"unidades del período", "a justificar / justificado") va en JSDoc, comentarios y mensajes. Motivo: (a) es
+la convención ya establecida en el repo (todo `src/domain/calculations/*` usa identificadores en inglés +
+comentarios en español), y (b) que los nombres calcen 1:1 con la fila persistida hace que el motor de
+Procesos (B17) mapee de la tabla a esta función sin traducir ni un campo. Cambiar a identificadores en
+español rompería esa simetría y la convención del repo.
+
+**`normalLossPct` es una fracción (0.02 = 2 %), no un porcentaje (2).** Mismo criterio que `holdingRate`
+en `raw-material.ts` (Wilson usa 0.30, no 30). Documentado en el JSDoc del input. El caso ancla lo
+confirma: 0.02 × 30.000 = 600.
+
+**Reglas implementadas (fuente de verdad = cátedra, no se reinterpreta):**
+- **R1 — derivación por diferencia.** Las dos derivables son `transferredOut` y `finalWip`. Si falta una,
+  se despeja de `Σ a justificar − Σ salidas conocidas`. Si faltan **las dos**, son dos incógnitas →
+  `ProcessValidationError`. Si la derivada sale **negativa** (las salidas informadas ya superan a las
+  entradas) → también `ProcessValidationError`, es un cuadro imposible.
+- **R2 — base de la pérdida normal = "unidades del período", nunca la EI.** sequence = 1 ⇒ puestas en
+  elaboración; sequence > 1 ⇒ recibidas del anterior + aumento de unidades. Se expone `periodUnits` en el
+  resultado para que el front lo muestre. El test compara un depto. inicial vs. uno posterior con **los
+  mismos insumos totales pero distinta composición** (8.000 vs. 6.000+1.000) y el mismo 5 %: dan 400 vs.
+  350 — prueba que la base cambia y que la EI **no** entra en la base.
+- **R3 — pérdida extraordinaria por diferencia = `totalLossReported − normalLoss`.** Nunca se ingresa
+  directa. Sin `totalLossReported` ⇒ la pérdida real total se asume igual a la normal (extraordinaria = 0).
+  Si la real informada es **menor** que la normal (extraordinaria negativa) → `ProcessValidationError`.
+- **R4 — coherencia por posición.** Depto. inicial (sequence = 1) con `receivedFromPrevious` o
+  `unitIncrease` distintos de cero → error. Se agregó el chequeo **simétrico** (no exigido explícitamente,
+  pero es la misma regla de dominio): un depto. posterior con `startedInProduction` ≠ 0 también corta,
+  porque "puestas en elaboración" solo existen en el inicial. Se considera "provisto" un valor definido y
+  **no nulo**: pasar `0` o `null`/`undefined` (como los trae la fila de un depto. inicial en la DB) es
+  inofensivo; solo una cantidad real que no corresponde dispara el 422.
+- **R5 — chequeo duro final.** `Σ a justificar = Σ justificado`. Si no, `ProcessValidationError` con la
+  diferencia en el mensaje **y** en `details.difference` — eso es lo que leerá el indicador
+  "cuadra / no cuadra" del front. Cuando se derivó una línea por diferencia, R5 cuadra por construcción;
+  el chequeo muerde de verdad cuando el usuario carga **ambas** derivables a mano.
+
+**`ProcessValidationError`** (nuevo, en `src/domain/errors/calculation-errors.ts`) extiende
+`UnprocessableEntityError` → **422**, nunca 500. Lleva mensaje accionable en español y `details`
+(`difference` y/o `field`) suficiente para que la capa HTTP (B17) arme el 422 y el front ubique el dato.
+Sigue el estilo de `MissingInputError` / `MissingAllocationBaseError` del mismo archivo.
+
+**Verificación.** `tests/domain/process-costing.test.ts` (8 casos): cuadro balanceado con EF derivada;
+`transferredOut` derivada dando la EF; R2 (inicial vs. posterior, base distinta); R4 (recibidas y aumento
+en el inicial, dos casos); R5 (desbalance, con la diferencia = 500 nombrada); R1 (dos incógnitas); y el
+**caso ancla de la cátedra (Azur Alcoholes, Destilado, abril)** que reproduce exactamente
+30.000 + 600 + 1.000 + 3.400 = 35.000. Suite completa: **518 passed / 1 skipped** (63 archivos), cero
+regresión. Sin migración, sin `prisma migrate dev` (B06 es dominio puro, no toca schema ni DB).
