@@ -549,6 +549,244 @@ export function calcEquivalentProduction(
   return { columns, unitsAtFullCompletion };
 }
 
+/* ========================================================================== *
+ * COSTEO POR PROCESOS · COSTO TRANSFERIDO = COSTO MODIFICADO + CAUP (B09)
+ * ========================================================================== */
+
+/**
+ * Insumos del costo unitario que un departamento lleva HACIA ADELANTE, al
+ * siguiente ("costo del departamento anterior"). Combina dos ajustes
+ * INDEPENDIENTES y ORDENADOS: el costo modificado (Paso 1) y el CAUP (Paso 2).
+ *
+ * Cantidades en unidades; costos TOTALES (no unitarios) salvo `previousUnitCost`.
+ */
+export interface TransferredCostInput {
+  /** Posición del departamento RECEPTOR en la cadena. El CAUP solo existe en seq > 1. */
+  sequence: number;
+  /**
+   * Costo UNITARIO del departamento anterior (el "previo"), tal como venía antes
+   * de recalcular. Se usa: (a) DIRECTO cuando no hay ni existencia inicial ni
+   * aumento (sin modificación); (b) como COTA DE CONTROL cuando hay aumento (el
+   * costo modificado debe diluir estrictamente por debajo de este valor).
+   */
+  previousUnitCost: Decimal.Value;
+
+  // --- Paso 1 · costo modificado ---
+  /** Costo TOTAL de la existencia inicial (EI) proveniente del depto. anterior. Default 0. */
+  initialWipTransferredCost?: Decimal.Value;
+  /** Unidades de existencia inicial recibidas del depto. anterior en su momento. Default 0. */
+  initialWipUnits?: Decimal.Value;
+  /** Costo TOTAL transferido del depto. anterior EN EL PERÍODO (del mes). Default 0. */
+  previousPeriodTransferredCost?: Decimal.Value;
+  /** Unidades recibidas del depto. anterior EN EL PERÍODO. Default 0. */
+  receivedUnits?: Decimal.Value;
+  /** Aumento de número de unidades (agua, etc.) — solo seq > 1. Default 0. */
+  unitIncrease?: Decimal.Value;
+
+  // --- Paso 2 · CAUP ---
+  /**
+   * Pérdidas NORMALES del departamento (unidades). Las extraordinarias NO entran
+   * acá: son unidades buenas (se terminaron y luego se perdieron). Default 0.
+   */
+  normalLossUnits?: Decimal.Value;
+}
+
+/**
+ * Costo transferido resuelto. Trae los tres números centrales de la cátedra
+ * —costo modificado (Paso 1), CAUP (Paso 2) y costo transferido (la suma)— más
+ * los intermedios (unidades a justificar, unidades buenas, costo de la pérdida)
+ * y las banderas de qué pasos se aplicaron, para que el informe (B10) y el motor
+ * (B17) muestren el detalle sin recalcular.
+ */
+export interface TransferredCost {
+  /** Paso 1 · costo unitario del depto. anterior RECALCULADO (o el previo, sin modificación). */
+  costoModificado: Decimal;
+  /** Paso 2 · Costo Adicional por Unidades Perdidas (CAUP/CAUO). 0 si no aplica. */
+  caup: Decimal;
+  /** Costo unitario FINAL del depto. anterior, a transferir = costo modificado + CAUP. */
+  costoTransferido: Decimal;
+  /** Unidades a justificar = EI + recibidas + aumento (denominador del Paso 1). */
+  unidadesAJustificar: Decimal;
+  /** Unidades buenas = unidades a justificar − pérdidas normales (denominador del CAUP). */
+  unidadesBuenas: Decimal;
+  /** Costo de la pérdida = pérdidas normales × costo modificado (numerador del CAUP). */
+  costoDeLaPerdida: Decimal;
+  /** El Paso 1 MODIFICÓ el costo del anterior (había EI y/o aumento). */
+  step1Applied: boolean;
+  /** El Paso 2 (CAUP) se aplicó (depto. posterior con pérdidas normales). */
+  step2Applied: boolean;
+}
+
+/**
+ * COSTO TRANSFERIDO de un departamento al siguiente (B09) — la parte más
+ * delicada de todo el motor de Procesos, por eso la matriz de 4 combinaciones se
+ * implementa como CUATRO RAMAS EXPLÍCITAS, cada una con su test.
+ *
+ * El costo que un departamento arrastra hacia adelante ("costo del departamento
+ * anterior") NO es el costo unitario tal cual: se recalcula por DOS ajustes
+ * independientes y ORDENADOS.
+ *
+ * PASO 1 — COSTO MODIFICADO (recalcula el costo unitario del anterior cuando
+ * cambia la cantidad de unidades). Aplica si hay existencia inicial recibida del
+ * anterior Y/O aumento de número de unidades:
+ *
+ *   costo modificado = (costo total EI del anterior + costo total del anterior del mes)
+ *                      ÷ (unidades EI + unidades recibidas del período + aumento)
+ *
+ *   - SIN existencia inicial: el promedio se reduce a costo del período ÷
+ *     (recibidas + aumento) — la EI aporta 0 al numerador y 0 al denominador.
+ *   - NI EI NI aumento: se usa el costo unitario previo DIRECTO (sin modificación).
+ *   - CONTROL (regla de la cátedra): con aumento de unidades, el costo modificado
+ *     debe ser ESTRICTAMENTE MENOR que el costo unitario previo (más unidades
+ *     diluyen el mismo costo total). Si sale mayor o igual, es un error de carga
+ *     ⇒ `ProcessValidationError` (422 accionable en español, nunca un 500).
+ *
+ * PASO 2 — CAUP (Costo Adicional por Unidades Perdidas; sinónimo CAUO). Aplica
+ * SOLO en departamentos posteriores (seq > 1) y SOLO si hay pérdidas normales:
+ *
+ *   costo de la pérdida = pérdidas normales × costo modificado
+ *   unidades buenas     = unidades a justificar − pérdidas normales
+ *   CAUP                = costo de la pérdida ÷ unidades buenas
+ *
+ *   (Las pérdidas EXTRAORDINARIAS son unidades buenas: se terminaron y después se
+ *   perdieron; las ÚNICAS unidades "malas" acá son las pérdidas normales.)
+ *
+ *   costo transferido = costo modificado + CAUP
+ *
+ * MATRIZ DE 4 COMBINACIONES (una rama explícita, un test por celda):
+ *   ┌───────────┬───────────┬─────────────────────────────────────────────────┐
+ *   │ aumento   │ pérd.norm │ qué se computa                                   │
+ *   ├───────────┼───────────┼─────────────────────────────────────────────────┤
+ *   │ Sí        │ No        │ Paso 1 solo (costo modificado)                   │
+ *   │ No        │ Sí        │ Paso 1 (promedio con EI si la hay) + Paso 2      │
+ *   │ Sí        │ Sí        │ Paso 1 y Paso 2, EN ESE ORDEN (caso ancla)       │
+ *   │ No        │ No        │ costo unitario previo directo (sin Paso 1 ni 2)  │
+ *   └───────────┴───────────┴─────────────────────────────────────────────────┘
+ *
+ * Función PURA: sin Prisma, sin HTTP, sin servicios.
+ *
+ * Caso ancla (Azur Alcoholes, Purificado, abril): EI $11.120 + período $112.500
+ * = $123.620 ÷ 35.320 unidades a justificar → costo modificado $3,50 (< $3,75
+ * previo ✓); pérdidas normales 320 → costo de la pérdida $1.120, unidades buenas
+ * 35.000, CAUP $0,032; costo transferido $3,50 + $0,032 = $3,532.
+ */
+export function calcTransferredCost(input: TransferredCostInput): TransferredCost {
+  const previousUnitCost = new Decimal(input.previousUnitCost);
+
+  const initialWipTransferredCost = withDefault(input.initialWipTransferredCost, 0);
+  const initialWipUnits = withDefault(input.initialWipUnits, 0);
+  const previousPeriodTransferredCost = withDefault(input.previousPeriodTransferredCost, 0);
+  const receivedUnits = withDefault(input.receivedUnits, 0);
+  const unitIncrease = withDefault(input.unitIncrease, 0);
+  const normalLossUnits = withDefault(input.normalLossUnits, 0);
+
+  // Denominador del Paso 1 y, a la vez, las "unidades a justificar" que usa el
+  // CAUP: es la MISMA cantidad, así los dos pasos nunca divergen.
+  const unidadesAJustificar = initialWipUnits.plus(receivedUnits).plus(unitIncrease);
+
+  // Los dos EJES de la matriz.
+  const hasUnitIncrease = unitIncrease.gt(0);
+  const hasNormalLoss = normalLossUnits.gt(0);
+  // El Paso 1 modifica el costo cuando hay EI y/o aumento (source of truth). La
+  // EI se detecta por sus unidades: sin unidades no hay existencia inicial.
+  const step1Modifies = initialWipUnits.gt(0) || hasUnitIncrease;
+  // El CAUP solo existe en departamentos posteriores con pérdidas normales.
+  const step2Caup = input.sequence > 1 && hasNormalLoss;
+
+  // --- Paso 1 · costo modificado (una sola definición, honra el source of truth) ---
+  const computeCostoModificado = (): Decimal => {
+    if (!step1Modifies) {
+      // Ni EI ni aumento: se usa el costo unitario previo, sin modificación.
+      return previousUnitCost;
+    }
+    if (unidadesAJustificar.isZero()) {
+      throw new ProcessValidationError(
+        'No se puede recalcular el costo modificado con 0 unidades a justificar (EI + recibidas + aumento). ' +
+          'Revisá las unidades cargadas del departamento.',
+        { field: 'receivedUnits' },
+      );
+    }
+    // Promedio ponderado: (costo total EI + costo total del período) ÷ (EI + recibidas + aumento).
+    return initialWipTransferredCost.plus(previousPeriodTransferredCost).div(unidadesAJustificar);
+  };
+
+  // --- Control de la cátedra: con aumento, el modificado debe diluir el costo ---
+  const assertDilution = (costoModificado: Decimal): void => {
+    if (hasUnitIncrease && costoModificado.gte(previousUnitCost)) {
+      throw new ProcessValidationError(
+        `Con aumento de número de unidades, el costo modificado (${costoModificado.toString()}) debe ser ` +
+          `ESTRICTAMENTE MENOR que el costo unitario previo (${previousUnitCost.toString()}): al agregar unidades, ` +
+          'el mismo costo total se diluye. Si sale mayor o igual, hay un error de carga en los costos o las unidades.',
+        {
+          field: 'unitIncrease',
+          costoModificado: costoModificado.toNumber(),
+          previousUnitCost: previousUnitCost.toNumber(),
+        },
+      );
+    }
+  };
+
+  // --- Paso 2 · CAUP (una sola definición) ---
+  const computeCaup = (costoModificado: Decimal): Decimal => {
+    const unidadesBuenas = unidadesAJustificar.minus(normalLossUnits);
+    if (unidadesBuenas.lte(0)) {
+      throw new ProcessValidationError(
+        `El CAUP no se puede repartir: las unidades buenas (unidades a justificar ${unidadesAJustificar.toString()} ` +
+          `− pérdidas normales ${normalLossUnits.toString()}) dan ${unidadesBuenas.toString()}. ` +
+          'Revisá las pérdidas normales cargadas.',
+        { field: 'normalLossUnits', unidadesBuenas: unidadesBuenas.toNumber() },
+      );
+    }
+    // costo de la pérdida ÷ unidades buenas = pérdidas normales × costo modificado ÷ unidades buenas.
+    return normalLossUnits.times(costoModificado).div(unidadesBuenas);
+  };
+
+  // Arma la salida de forma uniforme (las intermedias se derivan una sola vez).
+  const assemble = (costoModificado: Decimal, caup: Decimal, step1Applied: boolean, step2Applied: boolean): TransferredCost => ({
+    costoModificado,
+    caup,
+    costoTransferido: costoModificado.plus(caup),
+    unidadesAJustificar,
+    unidadesBuenas: unidadesAJustificar.minus(normalLossUnits),
+    costoDeLaPerdida: normalLossUnits.times(costoModificado),
+    step1Applied,
+    step2Applied,
+  });
+
+  const zero = new Decimal(0);
+
+  // ---------------------- MATRIZ DE 4 COMBINACIONES ------------------------- //
+  // Ramas EXPLÍCITAS por celda de la matriz (aumento × pérdidas normales), una y
+  // una sola por combinación. El manejo de la EI vive dentro del Paso 1
+  // (computeCostoModificado): "promedio con EI si la hay, si no el costo previo".
+
+  if (hasUnitIncrease && !hasNormalLoss) {
+    // Combo (aumento Sí, normales No): Paso 1 solo (costo modificado, sin CAUP).
+    const costoModificado = computeCostoModificado();
+    assertDilution(costoModificado);
+    return assemble(costoModificado, zero, step1Modifies, false);
+  }
+
+  if (!hasUnitIncrease && hasNormalLoss) {
+    // Combo (aumento No, normales Sí): Paso 1 (promedio con EI si la hay) + Paso 2 (CAUP).
+    const costoModificado = computeCostoModificado();
+    const caup = step2Caup ? computeCaup(costoModificado) : zero;
+    return assemble(costoModificado, caup, step1Modifies, step2Caup);
+  }
+
+  if (hasUnitIncrease && hasNormalLoss) {
+    // Combo (aumento Sí, normales Sí): Paso 1 y Paso 2, EN ESE ORDEN. Caso ancla Purificado.
+    const costoModificado = computeCostoModificado();
+    assertDilution(costoModificado);
+    const caup = step2Caup ? computeCaup(costoModificado) : zero;
+    return assemble(costoModificado, caup, step1Modifies, step2Caup);
+  }
+
+  // Combo (aumento No, normales No): sin CAUP. Con EI, el Paso 1 igual promedia
+  // (source of truth); sin EI, se usa el costo unitario previo directo.
+  return assemble(computeCostoModificado(), zero, step1Modifies, false);
+}
+
 /**
  * Un grado de avance es una FRACCIÓN en [0, 1]. Fuera de ese rango casi siempre
  * significa que se cargó un porcentaje (80) en lugar de la fracción (0.80): se

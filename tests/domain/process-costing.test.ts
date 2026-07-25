@@ -3,6 +3,7 @@ import {
   buildUnitMovementSchedule,
   calcEquivalentProduction,
   calcNormalAndExtraordinaryLosses,
+  calcTransferredCost,
   type EquivalentProductionElement,
   type UnitMovementSchedule,
 } from '@/domain/calculations/process-costing.js';
@@ -413,5 +414,127 @@ describe('Costeo por Procesos — producción equivalente (B07)', () => {
     expect(() =>
       calcEquivalentProduction({ schedule, conversionUnified: true, conversionAvance: 80 }),
     ).toThrow(ProcessValidationError);
+  });
+});
+
+describe('Costeo por Procesos — costo transferido = costo modificado + CAUP (B09)', () => {
+  // La matriz de 4 combinaciones (aumento × pérdidas normales): UN test por celda,
+  // más el caso ancla (que es la celda Sí/Sí) y el control de dilución.
+
+  it('Combo (aumento Sí, normales No): solo costo modificado, y DILUYE bajo el costo previo', () => {
+    // Sin EI, con aumento: el mismo costo del período se reparte en más unidades
+    // (recibidas + aumento) ⇒ el costo modificado cae por debajo del previo.
+    const r = calcTransferredCost({
+      sequence: 2,
+      previousUnitCost: 3.75,
+      previousPeriodTransferredCost: 112500, // 30.000 × 3,75
+      receivedUnits: 30000,
+      unitIncrease: 2000, // aumento
+      // normalLossUnits 0 ⇒ sin CAUP
+    });
+
+    // 112.500 ÷ (30.000 + 2.000) = 3,515625 < 3,75 (dilución).
+    expect(r.costoModificado.toNumber()).toBe(3.515625);
+    expect(r.costoModificado.lt(3.75)).toBe(true); // control de dilución OK
+    expect(r.caup.toNumber()).toBe(0);
+    expect(r.costoTransferido.toNumber()).toBe(3.515625); // = modificado (CAUP 0)
+    expect(r.step1Applied).toBe(true);
+    expect(r.step2Applied).toBe(false);
+  });
+
+  it('Combo (aumento No, normales Sí): costo modificado por PROMEDIO con EI + CAUP', () => {
+    // Con EI y sin aumento: el Paso 1 promedia (EI + período) ÷ (EI + recibidas).
+    // Luego el CAUP reparte la pérdida normal entre las unidades buenas.
+    const r = calcTransferredCost({
+      sequence: 2,
+      previousUnitCost: 4.2,
+      initialWipTransferredCost: 8000,
+      initialWipUnits: 2000,
+      previousPeriodTransferredCost: 80000,
+      receivedUnits: 20000,
+      // unitIncrease 0
+      normalLossUnits: 2000,
+    });
+
+    // (8.000 + 80.000) ÷ (2.000 + 20.000) = 88.000 ÷ 22.000 = 4,00.
+    expect(r.costoModificado.toNumber()).toBe(4);
+    // unidades buenas = 22.000 − 2.000 = 20.000; costo de la pérdida = 2.000 × 4 = 8.000.
+    expect(r.unidadesBuenas.toNumber()).toBe(20000);
+    expect(r.costoDeLaPerdida.toNumber()).toBe(8000);
+    // CAUP = 8.000 ÷ 20.000 = 0,40.
+    expect(r.caup.toNumber()).toBe(0.4);
+    expect(r.costoTransferido.toNumber()).toBe(4.4); // 4,00 + 0,40
+    expect(r.step1Applied).toBe(true);
+    expect(r.step2Applied).toBe(true);
+  });
+
+  it('Combo (aumento Sí, normales Sí) — CASO ANCLA Azur Alcoholes, Purificado, abril → 3,50 / 0,032 / 3,532', () => {
+    // Paso 1 y Paso 2, EN ESE ORDEN. Reproduce el caso de cátedra célula a célula.
+    const r = calcTransferredCost({
+      sequence: 2,
+      previousUnitCost: 3.75, // costo unitario previo del Destilado
+      initialWipTransferredCost: 11120, // costo total EI del anterior
+      initialWipUnits: 3320, // 35.320 a justificar − 30.000 recibidas − 2.000 aumento
+      previousPeriodTransferredCost: 112500, // costo del anterior del período
+      receivedUnits: 30000,
+      unitIncrease: 2000,
+      normalLossUnits: 320,
+    });
+
+    // Paso 1: (11.120 + 112.500) ÷ 35.320 = 123.620 ÷ 35.320 = 3,50 (< 3,75 previo ✓).
+    expect(r.unidadesAJustificar.toNumber()).toBe(35320);
+    expect(r.costoModificado.toNumber()).toBe(3.5);
+    // Paso 2: unidades buenas 35.320 − 320 = 35.000; costo pérdida 320 × 3,50 = 1.120.
+    expect(r.unidadesBuenas.toNumber()).toBe(35000);
+    expect(r.costoDeLaPerdida.toNumber()).toBe(1120);
+    // CAUP = 1.120 ÷ 35.000 = 0,032.
+    expect(r.caup.toNumber()).toBe(0.032);
+    // Costo transferido = 3,50 + 0,032 = 3,532.
+    expect(r.costoTransferido.toNumber()).toBe(3.532);
+    expect(r.step1Applied).toBe(true);
+    expect(r.step2Applied).toBe(true);
+  });
+
+  it('Combo (aumento No, normales No): devuelve el costo unitario previo SIN cambios', () => {
+    // Sin EI, sin aumento y sin pérdidas normales: el costo previo se usa DIRECTO.
+    // El costo/unidades del período son inconsistentes con el previo a propósito
+    // (100.000 ÷ 30.000 = 3,333) para probar que NO se recalcula: se toma el 3,75.
+    const r = calcTransferredCost({
+      sequence: 2,
+      previousUnitCost: 3.75,
+      previousPeriodTransferredCost: 100000,
+      receivedUnits: 30000,
+      // sin EI, sin aumento, sin pérdidas normales
+    });
+
+    expect(r.costoModificado.toNumber()).toBe(3.75); // el previo, directo
+    expect(r.costoModificado.toNumber()).not.toBe(100000 / 30000); // NO se recalculó
+    expect(r.caup.toNumber()).toBe(0);
+    expect(r.costoTransferido.toNumber()).toBe(3.75);
+    expect(r.step1Applied).toBe(false);
+    expect(r.step2Applied).toBe(false);
+  });
+
+  it('Control de cátedra: con aumento, si el costo modificado NO diluye (≥ previo) ⇒ ProcessValidationError', () => {
+    // Aumento presente pero la EI arrastra un costo tan alto que el modificado sale
+    // por encima del previo: es un error de carga y se corta con un 422 accionable.
+    let error: unknown;
+    try {
+      calcTransferredCost({
+        sequence: 2,
+        previousUnitCost: 3.0,
+        initialWipTransferredCost: 50000, // EI carísima
+        initialWipUnits: 2000,
+        previousPeriodTransferredCost: 30000,
+        receivedUnits: 10000,
+        unitIncrease: 1000, // hay aumento ⇒ debería diluir, pero (50.000+30.000)/13.000 = 6,15 > 3
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ProcessValidationError);
+    const err = error as ProcessValidationError;
+    expect(err.message).toContain('ESTRICTAMENTE MENOR');
+    expect((err.details as { previousUnitCost: number }).previousUnitCost).toBe(3);
   });
 });

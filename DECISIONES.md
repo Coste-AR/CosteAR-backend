@@ -1727,3 +1727,61 @@ R1 la EI nunca entra aunque el cuadro la lleve (Purificado con EI 8.000 → sigu
 422; default sin extraordinaria; y la delegación B06→B08 (mismas pérdidas). Suite completa: **563 passed /
 1 skipped** (71 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev`
 (dominio puro, no toca schema ni DB).
+
+## B09 — Dominio: `calcTransferredCost` (costo transferido = costo modificado + CAUP, función pura)
+
+**Qué hace.** Calcula el costo unitario que un departamento lleva HACIA ADELANTE, al siguiente ("costo
+del departamento anterior"). No es el costo unitario tal cual: se recalcula por DOS ajustes
+independientes y ORDENADOS. Función pura, mismo archivo que B06/B07/B08
+(`src/domain/calculations/process-costing.ts`), sin Prisma/HTTP/servicios. La consumirá el informe (B10)
+y el motor de Procesos (B17).
+
+**Por qué es la tarea más delicada.** Es la parte más fácil de equivocar de todo el motor: dos ajustes
+que se pisan si se aplican en el orden equivocado, y una matriz de combinaciones donde cada celda hace
+algo distinto. Por eso se implementó la **matriz de 4 combinaciones como CUATRO RAMAS EXPLÍCITAS** (no un
+cálculo "inteligente" que las colapse), con **un test por celda** más el ancla y el control.
+
+**Terminología.** CAUP = CAUO = "Costo Adicional por Unidades Perdidas" (sinónimos). En el código se usa
+**CAUP**; se acepta que el plan/otros docs digan CAUO.
+
+**Los dos pasos (source of truth: cátedra):**
+- **PASO 1 — COSTO MODIFICADO.** Recalcula el costo unitario del anterior cuando cambia la cantidad de
+  unidades. Aplica si hay existencia inicial (EI) recibida del anterior **y/o** aumento de número de
+  unidades: `costo modificado = (costo total EI + costo total del anterior del período) ÷ (unidades EI +
+  recibidas + aumento)`. Sin EI, el promedio se reduce a `costo del período ÷ (recibidas + aumento)` (la
+  EI aporta 0 y 0). **Ni EI ni aumento ⇒ se usa el costo unitario previo DIRECTO** (sin modificación).
+  **CONTROL de cátedra:** con aumento, el costo modificado debe ser **estrictamente menor** que el previo
+  (más unidades diluyen el mismo costo total); si sale ≥, es error de carga ⇒ `ProcessValidationError`
+  (422 accionable en español, nunca 500).
+- **PASO 2 — CAUP.** Solo en departamentos posteriores (seq > 1) y solo con pérdidas normales:
+  `costo de la pérdida = pérdidas normales × costo modificado`; `unidades buenas = unidades a justificar −
+  pérdidas normales`; `CAUP = costo de la pérdida ÷ unidades buenas`. Las pérdidas **extraordinarias** son
+  unidades buenas (se terminaron y luego se perdieron): las únicas "malas" acá son las normales.
+  `costo transferido = costo modificado + CAUP`.
+
+**Decisión de diseño — las ramas son la matriz literal (aumento × pérdidas normales).** El `if/else`
+ramifica sobre los DOS ejes de la matriz de cátedra —aumento y pérdidas normales—, una rama por celda, de
+modo que cada celda mapea 1:1 a un test. El manejo de la EI (source of truth: "promedio con EI si la hay,
+si no el costo previo") vive DENTRO del Paso 1 (`computeCostoModificado`), no como un tercer eje: así la
+fila `(No, No)` con EI presente igual promedia (respeta el spec de Paso 1) sin romper la lectura de la
+matriz. El control de dilución solo corre en las ramas con aumento.
+
+**Decisión de diseño — una sola cantidad para "unidades a justificar".** El denominador del Paso 1
+(EI + recibidas + aumento) es EXACTAMENTE las "unidades a justificar" que el Paso 2 usa para las unidades
+buenas. Se computa UNA vez (`unidadesAJustificar`) y se reutiliza, para que los dos pasos no puedan
+divergir.
+
+**Ambigüedad resuelta (regla #8).** La matriz rotula el eje como "aumento", pero el spec de Paso 1 (source
+of truth) dispara con **EI y/o aumento**. Se tomó el spec: el disparador real de la modificación es
+`EI || aumento`, y la columna "aumento" de la matriz es una simplificación (su fila `(No, Sí)` ya aclara
+"promedio con EI si la hay"). Documentado; sin riesgo de pérdida de datos.
+
+**Caso ancla reproducido EXACTO.** Azur Alcoholes, Purificado, abril: EI $11.120 + período $112.500 =
+$123.620 ÷ 35.320 → costo modificado **$3,50** (< $3,75 previo ✓); pérdidas normales 320 → costo de la
+pérdida $1.120, unidades buenas 35.000, CAUP **$0,032**; costo transferido $3,50 + $0,032 = **$3,532**.
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 5 casos B09 (27 en total): las 4
+celdas de la matriz —(aumento Sí, normales No) con dilución; (No, Sí) promedio-con-EI + CAUP; (Sí, Sí) el
+ancla Purificado 3,50/0,032/3,532; (No, No) devuelve el previo sin cambios— más el control de dilución
+(aumento con modificado ≥ previo → 422). Suite completa: **568 passed / 1 skipped** (71 archivos), cero
+regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev` (dominio puro, no toca schema ni DB).
