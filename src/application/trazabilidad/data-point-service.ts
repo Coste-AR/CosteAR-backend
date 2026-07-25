@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
@@ -41,48 +41,62 @@ export class DataPointService {
    */
   async create(userId: string, structureId: string, input: CreateDataPointInput, actor: TraceActor) {
     await this.requireStructureOwned(userId, structureId);
+    return withTenant(userId, (tx) => this.createInTx(tx, structureId, input, actor));
+  }
 
-    return withTenant(userId, async (tx) => {
-      const dp = await tx.dataPoint.create({
-        data: {
-          structureId,
-          element: input.element,
-          fieldKey: input.fieldKey,
-          label: input.label,
-          unit: input.unit,
-          sourceArea: input.sourceArea,
-          fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
-        },
-      });
-      await tx.dataPointVersion.create({
-        data: {
-          dataPointId: dp.id,
-          versionN: 1,
-          valueNum: input.valueNum,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          valueJson: input.valueJson as any,
-          reason: input.reason,
-          evidenceId: input.evidenceId,
-          method: input.method,
-          createdBy: actor.id,
-          actorRole: actor.role,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          actorArea: input.sourceArea as any,
-          deviceInfo: input.deviceInfo ?? actor.device,
-        },
-      });
-      await recordTraceAudit(
-        {
-          entityType: 'DataPoint',
-          entityId: dp.id,
-          action: 'crear',
-          actor: { ...actor, area: input.sourceArea, method: input.method },
-          after: { fieldKey: input.fieldKey, valueNum: input.valueNum, valueJson: input.valueJson },
-        },
-        tx,
-      );
-      return dp;
+  /**
+   * Igual que `create`, pero dentro de una transacción YA abierta por el
+   * llamador, para componer la creación de un DataPoint con otras escrituras
+   * (p. ej. el cuadro de movimiento de unidades, B15) en UNA sola transacción
+   * atómica. El chequeo de propiedad de la estructura queda a cargo del
+   * llamador (que ya lo hizo antes de abrir la transacción). Fuente ÚNICA de
+   * la creación de un dato trazable: `create` delega acá.
+   */
+  async createInTx(
+    tx: Prisma.TransactionClient,
+    structureId: string,
+    input: CreateDataPointInput,
+    actor: TraceActor,
+  ) {
+    const dp = await tx.dataPoint.create({
+      data: {
+        structureId,
+        element: input.element,
+        fieldKey: input.fieldKey,
+        label: input.label,
+        unit: input.unit,
+        sourceArea: input.sourceArea,
+        fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
+      },
     });
+    await tx.dataPointVersion.create({
+      data: {
+        dataPointId: dp.id,
+        versionN: 1,
+        valueNum: input.valueNum,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        valueJson: input.valueJson as any,
+        reason: input.reason,
+        evidenceId: input.evidenceId,
+        method: input.method,
+        createdBy: actor.id,
+        actorRole: actor.role,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        actorArea: input.sourceArea as any,
+        deviceInfo: input.deviceInfo ?? actor.device,
+      },
+    });
+    await recordTraceAudit(
+      {
+        entityType: 'DataPoint',
+        entityId: dp.id,
+        action: 'crear',
+        actor: { ...actor, area: input.sourceArea, method: input.method },
+        after: { fieldKey: input.fieldKey, valueNum: input.valueNum, valueJson: input.valueJson },
+      },
+      tx,
+    );
+    return dp;
   }
 
   /**
@@ -92,53 +106,68 @@ export class DataPointService {
    */
   async addVersion(userId: string, id: string, input: AddVersionInput, actor: TraceActor) {
     const dp = await this.requireDataPoint(userId, id);
-    const last = await this.db.dataPointVersion.findFirst({
+    return withTenant(userId, (tx) => this.addVersionInTx(tx, id, dp, input, actor));
+  }
+
+  /**
+   * Igual que `addVersion`, pero dentro de una transacción YA abierta por el
+   * llamador (misma lógica de composición que `createInTx`). `existing` es el
+   * DataPoint ya resuelto por el llamador (propiedad chequeada). Fuente ÚNICA
+   * de la corrección de un dato: `addVersion` delega acá.
+   */
+  async addVersionInTx(
+    tx: Prisma.TransactionClient,
+    id: string,
+    existing: { fechaHecho: Date | null },
+    input: AddVersionInput,
+    actor: TraceActor,
+  ) {
+    const dp = existing;
+    const last = await tx.dataPointVersion.findFirst({
       where: { dataPointId: id },
       orderBy: { versionN: 'desc' },
     });
     const nextN = (last?.versionN ?? 0) + 1;
 
-    return withTenant(userId, async (tx) => {
-      const version = await tx.dataPointVersion.create({
-        data: {
-          dataPointId: id,
-          versionN: nextN,
-          valueNum: input.valueNum,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          valueJson: input.valueJson as any,
-          reason: input.reason,
-          evidenceId: input.evidenceId,
-          method: input.method,
-          createdBy: actor.id,
-          actorRole: actor.role,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          actorArea: input.sourceArea as any,
-          deviceInfo: input.deviceInfo ?? actor.device,
-        },
-      });
-      // Una corrección invalida cualquier firma previa: vuelve a 'borrador'
-      // aunque ya estuviera validado/aplicado (pide re-validar).
-      const updated = await tx.dataPoint.update({
-        where: { id },
-        data: {
-          status: 'borrador',
-          fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : dp.fechaHecho,
-        },
-      });
-      await recordTraceAudit(
-        {
-          entityType: 'DataPoint',
-          entityId: id,
-          action: 'versionar',
-          actor: { ...actor, area: input.sourceArea, method: input.method },
-          before: { versionN: last?.versionN ?? null, valueNum: last?.valueNum, valueJson: last?.valueJson },
-          after: { versionN: nextN, valueNum: input.valueNum, valueJson: input.valueJson },
-          comment: input.reason,
-        },
-        tx,
-      );
-      return { dataPoint: updated, version };
+    const version = await tx.dataPointVersion.create({
+      data: {
+        dataPointId: id,
+        versionN: nextN,
+        valueNum: input.valueNum,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        valueJson: input.valueJson as any,
+        reason: input.reason,
+        evidenceId: input.evidenceId,
+        method: input.method,
+        createdBy: actor.id,
+        actorRole: actor.role,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        actorArea: input.sourceArea as any,
+        deviceInfo: input.deviceInfo ?? actor.device,
+      },
     });
+    // Una corrección invalida cualquier firma previa: vuelve a 'borrador'
+    // aunque ya estuviera validado/aplicado (pide re-validar).
+    const updated = await tx.dataPoint.update({
+      where: { id },
+      data: {
+        status: 'borrador',
+        fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : dp.fechaHecho,
+      },
+    });
+    await recordTraceAudit(
+      {
+        entityType: 'DataPoint',
+        entityId: id,
+        action: 'versionar',
+        actor: { ...actor, area: input.sourceArea, method: input.method },
+        before: { versionN: last?.versionN ?? null, valueNum: last?.valueNum, valueJson: last?.valueJson },
+        after: { versionN: nextN, valueNum: input.valueNum, valueJson: input.valueJson },
+        comment: input.reason,
+      },
+      tx,
+    );
+    return { dataPoint: updated, version };
   }
 
   /** borrador → validado. Firma: actor + hora exacta. */

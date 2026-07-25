@@ -1901,3 +1901,62 @@ base total ≤ 0 (p. ej. todos los precios en 0) y VNR negativo (gastos de comer
 distinto" (los 4 unitarios de A son todos diferentes) + controles y datos rotos que lanzan 422. Suite completa:
 **583 passed / 1 skipped** (72 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma
 migrate dev` (dominio puro, no toca schema ni DB).
+
+## B15 — Application: `unit-movement-service` (cuadro de movimiento como servicio + trazabilidad)
+
+**Qué se hizo.** CRUD del cuadro de movimiento de unidades por (departamento, período), apoyado en las
+funciones PURAS del dominio (`buildUnitMovementSchedule` B06, `calcEquivalentProduction` B07): el servicio
+`src/application/cost-structures/process-costing/unit-movement-service.ts` orquesta (validar → persistir →
+auditar → trazar), nunca reimplementa la matemática. Tres endpoints protegidos por auth, solo para estructuras
+`costingSystem = 'PROCESSES'`:
+- `GET  /structures/:id/process/departments/:deptId/periods/:periodId/movement` — cuadro guardado + resuelto
+  (con derivados por diferencia y estado "cuadra / no cuadra") + `dataPointId` de cada cifra trazable.
+- `PUT  …/movement` — upsert (clave única `[departmentId, periodId]`), valida con el dominio, traza.
+- `GET  …/equivalent-production` — deriva la producción equivalente (B07) del cuadro guardado.
+
+**Trazabilidad reusando `DataPointService` (no un mecanismo paralelo).** Cada valor MANUAL del cuadro se
+persiste como un `DataPoint` versionado. El valor DERIVADO por diferencia (el de `transferredOut` o `finalWip`
+que el usuario NO cargó) NO es DataPoint: es computado, no ingresado. La regla es simple y testeable: un campo
+se traza sí y solo sí viene en el body (no `undefined`), lo que excluye automáticamente al derivado (que se
+omite). Un re-save con el mismo valor no versiona (sin ruido); con un valor distinto agrega `version_n+1`
+(append-only, nunca pisa).
+
+**Decisión — una sola transacción atómica.** El `save` completo (upsert de la fila + todos los DataPoints +
+sus auditorías) corre dentro de UN `withTenant`. Para reusar `DataPointService` sin abrir transacciones
+sueltas, se extrajeron dos métodos componibles —`createInTx(tx, …)` y `addVersionInTx(tx, …)`— y los públicos
+`create`/`addVersion` ahora delegan en ellos dentro de su propio `withTenant`. La API pública y el
+comportamiento no cambian (los tests existentes de `DataPointService` siguen verdes): la lógica de creación y
+corrección de un dato trazable vive en UN solo lugar.
+
+**Decisión — `element = 'MP'` para todo el cuadro.** El cuadro de movimiento sigue UNIDADES FÍSICAS del
+producto (la materia que fluye por el proceso), no un elemento del costo puntual — la apertura por elemento
+(MOD/CIP) recién aparece en la producción equivalente (B07). El enum `CostElement` no tiene una opción
+"unidades", así que MP es el hogar natural y estable de estas cifras. Los grados de avance (MP/Conversión) se
+persisten para la producción equivalente pero NO se trazan como DataPoints: son insumos de la PE, no del cuadro
+de movimiento.
+
+**Decisión — `fieldKey` con scope depto+período.** Como `DataPoint` se ancla solo a `structureId`, la clave
+`proceso.cuadro.{periodId}.{departmentId}.{campo}` hace única cada celda del cuadro por estructura, depto,
+período y campo, para que un re-save encuentre el dato existente y le agregue versión en vez de duplicarlo. El
+`fieldKey` es una clave interna de máquina (nunca se muestra al usuario; lo que se ve es el `label` humano
+"Recibidas del departamento anterior · Destilado, Abril 2026"), así que no viola la regla de no exponer ids.
+
+**Decisión — errores accionables en español, nunca un 500.** Los `ProcessValidationError` del dominio (cuadro
+que no cuadra, dos incógnitas, depto. inicial con recibidas/aumento) se re-emiten anteponiendo el NOMBRE del
+departamento (nunca su id) → 422. Sobre una estructura de Órdenes, un 422 que nombra el producto y explica que
+el cuadro solo aplica a Procesos. `equivalent-production` sin cuadro cargado → 422 accionable nombrando el
+departamento y el período.
+
+**Decisión — producción equivalente con un solo avance de conversión.** La tabla `unit_movement_schedules`
+persiste un único `finalWipConvAvance`; si el departamento sigue MOD y CIP por separado
+(`defaultConversionAvanceEqualsMO = false`), ambas columnas usan ese avance común. Sin avance cargado, la EF
+aporta 0 a la conversión (default explícito, no se inventa un número).
+
+**Sin migración.** La tabla `unit_movement_schedules` y su RLS ya existen (B04). Cero `prisma migrate dev`.
+
+**Verificación.** 9 tests nuevos de aplicación (Prisma mockeado, mismo patrón que `data-point-service.test.ts`):
+round-trip save+get que cuadra y deriva la EF; cuadro desbalanceado → 422 nombrando el depto; cada valor manual
+crea un DataPoint y el derivado NO; auditoría del cuadro en la misma transacción; `equivalent-production`
+reproduce el resultado B07; endpoints sobre Órdenes → 422; re-save sin cambio no versiona y con cambio versiona.
+Suite completa: **592 passed / 1 skipped** (73 archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el
+script `npm run lint` está roto a nivel repo —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
