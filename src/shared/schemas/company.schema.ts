@@ -26,6 +26,17 @@ export const cuitSchema = z
  */
 export const periodicitySchema = z.enum(['MONTHLY', 'BIWEEKLY', 'QUARTERLY']);
 
+export const PREDEFINED_INDUSTRIES = [
+  'Gastronomía',
+  'Comercio Minorista (Retail)',
+  'Fábrica / Manufactura',
+  'Construcción',
+  'Servicios Profesionales',
+  'Logística y Transporte',
+  'Agropecuario',
+  'Otro'
+];
+
 export const createCompanySchema = z.object({
   name: z.string().min(2, 'Nombre demasiado corto').max(160).trim(),
   industry: z.string().max(120).trim().optional(),

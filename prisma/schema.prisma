@@ -147,9 +147,28 @@ model Company {
   alerts             Alert[]
   empresaConnections EmpresaConnection[]
   costPeriods        CostPeriod[]
+  targetBudget       CompanyTargetBudget?
 
   @@index([userId])
   @@map("companies")
+}
+
+// ---------------------------------------------------------------------------
+// Objetivos de la Empresa (Target Budget)
+// ---------------------------------------------------------------------------
+
+model CompanyTargetBudget {
+  id              String   @id @default(uuid()) @db.Uuid
+  companyId       String   @unique @db.Uuid
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rawMaterialsPct Float    @default(0) // Porcentaje deseado para materia prima/insumos
+  laborPct        Float    @default(0) // Porcentaje deseado para mano de obra
+  cifPct          Float    @default(0) // Porcentaje deseado para costos indirectos
+  marginPct       Float    @default(0) // Porcentaje deseado de ganancia neta
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("company_target_budgets")
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +460,7 @@ model EmpresaConnection {
   costistId String   @db.Uuid
   costist   User     @relation("costist_connections", fields: [costistId], references: [id], onDelete: Cascade)
   apiKey    String   @unique @default(uuid()) // clave para que la empresa suba datos
+  whatsappPhoneNumber String?  @unique // formato E.164, ej "5493815551234". Null si no usa este canal.
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

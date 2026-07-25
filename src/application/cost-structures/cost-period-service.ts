@@ -22,8 +22,8 @@ import {
   indirectCostConfigSchema,
   inventorySchema,
 } from '../../shared/schemas/cost.schema.js';
-import { comparePeriods, type PeriodSide } from './period-comparison.js';
-
+import { comparePeriods, type PeriodSide, type MacroContrast } from './period-comparison.js';
+import { MacroService } from '../macro/macro-service.js';
 /**
  * PERÍODOS DE COSTEO (problema C — Fases 1 y 3).
  *
@@ -54,7 +54,10 @@ import { comparePeriods, type PeriodSide } from './period-comparison.js';
 
 
 export class CostPeriodService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly macro: MacroService = new MacroService(),
+  ) {}
 
   private async requireStructure(userId: string, structureId: string) {
     const s = await this.db.costStructure.findFirst({
@@ -226,7 +229,7 @@ export class CostPeriodService {
                 companyId: period.companyId,
                 costStructureId: period.structureId,
                 type: 'COST_SPIKE',
-                message: `Anomalía en Materia Prima: el costo unitario ($${currentMP.toFixed(2)}) subió un ${(devMP * 100).toFixed(1)}% respecto al promedio histórico ($${avgMP.toFixed(2)}). Te recomendamos revaluar el precio de venta sugerido en el Simulador de Escenarios.`,
+                message: `[Alerta de Anomalía: Materia Prima] El costo unitario de Materia Prima ($${currentMP.toFixed(2)}) subió un ${(devMP * 100).toFixed(1)}% respecto al promedio histórico ($${avgMP.toFixed(2)}). Te recomendamos revaluar el precio de venta sugerido en el Simulador de Escenarios.`,
               },
             });
           }
@@ -238,7 +241,7 @@ export class CostPeriodService {
                 companyId: period.companyId,
                 costStructureId: period.structureId,
                 type: 'COST_SPIKE',
-                message: `Anomalía en Mano de Obra: el costo unitario ($${currentMOD.toFixed(2)}) subió un ${(devMOD * 100).toFixed(1)}% respecto al promedio histórico ($${avgMOD.toFixed(2)}). Revisá la productividad o paritarias.`,
+                message: `[Alerta de Anomalía: Mano de Obra] El costo unitario de Mano de Obra ($${currentMOD.toFixed(2)}) subió un ${(devMOD * 100).toFixed(1)}% respecto al promedio histórico ($${avgMOD.toFixed(2)}). Revisá la productividad o paritarias.`,
               },
             });
           }
@@ -300,7 +303,26 @@ export class CostPeriodService {
     // variación se lee "de mayo a junio", no "de junio a mayo".
     const [older, newer] = from.code < to.code ? [from, to] : [to, from];
 
-    return comparePeriods(this.toSide(older), this.toSide(newer));
+    const comparison = comparePeriods(this.toSide(older), this.toSide(newer));
+
+    let macroContrast: MacroContrast | null = null;
+    if (older.status === 'CLOSED' && newer.status === 'CLOSED') {
+      const inflation = await this.macro.cumulativeInflation(older.endDate, newer.endDate);
+      if (inflation) {
+        macroContrast = {
+          indicatorCode: 'IPC_NACIONAL',
+          indicatorLabel: 'Inflación nacional (IPC)',
+          deltaPct: inflation.deltaPct,
+          monthsUsed: inflation.monthsUsed,
+          snapshots: inflation.snapshots.map((s) => ({
+            value: s.value,
+            effectiveDate: s.effectiveDate.toISOString().slice(0, 10),
+          })),
+        };
+      }
+    }
+
+    return { ...comparison, macroContrast };
   }
 
   /** Un período tal como lo necesita la comparación, con sus números resueltos. */

@@ -4,6 +4,9 @@ import { PrismaVaultChunkRepository } from '../vault-indexer/vault-chunk-reposit
 import { UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { prisma } from '../../infrastructure/database/prisma.js';
 
+/** Techo defensivo de caracteres del contexto armado para el prompt del RAG. */
+const MAX_CONTEXT_CHARS = 12_000;
+
 export interface VaultQueryResult {
   answer: string;
   citations: string[];
@@ -30,15 +33,11 @@ Contexto extraído de la Bóveda:
 `;
 
 export class VaultQueryService {
-  private readonly embedder: VoyageService;
-  private readonly ai: GroqService;
-  private readonly repo: PrismaVaultChunkRepository;
-
-  constructor() {
-    this.embedder = new VoyageService();
-    this.ai = new GroqService();
-    this.repo = new PrismaVaultChunkRepository();
-  }
+  constructor(
+    private readonly embedder: VoyageService = new VoyageService(),
+    private readonly ai: GroqService = new GroqService(),
+    private readonly repo: PrismaVaultChunkRepository = new PrismaVaultChunkRepository(),
+  ) {}
 
   async query(question: string, maxResults = 5): Promise<VaultQueryResult> {
     if (!this.embedder.isConfigured || !this.ai.isConfigured) {
@@ -93,6 +92,11 @@ export class VaultQueryService {
       const heading = c.headingPath ? ` > ${c.headingPath}` : '';
       contextStr += `[Chunk ${i}] Fuente: ${c.sourceFile}${heading}\n${c.content}\n\n`;
       i++;
+    }
+
+    if (contextStr.length > MAX_CONTEXT_CHARS) {
+      console.warn(`[vault-query] Contexto truncado de ${contextStr.length} a ${MAX_CONTEXT_CHARS} caracteres.`);
+      contextStr = contextStr.slice(0, MAX_CONTEXT_CHARS) + '\n\n[...contexto truncado por límite de tamaño...]';
     }
 
     const userPrompt = `PREGUNTA DEL USUARIO:\n"${question}"\n\nCONTEXTO:\n${contextStr}`;

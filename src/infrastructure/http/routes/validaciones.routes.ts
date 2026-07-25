@@ -64,6 +64,13 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: { success: true } });
   });
 
+  app.put('/conexiones/:connectionId/whatsapp', { preHandler: authenticate }, async (request, reply) => {
+    const { connectionId } = request.params as { connectionId: string };
+    const { phoneNumber } = z.object({ phoneNumber: z.string().min(8).max(20) }).parse(request.body);
+    const conn = await connSvc.setWhatsappNumber(request.authUser!.id, connectionId, phoneNumber);
+    return reply.send({ data: conn });
+  });
+
   // ----- Submit público por API key (sin JWT) -----
 
   app.post('/datos/submit', async (request, reply) => {

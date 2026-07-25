@@ -7,6 +7,7 @@ export const TEXT_MODEL   = 'llama-3.3-70b-versatile';
 
 export interface GroqResponse {
   choices: { message: { content: string } }[];
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
 import { describeZodIssues } from './groq-schemas.js';
@@ -81,6 +82,14 @@ export class GroqClient {
       });
       if (!res.ok) { console.error('[groq] completeJSON error:', await res.text()); return null; }
       const data = await res.json() as GroqResponse;
+      if (data.usage) {
+        console.info('[groq] usage', {
+          model: TEXT_MODEL,
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+          totalTokens: data.usage.total_tokens,
+        });
+      }
       const raw = data.choices[0]?.message.content ?? '';
       return JSON.parse(raw) as T;
     } catch (err) {
