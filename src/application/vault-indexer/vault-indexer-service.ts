@@ -12,6 +12,13 @@ export interface IndexVaultResult {
   chunksSkippedUnchanged: number;
   chunksDeleted: number;
   filesWithErrors: string[];
+  /** Diagnóstico: dónde miró y qué encontró, para depurar sin acceso a los logs del server. */
+  debug: {
+    vaultPath: string;
+    hadGitFolder: boolean;
+    vaultCommit: string;
+    totalFilesFound: number;
+  };
 }
 
 const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
@@ -74,11 +81,12 @@ export class VaultIndexerService {
     }
 
     const cloneUrl = 'https://github.com/Coste-AR/costear-knowledge-base.git';
+    const hadGitFolder = existsSync(join(vaultPath, '.git')); // estado ANTES de tocar nada, para diagnóstico
 
     if (!existsSync(vaultPath)) {
       console.log(`[vault-indexer] Bóveda no encontrada en ${vaultPath}. Clonando de GitHub...`);
       execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
-    } else if (existsSync(join(vaultPath, '.git'))) {
+    } else if (hadGitFolder) {
       try {
         console.log(`[vault-indexer] Actualizando bóveda en ${vaultPath}...`);
         execSync('git pull', { cwd: vaultPath, stdio: 'inherit' });
@@ -141,6 +149,7 @@ export class VaultIndexerService {
       chunksSkippedUnchanged: 0,
       chunksDeleted: 0,
       filesWithErrors: [],
+      debug: { vaultPath, hadGitFolder, vaultCommit, totalFilesFound: absoluteFiles.length },
     };
 
     const toEmbedQueue: { sourceFile: string; chunk: ReturnType<typeof chunkMarkdown>[number] }[] = [];
