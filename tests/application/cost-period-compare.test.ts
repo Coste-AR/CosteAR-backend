@@ -60,8 +60,21 @@ function period(o: {
     status: o.status ?? 'CLOSED',
     resultSnapshot: o.snap ?? null,
     rawMaterialConfig: { materials: [{ id: 'm1', name: 'M1', unit: 'kg', expectedYield: 1, initialStock: { quantity: 0, unitCost: 0 }, initialStockQty: 0, initialStockValue: 0, stockPolicy: { type: 'FIFO', minConsumption: 1, maxConsumption: 1, minLeadTime: 1, maxLeadTime: 1, safetyStock: 1 }, wilson: { annualDemand: 1, orderCost: 1, holdingRate: 0.1, unitCost: 1, calculatedEOQ: 1 }, purchases: [], movements: [] }] },
-    directLaborConfig: { workingDays: { expected: 1, actual: 1, paid: 1, dailyHours: 1 }, itcs: { percentage: 0.1, type: 'CERTAIN' }, departments: [] },
-    indirectCostConfig: { centers: [] },
+    directLaborConfig: {
+      workingDays: {
+        totalDaysPerYear: 365,
+        unpaidAbsence: { sundays: 0, saturdays: 0, unjustifiedAbsences: 0, holidaysOnWeekend: 0 },
+        paidAbsence: { holidays: 0, vacations: 0, sickness: 0, specialLeaves: 0, workAccidents: 0 },
+      },
+      itcs: { derivationBase: 0, fixedArt: 0, uncertainRemunerative: [], uncertainNonRemunerative: [] },
+      departments: [],
+    },
+    indirectCostConfig: {
+      centers: [{ id: 'c1', name: 'Centro 1', type: 'productive' }],
+      concepts: [],
+      serviceDistributions: [],
+      productiveSettings: [],
+    },
     salesUnitPrice: 5000,
     salesQuantity: o.units ?? 100,
     startDate: o.startDate ?? new Date(`${o.code}-01`),
