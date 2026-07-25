@@ -1,7 +1,7 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
-import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
+import { NotFoundError, ValidationError, UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import {
   rawMaterialSectionSchema,
   directLaborConfigSchema,
@@ -120,7 +120,10 @@ export class CostStructureService {
 
     return this.db.$transaction(async (tx) => {
       const structure = await tx.costStructure.create({
-        data: { companyId, userId, productName: input.productName, period },
+        // El sistema de costeo (ÓRDENES / PROCESOS) se persiste desde el alta: es la
+        // compuerta de toda la feature de Costeo por Procesos. Antes se descartaba acá
+        // y TODA estructura nacía como ORDERS, ignorando lo que mandaba el cliente.
+        data: { companyId, userId, productName: input.productName, period, costingSystem: input.costingSystem ?? 'ORDERS' },
       });
       await recordAudit(
         // Se audita el período DERIVADO, no el que vino (que puede no venir): la auditoría
@@ -129,6 +132,59 @@ export class CostStructureService {
         tx,
       );
       return structure;
+    });
+  }
+
+  /**
+   * Cambia el SISTEMA DE COSTEO (ÓRDENES / PROCESOS) de una estructura. Solo se
+   * permite mientras la estructura NO tenga historia de cálculo: una vez que
+   * corrió el motor, cambiar de sistema mezclaría el rastro de dos motores
+   * distintos sobre la misma estructura y corrompería el árbol de derivación.
+   * En ese caso se devuelve un 422 accionable (nunca un 500). Ver DECISIONES.md.
+   */
+  async updateCostingSystem(
+    userId: string,
+    id: string,
+    costingSystem: 'ORDERS' | 'PROCESSES',
+    ctx: AuditContext,
+  ) {
+    const before = await this.requireStructure(userId, id);
+
+    return this.db.$transaction(async (tx) => {
+      // "Tener cálculos" abarca los dos registros de historia: los runs trazables
+      // (CalculationRun, árbol de derivación) y los snapshots del motor legado
+      // (CostCalculation). Con cualquiera de los dos presente, el sistema queda
+      // congelado: se bloquea el cambio de forma conservadora para no corromper
+      // ninguna historia.
+      const [runs, calcs] = await Promise.all([
+        tx.calculationRun.count({ where: { structureId: id } }),
+        tx.costCalculation.count({ where: { costStructureId: id } }),
+      ]);
+      if (runs > 0 || calcs > 0) {
+        throw new UnprocessableEntityError(
+          'No se puede cambiar el sistema de costeo de una estructura que ya tiene cálculos. ' +
+            'Creá una estructura nueva con el sistema que necesitás.',
+        );
+      }
+
+      const updated = await tx.costStructure.update({
+        where: { id },
+        data: { costingSystem },
+      });
+
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_structure.costing_system.update',
+          entityType: 'CostStructure',
+          entityId: id,
+          oldValue: { costingSystem: before.costingSystem },
+          newValue: { costingSystem },
+        },
+        tx,
+      );
+      return updated;
     });
   }
 

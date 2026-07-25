@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
@@ -41,48 +41,62 @@ export class DataPointService {
    */
   async create(userId: string, structureId: string, input: CreateDataPointInput, actor: TraceActor) {
     await this.requireStructureOwned(userId, structureId);
+    return withTenant(userId, (tx) => this.createInTx(tx, structureId, input, actor));
+  }
 
-    return withTenant(userId, async (tx) => {
-      const dp = await tx.dataPoint.create({
-        data: {
-          structureId,
-          element: input.element,
-          fieldKey: input.fieldKey,
-          label: input.label,
-          unit: input.unit,
-          sourceArea: input.sourceArea,
-          fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
-        },
-      });
-      await tx.dataPointVersion.create({
-        data: {
-          dataPointId: dp.id,
-          versionN: 1,
-          valueNum: input.valueNum,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          valueJson: input.valueJson as any,
-          reason: input.reason,
-          evidenceId: input.evidenceId,
-          method: input.method,
-          createdBy: actor.id,
-          actorRole: actor.role,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          actorArea: input.sourceArea as any,
-          deviceInfo: input.deviceInfo ?? actor.device,
-        },
-      });
-      await recordTraceAudit(
-        {
-          entityType: 'DataPoint',
-          entityId: dp.id,
-          action: 'crear',
-          actor: { ...actor, area: input.sourceArea, method: input.method },
-          after: { fieldKey: input.fieldKey, valueNum: input.valueNum, valueJson: input.valueJson },
-        },
-        tx,
-      );
-      return dp;
+  /**
+   * Igual que `create`, pero dentro de una transacción YA abierta por el
+   * llamador, para componer la creación de un DataPoint con otras escrituras
+   * (p. ej. el cuadro de movimiento de unidades, B15) en UNA sola transacción
+   * atómica. El chequeo de propiedad de la estructura queda a cargo del
+   * llamador (que ya lo hizo antes de abrir la transacción). Fuente ÚNICA de
+   * la creación de un dato trazable: `create` delega acá.
+   */
+  async createInTx(
+    tx: Prisma.TransactionClient,
+    structureId: string,
+    input: CreateDataPointInput,
+    actor: TraceActor,
+  ) {
+    const dp = await tx.dataPoint.create({
+      data: {
+        structureId,
+        element: input.element,
+        fieldKey: input.fieldKey,
+        label: input.label,
+        unit: input.unit,
+        sourceArea: input.sourceArea,
+        fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
+      },
     });
+    await tx.dataPointVersion.create({
+      data: {
+        dataPointId: dp.id,
+        versionN: 1,
+        valueNum: input.valueNum,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        valueJson: input.valueJson as any,
+        reason: input.reason,
+        evidenceId: input.evidenceId,
+        method: input.method,
+        createdBy: actor.id,
+        actorRole: actor.role,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        actorArea: input.sourceArea as any,
+        deviceInfo: input.deviceInfo ?? actor.device,
+      },
+    });
+    await recordTraceAudit(
+      {
+        entityType: 'DataPoint',
+        entityId: dp.id,
+        action: 'crear',
+        actor: { ...actor, area: input.sourceArea, method: input.method },
+        after: { fieldKey: input.fieldKey, valueNum: input.valueNum, valueJson: input.valueJson },
+      },
+      tx,
+    );
+    return dp;
   }
 
   /**
@@ -92,53 +106,68 @@ export class DataPointService {
    */
   async addVersion(userId: string, id: string, input: AddVersionInput, actor: TraceActor) {
     const dp = await this.requireDataPoint(userId, id);
-    const last = await this.db.dataPointVersion.findFirst({
+    return withTenant(userId, (tx) => this.addVersionInTx(tx, id, dp, input, actor));
+  }
+
+  /**
+   * Igual que `addVersion`, pero dentro de una transacción YA abierta por el
+   * llamador (misma lógica de composición que `createInTx`). `existing` es el
+   * DataPoint ya resuelto por el llamador (propiedad chequeada). Fuente ÚNICA
+   * de la corrección de un dato: `addVersion` delega acá.
+   */
+  async addVersionInTx(
+    tx: Prisma.TransactionClient,
+    id: string,
+    existing: { fechaHecho: Date | null },
+    input: AddVersionInput,
+    actor: TraceActor,
+  ) {
+    const dp = existing;
+    const last = await tx.dataPointVersion.findFirst({
       where: { dataPointId: id },
       orderBy: { versionN: 'desc' },
     });
     const nextN = (last?.versionN ?? 0) + 1;
 
-    return withTenant(userId, async (tx) => {
-      const version = await tx.dataPointVersion.create({
-        data: {
-          dataPointId: id,
-          versionN: nextN,
-          valueNum: input.valueNum,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          valueJson: input.valueJson as any,
-          reason: input.reason,
-          evidenceId: input.evidenceId,
-          method: input.method,
-          createdBy: actor.id,
-          actorRole: actor.role,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          actorArea: input.sourceArea as any,
-          deviceInfo: input.deviceInfo ?? actor.device,
-        },
-      });
-      // Una corrección invalida cualquier firma previa: vuelve a 'borrador'
-      // aunque ya estuviera validado/aplicado (pide re-validar).
-      const updated = await tx.dataPoint.update({
-        where: { id },
-        data: {
-          status: 'borrador',
-          fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : dp.fechaHecho,
-        },
-      });
-      await recordTraceAudit(
-        {
-          entityType: 'DataPoint',
-          entityId: id,
-          action: 'versionar',
-          actor: { ...actor, area: input.sourceArea, method: input.method },
-          before: { versionN: last?.versionN ?? null, valueNum: last?.valueNum, valueJson: last?.valueJson },
-          after: { versionN: nextN, valueNum: input.valueNum, valueJson: input.valueJson },
-          comment: input.reason,
-        },
-        tx,
-      );
-      return { dataPoint: updated, version };
+    const version = await tx.dataPointVersion.create({
+      data: {
+        dataPointId: id,
+        versionN: nextN,
+        valueNum: input.valueNum,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        valueJson: input.valueJson as any,
+        reason: input.reason,
+        evidenceId: input.evidenceId,
+        method: input.method,
+        createdBy: actor.id,
+        actorRole: actor.role,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        actorArea: input.sourceArea as any,
+        deviceInfo: input.deviceInfo ?? actor.device,
+      },
     });
+    // Una corrección invalida cualquier firma previa: vuelve a 'borrador'
+    // aunque ya estuviera validado/aplicado (pide re-validar).
+    const updated = await tx.dataPoint.update({
+      where: { id },
+      data: {
+        status: 'borrador',
+        fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : dp.fechaHecho,
+      },
+    });
+    await recordTraceAudit(
+      {
+        entityType: 'DataPoint',
+        entityId: id,
+        action: 'versionar',
+        actor: { ...actor, area: input.sourceArea, method: input.method },
+        before: { versionN: last?.versionN ?? null, valueNum: last?.valueNum, valueJson: last?.valueJson },
+        after: { versionN: nextN, valueNum: input.valueNum, valueJson: input.valueJson },
+        comment: input.reason,
+      },
+      tx,
+    );
+    return { dataPoint: updated, version };
   }
 
   /** borrador → validado. Firma: actor + hora exacta. */
@@ -418,6 +447,98 @@ export class DataPointService {
       default:
         return [];
     }
+  }
+
+  /**
+   * F06 — Movimientos de MP (compras/consumos) tal como viven en el store de
+   * trazabilidad, agrupados por `movementId`, INCLUYENDO los que todavía no
+   * tienen decisión de imputación (`periodoImputado = null`).
+   *
+   * La ficha PPP se dibujaba SOLO con el JSON de la sección (`rawMaterialConfig`),
+   * que no sabe nada de imputación: un movimiento sin imputar quedaba sin marca
+   * (o directamente invisible si el JSON y los data points se desincronizaban),
+   * aunque el motor lo contara como "dato sin imputar" (F04). Esta lista es la
+   * fuente de verdad del estado de imputación para que la ficha marque cada
+   * pendiente y lo haga accionable, sin ocultar ninguno.
+   *
+   * NO filtra por período: mostrar TODOS es justamente el fix. Un movimiento es
+   * `pending` si alguno de sus data points hermanos sigue sin imputar (cantidad
+   * y precio se imputan juntos, así que en la práctica es todo-o-nada).
+   */
+  async listMpMovements(userId: string, structureId: string) {
+    await this.requireStructureOwned(userId, structureId);
+
+    const points = await this.db.dataPoint.findMany({
+      where: {
+        structureId,
+        element: 'MP',
+        fieldKey: { in: ['mp.compra.cantidad', 'mp.compra.precio', 'mp.consumo.cantidad'] },
+        voidedAt: null,
+        status: { not: 'anulado' },
+      },
+      include: { versions: { orderBy: { versionN: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    type MpMovement = {
+      movementId: string;
+      label: string;
+      detail: string;
+      type: 'purchase' | 'consumption';
+      fechaHecho: string | null;
+      // fecha_captación (§3): timestamp que puso el servidor al entrar el dato.
+      // Read-only, nunca del reloj del cliente. Siempre presente (default now()).
+      fechaCaptacion: string;
+      periodoImputado: string | null;
+      pending: boolean;
+      dataPointIds: string[];
+    };
+    const byMovement = new Map<string, MpMovement>();
+
+    for (const dp of points) {
+      const vJson = (dp.versions[0]?.valueJson ?? null) as Record<string, unknown> | null;
+      const movementId = vJson?.movementId as string | undefined;
+      // Solo movimientos reales: la config migrada (mp.config) no lleva movementId.
+      if (!movementId) continue;
+
+      const type: 'purchase' | 'consumption' = dp.fieldKey.startsWith('mp.compra')
+        ? 'purchase'
+        : 'consumption';
+      const fechaHecho = dp.fechaHecho ? dp.fechaHecho.toISOString().slice(0, 10) : null;
+      const fechaCaptacion = dp.fechaCaptacion.toISOString();
+
+      const existing = byMovement.get(movementId);
+      if (existing) {
+        existing.dataPointIds.push(dp.id);
+        // Los hermanos de un movimiento (cantidad + precio) se crean juntos;
+        // como captación es la que puso el servidor, tomamos la más temprana
+        // para representar "cuándo entró el movimiento al sistema".
+        if (fechaCaptacion < existing.fechaCaptacion) existing.fechaCaptacion = fechaCaptacion;
+        if (dp.periodoImputado === null) {
+          existing.pending = true;
+          existing.periodoImputado = null;
+        }
+      } else {
+        byMovement.set(movementId, {
+          movementId,
+          label: dp.label,
+          detail: this.stripMovementPrefix(dp.label),
+          type,
+          fechaHecho,
+          fechaCaptacion,
+          periodoImputado: dp.periodoImputado,
+          pending: dp.periodoImputado === null,
+          dataPointIds: [dp.id],
+        });
+      }
+    }
+
+    return Array.from(byMovement.values());
+  }
+
+  /** 'Compra — Factura A-1' → 'Factura A-1' (mismo detalle que la fila de la sección). */
+  private stripMovementPrefix(label: string): string {
+    return label.replace(/^(Compra|Consumo)\s+—\s+/, '');
   }
 
   /** Bitácora paginada de una estructura (todas sus acciones de trazabilidad). */

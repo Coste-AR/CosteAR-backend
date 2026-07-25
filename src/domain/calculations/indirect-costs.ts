@@ -130,11 +130,15 @@ export function secondaryProration(
   }
 
   for (const dist of serviceDistributions) {
+    // F09-4 — nunca exponer el id interno (serv2…) en el mensaje: siempre el
+    // nombre humano del centro, o un genérico si todavía no tiene nombre.
+    const serviceName = centerById.get(dist.serviceCenterId)?.name?.trim() || 'un centro de servicio';
     const serviceCost = primary[dist.serviceCenterId];
     if (!serviceCost) {
-      throw new CalcError(`Servicio inexistente en prorrateo: ${dist.serviceCenterId}`);
+      throw new CalcError(
+        `El centro de servicio «${serviceName}» no tiene costo del prorrateo primario para repartir. Revisá el prorrateo primario y volvé a guardar Costos Indirectos.`,
+      );
     }
-    const serviceName = centerById.get(dist.serviceCenterId)?.name ?? dist.serviceCenterId;
 
     // Distribuir costo Fijo
     const fixedDist = dist.toProductiveFixed && Object.keys(dist.toProductiveFixed).length > 0
@@ -272,9 +276,12 @@ export function secondaryProrationStepwise(
 
   for (const cl of closures) {
     const service = acc[cl.serviceCenterId];
-    const serviceName = centerById.get(cl.serviceCenterId)?.name ?? cl.serviceCenterId;
+    // F09-4 — nunca exponer el id interno en el mensaje (ver arriba).
+    const serviceName = centerById.get(cl.serviceCenterId)?.name?.trim() || 'un centro de servicio';
     if (!service) {
-      throw new CalcError(`Cierre de un centro inexistente: ${cl.serviceCenterId}`);
+      throw new CalcError(
+        'El orden de cierre del prorrateo secundario incluye un centro que ya no existe en la estructura. Revisá el orden de cierre y volvé a guardar Costos Indirectos.',
+      );
     }
     if (closed.has(cl.serviceCenterId)) {
       throw new CalcError(`El centro «${serviceName}» figura dos veces en el orden de cierre. Dejalo una sola vez.`);

@@ -282,6 +282,11 @@ model CostPeriod {
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt
 
+  // Costeo por Procesos (B04): cuadros de movimiento de unidades del período.
+  unitMovementSchedules UnitMovementSchedule[]
+  // Costeo por Procesos (B05): repartos de costos conjuntos del período.
+  jointCostAllocations  JointCostAllocation[]
+
   @@unique([structureId, code])
   @@index([companyId, code])
   @@index([structureId, status])
@@ -320,14 +325,18 @@ model CostStructure {
   // recuperarse. Las listas la excluyen por defecto.
   deletedAt DateTime?
 
-  calculations    CostCalculation[]
-  alerts          Alert[]
-  dataEntries     DataEntry[]
+  calculations         CostCalculation[]
+  alerts               Alert[]
+  dataEntries          DataEntry[]
   // Trazabilidad Total v1 (ver sección al final del archivo)
-  dataPoints      DataPoint[]
-  calculationRuns CalculationRun[]
+  dataPoints           DataPoint[]
+  calculationRuns      CalculationRun[]
   // Modelo de períodos (problema C).
-  periods         CostPeriod[]
+  periods              CostPeriod[]
+  // Costeo por Procesos (B03): departamentos de la cadena secuencial.
+  processDepartments   ProcessDepartment[]
+  // Costeo por Procesos (B05): repartos de costos conjuntos de la estructura.
+  jointCostAllocations JointCostAllocation[]
 
   @@index([companyId])
   @@index([userId])
@@ -1111,4 +1120,257 @@ model VaultChatMessage {
 
   @@index([sessionId])
   @@map("vault_chat_messages")
+}
+
+// ---------------------------------------------------------------------------
+// Costeo por Procesos (B03)
+// ---------------------------------------------------------------------------
+// Un departamento/etapa de un proceso productivo SECUENCIAL: el costo terminado
+// de un departamento se transfiere al siguiente (depto 1 → depto 2 → …). Es la
+// unidad que produce un "cuadro de movimiento de unidades" y un informe de
+// costos propios. DISTINTO de los `centers[]` dentro de `indirectCostConfig`,
+// que solo existen para prorratear CIF (no tienen orden/precedencia).
+// El "cuadro de movimiento" y los costos conjuntos llegan en B04/B05.
+model ProcessDepartment {
+  id                              String        @id @default(uuid()) @db.Uuid
+  structureId                     String        @db.Uuid
+  structure                       CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  name                            String
+  // 1 = primer departamento de la cadena. Un depto. inicial no tiene "recibidas
+  // del departamento anterior" ni "aumento de número de unidades".
+  sequence                        Int
+  // true  = una sola columna "Costo de Conversión".
+  // false = MO y CIF se siguen por separado.
+  defaultConversionAvanceEqualsMO Boolean       @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // Soft-delete: mismo patrón que CostStructure (papelera recuperable).
+  deletedAt DateTime?
+
+  // Costeo por Procesos (B04): cuadro de movimiento de unidades por período.
+  schedules            UnitMovementSchedule[]
+  // Costeo por Procesos (B05): repartos de costos conjuntos cuyo punto de
+  // separación ocurre en este departamento.
+  jointCostAllocations JointCostAllocation[]
+
+  @@unique([structureId, sequence])
+  @@index([structureId])
+  @@map("process_departments")
+}
+
+// Costeo por Procesos (B04) — cuadro de movimiento de unidades.
+//
+// Una fila por (departamento, período): resume cuántas unidades entran, se
+// terminan, se transfieren, se pierden y quedan en proceso, con su grado de
+// avance por elemento del costo, más los costos del período por elemento. Es
+// la entrada que el motor (B17) convierte en producción equivalente e informe
+// de costos. Esta tarea solo crea la tabla.
+model UnitMovementSchedule {
+  id           String            @id @default(uuid()) @db.Uuid
+  departmentId String            @db.Uuid
+  department   ProcessDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  periodId     String            @db.Uuid
+  period       CostPeriod        @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  // --- ENTRADAS (unidades) ---
+  /**
+   * /** Existencia inicial de producción en proceso (EI), en unidades.
+   */
+  initialWip           Decimal  @default(0) @db.Decimal(18, 4)
+  /**
+   * % de avance de la EI en Materia Prima, arrastrado del período anterior.
+   */
+  initialWipMpAvance   Decimal? @db.Decimal(9, 4)
+  /**
+   * % de avance de la EI en Conversión, arrastrado del período anterior.
+   */
+  initialWipConvAvance Decimal? @db.Decimal(9, 4)
+  /**
+   * Puestas en elaboración — solo departamento inicial (sequence = 1).
+   */
+  startedInProduction  Decimal? @db.Decimal(18, 4)
+  /**
+   * Recibidas del departamento anterior — solo sequence > 1.
+   */
+  receivedFromPrevious Decimal? @db.Decimal(18, 4)
+  /**
+   * Aumento de número de unidades — solo sequence > 1.
+   */
+  unitIncrease         Decimal? @db.Decimal(18, 4)
+
+  // --- SALIDAS (unidades) ---
+  /**
+   * /** Terminadas y transferidas al depto. siguiente (puede derivarse por diferencia).
+   */
+  transferredOut     Decimal? @db.Decimal(18, 4)
+  /**
+   * Terminadas y en existencia (no transferidas).
+   */
+  finishedInStock    Decimal  @default(0) @db.Decimal(18, 4)
+  /**
+   * % de pérdida normal admitido.
+   */
+  normalLossPct      Decimal? @db.Decimal(9, 4)
+  /**
+   * Pérdida normal en unidades (calculada, no editable por el usuario).
+   */
+  normalLoss         Decimal? @db.Decimal(18, 4)
+  /**
+   * Pérdida real total del período (input del usuario).
+   */
+  totalLossReported  Decimal? @db.Decimal(18, 4)
+  /**
+   * Pérdida extraordinaria (derivada: pérdida real total − normal).
+   */
+  extraordinaryLoss  Decimal? @db.Decimal(18, 4)
+  /**
+   * Existencia final de producción en proceso (EF) (puede derivarse por diferencia).
+   */
+  finalWip           Decimal? @db.Decimal(18, 4)
+  /**
+   * % de avance de la EF en Materia Prima.
+   */
+  finalWipMpAvance   Decimal? @db.Decimal(9, 4)
+  /**
+   * % de avance de la EF en Conversión.
+   */
+  finalWipConvAvance Decimal? @db.Decimal(9, 4)
+
+  // --- COSTOS DEL PERÍODO (por elemento) ---
+  /**
+   * /** Costo de Materia Prima incurrido en el período.
+   */
+  periodCostMp      Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo de Mano de Obra incurrido en el período.
+   */
+  periodCostMo      Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo de Carga Fabril (CIF) incurrido en el período.
+   */
+  periodCostCif     Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo $ de MP arrastrado en la EI.
+   */
+  initialWipCostMp  Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo $ de MO arrastrado en la EI.
+   */
+  initialWipCostMo  Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo $ de CIF arrastrado en la EI.
+   */
+  initialWipCostCif Decimal? @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([departmentId, periodId])
+  @@map("unit_movement_schedules")
+}
+
+// ---------------------------------------------------------------------------
+// Costeo por Procesos (B05) — Costos conjuntos
+// ---------------------------------------------------------------------------
+
+// Método de reparto del costo conjunto entre los productos que salen del punto
+// de separación. Los cuatro que reconoce la cátedra:
+//   PHYSICAL_UNITS        — unidades físicas obtenidas.
+//   TECHNICAL_YIELD       — rendimiento técnico (%).
+//   MARKET_VALUE          — valor de mercado en el punto de separación.
+//   NET_REALIZABLE_VALUE  — valor neto de realización (precio − costos de venta).
+enum JointAllocationMethod {
+  PHYSICAL_UNITS
+  TECHNICAL_YIELD
+  MARKET_VALUE
+  NET_REALIZABLE_VALUE
+}
+
+// En un "punto de separación" un proceso rinde varios productos a partir de un
+// costo compartido (costo conjunto): coproductos (principales), subproductos
+// (secundarios) y desechos. Este registro es la CABECERA del reparto: el costo
+// conjunto acumulado hasta el punto de separación y el método elegido para
+// distribuirlo entre las líneas de producto (`ByProductLine`).
+//
+// Esta tarea (B05) solo crea la tabla. La matemática de los cuatro métodos
+// llega en B11 y se conecta al motor en B17.
+model JointCostAllocation {
+  id           String            @id @default(uuid()) @db.Uuid
+  structureId  String            @db.Uuid
+  structure    CostStructure     @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  // Departamento donde ocurre el punto de separación.
+  departmentId String            @db.Uuid
+  department   ProcessDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  periodId     String            @db.Uuid
+  period       CostPeriod        @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  method         JointAllocationMethod
+  /**
+   * Costo conjunto total (MP + conversión) acumulado hasta el punto de separación.
+   */
+  jointCostTotal Decimal               @db.Decimal(18, 4)
+
+  // Líneas de producto que salen del punto de separación.
+  products ByProductLine[]
+
+  createdAt DateTime @default(now())
+
+  // Un solo reparto de costos conjuntos por departamento y período.
+  @@unique([departmentId, periodId])
+  @@index([structureId])
+  @@map("joint_cost_allocations")
+}
+
+// Una línea de producto que sale del punto de separación: un coproducto, un
+// subproducto o un desecho. Guarda las magnitudes que necesita cada método de
+// reparto (unidades, rendimiento, precio de mercado, costos de venta) y, una
+// vez calculado (B11), el costo asignado y el costo unitario resultante.
+model ByProductLine {
+  id           String              @id @default(uuid()) @db.Uuid
+  allocationId String              @db.Uuid
+  allocation   JointCostAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+
+  productName   String
+  /**
+   * Tipo de producto: 'coproduct' | 'byproduct' | 'waste'.
+   */
+  kind          String
+  /**
+   * Unidades obtenidas de esta línea en el punto de separación.
+   */
+  unitsObtained Decimal @db.Decimal(18, 4)
+
+  /**
+   * Rendimiento técnico (%) — método TECHNICAL_YIELD.
+   */
+  yieldPct                Decimal? @db.Decimal(9, 4)
+  /**
+   * Precio de mercado — métodos MARKET_VALUE y NET_REALIZABLE_VALUE.
+   */
+  marketPrice             Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo de venta variable (%) — método NET_REALIZABLE_VALUE.
+   */
+  sellingCostVarPct       Decimal? @db.Decimal(9, 4)
+  /**
+   * Costo de venta fijo por unidad — método NET_REALIZABLE_VALUE.
+   */
+  sellingCostFixedPerUnit Decimal? @db.Decimal(18, 4)
+  /**
+   * Reconocimiento del subproducto: 'at_sale' | 'at_production' — solo kind='byproduct'.
+   */
+  byproductRecognition    String?
+
+  /**
+   * Costo asignado a la línea (resultado calculado).
+   */
+  allocatedCost Decimal? @db.Decimal(18, 4)
+  /**
+   * Costo unitario de la línea (resultado calculado).
+   */
+  unitCost      Decimal? @db.Decimal(18, 4)
+
+  @@index([allocationId])
+  @@map("joint_cost_by_product_lines")
 }

@@ -1081,3 +1081,943 @@ todo limpio.
 migración **sin trackear** `prisma/migrations/20260721144831_init/` y `package-lock.json` modificado
 de antes; no los toqué ni commiteé (no son de esta tarea). Conviene revisar con el equipo si ese
 `_init` local debería existir.
+
+---
+
+## Sesión 2026-07-23 — M-STRAY: limpieza de la migración `_init` colgada (cierre del flag anterior)
+
+Cierre del pendiente que dejó M-VAULT: la carpeta sin trackear
+`prisma/migrations/20260721144831_init/`.
+
+**Diagnóstico.** NO era un `_init` de esquema completo. Su `migration.sql` era un diff que Prisma
+generó en un `prisma migrate dev` local y que DROPea drift benigno:
+`DROP CONSTRAINT cost_config_versions_structureId_fkey` + `ALTER COLUMN ... DROP DEFAULT` sobre los
+`id` (gen_random_uuid) de `allocation_base_values`, `allocation_bases`, `cost_config_versions`,
+`cost_periods` y el `updatedAt` de `cost_periods`. Es exactamente el "ruido benigno" que ya estaba
+documentado (la FK `structureId` es DB-only a propósito y los defaults los pone Prisma Client).
+
+**Hallazgo inesperado (importante).** No era sólo una carpeta suelta: estaba **APLICADA** en la DB
+local (`_prisma_migrations` la tenía con `finished_at` no nulo). Verifiqué el efecto real: la FK
+`cost_config_versions_structureId_fkey` y el default de `cost_config_versions.id` estaban
+efectivamente **borrados en la DB local de dev**. En origin/dev NO existe la carpeta (puramente
+local). No es bug del equipo: es un `migrate dev` que alguien corrió el 21/07 (trampa conocida de
+este repo: schema.prisma no modela esa FID/defaults, así que `migrate dev` quiere "corregir" el
+drift intencional).
+
+**Qué hice.**
+1. `git checkout -- package-lock.json`: el cambio era ruido de lockfile (quitaba flags `"peer": true`
+   de devDeps por reserialización de otra versión de npm), no un cambio real de dependencias.
+2. Borré la carpeta sin trackear `20260721144831_init/` (untracked → no se pierde nada de git).
+3. Borré la fila huérfana de `_prisma_migrations` (`migration_name='20260721144831_init'`, exacta) —
+   la mitad de la migración colgada que vivía en la DB. Sin esto, tras borrar la carpeta el
+   `migrate status` de la DB de dev reportaría divergencia. NO es un `reset` ni se perdió dato de
+   negocio; es des-registrar una migración local nunca commiteada.
+
+**Decisión: NO restauré la FK/defaults en la DB de dev local.** Motivos: (a) la tarea era limpiar el
+artefacto, no reparar la DB; (b) son ítems benignos (Prisma Client igual genera uuid/updatedAt; la FK
+es DB-only); (c) restaurarlos RE-INTRODUCE el mismo drift que originó este stray, con lo que el
+próximo `migrate dev` lo volvería a generar. El estado actual de la DB local queda SIN drift respecto
+de schema.prisma (más limpio para generar futuras migraciones). Consecuencia documentada: la DB local
+carece de la FK DB-only `cost_config_versions_structureId_fkey` que sí tienen dev/prod; es una
+diferencia local benigna (y encima `cost_config_versions` tiene trigger append-only que bloquea
+DELETE, así que el CASCADE de esa FK casi no aplica). Si alguna vez se quiere paridad exacta:
+`ALTER TABLE "cost_config_versions" ADD CONSTRAINT "cost_config_versions_structureId_fkey" FOREIGN KEY ("structureId") REFERENCES "cost_structures"("id") ON DELETE CASCADE ON UPDATE CASCADE;`
+
+**Lección de raíz.** En este repo NUNCA correr `prisma migrate dev` (regenera este stray por el drift
+intencional). Para aplicar migraciones usar SIEMPRE `npm run prisma:deploy`.
+
+**Verificación (aceptación).** Working tree limpio (sin artefactos sin trackear). `migrate status` en
+la DB de dev = "Database schema is up to date!", 0 fallidas, 0 filas de `_init`. Además probé de CERO
+en una DB vacía temporal (`costear_scratch`) con `npm run prisma:deploy` end-to-end: **31 migraciones
+aplicadas, 0 fallidas**, y esa DB fresca SÍ tiene la FK `cost_config_versions_structureId_fkey` — lo
+que prueba que la historia commiteada es la canónica y que la "pérdida" de la FK es sólo local. Luego
+se dropeó la DB temporal. Sin cambios de código; el único cambio commiteado es esta entrada de
+DECISIONES.
+
+---
+
+## F06 — La ficha PPP tiene que mostrar TODOS los movimientos (incluidos los sin imputar)
+
+**Diagnóstico (STEP 1 — en qué capa se ocultaba).** La ficha PPP se dibuja SÓLO con el JSON de la
+sección (`rawMaterialConfig.materials[].movements`), que NO sabe nada de imputación y no tiene ningún
+vínculo con el store de trazabilidad (`data_points`). El estado "pendiente" (`periodoImputado = null`)
+vive EXCLUSIVAMENTE en `data_points` — el mismo store que cuenta el motor para la marca F04. La ficha
+nunca leía ese store, así que un movimiento sin imputar aparecía sin marca (o directamente invisible si
+el JSON y los data points se desincronizaban). **No era un filtro `periodoImputado != null` en el
+backend ni un filtro en el componente: no había NINGÚN endpoint que listara los movimientos por su
+estado de imputación. El dato no se filtraba, simplemente nunca se cruzaba.** La capa culpable es el
+flujo de datos del frontend (lee la sección, ignora los data points).
+
+**Fix (STEP 2).**
+1. **Backend (append-only, read-only):** nuevo `GET /structures/:id/mp-movements` +
+   `DataPointService.listMpMovements`. Agrupa los data points de MP por `valueJson.movementId`
+   (compra = cantidad + precio hermanos), INCLUYE los `periodoImputado = null` (mostrar todos es el
+   fix) y marca `pending` si algún hermano sigue sin imputar. No filtra por período. Sólo lee.
+2. **Frontend:** la tabla de movimientos de la sección se enriquece con ese estado. Cada fila cuyo
+   movimiento guardado casa con un movimiento pendiente muestra el pill **"Pendiente de imputar"**;
+   el pill ES el botón que abre el modal de imputación (se reusa `ImputacionModal` + `useImputar` +
+   `proposeImputation` ya montados en el componente — NO se creó un segundo modal). Al resolver, la
+   lista se refresca (invalidación de `['structures', id]`, que `useImputar` ya dispara) y el pill
+   desaparece; el movimiento queda como una fila normal ya imputada. Los movimientos imputados no
+   cambian su presentación.
+
+**Decisión — casar sección ↔ data points por clave natural.** La fila de la sección NO guarda
+`movementId` (sólo fecha/tipo/detalle/cantidad/precio), así que se casa por `(tipo · detalle · fecha)`,
+que es justo lo que la registración copia al `label` (`"Compra — {detalle}"`) y a `fechaHecho`. Detalle
+vacío → `'(sin detalle)'` en ambos lados. Es una clave natural robusta; una colisión exacta
+(mismo tipo, mismo detalle, misma fecha) sería, a efectos prácticos, el mismo movimiento. Se descartó
+escribir `movementId` de vuelta en el JSON de la sección por ser un cambio más invasivo y fuera de
+alcance.
+
+**Decisión — pendientes "huérfanos".** Si un pendiente que el motor cuenta NO tiene fila propia en la
+sección (desincronización histórica: p. ej. datos creados antes del fix F04, o una fila borrada de la
+sección con su data point vivo por append-only), se renderiza igual como fila extra marcada
+"Pendiente de imputar", en sólo lectura y accionable. Así **ningún** dato sin imputar queda invisible
+y el total de pendientes de la ficha iguala el conteo del motor. Nota multi-materia: como los data
+points de MP cuelgan de la estructura (no de la materia), un huérfano podría verse en la ficha de otra
+materia de la misma estructura; se prioriza "nunca ocultar un pendiente" sobre esa rareza (los
+huérfanos son raros post-fix F04, porque un movimiento nuevo hoy queda en AMBOS stores).
+
+**Fix incidental (bloqueaba el build, NO es F06).** Al re-sincronizar `AlanSandbox` con `origin/staging`
+(rule #1) el `typecheck` del backend estaba en ROJO por un break PREEXISTENTE en
+`cost-period-service.ts` (commit `20f4300`, de AlanSandbox, no del merge): dos `alert.create` usaban
+`title` y `severity`, campos que NO existen en el modelo `Alert` (tiene `type` + `message`). Se
+reemplazaron por `type: 'COST_SPIKE'` (enum válido, encaja con "anomalía de costo") plegando el título
+al `message`. Sin esto no se podía compilar ni verificar F06. Sin riesgo de pérdida de datos → se
+arregló y se documenta (rule #9).
+
+**Verificación (aceptación, navegador contra dev + DB real).** Estructura "Pieza V-F1 Prorrateo"
+(período 2026-07): agregué una compra fechada 2026-01-15 ("TEST F06 — enero fuera de periodo") y elegí
+"Decidir más tarde". (1) Aparece en la ficha PPP con el pill "Pendiente de imputar"; los 5 movimientos
+imputados siguen sin marca. (2) En DB: 2 data points (cantidad + precio) con `periodoImputado = null`;
+el conteo de "sin imputar" de la estructura = 2 = ese único movimiento pendiente (iguala lo que muestra
+la ficha). (3) Click en el pill → abre el modal con "TEST F06…" y las dos opciones. (4) Elegí "Imputar
+a 2026-07" → el pill desaparece, el movimiento queda como fila normal, y en DB los 2 data points pasan
+a `periodoImputado = 2026-07`; "sin imputar" de la estructura = 0. Suites: backend `typecheck` ✅ +
+`vitest` 503✅/1 skip; frontend `typecheck` ✅, `build` ✅, `vitest` 22✅.
+
+## F07 — Doble fecha (fecha_hecho / fecha_captación) en la ficha PPP — parte backend
+
+**Contexto (STEP 0, hallazgo).** El write path YA persistía ambas fechas: `DataPointService.create`
+guarda `fechaHecho` desde el cliente (la fecha del movimiento) y `fechaCaptacion` es un `TIMESTAMPTZ
+NOT NULL DEFAULT now()` que pone Postgres (regla dura #3 / manual §3). O sea: NINGÚN movimiento viejo
+perdió su fecha de hecho real; el hueco de F07 era puramente de **presentación** (la captación no se
+mostraba en ninguna parte y la columna se llamaba sólo "Fecha"). No hizo falta migración de esquema.
+
+**Cambio.** `listMpMovements` (GET `/structures/:id/mp-movements`) ahora expone también
+`fechaCaptacion: string` (ISO) por movimiento, para que la ficha la muestre en sólo lectura. Como un
+movimiento son dos data points hermanos (cantidad + precio) creados juntos, se toma la captación **más
+temprana** de los hermanos como "cuándo entró el movimiento al sistema". `fechaHecho` sigue viajando
+como `YYYY-MM-DD` (o `null` si el dato nunca la tuvo — retrocompat: el front la muestra "—").
+
+**Sin cambios en imputación:** la regla §3 (`proposeImputation` en el front, decisión `POST
+/data-points/:id/imputacion` en el back) ya estaba y se reusa tal cual; F07 no toca esa lógica.
+
+**Verificación.** `typecheck` ✅ + `vitest` 503✅/1 skip (sin regresión; el test de latencia por área,
+que ya leía `fechaCaptacion`, sigue verde). Flujo end-to-end en navegador: ver más abajo / DECISIONES
+del frontend.
+
+## F09-4 — Ningún mensaje 422 expone el id interno de un centro (siempre el nombre humano)
+
+Parte backend del pulido F09 (regla del proyecto #7: nunca `serv3`/`prod2` en texto de usuario).
+Casi todos los mensajes del prorrateo (`indirect-costs.ts`, `calculate.ts`) ya usaban `«${serviceName}»`
+(nombre humano). Quedaban DOS `CalcError` (que mapean a **422**, visibles al usuario) que interpolaban el
+id crudo:
+- `Servicio inexistente en prorrateo: ${dist.serviceCenterId}` (secundario directo).
+- `Cierre de un centro inexistente: ${cl.serviceCenterId}` (escalonado).
+
+**Cambio.** En `secondaryProration` se computa `serviceName` ANTES del chequeo y su fallback pasó de
+`?? id` a `|| 'un centro de servicio'` (nunca el id), y el mensaje se reescribió en términos de cátedra
+("no tiene costo del prorrateo primario para repartir…"). En `stepwiseProration`, como el centro es
+literalmente inexistente y no se puede nombrar con certeza, el mensaje quedó genérico y accionable ("el
+orden de cierre incluye un centro que ya no existe… revisá el orden de cierre") sin ningún id. El resto
+de mensajes ya por nombre no cambian de comportamiento (el fallback genérico solo aplica en el caso
+—casi imposible— de un centro ausente del catálogo).
+
+**Verificación.** `typecheck` (tsc) ✅ + `vitest` 503✅/1 skip, sin regresión (los tests de prorrateo,
+incluidos los que verifican mensajes por nombre humano, siguen verdes). Nota de entorno: `prisma generate`
+dentro de `npm run build` falló por un lock de Windows (EPERM al renombrar el `query_engine`.dll); es
+transitorio y ajeno al cambio —el `tsc` compila limpio y el cliente ya generado corre los 503 tests—.
+
+## B01 — Se persiste el `costingSystem` al crear la estructura (compuerta de Costeo por Procesos)
+
+La columna `CostStructure.costingSystem` (enum `ORDERS | PROCESSES`, default `ORDERS`) y el schema de
+alta (`createCostStructureSchema`) ya aceptaban el campo, pero `CostStructureService.create()` lo
+descartaba: el `data` de `costStructure.create()` solo incluía `companyId, userId, productName, period`.
+Resultado: TODA estructura nacía como `ORDERS`, sin importar lo que mandara el cliente, y nada aguas
+abajo podía distinguir los dos sistemas. Es la compuerta de toda la feature de Costeo por Procesos.
+
+**Cambio 1 — persistencia en el alta.** Se agregó `costingSystem: input.costingSystem ?? 'ORDERS'` al
+`data`. El default defensivo en la capa de servicio es redundante con el `.default('ORDERS')` del Zod
+(el schema ya lo garantiza en la ruta), pero cubre cualquier llamador interno que arme el input a mano.
+
+**Cambio 2 — cambiar el sistema solo si NO hay cálculos (nuevo `PATCH
+/cost-structures/:id/costing-system`).** Se puede cambiar el sistema de costeo mientras la estructura no
+tenga historia de cálculo. Si ya la tiene, se devuelve un **422** accionable en castellano ("No se puede
+cambiar el sistema de costeo de una estructura que ya tiene cálculos…"), nunca un 500.
+**Rationale:** mezclar el rastro de dos motores distintos (órdenes vs procesos) sobre una misma
+estructura corrompería el árbol de derivación.
+
+**Decisión (ambigüedad → default conservador): "tener cálculos" abarca los DOS registros de historia.**
+La tarea nombraba `CalculationRun` (los runs trazables de Trazabilidad v1). Se bloquea el cambio si existe
+**cualquiera** de los dos: `CalculationRun` (árbol de derivación) **o** `CostCalculation` (snapshot del
+motor legado). Es la opción más segura para la integridad: ambos son "historia de cálculo", y ninguno de
+los dos debería quedar con el sistema cambiado por debajo. No sobre-bloquea ningún flujo existente porque
+el endpoint es nuevo (ningún test previo lo usaba).
+
+**Auditoría** en la misma transacción, siguiendo el patrón `recordAudit` del servicio: acción
+`cost_structure.costing_system.update`, con `oldValue`/`newValue` del sistema. El chequeo de cálculos y el
+`update` van dentro del mismo `$transaction`.
+
+**Sin migración:** la columna `costingSystem` ya existía en `CostStructure`. No se corrió `prisma migrate
+dev` (regla del repo: siempre `npm run prisma:deploy`; esta tarea no necesitó ninguna migración).
+
+**Verificación.** `tsc --noEmit` ✅ + `vitest run` **508 ✅ / 1 skip** (antes ~503; +5 tests nuevos, sin
+regresión). Tests nuevos (`tests/application/costing-system-persist.test.ts`): (1) crear con
+`PROCESSES` lo persiste; (2) crear sin el campo cae en `ORDERS`; (3) cambiar el sistema sin cálculos
+funciona; (4) con un `CalculationRun` devuelve 422 en castellano y no toca la estructura; (5) idem con un
+`CostCalculation` legado. Verificación a nivel de servicio (unit) por ser cambio backend puro sobre una
+compuerta sin UI todavía; la ruta es un wrapper delgado sobre `updateCostingSystem`.
+
+## B02 — Se extrae la interfaz `CostingEngine` y se envuelve el motor de Órdenes (patrón Strategy)
+
+Preparación para el Costeo por Procesos SIN tocar el comportamiento del motor de Órdenes. La regla
+número uno de la tarea: el cálculo por Órdenes tiene que dar **byte-idéntico** después del refactor.
+Ni un número de los fixtures (fx3-dorado, r5-fixtures, allocation-primario/secundario/escalonado,
+multi-materia-prima, production-quantity, etc.) se movió.
+
+**Decisión de diseño: Strategy, NO un `if (costingSystem === 'PROCESSES')` dentro del cálculo.**
+La función `runCalculation` (Hojas 1-4) está verificada al centavo contra la cátedra; ramificar por
+dentro es la vía más rápida a una regresión silenciosa. En su lugar se introdujo un contrato común y se
+despacha por fuera.
+
+**Forma de la interfaz `CostingEngine`** (`src/application/cost-structures/costing-engine.ts`), que el
+motor de Procesos (B17) implementará tal cual:
+- `readonly engineVersion: string` — la versión con la que se calculó, que se persiste en
+  `CalculationRun.engineVersion`. Cada motor expone la suya (el de Órdenes devuelve `ENGINE_VERSION`,
+  hoy `v1.0.0`; Procesos tendrá la propia). Antes el servicio leía la constante importada directamente;
+  ahora la toma del motor elegido → para Órdenes es el mismo valor, byte-idéntico.
+- `run(input: CalculationInput): CostingResult` — función **pura** (sin DB ni red). `CalculationInput`
+  son los insumos ya resueltos (config de la estructura + datos del período). `CostingResult` es
+  **exactamente** lo que el camino actual ya producía, sin inventar forma nueva:
+  `{ results: CalculationOutput; tree: TreeNode[] }` — `results` es el output consolidado de
+  `runCalculation`; `tree` es el árbol de derivación de `buildCalculationTree` (todavía sin persistir).
+  La incompletitud (F04), la persistencia (`CalculationRun` + `CalculationNode`) y la auditoría **quedan
+  fuera del motor**, en el servicio: son orquestación común a cualquier sistema de costeo, no cálculo.
+
+**`OrdersCostingEngine`** (`orders-costing-engine.ts`) es una **extracción, no una reescritura**: su
+`run()` llama `runCalculation` y `buildCalculationTree` sin tocar una sola fórmula ni ninguna llamada de
+dominio (MP, MOD, CIF, estado de costos, bases de asignación, prorrateo primario/secundario/escalonado).
+
+**Despacho en `CalculationRunService.calculate()`**: `selectCostingEngine(s.costingSystem)` se llama
+**antes** de validar las secciones de Órdenes. Así una estructura de Procesos corta con un **422**
+accionable en castellano (`CostingSystemNotAvailableError`: "El costeo por procesos todavía no está
+disponible…") en vez de confundir al costista con "Falta cargar la sección de Materia Prima". Es un
+placeholder temporal que reemplazará el motor de Procesos (B17), nunca un 500 ni un crash. Cualquier
+valor que no sea `PROCESSES` (incluido `ORDERS` o el campo ausente en estructuras/mocks viejos) cae en el
+motor de Órdenes → cero regresión.
+
+**Persistencia de trazabilidad intacta**: el camino de Órdenes sigue armando `tree` con
+`buildCalculationTree`, enriqueciéndolo con `attachDataPointSources`, y persistiendo `CalculationRun` +
+`CalculationNode` en la misma transacción, exactamente como antes. Solo cambió de dónde salen `results`
+y `tree` (del motor en vez de las dos llamadas sueltas) y de dónde sale `engineVersion` (del motor).
+
+**Sin migración:** refactor puro, ningún cambio de schema. No se corrió `prisma migrate dev`.
+
+**Verificación.** `tsc --noEmit` ✅ + `vitest run` **510 ✅ / 1 skip** (antes 508; +2 tests nuevos, cero
+regresión — todos los fixtures de Órdenes pasan con valores idénticos). Test nuevo
+(`tests/application/costing-engine-dispatch.test.ts`): (1) una estructura `PROCESSES` corta con 422
+(`CostingSystemNotAvailableError`, `statusCode 422`, mensaje en castellano) y no toca la persistencia
+(ni corrida, ni nodos, ni auditoría); (2) una estructura `ORDERS` no cae en el placeholder (sigue al
+motor de Órdenes).
+
+## B03 — Migración + modelo `ProcessDepartment` (departamento de la cadena de Procesos)
+
+Primera tabla del batch de Costeo por Procesos. Un `ProcessDepartment` es un departamento/etapa de un
+proceso productivo **secuencial** (depto 1 → depto 2 → …): el costo terminado de un departamento se
+transfiere al siguiente y cada uno produce su propio "cuadro de movimiento de unidades" e informe de
+costos. Es **distinto** de los `centers[]` de `indirectCostConfig`, que solo prorratean CIF y no tienen
+orden/precedencia. Esta tarea crea **solo** la tabla del departamento; el cuadro de movimiento
+(`UnitMovementSchedule`) y los costos conjuntos llegan en B04/B05.
+
+**Fuente del modelo.** Se leyó la §5.2 del plan
+(`Plan-Implementacion-Costeo-Ordenes-y-Procesos.md`), accesible en disco (carpeta de outputs de una
+sesión local, no en la ruta del vault del prompt). Los campos son idénticos a la spec.
+
+**Se omitió la relación `schedules UnitMovementSchedule[]` que la §5.2 muestra en el modelo.** Esa
+relación apunta a `UnitMovementSchedule`, tabla que no existe hasta B04. Incluirla ahora rompería la
+compilación del schema. El propio enunciado de B03 acota el alcance a "solo la tabla del departamento" y
+su spec de campos ya la omite. Se agregará en B04 junto con la tabla destino.
+
+**Tipos de columna: se copió exactamente el patrón de `CostStructure`** (no el de `cost_periods`).
+`id UUID` sin `DEFAULT` (el uuid lo genera Prisma en la app, `@default(uuid())`), `createdAt TIMESTAMP(3)
+DEFAULT CURRENT_TIMESTAMP`, `updatedAt TIMESTAMP(3)` sin default, `deletedAt TIMESTAMP(3)` nullable
+(soft-delete = papelera recuperable). Para garantizar **cero drift**, el SQL de la tabla se generó con
+`prisma migrate diff` (salida canónica de Prisma) y recién después se lo volvió idempotente a mano.
+
+**Idempotencia.** `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE UNIQUE INDEX IF
+NOT EXISTS`, y la FK envuelta en un bloque `DO $$ … EXCEPTION WHEN duplicate_object THEN NULL $$`
+(ADD CONSTRAINT no admite IF NOT EXISTS). Verificado: el `migration.sql` corre dos veces seguidas contra
+una DB que ya tiene la tabla, exit 0 ambas veces (skips por NOTICE, ningún error). Esto es porque
+`scripts/migrate-deploy.mjs` puede re-aplicar una migración marcada como rolled-back.
+
+**RLS (obligatorio — sin esto la tabla es una fuga de datos entre tenants).** `process_departments` no
+tiene `userId` propio; el tenant se define por la estructura a la que pertenece. Se agregó la política
+`tenant_isolation` a `prisma/rls.sql` con el patrón de tabla-alcanzada-por-`structureId` (idéntico a
+`data_points` / `calculation_runs`): `"structureId" IN (SELECT id FROM cost_structures WHERE "userId" =
+current_app_user_id())`, con `ENABLE`+`FORCE ROW LEVEL SECURITY`. Verificado en la DB: `relrowsecurity`
+y `relforcerowsecurity` = `t`, policy `tenant_isolation` presente.
+
+**Timestamp de la migración.** `20260723182912` (hora UTC real de la corrida), estrictamente mayor que la
+última carpeta existente (`20260723120000_add_daily_signal_source`) y que el piso de la tarea
+(`20260713010000`). Se creó la carpeta y el SQL **a mano**; nunca se corrió `prisma migrate dev` (en este
+repo genera una `_init` basura por drift intencional). No se tocó `migration_lock.toml` ni ninguna
+migración ya commiteada.
+
+**Verificación.**
+- `npm run prisma:deploy`: aplica limpio sobre la DB local (1 migración nueva, cero fallidas).
+- **Desde cero sobre una DB vacía** (`costear_scratch` creada al vuelo): `prisma:deploy` aplica las 32
+  migraciones sin error y `db:rls` corre limpio (41 statements). DB descartable eliminada al terminar.
+- `npm run db:rls`: 41 statements aplicados, política nueva presente.
+- `prisma migrate diff --from-migrations … --to-schema-datamodel …` (con shadow DB descartable): la
+  tabla `process_departments` **no aparece** en el diff → cero drift para B03. El drift residual que sí
+  reporta (`allocation_bases`, `cost_config_versions`, `cost_periods`, `vault_chunks`) es **pre-existente
+  de la branch**: se probó corriendo el mismo diff con los cambios de B03 stasheados y da exactamente las
+  mismas 5 tablas, sin `process_departments`. No lo introduce esta tarea.
+- Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
+- `@@unique([structureId, sequence])` presente como índice único en la DB (`process_departments_
+  structureId_sequence_key`); FK a `cost_structures` con `ON DELETE CASCADE`; índice por `structureId`.
+- Cero carpetas de migración basura en el árbol; jamás se corrió `prisma migrate dev`.
+
+## B04 — Migración + modelo `UnitMovementSchedule` (cuadro de movimiento de unidades)
+
+Segunda tabla del batch de Costeo por Procesos. Una fila por **(departamento, período)** que resume el
+movimiento de unidades del período: existencia inicial de producción en proceso (EI), puestas en
+elaboración / recibidas del departamento anterior / aumento de número de unidades, terminadas y
+transferidas, terminadas en existencia, pérdidas (normal / real total / extraordinaria), existencia final
+de producción en proceso (EF), el grado de avance por elemento del costo (MP y Conversión) tanto de la EI
+como de la EF, y los costos del período por elemento (MP / MO / CIF), incluyendo el costo $ arrastrado en
+la EI. Es el insumo que el motor (B17) convertirá en producción equivalente e informe de costos. **Esta
+tarea solo crea la tabla**; no hay lógica de negocio ni endpoints todavía.
+
+**Modelo (`prisma/schema.prisma`).** `UnitMovementSchedule` → `@@map("unit_movement_schedules")`. FK
+`departmentId` → `ProcessDepartment` y FK `periodId` → `CostPeriod`, ambas `onDelete: Cascade`. Se
+agregaron las relaciones inversas `schedules UnitMovementSchedule[]` en `ProcessDepartment` y
+`unitMovementSchedules UnitMovementSchedule[]` en `CostPeriod`. `@@unique([departmentId, periodId])`: un
+solo cuadro por departamento y período.
+
+**Decisiones de tipos (documentadas por ambigüedad, default más simple).**
+- Todas las cantidades de unidades → `Decimal(18,4)` (mismo ancho que las cantidades del resto del
+  dominio, p.ej. `CostPeriod.productionQuantity`).
+- Todos los grados de avance (`*Avance`) → `Decimal(9,4)`, según el enunciado.
+- `normalLossPct` es un **porcentaje**, no una cantidad → se modeló como `Decimal(9,4)` (mismo criterio
+  que los avances). Los seis campos de costo del período (`periodCost*`, `initialWipCost*`) son montos →
+  `Decimal(18,4)`.
+- Campos derivables por diferencia (`transferredOut`, `finalWip`, `normalLoss`, `extraordinaryLoss`) y
+  todos los inputs condicionales por `sequence` quedan **opcionales**; solo `initialWip` y
+  `finishedInStock` son `NOT NULL DEFAULT 0`, como pide el spec. La regla de "no editable"
+  (`normalLoss`) es una restricción de la capa de aplicación (B17), no de la tabla; acá es nullable.
+- `createdAt`/`updatedAt` siguen el estilo de `process_departments` (`TIMESTAMP(3)`), no el `Timestamptz`
+  de `cost_periods`, para mantener consistencia dentro del batch de Procesos.
+- Sin `deletedAt`: el spec no lo pide y el `@@unique` ya garantiza una fila por (depto, período); si se
+  necesita reemplazar, se actualiza la fila. B03 sí tiene soft-delete porque un departamento es una
+  entidad de catálogo; un cuadro de movimiento es un dato del período.
+
+**RLS (obligatorio).** `unit_movement_schedules` no tiene `userId` ni `structureId` propios: el tenant se
+resuelve por la cadena **departamento → estructura → dueño**. Política `tenant_isolation` en
+`prisma/rls.sql` con `USING`/`WITH CHECK` sobre `departmentId IN (SELECT pd.id FROM process_departments pd
+JOIN cost_structures cs ON cs.id = pd."structureId" WHERE cs."userId" = current_app_user_id())` — mismo
+patrón de join que usan `calculation_nodes` y la nota de B03. `ENABLE` + `FORCE ROW LEVEL SECURITY`.
+
+**Timestamp de la migración.** `20260723195013` (hora UTC real de la corrida), estrictamente mayor que la
+última carpeta existente (`20260723182912_add_process_departments`) y que el piso indicado por la tarea.
+SQL escrito **a mano**, idempotente (`CREATE TABLE IF NOT EXISTS`, `CREATE UNIQUE INDEX IF NOT EXISTS`,
+`ADD CONSTRAINT` guardado con `DO $$ … EXCEPTION WHEN duplicate_object THEN NULL $$`) y aditivo. Nunca se
+corrió `prisma migrate dev`. No se tocó `migration_lock.toml` ni ninguna migración ya commiteada.
+
+**Nota sobre la DB local (pre-existente, no la introduce esta tarea).** La DB de desarrollo `costear`
+estaba construida con `prisma db push` (tenía las 35 tablas pero **sin** tabla de historial
+`_prisma_migrations`), por lo que `prisma migrate deploy` fallaba con P3005 ("schema is not empty"). Se
+**baselineó** la DB marcando las 32 migraciones previas como aplicadas (`prisma migrate resolve
+--applied …`, sin re-ejecutar SQL, operación no destructiva) para que `prisma:deploy` pueda correr. Es la
+adopción estándar de Prisma Migrate sobre una DB existente.
+
+**Verificación.**
+- **Desde cero sobre una DB vacía** (`costear_b04_verify` creada al vuelo): `prisma migrate deploy` aplica
+  las **33** migraciones sin error y `db:rls` corre limpio (45 statements). La tabla, el índice único
+  `unit_movement_schedules_departmentId_periodId_key`, la política `tenant_isolation` y `rowsecurity`/
+  `forcerowsecurity` quedan presentes. DB descartable eliminada al terminar.
+- `npm run prisma:deploy` sobre la DB local (post-baseline): aplica **solo** la migración nueva; una
+  segunda corrida da "No pending migrations to apply" (idempotente).
+- `npm run db:rls`: 45 statements aplicados, política nueva presente sobre la DB local.
+- `prisma migrate diff --from-migrations … --to-schema-datamodel …` (con shadow DB descartable): ninguna
+  línea menciona `unit_movement_schedules`/`schedule` → **cero drift nuevo** por esta tabla. El drift
+  residual (`allocation_base_values`, `allocation_bases`, `cost_config_versions`, `cost_periods`,
+  `vault_chunks`) es **pre-existente de la branch** (M-DRIFT), no lo introduce esta tarea.
+- Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
+- Cero carpetas de migración basura en el árbol; jamás se corrió `prisma migrate dev`.
+
+## B05 — Migración + modelos `JointCostAllocation` + `ByProductLine` (costos conjuntos)
+
+Tercera "pieza de datos" del batch de Costeo por Procesos. En un **punto de separación** un proceso rinde
+varios productos a partir de un **costo conjunto** (compartido): **coproductos** (principales),
+**subproductos** (secundarios) y **desechos**. El costo conjunto se reparte entre ellos por uno de cuatro
+métodos. Se crean **dos tablas**: `joint_cost_allocations` (cabecera del reparto) y
+`joint_cost_by_product_lines` (una fila por línea de producto). **Esta tarea solo crea el esquema**; la
+matemática de los cuatro métodos llega en **B11** y se conecta al motor en **B17** — no hay lógica de
+negocio ni endpoints todavía.
+
+**Enum (`prisma/schema.prisma`).** `JointAllocationMethod` con los cuatro métodos de la cátedra:
+`PHYSICAL_UNITS` (unidades físicas), `TECHNICAL_YIELD` (rendimiento técnico), `MARKET_VALUE` (valor de
+mercado en el punto de separación) y `NET_REALIZABLE_VALUE` (valor neto de realización).
+
+**Modelos.**
+- `JointCostAllocation` → `@@map("joint_cost_allocations")`. Cabecera: `structureId` → `CostStructure`,
+  `departmentId` → `ProcessDepartment` (depto. donde ocurre el punto de separación) y `periodId` →
+  `CostPeriod`, las tres FK `onDelete: Cascade`. `method JointAllocationMethod`, `jointCostTotal
+  Decimal(18,4)` (MP + conversión acumulados hasta el punto de separación), `createdAt`, y la relación
+  `products ByProductLine[]`. `@@unique([departmentId, periodId])`: un solo reparto por depto. y período.
+- `ByProductLine` → `@@map("joint_cost_by_product_lines")`. `allocationId` → `JointCostAllocation`
+  `onDelete: Cascade`. `productName`, `kind` (`'coproduct' | 'byproduct' | 'waste'`), `unitsObtained
+  Decimal(18,4)`; magnitudes por método, todas opcionales: `yieldPct Decimal(9,4)` (TECHNICAL_YIELD),
+  `marketPrice Decimal(18,4)` (MARKET_VALUE / NET_REALIZABLE_VALUE), `sellingCostVarPct Decimal(9,4)` y
+  `sellingCostFixedPerUnit Decimal(18,4)` (NET_REALIZABLE_VALUE), `byproductRecognition` (`'at_sale' |
+  'at_production'`, solo `kind='byproduct'`); y los resultados calculados `allocatedCost` /
+  `unitCost Decimal(18,4)`.
+- Relaciones inversas `jointCostAllocations JointCostAllocation[]` agregadas en `CostStructure`,
+  `CostPeriod` y `ProcessDepartment`, según el spec.
+
+**Decisiones de tipos (documentadas por ambigüedad, default más simple).**
+- Porcentajes (`yieldPct`, `sellingCostVarPct`) → `Decimal(9,4)`, mismo criterio que los avances de B04.
+  Montos (`jointCostTotal`, `marketPrice`, `sellingCostFixedPerUnit`, `allocatedCost`, `unitCost`) y
+  cantidades (`unitsObtained`) → `Decimal(18,4)`, ancho estándar del dominio.
+- `kind` y `byproductRecognition` se modelan como `String` (no enum): el spec los describe como cadenas
+  con valores fijos y la validación de dominio vive en la capa de aplicación (B11), no en la tabla —
+  mantiene la tabla flexible y evita un enum extra para un campo que aún no tiene lógica.
+- `JointCostAllocation` lleva `createdAt` pero **no** `updatedAt` (el spec solo pide `createdAt`), y
+  `ByProductLine` no lleva ninguno de los dos: son datos de un reparto puntual del período, no entidades
+  de catálogo. Sin `deletedAt` por el mismo motivo (igual criterio que B04).
+- Índices añadidos: `@@index([structureId])` en la cabecera (lookups por estructura) y
+  `@@index([allocationId])` en las líneas (FK sin unique). El `@@unique([departmentId, periodId])` ya cubre
+  el índice sobre `departmentId`.
+
+**RLS (obligatorio, ambas tablas).** Ninguna tabla tiene `userId` propio; el tenant se resuelve por la
+cadena de propiedad, mismo patrón que B03/B04. `joint_cost_allocations`: aislamiento directo por
+`structureId IN (SELECT id FROM cost_structures WHERE "userId" = current_app_user_id())`.
+`joint_cost_by_product_lines`: aislamiento por join **línea → reparto → estructura → dueño**
+(`allocationId IN (SELECT jca.id FROM joint_cost_allocations jca JOIN cost_structures cs ON cs.id =
+jca."structureId" WHERE cs."userId" = current_app_user_id())`). Ambas con `ENABLE` + `FORCE ROW LEVEL
+SECURITY` y política `tenant_isolation` en `prisma/rls.sql`.
+
+**Timestamp de la migración.** `20260723203711` (hora UTC real de la corrida), estrictamente mayor que la
+última carpeta existente (`20260723195013_add_unit_movement_schedules`, B04). SQL escrito **a mano**,
+aditivo e idempotente. El **enum** es el punto delicado: Postgres no admite `CREATE TYPE IF NOT EXISTS`, así
+que se envuelve en `DO $$ BEGIN CREATE TYPE … EXCEPTION WHEN duplicate_object THEN NULL; END $$` — la
+segunda corrida ignora el error y no rompe. Tablas con `CREATE TABLE IF NOT EXISTS`, índices con `CREATE
+[UNIQUE] INDEX IF NOT EXISTS`, y las cuatro FK guardadas con `DO $$ … EXCEPTION WHEN duplicate_object $$`.
+Nunca se corrió `prisma migrate dev`. No se tocó `migration_lock.toml` ni ninguna migración commiteada.
+
+**Verificación.**
+- **Desde cero sobre una DB vacía** (`costear_b05_scratch` creada al vuelo): `prisma migrate deploy` aplica
+  las **34** migraciones sin error; `db:rls` corre limpio (**53** statements); `migrate diff` contra el
+  schema no muestra ninguna línea `joint*`. DB descartable eliminada al terminar.
+- `npm run prisma:deploy` sobre la DB local: aplica **solo** la migración nueva.
+- **Idempotencia probada**: se re-ejecutó el `migration.sql` completo una segunda vez con `prisma db
+  execute` → `Script executed successfully`, sin error en el enum ni en nada. Sobrevive dos corridas.
+- `npm run db:rls`: 53 statements; ambas políticas nuevas presentes (`tenant_isolation` sobre las dos
+  tablas), verificado por consulta a `pg_policies` (2/2).
+- `prisma migrate diff --from-url <DB local> --to-schema-datamodel …`: **ninguna** línea menciona
+  `joint_cost_*` ni `JointAllocationMethod` → **cero drift nuevo** por estas tablas. El drift residual
+  (`allocation_base_values`, `allocation_bases`, `cost_config_versions`, `cost_periods`, `vault_chunks`) es
+  **pre-existente de la branch** (M-DRIFT), no lo introduce esta tarea.
+- Objetos confirmados por consulta a los catálogos de Postgres: 2 tablas, 1 enum, 2 políticas, 1 índice
+  único `joint_cost_allocations_departmentId_periodId_key`.
+- Suite completa: **510 passed / 1 skipped** (62 archivos), cero regresión.
+- Cero carpetas de migración basura; jamás se corrió `prisma migrate dev`.
+- **Nota (entorno):** `prisma generate` no pudo renombrar el `query_engine-windows.dll` (`EPERM`) porque
+  hay procesos node del usuario usando el engine; no se mataron. La migración, el schema (`prisma
+  validate` OK) y los tests no dependen de esa regeneración; el cliente se regenera solo en el próximo
+  arranque limpio.
+
+## B06 — Dominio: `buildUnitMovementSchedule` (cuadro de movimiento de unidades, función pura)
+
+Primer paso, fundacional, del Costeo por Procesos: resuelve el cuadro de movimiento de unidades de UN
+departamento para UN período. Todo lo de aguas abajo (producción equivalente, informe de costos —
+B11/B17) depende de que este cuadro cuadre. Vive en `src/domain/calculations/process-costing.ts`,
+100 % puro (sin Prisma, HTTP ni servicios), al estilo de `raw-material.ts` / `indirect-costs.ts`:
+`Decimal` de decimal.js para toda cantidad, JSDoc en español con terminología de la cátedra, mensajes
+de error en español.
+
+**Nombres de campo en inglés, no en español.** La consigna pide "terminología exacta de la cátedra en
+español". Se resolvió: los identificadores replican **exactamente** los de la tabla `UnitMovementSchedule`
+(B04) — `initialWip`, `startedInProduction`, `receivedFromPrevious`, `unitIncrease`, `transferredOut`,
+`finishedInStock`, `normalLossPct`, `normalLoss`, `totalLossReported`, `extraordinaryLoss`, `finalWip` —
+y la terminología de la cátedra ("existencia inicial de producción en proceso", "puestas en elaboración",
+"unidades del período", "a justificar / justificado") va en JSDoc, comentarios y mensajes. Motivo: (a) es
+la convención ya establecida en el repo (todo `src/domain/calculations/*` usa identificadores en inglés +
+comentarios en español), y (b) que los nombres calcen 1:1 con la fila persistida hace que el motor de
+Procesos (B17) mapee de la tabla a esta función sin traducir ni un campo. Cambiar a identificadores en
+español rompería esa simetría y la convención del repo.
+
+**`normalLossPct` es una fracción (0.02 = 2 %), no un porcentaje (2).** Mismo criterio que `holdingRate`
+en `raw-material.ts` (Wilson usa 0.30, no 30). Documentado en el JSDoc del input. El caso ancla lo
+confirma: 0.02 × 30.000 = 600.
+
+**Reglas implementadas (fuente de verdad = cátedra, no se reinterpreta):**
+- **R1 — derivación por diferencia.** Las dos derivables son `transferredOut` y `finalWip`. Si falta una,
+  se despeja de `Σ a justificar − Σ salidas conocidas`. Si faltan **las dos**, son dos incógnitas →
+  `ProcessValidationError`. Si la derivada sale **negativa** (las salidas informadas ya superan a las
+  entradas) → también `ProcessValidationError`, es un cuadro imposible.
+- **R2 — base de la pérdida normal = "unidades del período", nunca la EI.** sequence = 1 ⇒ puestas en
+  elaboración; sequence > 1 ⇒ recibidas del anterior + aumento de unidades. Se expone `periodUnits` en el
+  resultado para que el front lo muestre. El test compara un depto. inicial vs. uno posterior con **los
+  mismos insumos totales pero distinta composición** (8.000 vs. 6.000+1.000) y el mismo 5 %: dan 400 vs.
+  350 — prueba que la base cambia y que la EI **no** entra en la base.
+- **R3 — pérdida extraordinaria por diferencia = `totalLossReported − normalLoss`.** Nunca se ingresa
+  directa. Sin `totalLossReported` ⇒ la pérdida real total se asume igual a la normal (extraordinaria = 0).
+  Si la real informada es **menor** que la normal (extraordinaria negativa) → `ProcessValidationError`.
+- **R4 — coherencia por posición.** Depto. inicial (sequence = 1) con `receivedFromPrevious` o
+  `unitIncrease` distintos de cero → error. Se agregó el chequeo **simétrico** (no exigido explícitamente,
+  pero es la misma regla de dominio): un depto. posterior con `startedInProduction` ≠ 0 también corta,
+  porque "puestas en elaboración" solo existen en el inicial. Se considera "provisto" un valor definido y
+  **no nulo**: pasar `0` o `null`/`undefined` (como los trae la fila de un depto. inicial en la DB) es
+  inofensivo; solo una cantidad real que no corresponde dispara el 422.
+- **R5 — chequeo duro final.** `Σ a justificar = Σ justificado`. Si no, `ProcessValidationError` con la
+  diferencia en el mensaje **y** en `details.difference` — eso es lo que leerá el indicador
+  "cuadra / no cuadra" del front. Cuando se derivó una línea por diferencia, R5 cuadra por construcción;
+  el chequeo muerde de verdad cuando el usuario carga **ambas** derivables a mano.
+
+**`ProcessValidationError`** (nuevo, en `src/domain/errors/calculation-errors.ts`) extiende
+`UnprocessableEntityError` → **422**, nunca 500. Lleva mensaje accionable en español y `details`
+(`difference` y/o `field`) suficiente para que la capa HTTP (B17) arme el 422 y el front ubique el dato.
+Sigue el estilo de `MissingInputError` / `MissingAllocationBaseError` del mismo archivo.
+
+**Verificación.** `tests/domain/process-costing.test.ts` (8 casos): cuadro balanceado con EF derivada;
+`transferredOut` derivada dando la EF; R2 (inicial vs. posterior, base distinta); R4 (recibidas y aumento
+en el inicial, dos casos); R5 (desbalance, con la diferencia = 500 nombrada); R1 (dos incógnitas); y el
+**caso ancla de la cátedra (Azur Alcoholes, Destilado, abril)** que reproduce exactamente
+30.000 + 600 + 1.000 + 3.400 = 35.000. Suite completa: **518 passed / 1 skipped** (63 archivos), cero
+regresión. Sin migración, sin `prisma migrate dev` (B06 es dominio puro, no toca schema ni DB).
+
+## B07 — Dominio: `calcEquivalentProduction` (producción equivalente, función pura)
+
+Segundo paso del Costeo por Procesos, el más importante después del cuadro: la **producción equivalente**
+expresa, en términos de unidades terminadas, cuánto se procesó realmente en el período. Si sale mal, toda
+la hoja de costos sale mal. Vive en el **mismo archivo** que B06
+(`src/domain/calculations/process-costing.ts`), 100 % pura (sin Prisma, HTTP ni servicios), misma
+convención: `Decimal` de decimal.js, identificadores en inglés que calzan 1:1 con `UnitMovementSchedule`,
+JSDoc/comentarios/mensajes en español con terminología de la cátedra.
+
+**Toma el cuadro ya resuelto (`UnitMovementSchedule` de B06), no lo recalcula.** La entrada es el cuadro
+que devuelve `buildUnitMovementSchedule` más los grados de avance de la existencia final por elemento. Así
+las dos funciones componen sin duplicar la aritmética del cuadro, que es la que ya está testeada.
+
+**Una columna por elemento; el fórmula es la misma para todas.** Para cada columna:
+`terminadas y transferidas + terminadas en existencia + pérdidas extraordinarias` (todas al 100 %, es el
+campo `unitsAtFullCompletion`, común a todas las columnas) `+ EF × (grado de avance de ESE elemento)`.
+
+**Reglas implementadas (fuente de verdad = cátedra):**
+- **R1 — las pérdidas NORMALES no entran.** Las absorben las unidades buenas; no aparecen en ninguna
+  columna. Un test con pérdida normal grande (1.000) y EF = 0 lo fija: la PE es exactamente las terminadas
+  (9.000), no 10.000.
+- **R2 — las pérdidas EXTRAORDINARIAS sí entran, al 100 %.** La cátedra lo marca explícitamente como
+  fuente de error frecuente. Se suman dentro de `unitsAtFullCompletion`. Test de contraste: en la CC del
+  caso ancla, contarlas da 33.720 y no contarlas daría 32.720 — el delta es exactamente las 1.000
+  extraordinarias.
+- **R3 — la MP va al 100 % en la EF por default, overridable.** La materia prima se incorpora al inicio
+  del proceso, así que `mpAvance` es 1 por default; se puede sobrescribir cuando la MP no está toda al
+  inicio. Dos sub-casos en los tests: default (MP = 34.400) y override al 50 % (MP = 32.700).
+- **R4 — la EF es la ÚNICA fila multiplicada por un grado de avance.** Todas las demás filas van al 100 %.
+  Sale directo de la fórmula: solo `finalWip` se multiplica por el avance.
+
+**Agrupación de la conversión = flag del departamento, modelada como unión discriminada
+(`conversionUnified`).** `ProcessDepartment.defaultConversionAvanceEqualsMO` decide:
+`conversionUnified: true` → una sola columna **"Costo de Conversión (CC)"** (MOD y CIP comparten avance);
+`conversionUnified: false` → columnas separadas **MOD** y **CIP** con avances distintos. El tipo obliga a
+dar `conversionAvance` en el primer caso y `modAvance`/`cipAvance` en el segundo — imposible olvidarse un
+dato en tiempo de compilación.
+
+**"Costo primo" (MP+MOD agrupados) queda fuera de B07 — deferido a propósito.** La consigna lo menciona
+como agrupación posible, pero (a) ningún test lo pide, (b) el esquema de la DB solo distingue avance de MP
+y avance de Conversión para la EF (`finalWipMpAvance` / `finalWipConvAvance`), no un avance de MOD separado
+que habilite juntar MP+MOD, y (c) la decisión que sí codifica el modelo es CC-unificada vs. separada. Se
+implementa lo que el modelo soporta hoy (regla #8: default más simple que cumple el spec, documentado);
+costo primo llega cuando el modelo lo necesite.
+
+**"CIP" en el dominio, aunque la tabla diga "Cif".** La consigna (fuente de verdad) nombra los tres
+elementos MP / MOD / **CIP** (costos indirectos de producción). Se usan esas etiquetas de cátedra en el
+código nuevo; los campos de la tabla `UnitMovementSchedule` siguen diciendo `periodCostCif` /
+`finalWipConvAvance` (B04, no se tocan). El motor de Procesos (B17) mapea uno a otro.
+
+**Validación de grados de avance: fracción en [0, 1] o 422.** Un avance fuera de rango casi siempre es un
+porcentaje sin normalizar (80 en vez de 0.80). Se corta con `ProcessValidationError` (422, nunca 500)
+accionable, mismo criterio que `normalLossPct` en B06.
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 7 casos B07 (15 en total): caso
+ancla **Azur Alcoholes, Destilado, abril → MP 34.400 / CC 33.720 exacto**; R2 (extraordinarias al 100 %,
+con contraste 33.720 vs 32.720); R1 (normales excluidas); R3 (MP default 100 % y override); tres elementos
+separados con tres columnas distintas; y avance fuera de [0,1] → 422. Suite completa: **556 passed /
+1 skipped** (71 archivos), cero regresión. Sin migración, sin `prisma migrate dev` (dominio puro).
+
+**Re-sync con `origin/staging` + un test rojo pre-existente de staging.** Antes de empezar se mergeó
+`origin/staging` (rule #1c). Conflicto en `cost-period-service.ts`: solo texto de mensajes de alerta de
+anomalía — se tomó la redacción estandarizada de staging (`[Alerta de Anomalía: …]`) para no regresar su
+cambio intencional. Además, al correr la suite completa apareció **1 test rojo que ya venía roto en
+`origin/staging`** (probado: los archivos involucrados son byte-idénticos a staging): en
+`tests/application/cost-period-compare.test.ts`, el caso de `macroContrast` con un período **OPEN** fuerza
+el recálculo (`toSide → computeResult`), y el fixture de ese archivo traía un `directLaborConfig`/
+`indirectCostConfig` con forma vieja que ya no valida contra los esquemas actuales (post B40:
+`itcs.uncertainRemunerative`/`uncertainNonRemunerative` requeridos, `centers.min(1)`). Los períodos CLOSED
+leen su snapshot y nunca parsean esos configs, por eso el test pasaba antes de que staging agregara el caso
+OPEN. Fix **solo de datos de test** (sin tocar lógica de producto): se le dio al fixture un
+`directLaborConfig`/`indirectCostConfig` válido y recomputable, restaurando la intención del autor del test.
+Con eso la suite queda verde de punta a punta.
+
+**Nota de entorno (no es del código):** `tsc --noEmit` marca errores de cliente Prisma desactualizado
+(`companyTargetBudget`, `whatsappPhoneNumber`) que trajo el merge de staging; se arreglan con
+`prisma generate` (lo corre el script `build`), pero acá el `.dll` del query engine está tomado por un
+proceso node en ejecución (dev server) y el generate da `EPERM`. No se mató el proceso del usuario. El
+código nuevo de B07 es type-clean y toda la suite de tests pasa.
+
+## B08 — Dominio: `calcNormalAndExtraordinaryLosses` (pérdidas normales y extraordinarias, función pura)
+
+**Qué hace.** Determina las pérdidas **normales** y **extraordinarias** de un departamento para un
+período. Función pura, mismo archivo que B06/B07 (`src/domain/calculations/process-costing.ts`), sin
+Prisma/HTTP/servicios. La consumen el cuadro (B06), el CAUP/CAUO (B09) y el informe (B10).
+
+**Fuente ÚNICA de la regla de pérdidas (el punto central de la tarea).** B06 ya calculaba las pérdidas
+*inline* dentro de `buildUnitMovementSchedule` (base "unidades del período", pérdida normal y
+extraordinaria por diferencia). Eso era exactamente la duplicación que la consigna pedía eliminar. Se
+**extrajo** esa lógica a `calcNormalAndExtraordinaryLosses` y **B06 ahora delega** en ella (le pasa las
+entradas ya corregidas por posición y desestructura `periodUnits`/`normalLoss`/`extraordinaryLoss`). La
+regla vive en un solo lugar; no hay forma de que B06 y B08 diverjan. Un test lo prueba célula a célula
+(cuadro ancla vs. función pura → mismas pérdidas).
+
+**Reglas modeladas (source of truth: cátedra):**
+- **R1 — base "unidades del período", que DIFIERE por posición:** depto. inicial (seq 1) → puestas en
+  elaboración; depto. posterior (seq > 1) → recibidas del anterior + aumento de número de unidades. **El %
+  NUNCA se computa sobre la existencia inicial** (son unidades del período anterior). Regla explícita y muy
+  tomada. En la función pura, la EI **ni siquiera es un campo del input**: es estructuralmente imposible
+  que entre en la base. Además hay un test a nivel cuadro que pasa una EI no trivial (8.000) y comprueba
+  que la pérdida normal no se mueve.
+- **R2 — extraordinaria por diferencia:** `extraordinaria = pérdida real total informada − pérdida normal`.
+  Nunca se ingresa directa; los únicos inputs son el % normal y la pérdida real total. Si la real < normal
+  ⇒ `ProcessValidationError` (422 accionable en español), porque una extraordinaria negativa es imposible.
+  Sin pérdida real informada ⇒ default = normal (sin extraordinaria).
+- **R3 — tratamiento (banderas de salida).** La función computa **cantidades**; la valuación es de pasos
+  posteriores. Se exponen `normalLossAbsorbedAutomatically` (true en el depto. inicial: la absorben las
+  unidades buenas sin cálculo extra) y `normalLossGeneratesCaup` (true en deptos. posteriores: la normal
+  genera el CAUP/CAUO en B09). La extraordinaria ya la consume B07 al 100 % en la producción equivalente y
+  se valúa al Estado de Resultados, no al costo del producto.
+
+**Decisión de diseño — B06 pasa entradas ya corregidas por posición.** `buildUnitMovementSchedule` ya
+resuelve los ceros que impone la posición (un depto. inicial no tiene recibidas/aumento; uno posterior no
+tiene puestas). Le pasa esos Decimals ya corregidos a B08. Como B08 vuelve a ramificar por `sequence` para
+elegir la base, el resultado es idéntico y la regla de "qué base según posición" queda escrita una sola vez
+(en B08). No se movió la validación R4 de coherencia de entradas: sigue en B06, que es el que arma el cuadro.
+
+**Casos ancla reproducidos exactos.** Destilado (seq 1): puestas 30.000, 2 % → normal **600**; real 1.600 →
+extraordinaria **1.000**. Purificado (seq 2): recibidas 30.000 + aumento 2.000 = base 32.000, 1 % → normal
+**320** (el valor que usa el CAUP en B09), con test que descarta las bases equivocadas (300 sin aumento,
+400 con EI, 80 solo EI).
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 7 casos B08 (22 en total): R1 base
+inicial (600); R2 extraordinaria por diferencia (1.000); R1 base posterior "recibidas + aumento" (320);
+R1 la EI nunca entra aunque el cuadro la lleve (Purificado con EI 8.000 → sigue 320); R2 real < normal →
+422; default sin extraordinaria; y la delegación B06→B08 (mismas pérdidas). Suite completa: **563 passed /
+1 skipped** (71 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev`
+(dominio puro, no toca schema ni DB).
+
+## B09 — Dominio: `calcTransferredCost` (costo transferido = costo modificado + CAUP, función pura)
+
+**Qué hace.** Calcula el costo unitario que un departamento lleva HACIA ADELANTE, al siguiente ("costo
+del departamento anterior"). No es el costo unitario tal cual: se recalcula por DOS ajustes
+independientes y ORDENADOS. Función pura, mismo archivo que B06/B07/B08
+(`src/domain/calculations/process-costing.ts`), sin Prisma/HTTP/servicios. La consumirá el informe (B10)
+y el motor de Procesos (B17).
+
+**Por qué es la tarea más delicada.** Es la parte más fácil de equivocar de todo el motor: dos ajustes
+que se pisan si se aplican en el orden equivocado, y una matriz de combinaciones donde cada celda hace
+algo distinto. Por eso se implementó la **matriz de 4 combinaciones como CUATRO RAMAS EXPLÍCITAS** (no un
+cálculo "inteligente" que las colapse), con **un test por celda** más el ancla y el control.
+
+**Terminología.** CAUP = CAUO = "Costo Adicional por Unidades Perdidas" (sinónimos). En el código se usa
+**CAUP**; se acepta que el plan/otros docs digan CAUO.
+
+**Los dos pasos (source of truth: cátedra):**
+- **PASO 1 — COSTO MODIFICADO.** Recalcula el costo unitario del anterior cuando cambia la cantidad de
+  unidades. Aplica si hay existencia inicial (EI) recibida del anterior **y/o** aumento de número de
+  unidades: `costo modificado = (costo total EI + costo total del anterior del período) ÷ (unidades EI +
+  recibidas + aumento)`. Sin EI, el promedio se reduce a `costo del período ÷ (recibidas + aumento)` (la
+  EI aporta 0 y 0). **Ni EI ni aumento ⇒ se usa el costo unitario previo DIRECTO** (sin modificación).
+  **CONTROL de cátedra:** con aumento, el costo modificado debe ser **estrictamente menor** que el previo
+  (más unidades diluyen el mismo costo total); si sale ≥, es error de carga ⇒ `ProcessValidationError`
+  (422 accionable en español, nunca 500).
+- **PASO 2 — CAUP.** Solo en departamentos posteriores (seq > 1) y solo con pérdidas normales:
+  `costo de la pérdida = pérdidas normales × costo modificado`; `unidades buenas = unidades a justificar −
+  pérdidas normales`; `CAUP = costo de la pérdida ÷ unidades buenas`. Las pérdidas **extraordinarias** son
+  unidades buenas (se terminaron y luego se perdieron): las únicas "malas" acá son las normales.
+  `costo transferido = costo modificado + CAUP`.
+
+**Decisión de diseño — las ramas son la matriz literal (aumento × pérdidas normales).** El `if/else`
+ramifica sobre los DOS ejes de la matriz de cátedra —aumento y pérdidas normales—, una rama por celda, de
+modo que cada celda mapea 1:1 a un test. El manejo de la EI (source of truth: "promedio con EI si la hay,
+si no el costo previo") vive DENTRO del Paso 1 (`computeCostoModificado`), no como un tercer eje: así la
+fila `(No, No)` con EI presente igual promedia (respeta el spec de Paso 1) sin romper la lectura de la
+matriz. El control de dilución solo corre en las ramas con aumento.
+
+**Decisión de diseño — una sola cantidad para "unidades a justificar".** El denominador del Paso 1
+(EI + recibidas + aumento) es EXACTAMENTE las "unidades a justificar" que el Paso 2 usa para las unidades
+buenas. Se computa UNA vez (`unidadesAJustificar`) y se reutiliza, para que los dos pasos no puedan
+divergir.
+
+**Ambigüedad resuelta (regla #8).** La matriz rotula el eje como "aumento", pero el spec de Paso 1 (source
+of truth) dispara con **EI y/o aumento**. Se tomó el spec: el disparador real de la modificación es
+`EI || aumento`, y la columna "aumento" de la matriz es una simplificación (su fila `(No, Sí)` ya aclara
+"promedio con EI si la hay"). Documentado; sin riesgo de pérdida de datos.
+
+**Caso ancla reproducido EXACTO.** Azur Alcoholes, Purificado, abril: EI $11.120 + período $112.500 =
+$123.620 ÷ 35.320 → costo modificado **$3,50** (< $3,75 previo ✓); pérdidas normales 320 → costo de la
+pérdida $1.120, unidades buenas 35.000, CAUP **$0,032**; costo transferido $3,50 + $0,032 = **$3,532**.
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 5 casos B09 (27 en total): las 4
+celdas de la matriz —(aumento Sí, normales No) con dilución; (No, Sí) promedio-con-EI + CAUP; (Sí, Sí) el
+ancla Purificado 3,50/0,032/3,532; (No, No) devuelve el previo sin cambios— más el control de dilución
+(aumento con modificado ≥ previo → 422). Suite completa: **568 passed / 1 skipped** (71 archivos), cero
+regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev` (dominio puro, no toca schema ni DB).
+
+## B10 — Dominio: `buildProductionCostReport` (informe de costos de producción, función pura)
+
+**Qué hace.** Ensambla la hoja de costos de UN departamento para UN período: los números finales
+valuados. Cierra la matemática por departamento a partir de las piezas de B06-B09 (cuadro de movimiento,
+producción equivalente, pérdidas, costo transferido). Función pura, mismo archivo que B06/B07/B08/B09
+(`src/domain/calculations/process-costing.ts`), sin Prisma/HTTP/servicios. La consumirá el motor de
+Procesos (B17).
+
+**Función ENSAMBLADORA, no calculadora.** El punto de la tarea es que B10 NO recalcula nada: toma el
+`UnitMovementSchedule` (B06), el `EquivalentProductionSchedule` (B07) y los costos por elemento (más el
+costo transferido de B09 en seq > 1) ya resueltos, y los combina. Así la regla de cada pieza vive en un
+solo lugar y B10 no puede divergir de sus insumos.
+
+**Las tres partes de la hoja (source of truth: cátedra):**
+- **PARTE 1 — COSTO A JUSTIFICAR.** Sección A (costo del departamento anterior, SOLO seq > 1) + Sección B
+  (costos del departamento, abiertos por elemento en inventario inicial y período). Costo unitario del
+  elemento = `(costo inv. inicial + costo del período) ÷ producción realmente procesada` (**promedio
+  ponderado**, único método acá). Costo unitario total acumulado = Σ costos unitarios (+ costo transferido
+  en seq > 1). Costo acumulado a justificar = Σ de todos los costos totales.
+- **PARTE 2 — JUSTIFICACIÓN.** Terminadas y transferidas, terminadas en stock y pérdidas extraordinarias,
+  cada una × costo unitario total acumulado. La **existencia final se obtiene POR DIFERENCIA** (costo a
+  justificar − las tres líneas): es la única línea que no se computa directo, porque las unidades en
+  proceso no están terminadas y no se les aplica el costo de la unidad terminada.
+- **PARTE 3 — VALUACIÓN DE LA EF (verificación).** Recomputa la EF por el OTRO camino, por elemento:
+  `Σ (unidades equivalentes de la EF del elemento × costo unitario del elemento)` (+ en seq > 1) `unidades
+  EF × costo transferido del anterior` (siempre al 100 %).
+
+**Doble verificación (assertion dura).** La valuación por elemento (Parte 3) DEBE igualar la EF por
+diferencia (Parte 2) dentro de una tolerancia de redondeo. Si difieren más que la tolerancia ⇒
+`ProcessValidationError` (422 accionable en español); NUNCA se devuelve un informe inconsistente. Un ajuste
+de pocos pesos por redondeo de los costos unitarios se **acepta y se registra** (`ajustePorRedondeo`); uno
+desproporcionado al total delata un error previo (costos, costo transferido o cuadro) y corta.
+
+**Decisión de diseño — la Sección A se pasa explícita (costo unitario + costo total).** En seq > 1 el
+costo del departamento anterior necesita el costo unitario transferido (B09, para el costo unitario total
+acumulado y la valuación al 100 % de la Parte 3) y el costo total acumulado (para el costo a justificar).
+Se piden los DOS por separado en `previousDepartmentCost` en vez de reconstruir la semántica del CAUP
+(total = unidades buenas × costo transferido) dentro de B10: mantiene a B10 como ensamblador y deja que la
+inconsistencia entre ambos —si el llamador se equivoca— la atrape la doble verificación. En seq 1 la
+Sección A va en blanco: informarla es error, y omitirla en seq > 1 también (guardas simétricas, criterio
+de la R4 de B06).
+
+**Decisión de diseño — tolerancia de redondeo absoluta, configurable.** `DEFAULT_ROUNDING_TOLERANCE = 5`
+pesos, sobrescribible por `roundingTolerance`. La cátedra habla de "unos pocos pesos"; una cota absoluta
+simple alcanza para distinguir el residuo de redondeo de un error real (que es de orden mucho mayor). El
+`ajustePorRedondeo` se computa siempre como `EF por diferencia − EF por elemento` y viaja en la salida;
+la Parte 2 (por diferencia) queda como la EF oficial y la Parte 3 reconcilia con ese ajuste.
+
+**Ambigüedad resuelta (regla #8).** El split inventario inicial / período de cada elemento NO cambia el
+costo unitario (solo entra la SUMA); se conserva la apertura porque la hoja la muestra en dos subsecciones,
+pero los tests eligen libremente el reparto. Documentado; sin riesgo de pérdida de datos.
+
+**Casos ancla reproducidos EXACTO.** Azur Alcoholes, abril:
+- **Destilado (seq 1):** costo unitario MP $2,00 + CC $1,75 = **$3,75**; costo acumulado a justificar
+  **$127.810**; terminadas 30.000 × $3,75 = $112.500; extraordinarias 1.000 × $3,75 = $3.750; **EF por
+  diferencia $11.560** = por elemento (MP 3.400 × $2,00 = $6.800 + CC 2.720 × $1,75 = $4.760). Ambos
+  caminos $11.560, ajuste $0.
+- **Purificado (seq 2):** costo unitario total **$6,532** ($3,532 transferido + $1,00 MP + $2,00 CC); **EF
+  por elemento $31.992** (anterior 6.000 × $3,532 = $21.192 + MP 6.000 × $1,00 = $6.000 + CC 2.400 × $2,00
+  = $4.800), coincide con la EF por diferencia.
+
+**Verificación.** `tests/domain/process-costing.test.ts` extendido con 5 casos B10 (32 en total): los dos
+anclas (EF por AMBOS caminos en Destilado; costo total $6,532 y EF $31.992 en Purificado); la doble
+verificación que lanza 422 al forzar una inconsistencia (Sección A corrompida, ajuste $26.380); un ajuste
+por redondeo de $2 dentro de tolerancia que se acepta y registra; y las guardas de Sección A (depto.
+inicial no la lleva, depto. posterior sin ella → 422). Suite completa: **573 passed / 1 skipped** (71
+archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma migrate dev` (dominio puro,
+no toca schema ni DB).
+
+## B11 — Costos conjuntos: los 4 métodos de reparto (dominio puro)
+
+**Qué se hizo.** `src/domain/calculations/joint-costs.ts` (función pura, sin Prisma/HTTP/servicios): reparte
+el costo conjunto (MP + conversión acumulados hasta el punto de separación — el TODO) entre los productos que
+emergen en el punto de separación. Cuatro funciones con la MISMA firma `(products, jointCostTotal)` —
+`allocateByPhysicalUnits`, `allocateByTechnicalYield`, `allocateByMarketValue`, `allocateByNetRealizableValue`—
+y un dispatcher `allocateJointCosts(products, method, jointCostTotal)`. Ningún método es "el correcto": el
+usuario elige y cada uno da un costo unitario distinto. Nombres de campo alineados a `ByProductLine` (B05) para
+que el motor (B17) mapee sin traducir.
+
+**Diseño — núcleo compartido.** Los cuatro métodos difieren SOLO en la "base de reparto" de cada línea; el
+resto (participación = base ÷ Σ bases; asignado = participación × total; unitario = asignado ÷ unidades; y los
+dos controles) vive UNA sola vez en `allocate(...)`, al que cada método le pasa su `baseOf`. Evita divergencia
+entre métodos y garantiza firma/salida idénticas.
+
+**Ambigüedad resuelta (regla #8) — factor técnico sin `rawMaterialKg`.** El spec define kilos obtenidos(p) =
+kg MP × % rendimiento(p), pero los kg de MP son un FACTOR COMÚN a todas las líneas y se cancelan en la
+participación (kilos obtenidos ratio = rendimiento ratio). La firma fija de tres parámetros del dispatcher no
+lleva kg de MP, así que la base de reparto del método es directamente `yieldPct` (rendimiento). Da igual
+fracción o porcentaje mientras sea consistente entre líneas. Las `unitsObtained` de la línea son los kilos
+obtenidos y hacen de denominador del costo unitario. Reproduce las participaciones del ancla M2 exacto sin
+pedir un dato extra.
+
+**Diseño — controles de la cátedra como aserción dura.** `assertAllocationConsistency` verifica Σ
+participaciones = 100 % (tol. 1e-9) y Σ costos asignados = costo conjunto total (tol. $0,01). Se cumplen por
+construcción; la cota solo absorbe el residuo de redondeo al dividir. Que fallen sería un error de
+programación, no de datos. Validaciones de datos rotos (sí accionables, 422 `ProcessValidationError`, nunca un
+500): sin productos, unidades ≤ 0, costo conjunto negativo, falta un campo del método (precio/rendimiento),
+base total ≤ 0 (p. ej. todos los precios en 0) y VNR negativo (gastos de comercialización > valor de venta).
+
+**Casos ancla FX-J1 reproducidos EXACTO** (`tests/domain/joint-costs.test.ts`):
+- **M1 (unidades físicas):** costo conjunto $570.000; A 2.500 / B 3.000 / C 4.000 (buenas 9.500; desperdicio
+  500 NO se lista) → $60/kg → A $150.000, B $180.000, C $240.000. Control $570.000.
+- **M3 (valor de mercado):** $570.000; bases $300.000 / $510.000 / $900.000 (Σ $1.710.000) → A $100.000
+  ($40/kg), B $170.000 ($56,67/kg), C $300.000 ($75/kg). Control $570.000.
+- **M4 (VNR):** $110.000; var 3 % sobre valor de venta + fija $10/kg → VNR $56.200 / $113.400 / $190.000 (Σ
+  $359.600) → A $17.191,32 ($85,96/kg), B $34.688,54, C $58.120,13. Control $110.000. Nota: la cátedra imprime
+  el unitario de B/C redondeado a pesos enteros ($115 y $145); los tests comparan el asignado (que es el que
+  reproduce el ancla) y el unitario con la precisión que corresponde.
+- **M2 (factor técnico):** MP 1.000 kg; rendimientos 6 % / 0,50 % / 5 % → kilos 60/5/50 (Σ 115) →
+  participaciones 52,17 % / 4,35 % / 43,48 %; asignado = participación × costo conjunto total.
+
+**Verificación.** 10 casos nuevos: los 4 anclas + "los 4 métodos sobre el MISMO dataset dan costo unitario
+distinto" (los 4 unitarios de A son todos diferentes) + controles y datos rotos que lanzan 422. Suite completa:
+**583 passed / 1 skipped** (72 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración, sin `prisma
+migrate dev` (dominio puro, no toca schema ni DB).
+
+## B15 — Application: `unit-movement-service` (cuadro de movimiento como servicio + trazabilidad)
+
+**Qué se hizo.** CRUD del cuadro de movimiento de unidades por (departamento, período), apoyado en las
+funciones PURAS del dominio (`buildUnitMovementSchedule` B06, `calcEquivalentProduction` B07): el servicio
+`src/application/cost-structures/process-costing/unit-movement-service.ts` orquesta (validar → persistir →
+auditar → trazar), nunca reimplementa la matemática. Tres endpoints protegidos por auth, solo para estructuras
+`costingSystem = 'PROCESSES'`:
+- `GET  /structures/:id/process/departments/:deptId/periods/:periodId/movement` — cuadro guardado + resuelto
+  (con derivados por diferencia y estado "cuadra / no cuadra") + `dataPointId` de cada cifra trazable.
+- `PUT  …/movement` — upsert (clave única `[departmentId, periodId]`), valida con el dominio, traza.
+- `GET  …/equivalent-production` — deriva la producción equivalente (B07) del cuadro guardado.
+
+**Trazabilidad reusando `DataPointService` (no un mecanismo paralelo).** Cada valor MANUAL del cuadro se
+persiste como un `DataPoint` versionado. El valor DERIVADO por diferencia (el de `transferredOut` o `finalWip`
+que el usuario NO cargó) NO es DataPoint: es computado, no ingresado. La regla es simple y testeable: un campo
+se traza sí y solo sí viene en el body (no `undefined`), lo que excluye automáticamente al derivado (que se
+omite). Un re-save con el mismo valor no versiona (sin ruido); con un valor distinto agrega `version_n+1`
+(append-only, nunca pisa).
+
+**Decisión — una sola transacción atómica.** El `save` completo (upsert de la fila + todos los DataPoints +
+sus auditorías) corre dentro de UN `withTenant`. Para reusar `DataPointService` sin abrir transacciones
+sueltas, se extrajeron dos métodos componibles —`createInTx(tx, …)` y `addVersionInTx(tx, …)`— y los públicos
+`create`/`addVersion` ahora delegan en ellos dentro de su propio `withTenant`. La API pública y el
+comportamiento no cambian (los tests existentes de `DataPointService` siguen verdes): la lógica de creación y
+corrección de un dato trazable vive en UN solo lugar.
+
+**Decisión — `element = 'MP'` para todo el cuadro.** El cuadro de movimiento sigue UNIDADES FÍSICAS del
+producto (la materia que fluye por el proceso), no un elemento del costo puntual — la apertura por elemento
+(MOD/CIP) recién aparece en la producción equivalente (B07). El enum `CostElement` no tiene una opción
+"unidades", así que MP es el hogar natural y estable de estas cifras. Los grados de avance (MP/Conversión) se
+persisten para la producción equivalente pero NO se trazan como DataPoints: son insumos de la PE, no del cuadro
+de movimiento.
+
+**Decisión — `fieldKey` con scope depto+período.** Como `DataPoint` se ancla solo a `structureId`, la clave
+`proceso.cuadro.{periodId}.{departmentId}.{campo}` hace única cada celda del cuadro por estructura, depto,
+período y campo, para que un re-save encuentre el dato existente y le agregue versión en vez de duplicarlo. El
+`fieldKey` es una clave interna de máquina (nunca se muestra al usuario; lo que se ve es el `label` humano
+"Recibidas del departamento anterior · Destilado, Abril 2026"), así que no viola la regla de no exponer ids.
+
+**Decisión — errores accionables en español, nunca un 500.** Los `ProcessValidationError` del dominio (cuadro
+que no cuadra, dos incógnitas, depto. inicial con recibidas/aumento) se re-emiten anteponiendo el NOMBRE del
+departamento (nunca su id) → 422. Sobre una estructura de Órdenes, un 422 que nombra el producto y explica que
+el cuadro solo aplica a Procesos. `equivalent-production` sin cuadro cargado → 422 accionable nombrando el
+departamento y el período.
+
+**Decisión — producción equivalente con un solo avance de conversión.** La tabla `unit_movement_schedules`
+persiste un único `finalWipConvAvance`; si el departamento sigue MOD y CIP por separado
+(`defaultConversionAvanceEqualsMO = false`), ambas columnas usan ese avance común. Sin avance cargado, la EF
+aporta 0 a la conversión (default explícito, no se inventa un número).
+
+**Sin migración.** La tabla `unit_movement_schedules` y su RLS ya existen (B04). Cero `prisma migrate dev`.
+
+**Verificación.** 9 tests nuevos de aplicación (Prisma mockeado, mismo patrón que `data-point-service.test.ts`):
+round-trip save+get que cuadra y deriva la EF; cuadro desbalanceado → 422 nombrando el depto; cada valor manual
+crea un DataPoint y el derivado NO; auditoría del cuadro en la misma transacción; `equivalent-production`
+reproduce el resultado B07; endpoints sobre Órdenes → 422; re-save sin cambio no versiona y con cambio versiona.
+Suite completa: **592 passed / 1 skipped** (73 archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el
+script `npm run lint` está roto a nivel repo —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
+
+## B16 — Application: `joint-cost-service` (costos conjuntos como servicio + trazabilidad)
+
+**Qué se hizo.** CRUD del reparto de costos conjuntos por (departamento punto de separación, período), apoyado
+en la función PURA del dominio `allocateJointCosts` (B11): el servicio
+`src/application/cost-structures/process-costing/joint-cost-service.ts` orquesta (validar → repartir →
+persistir → auditar → trazar), NUNCA reimplementa la matemática de los cuatro métodos (PHYSICAL_UNITS /
+TECHNICAL_YIELD / MARKET_VALUE / NET_REALIZABLE_VALUE). Dos endpoints protegidos por auth, solo para
+estructuras `costingSystem = 'PROCESSES'`:
+- `GET /structures/:id/process/periods/:periodId/joint-costs?deptId=…` — configuración guardada + resultado recalculado.
+- `PUT /structures/:id/process/periods/:periodId/joint-costs` — persiste, computa y devuelve el reparto.
+
+**Decisión — el departamento viaja en query/body, no en el path.** El enunciado fijó los paths scopeados por
+estructura+período (`…/process/periods/:periodId/joint-costs`), sin segmento de departamento, pero un reparto
+es único por `(departmentId, periodId)` y la FK exige un departamento. Para honrar el path literal del enunciado
+SIN perder el departamento, `deptId` viaja como query param en el GET y como campo del body en el PUT. Es un
+identificador de recurso (no se muestra en ningún mensaje), así que no viola la regla de no exponer ids.
+
+**Decisión — FX-J2: la pérdida se MUESTRA, nunca se descarta.** Un método (típicamente el factor técnico, que
+reparte por rendimiento e ignora el precio) puede asignarle a un producto un costo mayor a su valor de mercado.
+Ese producto queda con MARGEN NEGATIVO, pero el reparto es válido. El servicio devuelve cada línea con TODOS sus
+números (costo asignado, costo unitario, `marketValue`, `margin`) y una bandera `isLoss = margin < 0`; jamás
+filtra la línea. El `margin` queda en `null` si no hay precio de mercado cargado (no se inventa un valor de
+venta). El dominio solo corta con 422 el caso IMPOSIBLE de repartir (VNR negativo, base total 0), no la pérdida.
+
+**Decisión — `method` de reparto vs. `captureMethod` de trazabilidad.** El body usa `method` para el método de
+REPARTO (como pidió el contrato `save(...{ method, jointCostTotal, products })`) y `captureMethod` para el
+método de CAPTURA del dato trazable, evitando la colisión con el `method` de `captureMethodSchema` que usa el
+resto de Trazabilidad.
+
+**Decisión — líneas reemplazadas, no append-only.** La cabecera `JointCostAllocation` se hace upsert y las
+`ByProductLine` se borran y recrean en cada save (el reparto es una CONFIGURACIÓN editable, igual que el cuadro
+de movimiento B15, no un log). La append-only vive donde corresponde: en los `DataPoint` de trazabilidad, que
+versionan sin pisar. Los resultados calculados (`allocatedCost`, `unitCost`) se persisten en la línea pero NO
+son DataPoints (son derivados, no ingresados).
+
+**Decisión — trazabilidad de los insumos manuales.** Se persiste como `DataPoint` versionado (vía
+`DataPointService`, mismo mecanismo que B15) el costo conjunto total y, por línea, cada insumo cargado
+(`unitsObtained`, `yieldPct`, `marketPrice`, `sellingCostVarPct`, `sellingCostFixedPerUnit`). `fieldKey` con
+scope `proceso.costos-conjuntos.{periodId}.{departmentId}.[jointCostTotal | producto.{nombre}.{campo}]` — clave
+interna de máquina (nunca se muestra; lo que se ve es el `label` humano). El `element` del DataPoint mapea al
+`CostElement` que mejor describe el impacto: cifras de costo/físicas (costo total, unidades, rendimiento) → MP;
+cifras de venta (precio, gastos de comercialización) → VENTA, para que la ficha muestre los impactos correctos.
+Un re-save con el mismo valor no versiona (sin ruido); con un valor distinto agrega la versión n+1.
+
+**Decisión — errores accionables en español, nunca un 500.** Los `ProcessValidationError` del dominio (Σ% ≠
+100 %, base de reparto total 0, VNR negativo, falta de precio/rendimiento) se re-emiten anteponiendo el NOMBRE
+del departamento (nunca su id) → 422. Sobre una estructura de Órdenes, un 422 que nombra el producto y explica
+que el reparto solo aplica a Procesos.
+
+**Sin migración.** Las tablas `joint_cost_allocations` y `joint_cost_by_product_lines` y su RLS ya existen
+(B05). Cero `prisma migrate dev`.
+
+**Verificación.** 9 tests nuevos de aplicación (Prisma mockeado, mismo patrón que `unit-movement-service.test.ts`):
+round-trip save+get (ancla M1); los 4 métodos con los números ancla FX-J1 (M2 participaciones, M3 costos
+asignados/unitarios, M4 VNR); FX-J2 la línea con costo > valor de mercado se muestra con `isLoss=true` y no se
+descarta; dataset roto (base 0) → 422 nombrando el depto; cada insumo manual crea un DataPoint (total + los de
+la línea) y los resultados NO; auditoría del reparto en la misma transacción; endpoints sobre Órdenes → 422; get
+sin reparto → `exists=false`; re-save sin cambio no versiona. Suite completa: **601 passed / 1 skipped** (74
+archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el script `npm run lint` sigue roto a nivel repo
+—ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
