@@ -2200,3 +2200,39 @@ avance, avance de MP ausente, y punto de separación con método elegido. Un tes
 error y verifica que ninguno filtre un UUID, una ruta de endpoint ni un nombre de columna — la regla de "nunca
 exponer identificadores internos" queda cubierta por test, no por disciplina. Suite completa: **641 passed /
 1 skipped** (79 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración.
+
+## B20 — Verificación integral del backend de Procesos y simulacro de migración en base limpia
+
+**1 · Suite completa.** **641 passed / 1 skipped** (79 archivos), cero fallos. Los fixtures de Órdenes pasan
+byte-idénticos (fx3-dorado, r5-fixtures, allocation-*, despacho B02). Los de Procesos: FX-P1 abril end to end,
+FX-P2 abril → mayo, FX-J1 (4 métodos de costos conjuntos), cadena de 3 departamentos, y los 14 chequeos de
+B19. El único `skipped` es el fixture drift de staging ya conocido, ajeno a Procesos.
+
+**2 · Simulacro en base limpia.** Base `costear_scratch` creada de cero sobre `pgvector/pgvector:pg16` →
+`prisma migrate deploy` aplicó TODAS las migraciones sin un error ni una marcada como fallida (incluida la
+nueva `20260726001409_add_initial_wip_prev_dept_cost`) → `apply-rls.mjs` aplicó **53 statements** →
+`prisma/seed.mjs` completó. Verificado en la base resultante: `unit_movement_schedules.initialWipCostPrevDept`
+existe como `numeric(18,4)`, y la tabla tiene RLS **forzada** con su política `tenant_isolation` (creada en
+B04; agregar una columna no la altera).
+
+**3 · `prisma migrate diff` — sin drift NUEVO.** El diff contra la base recién migrada es idéntico al que había
+antes de B18: `unit_movement_schedules` NO aparece, o sea que el esquema y la migración están en sincro. Lo que
+sí aparece es todo preexistente y ajeno a Procesos: los quirks cosméticos de `@default(uuid())` vs
+`gen_random_uuid()` en `allocation_bases` / `allocation_base_values` / `cost_config_versions` / `cost_periods`,
+los índices de `vault_chunks` que Prisma no modela (`tsvector` + `ivfflat`), y el `whatsappPhoneNumber` sin
+migración ya descrito en B18.
+
+**4 · `tsc --noEmit` limpio.** (`npm run lint` sigue roto a nivel repo —ESLint v9 sin `eslint.config.js`—;
+ajeno a estas tareas. El gate real usado fue `tsc` + la suite.)
+
+### Dos hallazgos del entorno que conviene arreglar antes del PR a `staging`
+
+**🔴 `apply-rls.mjs` falla en SILENCIO sin `DATABASE_URL`.** El script usa `PrismaClient` directo, sin cargar el
+`.env` (el CLI de Prisma sí lo carga solo, por eso `prisma:deploy` funciona y este no). Cuando la variable no
+está, imprime `Advertencia aplicando RLS (no fatal)` y **termina con éxito**. Resultado: un dev que sigue el
+README con `npm run db:setup` se queda SIN políticas RLS creyendo que las aplicó — en una app multi-tenant eso
+es un agujero de aislamiento entre inquilinos, no un detalle. Arreglo: cargar el `.env` en el script y hacer
+que el fallo sea fatal.
+
+**🟡 `.env.example` con los puertos equivocados.** Dice `5432`/`6379`, pero el `docker-compose.yml` mapea
+`5433`/`6380` (el README está bien). Cualquiera que copie el ejemplo tal cual no conecta.
