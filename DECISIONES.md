@@ -2236,3 +2236,53 @@ que el fallo sea fatal.
 
 **🟡 `.env.example` con los puertos equivocados.** Dice `5432`/`6379`, pero el `docker-compose.yml` mapea
 `5433`/`6380` (el README está bien). Cualquiera que copie el ejemplo tal cual no conecta.
+
+## B14 — Application: departamentos de proceso como servicio (CRUD + orden de la cadena)
+
+**Por qué aparece acá y no antes.** El handoff daba B14 por hecho ("✅ dev"), pero **no existía**: no había
+`process-department-service.ts`, ni rutas, ni un solo `processDepartment.create/update/delete` en `src` — solo
+cuatro lecturas desde los servicios que sí estaban. Consecuencia: no había forma de crear un departamento por
+la API. El motor calculaba bien, pero los datos que consume no se podían cargar desde ningún lado que no fuera
+escribir en la base a mano. Costeo por Procesos no era usable de punta a punta, y quedaban bloqueadas U04-U08
+y el primer ítem del checklist de V01.
+
+**Decisión — `sequence` es la cadena del costo, no un orden de pantalla.** El departamento 1 transfiere su
+costo al 2, el 2 al 3, y el costo unitario del último es el costo del producto terminado. De ahí salen las
+tres reglas duras: la cadena es SIEMPRE continua (1..n), el alta va SIEMPRE al final, y con cálculos ya hechos
+la cadena queda congelada.
+
+**Decisión — alta al final, nunca en el medio.** Insertar una etapa entre dos existentes recorre el costo de
+todas las siguientes. Si hace falta una etapa intermedia, se agrega al final y se reordena: dos actos
+explícitos, cada uno con su auditoría, en vez de uno que hace las dos cosas sin que se note.
+
+**Decisión — con cálculos hechos se congela el ORDEN, no el alta.** Reordenar o sacar una etapa cambiaría el
+significado de resultados ya emitidos, así que sale un 422. Agregar al final sí se permite: no altera nada de
+lo ya calculado. El mensaje ofrece esa alternativa en vez de dejar al costista sin salida. `list()` devuelve
+`chainFrozen` para que el frontend deshabilite los controles ANTES de que el usuario intente y choque.
+
+**Decisión — el reordenamiento escribe en DOS PASADAS.** El índice único `(structureId, sequence)` se chequea
+fila por fila, no al final de la transacción: escribir las posiciones nuevas directamente choca con las viejas
+apenas dos departamentos intercambian lugares. La primera pasada los estaciona en un rango negativo que nadie
+usa y la segunda los baja a su posición definitiva.
+
+**Decisión — la baja lógica libera su lugar en la cadena.** Ese mismo índice único no distingue filas dadas de
+baja, así que una etapa borrada que conservara su `sequence` impediría correr las siguientes. Al darla de baja
+se la manda a una secuencia negativa (siempre por debajo del mínimo, garantizada única) y las etapas
+posteriores suben una posición.
+
+**Decisión — nombres únicos por estructura (case-insensitive).** No lo pide el esquema, pero TODOS los
+mensajes del sistema identifican las etapas por nombre —es la regla de no exponer ids—; dos "Destilado"
+vuelven ilegible cada 422 de B19.
+
+**Endpoints** (`/structures/:id/process/departments`): `GET` la cadena, `POST` alta al final, `PATCH /:deptId`
+renombrar o cambiar si la conversión va unificada, `DELETE /:deptId` baja lógica, `PUT /order` reordenar la
+cadena completa. Todos exigen estructura `PROCESSES` (una de Órdenes recibe un 422 accionable), corren en una
+transacción con `withTenant` (RLS) y dejan su auditoría en esa misma transacción.
+
+**Verificación.** 19 tests nuevos (`tests/application/process-department-service.test.ts`, Prisma mockeado):
+alta al final, nombre recortado, nombre vacío y nombre repetido rechazados, alta permitida con cálculos
+hechos; reordenar y borrar bloqueados con cálculos hechos y nombrando la etapa; las dos pasadas del reorden
+verificadas sobre las llamadas reales; orden parcial e id ajeno rechazados; la baja manda la fila a negativo y
+cierra el hueco; Órdenes → 422, estructura inexistente → 404; `chainFrozen` en los dos estados. Suite completa:
+**660 passed / 1 skipped** (80 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración: la tabla
+`process_departments` y su RLS existen desde B03.
