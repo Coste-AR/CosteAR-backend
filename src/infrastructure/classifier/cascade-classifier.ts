@@ -1,5 +1,5 @@
 // src/infrastructure/classifier/cascade-classifier.ts
-import { runQualityGate, PARTIAL_CONFIDENCE_CAP } from './layers/layer0-quality-gate.js';
+import { runQualityGate } from './layers/layer0-quality-gate.js';
 import { detectIntent }   from './layers/layer0a-intent-detection.js';
 import { runLayer1 }      from './layers/layer1-definitive-signals.js';
 import { runLayer2 }      from './layers/layer2-corroborating-signals.js';
@@ -42,9 +42,11 @@ function buildExplanation(params: {
   signalCount: number;
   wasteReviewRequired?: boolean;
 }): string {
+  // `documentType`, `costSection` y `aiUsed` siguen en el tipo de `params` —
+  // forman parte del contrato— pero esta función no los usa para armar el texto.
   const {
-    intent, documentType, costSection, confidence,
-    definitiveSignal, l4Reasoning, aiUsed,
+    intent, confidence,
+    definitiveSignal, l4Reasoning,
     supplierFingerprintUsed, requiresReview,
     industryCategory, industryLabel, signalCount,
     wasteReviewRequired,

@@ -38,7 +38,9 @@ export function routeNota(
 export function routeFacturaCompra(
   lower: string,
   profile: ReturnType<typeof getIndustryProfile>,
-  industryCategory: IndustryCategory,
+  // Se recibe para mantener la firma común de los ruteadores de Layer 4, aunque
+  // el ruteo de facturas de compra no la use.
+  _industryCategory: IndustryCategory,
 ): Layer4Result {
 
   const unconditionalCip = UNCONDITIONAL_CIP_KEYWORDS.filter((kw) => lower.includes(kw));

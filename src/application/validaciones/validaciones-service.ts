@@ -1,6 +1,6 @@
 import type { PrismaClient, DataEntryStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
-import { NotFoundError, ForbiddenError, ValidationError } from '../../domain/errors/domain-error.js';
+import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { buildLedgerDraft } from './ledger-builder.js';
 import { populateCostStructureFromApproval } from './cost-structure-populator.js';

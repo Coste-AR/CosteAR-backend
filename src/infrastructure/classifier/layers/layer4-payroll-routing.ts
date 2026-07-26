@@ -39,9 +39,11 @@ function matchAnyKeyword(haystack: string, keywords: string[]): string | null {
 }
 
 export function extractRoleFromText(text: string): string | null {
-  const labeled = text.match(/(?:puesto|cargo|categor[ií]a|funci[oó]n)\s*[:\-]\s*([^\n]+)/i);
+  // `[:-]` con el guion al final de la clase ya es literal: escaparlo no cambia
+  // qué matchea, solo agrega ruido.
+  const labeled = text.match(/(?:puesto|cargo|categor[ií]a|funci[oó]n)\s*[:-]\s*([^\n]+)/i);
   if (labeled?.[1]) return labeled[1].trim();
-  const empleado = text.match(/empleado\s*[:\-]\s*([^\n]+)/i);
+  const empleado = text.match(/empleado\s*[:-]\s*([^\n]+)/i);
   if (empleado?.[1]) return empleado[1].trim();
   return null;
 }

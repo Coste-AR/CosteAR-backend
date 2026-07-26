@@ -1,4 +1,3 @@
-import { VaultIndexerService } from './src/application/vault-indexer/vault-indexer-service.js';
 import { readFile } from 'fs/promises';
 import { chunkMarkdown } from './src/application/vault-indexer/markdown-chunker.js';
 import * as path from 'path';

@@ -4,7 +4,6 @@ import { ValidacionesService } from '../../../application/validaciones/validacio
 import { ValidacionesLedgerService } from '../../../application/validaciones/validaciones-ledger-service.js';
 import { EmpresaConnectionService } from '../../../application/empresa/empresa-connection-service.js';
 import { authenticate } from '../plugins/authenticate.js';
-import { periodSchema } from '../../../shared/schemas/cost.schema.js';
 
 const DOC_TYPES = [
   'FACTURA_COMPRA', 'FACTURA_VENTA', 'REMITO', 'LIQUIDACION_MOD',

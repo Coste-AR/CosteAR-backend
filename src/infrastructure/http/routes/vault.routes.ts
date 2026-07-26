@@ -143,7 +143,6 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/vault/index', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
     const { VaultIndexerService } = await import('../../../application/vault-indexer/vault-indexer-service.js');
-    const { execSync } = await import('node:child_process');
     const path = await import('node:path');
     
     const vaultPath = process.env.VAULT_PATH || '../CosteAR-vault';
