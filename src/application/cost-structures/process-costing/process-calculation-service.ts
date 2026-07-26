@@ -218,9 +218,11 @@ export class ProcessCalculationService {
         cifInicial: n(schedule.initialWipCostCif),
         cifPeriodo: n(schedule.periodCostCif),
       },
-      // La tabla no tiene columna para el "costo del anterior arrastrado en la EI"
-      // (sería una migración, fuera del alcance de B17). El motor lo asume 0 salvo
-      // que se derive de un período previo. Ver DECISIONES.md (B17).
+      // Costo del departamento anterior que la EI ya traía adentro (costo
+      // modificado + CAUP de la etapa previa). Lo persiste el arrastre entre
+      // períodos (B18); en un departamento inicial o en el primer período de la
+      // estructura no hay nada que arrastrar y queda en 0.
+      initialWipTransferredCost: n(schedule.initialWipCostPrevDept) ?? 0,
       jointAllocation: joint
         ? {
             method: joint.method,

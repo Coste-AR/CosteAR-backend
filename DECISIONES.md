@@ -2097,3 +2097,65 @@ Servicio (`process-calculation-service.test.ts`, Prisma mockeado): datos sin imp
 **613 passed / 1 skipped** (76 archivos), cero regresión — los fixtures de Órdenes (fx3-dorado, r5-fixtures,
 allocation-*) y el test de despacho B02 pasan byte-idénticos. `tsc --noEmit` limpio. (El script `npm run lint`
 sigue roto a nivel repo —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
+
+## B18 — Application: arrastre de existencias en proceso entre períodos (Costeo por Procesos)
+
+**El problema.** En Costeo por Procesos la producción no se corta a fin de mes: lo que quedó a medio hacer en
+cada departamento el 30 de abril es, literalmente, con lo que arranca mayo. La regla de la cátedra es
+`inventario final del período 1 = inventario inicial del período 2` — mismas unidades físicas, mismos grados de
+avance, y el costo con el que cerraron. Hasta B17 el motor aceptaba esa existencia inicial por input, pero al
+abrir el período siguiente nadie la cargaba: el costista tenía que reescribir a mano el cuadro de movimiento de
+cada departamento, con los costos valuados. Eso no es una molestia: es la puerta de entrada del error.
+
+**Decisión — se extiende `openNext`, no se reescribe.** El arrastre vive en
+`cost-period-propagation-service.ts`, junto al que ya existía para materia prima (existencia final valuada al
+PPP, Órdenes). Se agrega una rama por `costingSystem === 'PROCESSES'`; el camino de Órdenes no cambia una
+línea y sus fixtures siguen byte-idénticos. (El handoff ubicaba `openNext` en `cost-period-service.ts`; el
+método vive en el servicio de propagación.)
+
+**Decisión — se cierra el follow-up de B17: la columna existe.** B17 documentó que el "costo del departamento
+anterior arrastrado en la EI" no tenía dónde guardarse y que el endpoint lo pasaba 0. Ahora sí:
+`UnitMovementSchedule.initialWipCostPrevDept` (migración `20260726001409_add_initial_wip_prev_dept_cost`,
+ADITIVA e idempotente — un solo `ADD COLUMN IF NOT EXISTS`, nullable, sin default). `toDepartmentInput` la
+cablea a `initialWipTransferredCost`. Las filas viejas quedan en NULL, que el mapeo lee como 0: exactamente el
+comportamiento anterior. La política RLS de `unit_movement_schedules` (B04) no cambia — agregar una columna no
+la altera.
+
+**Decisión — la valuación de la EF sale del motor, no de una cuenta paralela.** El arrastre corre el
+`ProcessCostingEngine` sobre el período que cierra (vía `getProductionReport`) y toma `valuacionEF` por
+elemento y `previousDepartment.valuacionEF`. Mismo criterio que `close()` con `computeResult`: el número que
+arrastra el sistema y el que el costista ve en pantalla son, por construcción, el mismo número. Se resuelve
+ANTES de la transacción (necesita sus propias lecturas) y las filas se crean DENTRO, junto al período y su
+auditoría.
+
+**Decisión — conversión unificada: el costo se reparte, no se apila.** Si el departamento sigue MOD y CIP como
+una sola columna "Conversión" (`defaultConversionAvanceEqualsMO`), el informe valúa la EF en un único número,
+pero la tabla guarda MO y CIF por separado. Se reparte en la MISMA proporción con la que el departamento cerró
+el período (`initialWipCostMo + periodCostMo` contra sus equivalentes de CIF). Mientras el departamento siga
+unificado el reparto es indistinto —el motor vuelve a sumarlos—, y si algún día se separa arranca con una
+proporción real en vez de un número inventado. Si ambos son 0, todo va a MO.
+
+**Decisión — abrir un mes nunca se bloquea por falta de datos de Procesos.** Sin departamentos cargados, o sin
+cuadros de movimiento en el período que cierra, no hay nada que arrastrar y la apertura sigue normal. En
+cambio, si los datos existen pero no cierran, el motor tira su 422 accionable y la apertura se detiene:
+arrastrar un número mal calculado es peor que no arrastrarlo.
+
+**Trazabilidad.** La auditoría de `cost_period.open` suma `processWipCarry`: qué arrastró cada departamento
+—por NOMBRE, nunca por id— con unidades, avances y costo por elemento.
+
+**Verificación.** 9 tests nuevos (`tests/application/process-wip-carry.test.ts`), FX-P2 Azur Alcoholes abril →
+mayo. Los números de abril no están escritos a mano: se derivan corriendo el motor real sobre el insumo de
+FX-P1, y el test los ancla contra la cátedra ($3,75 y $6,532) antes de mirar el arrastre — si el fixture ancla
+cambiara, falla de frente en vez de verificar en silencio otra cosa. Destilado arrastra 3.400 u al 80 % con
+MP **$6.800** + conversión **$4.760**; Purificado arrastra 6.000 u al 40 % con MP **$6.000**, conversión
+**$4.800** y costo del departamento anterior **$21.192** (6.000 × $3,532 = costo modificado $3,50 + CAUP
+$0,032). El total arrastrado es **$43.552**, exactamente la existencia final valuada de abril
+($11.560 + $31.992). Más: el reparto 60/40 de la conversión entre MO y CIF; una estructura de Órdenes no
+arrastra nada; y los dos casos sin datos no bloquean la apertura. Suite completa: **627 passed / 1 skipped**
+(78 archivos), cero regresión. `tsc --noEmit` limpio. `prisma migrate diff` sin drift nuevo — la tabla
+`unit_movement_schedules` no aparece en el diff.
+
+> **Drift ajeno detectado (no es de esta tarea).** `EmpresaConnection.whatsappPhoneNumber` está en
+> `schema.prisma` (línea 463, con `@unique`) pero NINGUNA migración lo crea. Un deploy desde cero levanta sin
+> esa columna y el módulo de WhatsApp falla en runtime. Viene del merge de la feature de WhatsApp a `dev`;
+> hay que crearle su migración aditiva antes del PR a `staging`.

@@ -83,8 +83,9 @@ const purificado: ProcessDepartmentInput = {
     moInicial: 12800,
     moPeriodo: 50000, // CC total 62.800 ÷ 31.400 = 2,00
   },
-  // Costo del anterior arrastrado en la EI (no hay columna en la tabla; el motor
-  // lo modela por input para reproducir el costo modificado $3,50 de la cátedra).
+  // Costo del anterior arrastrado en la EI: reproduce el costo modificado $3,50
+  // de la cátedra. Desde B18 lo persiste `initialWipCostPrevDept` y lo carga solo
+  // la apertura del período siguiente (ver `process-wip-carry.test.ts`).
   initialWipTransferredCost: 11120,
 };
 
