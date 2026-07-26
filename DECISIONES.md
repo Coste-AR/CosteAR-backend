@@ -2279,6 +2279,43 @@ renombrar o cambiar si la conversión va unificada, `DELETE /:deptId` baja lógi
 cadena completa. Todos exigen estructura `PROCESSES` (una de Órdenes recibe un 422 accionable), corren en una
 transacción con `withTenant` (RLS) y dejan su auditoría en esa misma transacción.
 
+## Arreglos de entorno detectados en B20 (RLS silencioso, drift de WhatsApp, `db:setup`)
+
+**🔴 `apply-rls.mjs` ya no falla en silencio.** Tres cambios: (1) carga el `.env` con `process.loadEnvFile`
+cuando `DATABASE_URL` no está en el entorno —el CLI de Prisma lo hace solo, este script usa `PrismaClient`
+directo y nadie se lo cargaba—; (2) si aun así falta la variable, corta con un mensaje que dice dónde
+definirla; (3) ante cualquier error sale con **código 1** y dice explícitamente que la base quedó SIN
+aislamiento entre inquilinos. Antes imprimía `Advertencia (no fatal)` y terminaba con éxito: un dev que seguía
+el README con `npm run db:setup` se quedaba sin políticas RLS creyendo que las había aplicado.
+
+**Decisión — el arranque del servidor sigue tolerando el fallo, pero lo registra.** `entry.ts` ignoraba el
+código de salida a propósito (dejar la app caída por un fallo transitorio del script sería peor) y por eso
+hacer fallar el script NO rompe el deploy. Lo que sí cambió: ahora loguea un `WARN` con el código, igual que
+ya hacía con las migraciones. Un fallo de RLS en producción tiene que verse en los logs.
+
+**🔴 `db:setup` hacía justo lo que el repo prohíbe.** Era `prisma migrate dev --name init && apply-rls`, y
+`prisma migrate dev` en este repo regenera un `_init` espurio y corrompe el árbol de migraciones — la regla
+está escrita en los parámetros de trabajo del equipo, pero el README mandaba a correr ese script. Ahora es
+`migrate-deploy.mjs && apply-rls.mjs`, el mismo camino que usa el deploy.
+
+**🔴 `EmpresaConnection.whatsappPhoneNumber` sin migración.** Estaba en `schema.prisma` con `@unique` desde que
+se sumó el módulo de WhatsApp, pero ninguna migración la creaba: una base desde cero levantaba sin la columna y
+el webhook fallaba en runtime al buscar la conexión por teléfono. Nueva migración aditiva e idempotente
+`20260726093923_add_whatsapp_phone_number` (columna + índice único, ambos `IF NOT EXISTS`, para no romper las
+bases donde ya se creó a mano). Con esto `empresa_connections` desaparece del `prisma migrate diff`.
+
+**🟡 `.env.example` corregido.** Decía `5432`/`6379`; el `docker-compose.yml` mapea `5433`/`6380`.
+
+**Drift restante (cosmético, conocido, ajeno).** Solo quedan los quirks de `@default(uuid())` vs
+`gen_random_uuid()` en `allocation_bases` / `allocation_base_values` / `cost_config_versions` / `cost_periods`,
+y los dos índices de `vault_chunks` (`tsvector` + `ivfflat`) que Prisma no modela.
+
+**Verificación.** Las dos ramas de `apply-rls.mjs` probadas a mano: sin `DATABASE_URL` en el entorno carga el
+`.env` y aplica los 53 statements; contra una base inexistente sale con código 1 y el mensaje de aislamiento.
+Suite **660 passed / 1 skipped**, `tsc --noEmit` limpio.
+
+## B14 (continuación) — verificación
+
 **Verificación.** 19 tests nuevos (`tests/application/process-department-service.test.ts`, Prisma mockeado):
 alta al final, nombre recortado, nombre vacío y nombre repetido rechazados, alta permitida con cálculos
 hechos; reordenar y borrar bloqueados con cálculos hechos y nombrando la etapa; las dos pasadas del reorden
