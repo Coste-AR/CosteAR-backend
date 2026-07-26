@@ -65,7 +65,10 @@ export interface ProcessScheduleCheck {
   unitIncrease?: number | null;
   transferredOut?: number | null;
   finishedInStock?: number | null;
+  /** Pérdida real total informada. Si no está, la única pérdida es la normal. */
   totalLossReported?: number | null;
+  /** Pérdida normal ya calculada y persistida (`normalLossPct` × unidades del período). */
+  normalLoss?: number | null;
   finalWip?: number | null;
   finalWipMpAvance?: number | null;
   finalWipConvAvance?: number | null;
@@ -157,11 +160,14 @@ export function validateProcessInputs(departments: ProcessDepartmentCheck[]): vo
         num(s.startedInProduction) +
         num(s.receivedFromPrevious) +
         num(s.unitIncrease);
-      const salen =
-        num(s.transferredOut) +
-        num(s.finishedInStock) +
-        num(s.totalLossReported) +
-        num(s.finalWip);
+      // Las unidades que salen por pérdida son la pérdida REAL TOTAL. Cuando el
+      // costista no informa una pérdida total, la única que hubo es la normal
+      // (calculada del % admitido): usar solo `totalLossReported` daba un falso
+      // "no cuadra" por exactamente la pérdida normal en el caso más común, que
+      // es cargar un % de merma admitida y ninguna merma extraordinaria.
+      const perdidas =
+        s.totalLossReported != null ? num(s.totalLossReported) : num(s.normalLoss);
+      const salen = num(s.transferredOut) + num(s.finishedInStock) + perdidas + num(s.finalWip);
       const diferencia = entran - salen;
       if (Math.abs(diferencia) > 1e-4) {
         const sobran = diferencia > 0;

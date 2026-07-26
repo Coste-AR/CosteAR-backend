@@ -117,6 +117,51 @@ describe('B19 — validaciones previas al cálculo de Procesos', () => {
     expect(err.message).toMatch(/sobran/i);
   });
 
+  it('con merma admitida y SIN pérdida total informada, el cuadro cuadra', () => {
+    // El caso más común: se carga un % de merma normal y no hubo pérdida
+    // extraordinaria. Las unidades que salen incluyen esa pérdida normal ya
+    // calculada; mirar solo `totalLossReported` daba un falso "no cuadra" por
+    // exactamente el valor de la merma.
+    expect(() =>
+      validateProcessInputs([
+        sano({
+          name: 'Purificado',
+          schedule: {
+            initialWip: 3320,
+            receivedFromPrevious: 30000,
+            unitIncrease: 2000,
+            transferredOut: 29000,
+            finishedInStock: 0,
+            totalLossReported: null,
+            normalLoss: 320,
+            finalWip: 6000,
+            finalWipConvAvance: 0.4,
+          },
+        }),
+      ]),
+    ).not.toThrow();
+  });
+
+  it('la pérdida total informada manda sobre la normal cuando está', () => {
+    // 5.000 + 30.000 entran; salen 30.000 + 0 + 1.600 (total real) + 3.400.
+    expect(() =>
+      validateProcessInputs([
+        sano({
+          schedule: {
+            initialWip: 5000,
+            startedInProduction: 30000,
+            transferredOut: 30000,
+            finishedInStock: 0,
+            totalLossReported: 1600,
+            normalLoss: 600,
+            finalWip: 3400,
+            finalWipConvAvance: 0.8,
+          },
+        }),
+      ]),
+    ).not.toThrow();
+  });
+
   it('acepta el cuadro cuando la existencia final se deja para deducir por diferencia', () => {
     expect(() =>
       validateProcessInputs([

@@ -204,6 +204,7 @@ export class ProcessCalculationService {
               transferredOut: numOrNull(schedule.transferredOut),
               finishedInStock: numOrNull(schedule.finishedInStock),
               totalLossReported: numOrNull(schedule.totalLossReported),
+              normalLoss: numOrNull(schedule.normalLoss),
               finalWip: numOrNull(schedule.finalWip),
               finalWipMpAvance: numOrNull(schedule.finalWipMpAvance),
               finalWipConvAvance: numOrNull(schedule.finalWipConvAvance),
