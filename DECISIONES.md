@@ -2237,6 +2237,37 @@ que el fallo sea fatal.
 **🟡 `.env.example` con los puertos equivocados.** Dice `5432`/`6379`, pero el `docker-compose.yml` mapea
 `5433`/`6380` (el README está bien). Cualquiera que copie el ejemplo tal cual no conecta.
 
+## V01 — Verificación final de Costeo por Procesos
+
+| Ítem | Resultado |
+|---|---|
+| `AlanSandbox` mergea limpio en `staging` (los dos repos) | ✅ sin conflictos |
+| Base limpia: `migrate deploy` → `db:rls` → `db:seed` | ✅ cero errores · 53 políticas RLS · seed OK |
+| `prisma migrate diff` sin drift NUEVO | ✅ solo el cosmético preexistente |
+| Toda tabla nueva con su política RLS | ✅ las 4 de Procesos |
+| Ninguna migración commiteada editada o renombrada | ✅ solo 2 altas (`A`), cero `M`/`D` |
+| Suite backend | ✅ **668 passed / 1 skipped**, fixtures de Órdenes byte-idénticos |
+| Frontend `build` + `typecheck` + `vitest` | ✅ limpios, 32 tests |
+| Sin ids internos, endpoints ni fechas en formato ajeno visibles | ✅ verificado |
+| `DECISIONES.md` actualizado en los dos repos | ✅ |
+
+**Caso dorado, corrido contra la API real** (no solo tests con Prisma simulado): crear estructura
+`PROCESSES` → agregar la cadena de departamentos → abrir período → cargar los dos cuadros de movimiento
+con sus importes → calcular. El primer departamento reproduce **$3,75** de costo unitario y **$11.560**
+de existencia final —los valores de la cátedra (FX-P1)— y la doble verificación de la existencia final
+cierra en las dos etapas. La ficha de trazabilidad de un valor del cuadro resuelve con su etiqueta,
+valor, autor, método de captura, versiones e impactos.
+
+**Lo que queda pendiente para el PR a `staging`:** la pasada VISUAL en navegador con sesión iniciada
+(la extensión de navegador no quedó disponible en esta sesión). Todo lo demás —lógica, contratos,
+cálculo, persistencia, trazabilidad— está verificado contra base y API reales.
+
+> **Anotación menor, no bloqueante.** Los `impacts` que devuelve la ficha de trazabilidad de un dato
+> del cuadro de movimiento son los de Órdenes ("PPP", "MP consumida", "COGS", "Margen"). Para un dato
+> de Procesos lo correcto sería "Producción equivalente", "Costo unitario del departamento", "Costo
+> transferido". Vive en `data-point-service`; se deja anotado y no se toca porque cambiar esa lógica
+> arriesga los impactos de Órdenes, que están bien y fuera del alcance de estas tareas.
+
 ## B14 — Application: departamentos de proceso como servicio (CRUD + orden de la cadena)
 
 **Por qué aparece acá y no antes.** El handoff daba B14 por hecho ("✅ dev"), pero **no existía**: no había
