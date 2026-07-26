@@ -2159,3 +2159,44 @@ arrastra nada; y los dos casos sin datos no bloquean la apertura. Suite completa
 > `schema.prisma` (línea 463, con `@unique`) pero NINGUNA migración lo crea. Un deploy desde cero levanta sin
 > esa columna y el módulo de WhatsApp falla en runtime. Viene del merge de la feature de WhatsApp a `dev`;
 > hay que crearle su migración aditiva antes del PR a `staging`.
+
+## B19 — Application: validaciones previas al cálculo de Costeo por Procesos
+
+**El problema.** El dominio ya frena casi todos los datos inconsistentes, pero sus mensajes hablan de "el
+cuadro" sin decir CUÁL: `El cuadro no cuadra: unidades a justificar (35000) ≠ unidades justificadas (34600)`.
+A un costista con cinco departamentos eso lo deja buscando a mano. B19 no reemplaza esas validaciones: agrega
+una capa ANTES del motor que produce el mismo diagnóstico con el nombre del departamento y una acción concreta.
+
+**Decisión — `validateProcessInputs` es una función pura, no un método del servicio.** Vive en
+`validate-inputs.ts` junto a la de Órdenes, recibe formas planas (sin tipos de Prisma) y no toca la base. Se
+testea sola, sin mockear un `PrismaClient`. `validateCalculationInputs` no se tocó: recibe `CalculationInput`,
+que es la forma de Órdenes y no tiene nada de Procesos, así que extenderla era imposible — son dos funciones
+hermanas, no una con un `if`.
+
+**Decisión — se junta todo primero y se valida el conjunto.** `buildEngineInput` pasó de "leo un departamento,
+lo valido, sigo" a "leo todos, valido el conjunto, armo el insumo". Dos razones: validar de a uno hace que el
+costista arregle un problema, vuelva a calcular y se choque con el siguiente; y los huecos en la cadena de
+`sequence` solo se ven mirando la secuencia entera.
+
+**Los seis chequeos.** (1) Huecos en la cadena — `1, 2, 4` nombra a los dos vecinos del salto. (2)
+Departamento sin cuadro de movimiento. (3) Cuadro irresoluble: faltan a la vez las transferidas Y la existencia
+final (el cuadro admite UNA incógnita, se despeja por diferencia). (4) Cuadro que no cuadra, con cuántas
+unidades sobran o faltan. (5) Existencia final con unidades y sin grado de avance en conversión. (6) Punto de
+separación con productos cargados y sin método de reparto.
+
+**Decisión — el chequeo (5) es el que más valor agrega, y no estaba en ningún lado.** El motor hace
+`finalWipConversionAvance ?? 0`: una existencia final con unidades y sin avance cargado se valúa en CERO sin
+avisar. El mes cierra con el inventario subvaluado y el error no aparece por ningún lado — ni excepción, ni
+advertencia. Ahora es un 422 que además explica el porqué ("sin ese dato esas unidades se valuarían en cero"),
+porque si no el costista lee el pedido como burocracia.
+
+**Decisión — el avance en materia prima NO se exige.** El motor hace `finalWipMpAvance ?? 1`, y ese default sí
+es correcto: la materia prima se incorpora al inicio del proceso, que es el caso normal de la cátedra. Exigirlo
+sería pedir un dato que el 90 % de las veces es 100 %.
+
+**Verificación.** 14 tests nuevos (`tests/application/process-validations.test.ts`), uno por chequeo más los
+casos que NO deben disparar: existencia final dejada en blanco para deducir por diferencia, EF en cero sin
+avance, avance de MP ausente, y punto de separación con método elegido. Un test recorre los seis mensajes de
+error y verifica que ninguno filtre un UUID, una ruta de endpoint ni un nombre de columna — la regla de "nunca
+exponer identificadores internos" queda cubierta por test, no por disciplina. Suite completa: **641 passed /
+1 skipped** (79 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración.

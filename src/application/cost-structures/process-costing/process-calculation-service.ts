@@ -12,6 +12,10 @@ import type {
   ProcessDepartmentInput,
 } from './process-costing-engine.js';
 import type { JointAllocationMethod } from '../../../domain/calculations/joint-costs.js';
+import { validateProcessInputs } from '../validate-inputs.js';
+
+/** Decimal de Prisma (o null) a número plano, conservando el "no cargado". */
+const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
 
 /**
  * COSTEO POR PROCESOS · SERVICIO DE CÁLCULO (B17) — orquesta el motor con la DB.
@@ -156,25 +160,63 @@ export class ProcessCalculationService {
       );
     }
 
-    const engineDepartments: ProcessDepartmentInput[] = [];
+    // Se juntan primero TODOS los cuadros y repartos, después se revisa el
+    // conjunto (B19) y recién ahí se arma el insumo del motor. El orden importa:
+    // revisar de a un departamento hace que el costista arregle un problema,
+    // vuelva a calcular, y se choque con el siguiente. Además, los huecos en la
+    // cadena solo se ven mirando la secuencia entera.
+    const rows: Array<{
+      dept: {
+        id: string;
+        name: string;
+        sequence: number;
+        defaultConversionAvanceEqualsMO: boolean;
+      };
+      schedule: Record<string, unknown> | null;
+      joint: {
+        method: JointAllocationMethod;
+        jointCostTotal: Prisma.Decimal | number;
+        products: Array<Record<string, unknown>>;
+      } | null;
+    }> = [];
+
     for (const dept of departments) {
       const schedule = await this.db.unitMovementSchedule.findUnique({
         where: { departmentId_periodId: { departmentId: dept.id, periodId } },
       });
-      if (!schedule) {
-        throw new UnprocessableEntityError(
-          `Falta el cuadro de movimiento de unidades del departamento «${dept.name}» para el período «${period.label}». ` +
-            'Cargalo antes de calcular el costo por procesos.',
-        );
-      }
-
       const joint = await this.db.jointCostAllocation.findUnique({
         where: { departmentId_periodId: { departmentId: dept.id, periodId } },
         include: { products: true },
       });
-
-      engineDepartments.push(this.toDepartmentInput(dept, schedule, joint, periodId));
+      rows.push({ dept, schedule, joint: joint as never });
     }
+
+    validateProcessInputs(
+      rows.map(({ dept, schedule, joint }) => ({
+        name: dept.name,
+        sequence: dept.sequence,
+        schedule: schedule
+          ? {
+              initialWip: numOrNull(schedule.initialWip),
+              startedInProduction: numOrNull(schedule.startedInProduction),
+              receivedFromPrevious: numOrNull(schedule.receivedFromPrevious),
+              unitIncrease: numOrNull(schedule.unitIncrease),
+              transferredOut: numOrNull(schedule.transferredOut),
+              finishedInStock: numOrNull(schedule.finishedInStock),
+              totalLossReported: numOrNull(schedule.totalLossReported),
+              finalWip: numOrNull(schedule.finalWip),
+              finalWipMpAvance: numOrNull(schedule.finalWipMpAvance),
+              finalWipConvAvance: numOrNull(schedule.finalWipConvAvance),
+            }
+          : null,
+        hasByProductLines: (joint?.products?.length ?? 0) > 0,
+        jointMethod: joint?.method ?? null,
+      })),
+    );
+
+    const engineDepartments: ProcessDepartmentInput[] = rows.map(({ dept, schedule, joint }) =>
+      this.toDepartmentInput(dept, schedule as never, joint as never, periodId),
+    );
 
     return {
       structure: { id: structure.id, productName: structure.productName },

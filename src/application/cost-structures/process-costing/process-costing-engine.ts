@@ -109,9 +109,10 @@ export interface ProcessDepartmentInput {
   costs: ProcessElementCosts;
   /**
    * Costo TOTAL del departamento anterior arrastrado en la existencia inicial
-   * (B09, solo seq > 1). La tabla `UnitMovementSchedule` no tiene columna para
-   * este valor (sería una migración, fuera del alcance de B17): el endpoint lo
-   * pasa 0 salvo que se derive de un período previo. Default 0.
+   * (B09, solo seq > 1). Desde B18 lo persiste
+   * `UnitMovementSchedule.initialWipCostPrevDept` y lo carga la apertura del
+   * período siguiente; en un departamento inicial, o en el primer período de la
+   * estructura, no hay nada que arrastrar. Default 0.
    */
   initialWipTransferredCost?: number;
 
