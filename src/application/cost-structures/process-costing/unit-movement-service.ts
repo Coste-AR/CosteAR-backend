@@ -53,6 +53,37 @@ type CuadroField = (typeof CUADRO_FIELDS)[number];
  * `CostElement` no tiene una opción "unidades", así que MP es el hogar natural
  * y estable de estas cifras. Ver DECISIONES.md (B15).
  */
+/**
+ * Costos del período y de la existencia inicial, por elemento. NO entran al
+ * cuadro de unidades (B06 solo mueve unidades físicas): son los importes que el
+ * motor consume para valuar esa producción. Van en la misma tabla y se cargan en
+ * el mismo acto, pero se persisten y se trazan aparte — con su elemento del
+ * costo real, no con el MP genérico de las unidades.
+ *
+ * Sin esto no había NINGÚN endpoint que escribiera `periodCostMp/Mo/Cif`: el
+ * motor los leía siempre en 0 y el costo por procesos daba cero.
+ */
+const COST_FIELDS = [
+  'periodCostMp',
+  'periodCostMo',
+  'periodCostCif',
+  'initialWipCostMp',
+  'initialWipCostMo',
+  'initialWipCostCif',
+] as const;
+type CostField = (typeof COST_FIELDS)[number];
+
+type TraceableField = CuadroField | CostField;
+
+const COST_META: Record<CostField, { label: string; unit: string; element: 'MP' | 'MOD' | 'CIP' }> = {
+  periodCostMp: { label: 'Costo de materia prima del período', unit: '$', element: 'MP' },
+  periodCostMo: { label: 'Costo de mano de obra del período', unit: '$', element: 'MOD' },
+  periodCostCif: { label: 'Carga fabril del período', unit: '$', element: 'CIP' },
+  initialWipCostMp: { label: 'Materia prima de la existencia inicial', unit: '$', element: 'MP' },
+  initialWipCostMo: { label: 'Mano de obra de la existencia inicial', unit: '$', element: 'MOD' },
+  initialWipCostCif: { label: 'Carga fabril de la existencia inicial', unit: '$', element: 'CIP' },
+};
+
 const FIELD_META: Record<CuadroField, { label: string; unit: string; element: 'MP' }> = {
   initialWip: { label: 'Existencia inicial en proceso', unit: 'u', element: 'MP' },
   startedInProduction: { label: 'Puestas en elaboración', unit: 'u', element: 'MP' },
@@ -158,7 +189,8 @@ export class UnitMovementService {
 
       // 2) Trazabilidad: un DataPoint por cada valor MANUAL provisto. El valor
       //    derivado por diferencia (el que el usuario NO cargó) queda afuera.
-      for (const field of CUADRO_FIELDS) {
+      const trazables: TraceableField[] = [...CUADRO_FIELDS, ...COST_FIELDS];
+      for (const field of trazables) {
         const raw = body[field];
         if (raw === undefined) continue; // no ingresado a mano → no es DataPoint
         await this.traceValue(tx, ctx, field, raw, body, actor);
@@ -284,12 +316,13 @@ export class UnitMovementService {
   private async traceValue(
     tx: Prisma.TransactionClient,
     ctx: ProcessContext,
-    field: CuadroField,
+    field: TraceableField,
     raw: number,
     body: UnitMovementInputBody,
     actor: TraceActor,
   ): Promise<void> {
-    const meta = FIELD_META[field];
+    const meta: { label: string; unit: string; element: 'MP' | 'MOD' | 'CIP' } =
+      field in COST_META ? COST_META[field as CostField] : FIELD_META[field as CuadroField];
     const fieldKey = this.fieldKey(ctx, field);
     const label = `${meta.label} · ${ctx.department.name}, ${ctx.period.label}`;
     const valueJson = {
@@ -343,27 +376,30 @@ export class UnitMovementService {
   }
 
   /** Clave estable de un valor del cuadro (única por estructura+depto+período+campo). */
-  private fieldKey(ctx: ProcessContext, field: CuadroField): string {
+  private fieldKey(ctx: ProcessContext, field: TraceableField): string {
     return `proceso.cuadro.${ctx.period.id}.${ctx.department.id}.${field}`;
   }
 
   /** dataPointId por campo trazable (null si es derivado o no se cargó). */
-  private async tracesFor(ctx: ProcessContext): Promise<Record<CuadroField, string | null>> {
-    const keys = CUADRO_FIELDS.map((f) => this.fieldKey(ctx, f));
+  private async tracesFor(ctx: ProcessContext): Promise<Record<TraceableField, string | null>> {
+    const campos: TraceableField[] = [...CUADRO_FIELDS, ...COST_FIELDS];
+    const keys = campos.map((f) => this.fieldKey(ctx, f));
     const dps = await this.db.dataPoint.findMany({
       where: { structureId: ctx.structure.id, fieldKey: { in: keys }, voidedAt: null },
       select: { id: true, fieldKey: true },
     });
     const byKey = new Map(dps.map((d) => [d.fieldKey, d.id]));
     const out = this.emptyTraces();
-    for (const field of CUADRO_FIELDS) {
+    for (const field of campos) {
       out[field] = byKey.get(this.fieldKey(ctx, field)) ?? null;
     }
     return out;
   }
 
-  private emptyTraces(): Record<CuadroField, string | null> {
-    return Object.fromEntries(CUADRO_FIELDS.map((f) => [f, null])) as Record<CuadroField, string | null>;
+  private emptyTraces(): Record<TraceableField, string | null> {
+    return Object.fromEntries(
+      [...CUADRO_FIELDS, ...COST_FIELDS].map((f) => [f, null]),
+    ) as Record<TraceableField, string | null>;
   }
 
   private bodyValues(body: UnitMovementInputBody): NumericValues {
@@ -413,6 +449,16 @@ export class UnitMovementService {
       finalWipConvAvance: body.finalWipConvAvance ?? null,
       initialWipMpAvance: body.initialWipMpAvance ?? null,
       initialWipConvAvance: body.initialWipConvAvance ?? null,
+      // Importes por elemento. `undefined` = el cliente no mandó el campo ⇒ se
+      // deja como está (Prisma ignora `undefined` en el update). No se pisa con
+      // null: el arrastre entre períodos (B18) escribe los costos de la EI, y un
+      // guardado del cuadro de unidades no tiene por qué borrarlos.
+      periodCostMp: body.periodCostMp,
+      periodCostMo: body.periodCostMo,
+      periodCostCif: body.periodCostCif,
+      initialWipCostMp: body.initialWipCostMp,
+      initialWipCostMo: body.initialWipCostMo,
+      initialWipCostCif: body.initialWipCostCif,
     };
   }
 
@@ -452,6 +498,16 @@ export class UnitMovementService {
       finalWipConvAvance: n(row.finalWipConvAvance),
       initialWipMpAvance: n(row.initialWipMpAvance),
       initialWipConvAvance: n(row.initialWipConvAvance),
+      periodCostMp: n(row.periodCostMp),
+      periodCostMo: n(row.periodCostMo),
+      periodCostCif: n(row.periodCostCif),
+      initialWipCostMp: n(row.initialWipCostMp),
+      initialWipCostMo: n(row.initialWipCostMo),
+      initialWipCostCif: n(row.initialWipCostCif),
+      // Solo lectura: lo escribe la apertura del período siguiente (B18), no el
+      // costista. Viaja igual para que la pantalla pueda mostrar de dónde sale
+      // el costo del departamento anterior contenido en la existencia inicial.
+      initialWipCostPrevDept: n(row.initialWipCostPrevDept),
     };
   }
 }

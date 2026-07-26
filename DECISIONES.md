@@ -2279,6 +2279,41 @@ renombrar o cambiar si la conversión va unificada, `DELETE /:deptId` baja lógi
 cadena completa. Todos exigen estructura `PROCESSES` (una de Órdenes recibe un 422 accionable), corren en una
 transacción con `withTenant` (RLS) y dejan su auditoría en esa misma transacción.
 
+## B15 (extensión) — los costos del período entran por el cuadro de movimiento
+
+**El problema.** Igual que B14, un hueco que no figuraba en ningún lado: **ningún endpoint escribía
+`periodCostMp/Mo/Cif`**. El motor los leía siempre en 0, así que el costo por procesos daba cero por más
+completo que estuviera el cuadro de unidades. El único uso de esas columnas en todo `src` era la LECTURA de
+`toDepartmentInput`. Detectado al escribir los tipos del frontend (U03), buscando qué endpoint los cargaba.
+
+**Decisión — los importes viajan con el cuadro, no en un endpoint aparte.** Pertenecen al mismo
+`(departamento, período)` que las unidades y el costista los carga en el mismo momento; separarlos en otro
+endpoint obligaría a dos guardados para completar una pantalla. Se suman al `PUT .../movement` existente.
+
+**Decisión — persistencia y trazabilidad separadas de las unidades.** `CUADRO_FIELDS` (lo que consume el
+dominio B06) queda intacto: si los importes entraran ahí viajarían como insumo a `buildUnitMovementSchedule`,
+que solo mueve unidades físicas. Se agregó una lista `COST_FIELDS` propia, usada solo para persistir y trazar.
+
+**Decisión — cada importe se traza con SU elemento del costo.** Las unidades del cuadro van todas a MP (siguen
+la materia que fluye, no un elemento puntual — decisión de B15). Los importes no: MP, MOD y CIP según
+corresponda, y en `$` en vez de `u`. Así la ficha de trazabilidad de un costo muestra el elemento correcto.
+
+**Decisión — un importe ausente NO se pisa.** El resto del cuadro usa `?? null` (el PUT reemplaza), pero los
+costos de la existencia inicial los escribe el arrastre entre períodos (B18): un guardado de unidades que los
+mandara en `null` borraría lo que la apertura del mes acababa de calcular. Un campo ausente queda `undefined` y
+Prisma no toca la columna.
+
+**`initialWigCostPrevDept` vuelve en la lectura pero es de solo lectura**: lo escribe la apertura del período,
+no el costista. Viaja para que la pantalla pueda mostrar de dónde sale el costo del departamento anterior
+contenido en la existencia inicial.
+
+**Verificación.** 6 tests nuevos (`tests/application/process-period-costs.test.ts`): los seis importes se
+persisten; cada uno queda trazable con su elemento (MP/MOD/CIP) mientras las unidades siguen en MP; se
+etiquetan en `$` y no en `u`; un guardado sin importes los deja `undefined` (no los borra); la lectura los
+devuelve junto al costo del departamento anterior; un importe negativo lo rechaza el schema. Suite completa:
+**666 passed / 1 skipped** (81 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración: las columnas
+existen desde B04.
+
 ## Arreglos de entorno detectados en B20 (RLS silencioso, drift de WhatsApp, `db:setup`)
 
 **🔴 `apply-rls.mjs` ya no falla en silencio.** Tres cambios: (1) carga el `.env` con `process.loadEnvFile`
