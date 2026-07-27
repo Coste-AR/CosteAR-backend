@@ -90,7 +90,7 @@ export class VaultIndexerService {
       try {
         console.log(`[vault-indexer] Actualizando bóveda en ${vaultPath}...`);
         execSync('git pull', { cwd: vaultPath, stdio: 'inherit' });
-      } catch (err) {
+      } catch {
         // Hay un .git pero el pull falla: checkout corrupto o divergido (clone
         // previo interrumpido a mitad de camino, disco efímero de Railway
         // reseteado entre deploys, etc.). Seguir con lo que haya en disco es
@@ -110,7 +110,7 @@ export class VaultIndexerService {
     let vaultCommit = 'unknown';
     try {
       vaultCommit = execSync('git rev-parse HEAD', { cwd: vaultPath, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch (e) {
+    } catch {
       console.warn('[vault-indexer] No se pudo obtener el commit actual del vault.');
     }
 

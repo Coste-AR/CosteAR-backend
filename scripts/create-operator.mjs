@@ -70,7 +70,7 @@ async function main() {
   console.log('✔ Creado/Actualizado usuario operador:', operator.email);
 
   // 6. Ensure membership exists
-  const membership = await prisma.operatorMembership.upsert({
+  await prisma.operatorMembership.upsert({
     where: {
       operatorId_connectionId: {
         operatorId: operator.id,

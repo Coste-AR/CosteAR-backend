@@ -15,6 +15,7 @@ import { sourceAreaSchema, captureMethodSchema } from './trazabilidad.schema.js'
 
 const units = z.number().finite().nonnegative();
 const fraction = z.number().finite().min(0).max(1);
+const money = z.number().finite().nonnegative();
 
 export const unitMovementInputSchema = z
   .object({
@@ -40,6 +41,25 @@ export const unitMovementInputSchema = z
     initialWipMpAvance: fraction.optional(),
     /** Avance de la EI en Conversión (fracción), arrastrado del período anterior. */
     initialWipConvAvance: fraction.optional(),
+    // --- COSTOS DEL PERÍODO Y DE LA EI, por elemento ($) ---
+    //
+    // No entran al cuadro de unidades (B06 solo mueve unidades físicas): son los
+    // importes con los que el motor valúa esa producción. Se cargan en el mismo
+    // acto porque pertenecen al mismo (departamento, período). Un campo ausente
+    // NO se pisa: los costos de la existencia inicial los escribe el arrastre
+    // entre períodos (B18) y un guardado de unidades no debe borrarlos.
+    /** Costo de materia prima incurrido en el período. */
+    periodCostMp: money.optional(),
+    /** Costo de mano de obra incurrido en el período. */
+    periodCostMo: money.optional(),
+    /** Carga fabril incurrida en el período. */
+    periodCostCif: money.optional(),
+    /** Materia prima contenida en la existencia inicial. */
+    initialWipCostMp: money.optional(),
+    /** Mano de obra contenida en la existencia inicial. */
+    initialWipCostMo: money.optional(),
+    /** Carga fabril contenida en la existencia inicial. */
+    initialWipCostCif: money.optional(),
     // --- Trazabilidad del acto de carga ---
     sourceArea: sourceAreaSchema,
     method: captureMethodSchema.default('manual'),

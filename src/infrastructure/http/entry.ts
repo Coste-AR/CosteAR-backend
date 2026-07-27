@@ -64,9 +64,18 @@ if (migrateCode !== 0) {
   process.stderr.write(`[entry] WARN: migraciones salieron con código ${migrateCode}\n`);
 }
 
-// ─── 3. RLS (no fatal) ──────────────────────────────────────────────────────
+// ─── 3. RLS (no fatal, pero NO silencioso) ──────────────────────────────────
+//
+// No frena el arranque a propósito: dejar la app caída por un fallo transitorio
+// del script sería peor. Pero si falla, la base queda sin aislamiento entre
+// inquilinos, así que tiene que verse en los logs igual que las migraciones.
 
-await runScript(join(ROOT, 'scripts', 'apply-rls.mjs'));
+const rlsCode = await runScript(join(ROOT, 'scripts', 'apply-rls.mjs'));
+if (rlsCode !== 0) {
+  process.stderr.write(
+    `[entry] WARN: RLS salió con código ${rlsCode} — la base puede estar SIN aislamiento entre inquilinos\n`,
+  );
+}
 
 // ─── 4. Cerrar pre-server y arrancar Fastify ────────────────────────────────
 

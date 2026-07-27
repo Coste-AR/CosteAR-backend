@@ -4,12 +4,6 @@ import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
 import { MissingInputError } from '../../domain/errors/calculation-errors.js';
 import {
-  periodBounds,
-  nextPeriodCode,
-  normalizeLegacyCode,
-  type Periodicity,
-} from '../../domain/periods/period-calendar.js';
-import {
   runCalculation,
   ENGINE_VERSION,
   type CalculationInput,

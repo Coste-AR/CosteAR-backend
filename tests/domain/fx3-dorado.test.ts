@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { Money } from '@/domain/value-objects/money.js';
 import { calcStockLedgerPPP } from '@/domain/calculations/raw-material.js';
 import {
-  primaryProration,
   secondaryProration,
   calcPredeterminedQuota,
   calcVarianceAnalysis,

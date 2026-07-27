@@ -42,7 +42,7 @@ export const CORROBORATING_SIGNALS: CorroboratingSignal[] = [
   // ── Planilla de horas indicators ────────────────────────────────────────────
   { label: 'DEPT_HOURS',       pattern: /\bDEPARTAMENTO\b.*\bHORAS\b|\bHORAS\b.*\bDEPARTAMENTO\b/i, pts: 25, type: 'PLANILLA_HORAS' },
   { label: 'TURNO_JORNADA',    pattern: /\bTURNO\b.*\bJORNADA\b|\bJORNADA\b.*\bTURNO\b/i, pts: 20, type: 'PLANILLA_HORAS' },
-  { label: 'HOURS_FORMAT',     pattern: /\bHs?\.\s*\d+[\.,]\d{2}\b/,                   pts: 15, type: 'PLANILLA_HORAS' },
+  { label: 'HOURS_FORMAT',     pattern: /\bHs?\.\s*\d+[.,]\d{2}\b/,                    pts: 15, type: 'PLANILLA_HORAS' },
   // ── Remito indicators ───────────────────────────────────────────────────────
   { label: 'REMITO_KEYWORD',   pattern: /\bREMITO\b/i,                                  pts: 25, type: 'REMITO' },
   { label: 'FECHA_ENTREGA',    pattern: /\bFECHA\s+DE\s+(ENTREGA|REMISI[OÓ]N)\b/i,     pts: 18, type: 'REMITO' },

@@ -23,6 +23,15 @@ export interface TreeNode {
    * DB. No participa del cálculo: es puramente de trazabilidad (D.1/D.2).
    */
   sourceDataPointId?: string;
+  /**
+   * Clave estable del DataPoint que respalda este nodo (p. ej. la `fieldKey`
+   * del cuadro de movimiento en Costeo por Procesos). La arma el motor —que sí
+   * conoce el (departamento, período)— y el servicio la resuelve a un
+   * `sourceDataPointId` con UNA query. Es una alternativa DETERMINÍSTICA al
+   * matcheo por `label` (el motor de Órdenes usa label; el de Procesos, esta
+   * clave). Aditiva: un árbol sin ella se comporta igual que antes.
+   */
+  traceFieldKey?: string;
 }
 
 export function buildCalculationTree(input: CalculationInput, output: CalculationOutput): TreeNode[] {

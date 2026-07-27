@@ -2021,3 +2021,371 @@ la línea) y los resultados NO; auditoría del reparto en la misma transacción;
 sin reparto → `exists=false`; re-save sin cambio no versiona. Suite completa: **601 passed / 1 skipped** (74
 archivos), cero regresión. `tsc --noEmit` limpio. (Nota: el script `npm run lint` sigue roto a nivel repo
 —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
+
+---
+
+## B17 — Application: `ProcessCostingEngine` (motor que hace calculable Costeo por Procesos de punta a punta)
+
+**Qué se hizo.** El motor de Costeo por Procesos (patrón Strategy, implementa el `CostingEngine` de B02)
+que orquesta el cálculo por estructura reutilizando las funciones PURAS del dominio (B06-B11) y el reparto
+de costos conjuntos (B11). Reemplaza el placeholder 422 de `selectCostingEngine('PROCESSES')`.
+- `src/application/cost-structures/process-costing/process-costing-engine.ts` — motor PURO (sin Prisma ni
+  HTTP, como el de Órdenes). `run(input) → { results, tree }`. Recorre los departamentos EN ORDEN DE
+  SECUENCIA y por cada uno encadena: cuadro de movimiento (B06) → producción equivalente (B07) → pérdidas
+  (B08, ya resueltas dentro del cuadro) → costo transferido = modificado + CAUP del anterior (B09) →
+  informe con doble verificación de la EF (B10); y donde hay `JointCostAllocation`, reparte con
+  `allocateJointCosts` (B11). El "terminadas y transferidas" del depto. N alimenta el "costo del
+  departamento anterior" de N+1; el primero no tiene costo previo.
+- `src/application/cost-structures/process-costing/process-calculation-service.ts` — borde de aplicación:
+  resuelve estructura (tenant + que sea Procesos) y período, carga cuadros y repartos de cada depto., arma
+  el insumo del motor, corre, marca incompletitud (F04) y persiste con la MISMA persistencia compartida.
+- `src/infrastructure/http/routes/process-calculation.routes.ts` — dos endpoints con auth, solo Procesos:
+  `POST /structures/:id/process/periods/:periodId/calculate` (traza y persiste la corrida) y
+  `GET /structures/:id/process/periods/:periodId/production-report` (informe para mostrar/exportar).
+
+**Decisión — despacho y guardia del endpoint de Órdenes.** `selectCostingEngine('PROCESSES')` ya devuelve el
+`ProcessCostingEngine` (sobrecargas de tipo para que el llamador reciba el motor correcto); cualquier otro
+valor sigue devolviendo el de Órdenes (default histórico, cero regresión). El guardia que antes vivía DENTRO
+de `selectCostingEngine` (tirar 422 para Procesos) se movió a `CalculationRunService.calculate`: ese endpoint
+es el cálculo de UNA estructura de Órdenes (un solo número), y Procesos se calcula por período/departamento
+con su propio motor; una estructura de Procesos que caiga ahí va por el camino equivocado y se corta con el
+mismo `CostingSystemNotAvailableError` (test de despacho intacto).
+
+**Decisión — NO se duplica la persistencia de la corrida.** Se extrajo
+`src/application/cost-structures/calculation-run-persistence.ts` (`persistCalculationRun` + `persistTree`) de
+`calculation-run-service.ts` SIN cambiar una query, y ahora la usan los dos caminos (Órdenes y Procesos): una
+sola definición de "cómo se guarda una corrida + su árbol + su auditoría, en la misma transacción". El motor
+de Órdenes quedó byte-idéntico (sus fixtures pasan sin cambios). `results`/`inputsSnapshot` se guardan como
+JSON: cada motor tiene su propia forma de resultado (Órdenes `CalculationOutput`, Procesos el informe por
+departamento) y la tabla no se casa con ninguna. La marca de incompletitud (`buildIncompletitud`, F04) se
+exporta y se reutiliza tal cual.
+
+**Decisión — árbol de derivación con UNA RAÍZ POR DEPARTAMENTO.** Cada raíz ("Departamento 1º — Destilado",
+"Departamento 2º — Purificado", …) abre sub-nodos por MP / conversión (CC o MOD/CIP) / costo transferido
+(con su apertura costo modificado + CAUP) / justificación del costo, y —como hojas— los datos del cuadro
+cargados a mano. Cada hoja lleva una `traceFieldKey` (`proceso.cuadro.{periodId}.{deptId}.{campo}`, la MISMA
+que persiste `UnitMovementService` en B15); el servicio la resuelve a `sourceDataPointId` con UNA query y la
+guarda en `sourceDpVersionIds`, para que el `DerivationTree` del front drille de la hoja hasta la ficha del
+dato origen. Se agregó el campo opcional `traceFieldKey` al `TreeNode` (aditivo: matcheo determinístico por
+clave, en vez del matcheo por `label` que usa el motor de Órdenes; un árbol sin la clave se comporta igual).
+
+**Decisión — "costo del anterior arrastrado en la EI" sin columna (sin migración).** Para reproducir el costo
+modificado $3,50 de la cátedra, B09 necesita el costo TOTAL del departamento anterior embebido en la
+existencia inicial (Purificado: $11.120). La tabla `UnitMovementSchedule` NO tiene una columna para ese valor
+(las `initialWipCost*` son los costos por elemento del propio depto., no el transferido), y agregarla sería
+una migración —fuera del alcance de B17—. Resolución: el motor PURO lo modela como input
+(`initialWipTransferredCost`), así FX-P1 se reproduce de punta a punta; el endpoint, que hoy no cablea la
+valuación de la EI entre períodos, lo pasa 0 (caso común sin EI transferida). Es un follow-up acotado
+(agregar la columna) el día que se necesite EI transferida vía endpoint.
+
+**Decisión — costo del anterior derivado en la cadena.** El "costo del anterior del período" que consume B09
+se deriva de la cadena: `unidades recibidas × costo unitario transferido del departamento previo`. La Sección A
+del informe (B10) es `unidades buenas × costo transferido` (semántica del CAUP). Ninguno de los dos se pide
+como input redundante: salen del recorrido secuencial.
+
+**Sin migración.** Todas las tablas (`ProcessDepartment` B03, `UnitMovementSchedule` B04, `JointCostAllocation`
+/ `ByProductLine` B05, `CalculationRun` / `CalculationNode`) ya existen. Cero `prisma migrate dev`.
+
+**Verificación.** 12 tests nuevos. Motor puro (`process-costing-engine.test.ts`): FX-P1 end to end sobre 2
+departamentos reproduce Destilado $2,00 / $1,75 / **$3,75** y EF **$11.560**, y Purificado costo modificado
+**$3,50** / CAUP **$0,032** / transferido **$3,532** / total **$6,532** y EF **$31.992**; cadena de 3
+departamentos transfiere el costo 1→2→3 (2,00 → 3,00 → 4,00); una raíz por departamento con sus hojas
+`traceFieldKey`; `selectCostingEngine('PROCESSES')` devuelve el motor y ORDERS/null/undefined el de Órdenes.
+Servicio (`process-calculation-service.test.ts`, Prisma mockeado): datos sin imputar → resultado marcado
+`incompleto` (F04); hojas enlazadas a su DataPoint por `traceFieldKey` (nodo persistido con
+`sourceDpVersionIds`); estructura de Órdenes → 422 accionable; informe recalcula sin persistir. Suite completa:
+**613 passed / 1 skipped** (76 archivos), cero regresión — los fixtures de Órdenes (fx3-dorado, r5-fixtures,
+allocation-*) y el test de despacho B02 pasan byte-idénticos. `tsc --noEmit` limpio. (El script `npm run lint`
+sigue roto a nivel repo —ESLint v9 sin `eslint.config.js`—, ajeno a esta tarea.)
+
+## B18 — Application: arrastre de existencias en proceso entre períodos (Costeo por Procesos)
+
+**El problema.** En Costeo por Procesos la producción no se corta a fin de mes: lo que quedó a medio hacer en
+cada departamento el 30 de abril es, literalmente, con lo que arranca mayo. La regla de la cátedra es
+`inventario final del período 1 = inventario inicial del período 2` — mismas unidades físicas, mismos grados de
+avance, y el costo con el que cerraron. Hasta B17 el motor aceptaba esa existencia inicial por input, pero al
+abrir el período siguiente nadie la cargaba: el costista tenía que reescribir a mano el cuadro de movimiento de
+cada departamento, con los costos valuados. Eso no es una molestia: es la puerta de entrada del error.
+
+**Decisión — se extiende `openNext`, no se reescribe.** El arrastre vive en
+`cost-period-propagation-service.ts`, junto al que ya existía para materia prima (existencia final valuada al
+PPP, Órdenes). Se agrega una rama por `costingSystem === 'PROCESSES'`; el camino de Órdenes no cambia una
+línea y sus fixtures siguen byte-idénticos. (El handoff ubicaba `openNext` en `cost-period-service.ts`; el
+método vive en el servicio de propagación.)
+
+**Decisión — se cierra el follow-up de B17: la columna existe.** B17 documentó que el "costo del departamento
+anterior arrastrado en la EI" no tenía dónde guardarse y que el endpoint lo pasaba 0. Ahora sí:
+`UnitMovementSchedule.initialWipCostPrevDept` (migración `20260726001409_add_initial_wip_prev_dept_cost`,
+ADITIVA e idempotente — un solo `ADD COLUMN IF NOT EXISTS`, nullable, sin default). `toDepartmentInput` la
+cablea a `initialWipTransferredCost`. Las filas viejas quedan en NULL, que el mapeo lee como 0: exactamente el
+comportamiento anterior. La política RLS de `unit_movement_schedules` (B04) no cambia — agregar una columna no
+la altera.
+
+**Decisión — la valuación de la EF sale del motor, no de una cuenta paralela.** El arrastre corre el
+`ProcessCostingEngine` sobre el período que cierra (vía `getProductionReport`) y toma `valuacionEF` por
+elemento y `previousDepartment.valuacionEF`. Mismo criterio que `close()` con `computeResult`: el número que
+arrastra el sistema y el que el costista ve en pantalla son, por construcción, el mismo número. Se resuelve
+ANTES de la transacción (necesita sus propias lecturas) y las filas se crean DENTRO, junto al período y su
+auditoría.
+
+**Decisión — conversión unificada: el costo se reparte, no se apila.** Si el departamento sigue MOD y CIP como
+una sola columna "Conversión" (`defaultConversionAvanceEqualsMO`), el informe valúa la EF en un único número,
+pero la tabla guarda MO y CIF por separado. Se reparte en la MISMA proporción con la que el departamento cerró
+el período (`initialWipCostMo + periodCostMo` contra sus equivalentes de CIF). Mientras el departamento siga
+unificado el reparto es indistinto —el motor vuelve a sumarlos—, y si algún día se separa arranca con una
+proporción real en vez de un número inventado. Si ambos son 0, todo va a MO.
+
+**Decisión — abrir un mes nunca se bloquea por falta de datos de Procesos.** Sin departamentos cargados, o sin
+cuadros de movimiento en el período que cierra, no hay nada que arrastrar y la apertura sigue normal. En
+cambio, si los datos existen pero no cierran, el motor tira su 422 accionable y la apertura se detiene:
+arrastrar un número mal calculado es peor que no arrastrarlo.
+
+**Trazabilidad.** La auditoría de `cost_period.open` suma `processWipCarry`: qué arrastró cada departamento
+—por NOMBRE, nunca por id— con unidades, avances y costo por elemento.
+
+**Verificación.** 9 tests nuevos (`tests/application/process-wip-carry.test.ts`), FX-P2 Azur Alcoholes abril →
+mayo. Los números de abril no están escritos a mano: se derivan corriendo el motor real sobre el insumo de
+FX-P1, y el test los ancla contra la cátedra ($3,75 y $6,532) antes de mirar el arrastre — si el fixture ancla
+cambiara, falla de frente en vez de verificar en silencio otra cosa. Destilado arrastra 3.400 u al 80 % con
+MP **$6.800** + conversión **$4.760**; Purificado arrastra 6.000 u al 40 % con MP **$6.000**, conversión
+**$4.800** y costo del departamento anterior **$21.192** (6.000 × $3,532 = costo modificado $3,50 + CAUP
+$0,032). El total arrastrado es **$43.552**, exactamente la existencia final valuada de abril
+($11.560 + $31.992). Más: el reparto 60/40 de la conversión entre MO y CIF; una estructura de Órdenes no
+arrastra nada; y los dos casos sin datos no bloquean la apertura. Suite completa: **627 passed / 1 skipped**
+(78 archivos), cero regresión. `tsc --noEmit` limpio. `prisma migrate diff` sin drift nuevo — la tabla
+`unit_movement_schedules` no aparece en el diff.
+
+> **Drift ajeno detectado (no es de esta tarea).** `EmpresaConnection.whatsappPhoneNumber` está en
+> `schema.prisma` (línea 463, con `@unique`) pero NINGUNA migración lo crea. Un deploy desde cero levanta sin
+> esa columna y el módulo de WhatsApp falla en runtime. Viene del merge de la feature de WhatsApp a `dev`;
+> hay que crearle su migración aditiva antes del PR a `staging`.
+
+## B19 — Application: validaciones previas al cálculo de Costeo por Procesos
+
+**El problema.** El dominio ya frena casi todos los datos inconsistentes, pero sus mensajes hablan de "el
+cuadro" sin decir CUÁL: `El cuadro no cuadra: unidades a justificar (35000) ≠ unidades justificadas (34600)`.
+A un costista con cinco departamentos eso lo deja buscando a mano. B19 no reemplaza esas validaciones: agrega
+una capa ANTES del motor que produce el mismo diagnóstico con el nombre del departamento y una acción concreta.
+
+**Decisión — `validateProcessInputs` es una función pura, no un método del servicio.** Vive en
+`validate-inputs.ts` junto a la de Órdenes, recibe formas planas (sin tipos de Prisma) y no toca la base. Se
+testea sola, sin mockear un `PrismaClient`. `validateCalculationInputs` no se tocó: recibe `CalculationInput`,
+que es la forma de Órdenes y no tiene nada de Procesos, así que extenderla era imposible — son dos funciones
+hermanas, no una con un `if`.
+
+**Decisión — se junta todo primero y se valida el conjunto.** `buildEngineInput` pasó de "leo un departamento,
+lo valido, sigo" a "leo todos, valido el conjunto, armo el insumo". Dos razones: validar de a uno hace que el
+costista arregle un problema, vuelva a calcular y se choque con el siguiente; y los huecos en la cadena de
+`sequence` solo se ven mirando la secuencia entera.
+
+**Los seis chequeos.** (1) Huecos en la cadena — `1, 2, 4` nombra a los dos vecinos del salto. (2)
+Departamento sin cuadro de movimiento. (3) Cuadro irresoluble: faltan a la vez las transferidas Y la existencia
+final (el cuadro admite UNA incógnita, se despeja por diferencia). (4) Cuadro que no cuadra, con cuántas
+unidades sobran o faltan. (5) Existencia final con unidades y sin grado de avance en conversión. (6) Punto de
+separación con productos cargados y sin método de reparto.
+
+**Decisión — el chequeo (5) es el que más valor agrega, y no estaba en ningún lado.** El motor hace
+`finalWipConversionAvance ?? 0`: una existencia final con unidades y sin avance cargado se valúa en CERO sin
+avisar. El mes cierra con el inventario subvaluado y el error no aparece por ningún lado — ni excepción, ni
+advertencia. Ahora es un 422 que además explica el porqué ("sin ese dato esas unidades se valuarían en cero"),
+porque si no el costista lee el pedido como burocracia.
+
+**Decisión — el avance en materia prima NO se exige.** El motor hace `finalWipMpAvance ?? 1`, y ese default sí
+es correcto: la materia prima se incorpora al inicio del proceso, que es el caso normal de la cátedra. Exigirlo
+sería pedir un dato que el 90 % de las veces es 100 %.
+
+**Verificación.** 14 tests nuevos (`tests/application/process-validations.test.ts`), uno por chequeo más los
+casos que NO deben disparar: existencia final dejada en blanco para deducir por diferencia, EF en cero sin
+avance, avance de MP ausente, y punto de separación con método elegido. Un test recorre los seis mensajes de
+error y verifica que ninguno filtre un UUID, una ruta de endpoint ni un nombre de columna — la regla de "nunca
+exponer identificadores internos" queda cubierta por test, no por disciplina. Suite completa: **641 passed /
+1 skipped** (79 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración.
+
+## B20 — Verificación integral del backend de Procesos y simulacro de migración en base limpia
+
+**1 · Suite completa.** **641 passed / 1 skipped** (79 archivos), cero fallos. Los fixtures de Órdenes pasan
+byte-idénticos (fx3-dorado, r5-fixtures, allocation-*, despacho B02). Los de Procesos: FX-P1 abril end to end,
+FX-P2 abril → mayo, FX-J1 (4 métodos de costos conjuntos), cadena de 3 departamentos, y los 14 chequeos de
+B19. El único `skipped` es el fixture drift de staging ya conocido, ajeno a Procesos.
+
+**2 · Simulacro en base limpia.** Base `costear_scratch` creada de cero sobre `pgvector/pgvector:pg16` →
+`prisma migrate deploy` aplicó TODAS las migraciones sin un error ni una marcada como fallida (incluida la
+nueva `20260726001409_add_initial_wip_prev_dept_cost`) → `apply-rls.mjs` aplicó **53 statements** →
+`prisma/seed.mjs` completó. Verificado en la base resultante: `unit_movement_schedules.initialWipCostPrevDept`
+existe como `numeric(18,4)`, y la tabla tiene RLS **forzada** con su política `tenant_isolation` (creada en
+B04; agregar una columna no la altera).
+
+**3 · `prisma migrate diff` — sin drift NUEVO.** El diff contra la base recién migrada es idéntico al que había
+antes de B18: `unit_movement_schedules` NO aparece, o sea que el esquema y la migración están en sincro. Lo que
+sí aparece es todo preexistente y ajeno a Procesos: los quirks cosméticos de `@default(uuid())` vs
+`gen_random_uuid()` en `allocation_bases` / `allocation_base_values` / `cost_config_versions` / `cost_periods`,
+los índices de `vault_chunks` que Prisma no modela (`tsvector` + `ivfflat`), y el `whatsappPhoneNumber` sin
+migración ya descrito en B18.
+
+**4 · `tsc --noEmit` limpio.** (`npm run lint` sigue roto a nivel repo —ESLint v9 sin `eslint.config.js`—;
+ajeno a estas tareas. El gate real usado fue `tsc` + la suite.)
+
+### Dos hallazgos del entorno que conviene arreglar antes del PR a `staging`
+
+**🔴 `apply-rls.mjs` falla en SILENCIO sin `DATABASE_URL`.** El script usa `PrismaClient` directo, sin cargar el
+`.env` (el CLI de Prisma sí lo carga solo, por eso `prisma:deploy` funciona y este no). Cuando la variable no
+está, imprime `Advertencia aplicando RLS (no fatal)` y **termina con éxito**. Resultado: un dev que sigue el
+README con `npm run db:setup` se queda SIN políticas RLS creyendo que las aplicó — en una app multi-tenant eso
+es un agujero de aislamiento entre inquilinos, no un detalle. Arreglo: cargar el `.env` en el script y hacer
+que el fallo sea fatal.
+
+**🟡 `.env.example` con los puertos equivocados.** Dice `5432`/`6379`, pero el `docker-compose.yml` mapea
+`5433`/`6380` (el README está bien). Cualquiera que copie el ejemplo tal cual no conecta.
+
+## V01 — Verificación final de Costeo por Procesos
+
+| Ítem | Resultado |
+|---|---|
+| `AlanSandbox` mergea limpio en `staging` (los dos repos) | ✅ sin conflictos |
+| Base limpia: `migrate deploy` → `db:rls` → `db:seed` | ✅ cero errores · 53 políticas RLS · seed OK |
+| `prisma migrate diff` sin drift NUEVO | ✅ solo el cosmético preexistente |
+| Toda tabla nueva con su política RLS | ✅ las 4 de Procesos |
+| Ninguna migración commiteada editada o renombrada | ✅ solo 2 altas (`A`), cero `M`/`D` |
+| Suite backend | ✅ **668 passed / 1 skipped**, fixtures de Órdenes byte-idénticos |
+| Frontend `build` + `typecheck` + `vitest` | ✅ limpios, 32 tests |
+| Sin ids internos, endpoints ni fechas en formato ajeno visibles | ✅ verificado |
+| `DECISIONES.md` actualizado en los dos repos | ✅ |
+
+**Caso dorado, corrido contra la API real** (no solo tests con Prisma simulado): crear estructura
+`PROCESSES` → agregar la cadena de departamentos → abrir período → cargar los dos cuadros de movimiento
+con sus importes → calcular. El primer departamento reproduce **$3,75** de costo unitario y **$11.560**
+de existencia final —los valores de la cátedra (FX-P1)— y la doble verificación de la existencia final
+cierra en las dos etapas. La ficha de trazabilidad de un valor del cuadro resuelve con su etiqueta,
+valor, autor, método de captura, versiones e impactos.
+
+**Lo que queda pendiente para el PR a `staging`:** la pasada VISUAL en navegador con sesión iniciada
+(la extensión de navegador no quedó disponible en esta sesión). Todo lo demás —lógica, contratos,
+cálculo, persistencia, trazabilidad— está verificado contra base y API reales.
+
+> **Anotación menor, no bloqueante.** Los `impacts` que devuelve la ficha de trazabilidad de un dato
+> del cuadro de movimiento son los de Órdenes ("PPP", "MP consumida", "COGS", "Margen"). Para un dato
+> de Procesos lo correcto sería "Producción equivalente", "Costo unitario del departamento", "Costo
+> transferido". Vive en `data-point-service`; se deja anotado y no se toca porque cambiar esa lógica
+> arriesga los impactos de Órdenes, que están bien y fuera del alcance de estas tareas.
+
+## B14 — Application: departamentos de proceso como servicio (CRUD + orden de la cadena)
+
+**Por qué aparece acá y no antes.** El handoff daba B14 por hecho ("✅ dev"), pero **no existía**: no había
+`process-department-service.ts`, ni rutas, ni un solo `processDepartment.create/update/delete` en `src` — solo
+cuatro lecturas desde los servicios que sí estaban. Consecuencia: no había forma de crear un departamento por
+la API. El motor calculaba bien, pero los datos que consume no se podían cargar desde ningún lado que no fuera
+escribir en la base a mano. Costeo por Procesos no era usable de punta a punta, y quedaban bloqueadas U04-U08
+y el primer ítem del checklist de V01.
+
+**Decisión — `sequence` es la cadena del costo, no un orden de pantalla.** El departamento 1 transfiere su
+costo al 2, el 2 al 3, y el costo unitario del último es el costo del producto terminado. De ahí salen las
+tres reglas duras: la cadena es SIEMPRE continua (1..n), el alta va SIEMPRE al final, y con cálculos ya hechos
+la cadena queda congelada.
+
+**Decisión — alta al final, nunca en el medio.** Insertar una etapa entre dos existentes recorre el costo de
+todas las siguientes. Si hace falta una etapa intermedia, se agrega al final y se reordena: dos actos
+explícitos, cada uno con su auditoría, en vez de uno que hace las dos cosas sin que se note.
+
+**Decisión — con cálculos hechos se congela el ORDEN, no el alta.** Reordenar o sacar una etapa cambiaría el
+significado de resultados ya emitidos, así que sale un 422. Agregar al final sí se permite: no altera nada de
+lo ya calculado. El mensaje ofrece esa alternativa en vez de dejar al costista sin salida. `list()` devuelve
+`chainFrozen` para que el frontend deshabilite los controles ANTES de que el usuario intente y choque.
+
+**Decisión — el reordenamiento escribe en DOS PASADAS.** El índice único `(structureId, sequence)` se chequea
+fila por fila, no al final de la transacción: escribir las posiciones nuevas directamente choca con las viejas
+apenas dos departamentos intercambian lugares. La primera pasada los estaciona en un rango negativo que nadie
+usa y la segunda los baja a su posición definitiva.
+
+**Decisión — la baja lógica libera su lugar en la cadena.** Ese mismo índice único no distingue filas dadas de
+baja, así que una etapa borrada que conservara su `sequence` impediría correr las siguientes. Al darla de baja
+se la manda a una secuencia negativa (siempre por debajo del mínimo, garantizada única) y las etapas
+posteriores suben una posición.
+
+**Decisión — nombres únicos por estructura (case-insensitive).** No lo pide el esquema, pero TODOS los
+mensajes del sistema identifican las etapas por nombre —es la regla de no exponer ids—; dos "Destilado"
+vuelven ilegible cada 422 de B19.
+
+**Endpoints** (`/structures/:id/process/departments`): `GET` la cadena, `POST` alta al final, `PATCH /:deptId`
+renombrar o cambiar si la conversión va unificada, `DELETE /:deptId` baja lógica, `PUT /order` reordenar la
+cadena completa. Todos exigen estructura `PROCESSES` (una de Órdenes recibe un 422 accionable), corren en una
+transacción con `withTenant` (RLS) y dejan su auditoría en esa misma transacción.
+
+## B15 (extensión) — los costos del período entran por el cuadro de movimiento
+
+**El problema.** Igual que B14, un hueco que no figuraba en ningún lado: **ningún endpoint escribía
+`periodCostMp/Mo/Cif`**. El motor los leía siempre en 0, así que el costo por procesos daba cero por más
+completo que estuviera el cuadro de unidades. El único uso de esas columnas en todo `src` era la LECTURA de
+`toDepartmentInput`. Detectado al escribir los tipos del frontend (U03), buscando qué endpoint los cargaba.
+
+**Decisión — los importes viajan con el cuadro, no en un endpoint aparte.** Pertenecen al mismo
+`(departamento, período)` que las unidades y el costista los carga en el mismo momento; separarlos en otro
+endpoint obligaría a dos guardados para completar una pantalla. Se suman al `PUT .../movement` existente.
+
+**Decisión — persistencia y trazabilidad separadas de las unidades.** `CUADRO_FIELDS` (lo que consume el
+dominio B06) queda intacto: si los importes entraran ahí viajarían como insumo a `buildUnitMovementSchedule`,
+que solo mueve unidades físicas. Se agregó una lista `COST_FIELDS` propia, usada solo para persistir y trazar.
+
+**Decisión — cada importe se traza con SU elemento del costo.** Las unidades del cuadro van todas a MP (siguen
+la materia que fluye, no un elemento puntual — decisión de B15). Los importes no: MP, MOD y CIP según
+corresponda, y en `$` en vez de `u`. Así la ficha de trazabilidad de un costo muestra el elemento correcto.
+
+**Decisión — un importe ausente NO se pisa.** El resto del cuadro usa `?? null` (el PUT reemplaza), pero los
+costos de la existencia inicial los escribe el arrastre entre períodos (B18): un guardado de unidades que los
+mandara en `null` borraría lo que la apertura del mes acababa de calcular. Un campo ausente queda `undefined` y
+Prisma no toca la columna.
+
+**`initialWigCostPrevDept` vuelve en la lectura pero es de solo lectura**: lo escribe la apertura del período,
+no el costista. Viaja para que la pantalla pueda mostrar de dónde sale el costo del departamento anterior
+contenido en la existencia inicial.
+
+**Verificación.** 6 tests nuevos (`tests/application/process-period-costs.test.ts`): los seis importes se
+persisten; cada uno queda trazable con su elemento (MP/MOD/CIP) mientras las unidades siguen en MP; se
+etiquetan en `$` y no en `u`; un guardado sin importes los deja `undefined` (no los borra); la lectura los
+devuelve junto al costo del departamento anterior; un importe negativo lo rechaza el schema. Suite completa:
+**666 passed / 1 skipped** (81 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración: las columnas
+existen desde B04.
+
+## Arreglos de entorno detectados en B20 (RLS silencioso, drift de WhatsApp, `db:setup`)
+
+**🔴 `apply-rls.mjs` ya no falla en silencio.** Tres cambios: (1) carga el `.env` con `process.loadEnvFile`
+cuando `DATABASE_URL` no está en el entorno —el CLI de Prisma lo hace solo, este script usa `PrismaClient`
+directo y nadie se lo cargaba—; (2) si aun así falta la variable, corta con un mensaje que dice dónde
+definirla; (3) ante cualquier error sale con **código 1** y dice explícitamente que la base quedó SIN
+aislamiento entre inquilinos. Antes imprimía `Advertencia (no fatal)` y terminaba con éxito: un dev que seguía
+el README con `npm run db:setup` se quedaba sin políticas RLS creyendo que las había aplicado.
+
+**Decisión — el arranque del servidor sigue tolerando el fallo, pero lo registra.** `entry.ts` ignoraba el
+código de salida a propósito (dejar la app caída por un fallo transitorio del script sería peor) y por eso
+hacer fallar el script NO rompe el deploy. Lo que sí cambió: ahora loguea un `WARN` con el código, igual que
+ya hacía con las migraciones. Un fallo de RLS en producción tiene que verse en los logs.
+
+**🔴 `db:setup` hacía justo lo que el repo prohíbe.** Era `prisma migrate dev --name init && apply-rls`, y
+`prisma migrate dev` en este repo regenera un `_init` espurio y corrompe el árbol de migraciones — la regla
+está escrita en los parámetros de trabajo del equipo, pero el README mandaba a correr ese script. Ahora es
+`migrate-deploy.mjs && apply-rls.mjs`, el mismo camino que usa el deploy.
+
+**🔴 `EmpresaConnection.whatsappPhoneNumber` sin migración.** Estaba en `schema.prisma` con `@unique` desde que
+se sumó el módulo de WhatsApp, pero ninguna migración la creaba: una base desde cero levantaba sin la columna y
+el webhook fallaba en runtime al buscar la conexión por teléfono. Nueva migración aditiva e idempotente
+`20260726093923_add_whatsapp_phone_number` (columna + índice único, ambos `IF NOT EXISTS`, para no romper las
+bases donde ya se creó a mano). Con esto `empresa_connections` desaparece del `prisma migrate diff`.
+
+**🟡 `.env.example` corregido.** Decía `5432`/`6379`; el `docker-compose.yml` mapea `5433`/`6380`.
+
+**Drift restante (cosmético, conocido, ajeno).** Solo quedan los quirks de `@default(uuid())` vs
+`gen_random_uuid()` en `allocation_bases` / `allocation_base_values` / `cost_config_versions` / `cost_periods`,
+y los dos índices de `vault_chunks` (`tsvector` + `ivfflat`) que Prisma no modela.
+
+**Verificación.** Las dos ramas de `apply-rls.mjs` probadas a mano: sin `DATABASE_URL` en el entorno carga el
+`.env` y aplica los 53 statements; contra una base inexistente sale con código 1 y el mensaje de aislamiento.
+Suite **660 passed / 1 skipped**, `tsc --noEmit` limpio.
+
+## B14 (continuación) — verificación
+
+**Verificación.** 19 tests nuevos (`tests/application/process-department-service.test.ts`, Prisma mockeado):
+alta al final, nombre recortado, nombre vacío y nombre repetido rechazados, alta permitida con cálculos
+hechos; reordenar y borrar bloqueados con cálculos hechos y nombrando la etapa; las dos pasadas del reorden
+verificadas sobre las llamadas reales; orden parcial e id ajeno rechazados; la baja manda la fila a negativo y
+cierra el hueco; Órdenes → 422, estructura inexistente → 404; `chainFrozen` en los dos estados. Suite completa:
+**660 passed / 1 skipped** (80 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración: la tabla
+`process_departments` y su RLS existen desde B03.

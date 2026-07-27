@@ -347,7 +347,7 @@ export class DataPointService {
         by: v.createdByUser.name,
         at: v.createdAt.toISOString(),
       })),
-      impacts: this.impactsFor(dp.element),
+      impacts: this.impactsFor(dp.element, dp.fieldKey),
     };
   }
 
@@ -434,7 +434,24 @@ export class DataPointService {
     return only.unit === '$' ? fmtMoney(only.value) : `${fmtNumber(only.value)} ${only.unit ?? ''}`.trim();
   }
 
-  private impactsFor(element: string): string[] {
+  /**
+   * En qué otros números repercute este dato si cambia.
+   *
+   * Depende del SISTEMA DE COSTEO, no solo del elemento. Un dato del cuadro de
+   * movimiento no impacta en el PPP ni en el COGS: impacta en la producción
+   * equivalente, en el costo unitario del departamento y —vía el costo
+   * transferido— en todas las etapas siguientes. Mostrarle a un costista de
+   * Procesos los impactos de Órdenes es decirle algo falso sobre su propio
+   * número.
+   *
+   * Se distingue por la `fieldKey`, que en Procesos arranca con `proceso.cuadro.`
+   * (la arma `unit-movement-service`). Órdenes no la usa, así que su
+   * comportamiento no cambia.
+   */
+  private impactsFor(element: string, fieldKey?: string | null): string[] {
+    if (fieldKey?.startsWith('proceso.cuadro.')) {
+      return this.processImpactsFor(fieldKey);
+    }
     switch (element) {
       case 'MP':
         return ['PPP', 'MP consumida', 'Costo de producción', 'COGS', 'Margen'];
@@ -446,6 +463,80 @@ export class DataPointService {
         return ['Ingreso', 'Margen', 'Margen %'];
       default:
         return [];
+    }
+  }
+
+  /**
+   * Impactos de un dato del cuadro de movimiento (Costeo por Procesos).
+   *
+   * La `fieldKey` es `proceso.cuadro.{periodId}.{deptId}.{campo}`: el último
+   * segmento dice qué se cargó.
+   */
+  private processImpactsFor(fieldKey: string): string[] {
+    const campo = fieldKey.split('.').pop() ?? '';
+
+    // Cadena común: todo dato del cuadro termina moviendo el costo del producto
+    // terminado, porque el costo de cada etapa se transfiere a la siguiente.
+    const cadena = ['Costo unitario del departamento', 'Costo del producto terminado'];
+
+    switch (campo) {
+      case 'initialWip':
+      case 'startedInProduction':
+      case 'receivedFromPrevious':
+      case 'unitIncrease':
+        return ['Total de unidades a justificar', 'Producción equivalente', ...cadena];
+
+      case 'transferredOut':
+        return [
+          'Unidades justificadas',
+          'Producción equivalente',
+          'Costo transferido a la etapa siguiente',
+          ...cadena,
+        ];
+
+      case 'finishedInStock':
+        return ['Unidades justificadas', 'Producción equivalente', ...cadena];
+
+      case 'finalWip':
+        return [
+          'Unidades justificadas',
+          'Producción equivalente',
+          'Valuación de la existencia final',
+          'Existencia inicial del período siguiente',
+          ...cadena,
+        ];
+
+      case 'normalLossPct':
+        return [
+          'Pérdida normal del período',
+          'CAUP — costo adicional por unidades perdidas',
+          ...cadena,
+        ];
+
+      case 'totalLossReported':
+        return [
+          'Pérdida extraordinaria del período',
+          'Producción equivalente',
+          'Resultado del período (las extraordinarias no las absorbe el producto)',
+          ...cadena,
+        ];
+
+      case 'periodCostMp':
+      case 'periodCostMo':
+      case 'periodCostCif':
+        return ['Costo del período del departamento', 'Costo acumulado a justificar', ...cadena];
+
+      case 'initialWipCostMp':
+      case 'initialWipCostMo':
+      case 'initialWipCostCif':
+        return [
+          'Costo de la existencia inicial en proceso',
+          'Costo acumulado a justificar',
+          ...cadena,
+        ];
+
+      default:
+        return ['Producción equivalente', ...cadena];
     }
   }
 
