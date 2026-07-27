@@ -198,6 +198,33 @@ describe('Costos del período en el cuadro de movimiento', () => {
     expect(saved!.initialWipCostPrevDept).toBe(21192);
   });
 
+  it('los impactos son los de Procesos, no los de Órdenes', async () => {
+    // Un dato del cuadro de movimiento no repercute en el PPP ni en el COGS:
+    // repercute en la produccion equivalente y, via el costo transferido, en las
+    // etapas siguientes. Mostrarle a un costista de Procesos los impactos de
+    // Ordenes es decirle algo falso sobre su propio numero.
+    const { DataPointService } = await import('@/application/trazabilidad/data-point-service.js');
+    const svc = new DataPointService(mockTx as never);
+    // `impactsFor` es privado: se llega por el mismo camino que la ficha.
+    const impactos = (
+      svc as unknown as { impactsFor: (el: string, key?: string | null) => string[] }
+    ).impactsFor.bind(svc);
+
+    const cuadro = impactos('MP', 'proceso.cuadro.per-1.dept-1.finalWip');
+    expect(cuadro).toContain('Producción equivalente');
+    expect(cuadro).toContain('Existencia inicial del período siguiente');
+    expect(cuadro).not.toContain('PPP');
+    expect(cuadro).not.toContain('COGS');
+
+    const costo = impactos('MOD', 'proceso.cuadro.per-1.dept-1.periodCostMo');
+    expect(costo).toContain('Costo del período del departamento');
+    expect(costo).toContain('Costo del producto terminado');
+
+    // Órdenes no cambia: sin fieldKey de proceso, los impactos de siempre.
+    expect(impactos('MP', 'mp.material.0.unitCost')).toContain('PPP');
+    expect(impactos('MOD')).toContain('ITCS');
+  });
+
   it('rechaza un importe negativo', async () => {
     mockContext();
     const { unitMovementInputSchema } = await import(
