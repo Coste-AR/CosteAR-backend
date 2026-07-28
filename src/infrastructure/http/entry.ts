@@ -46,6 +46,25 @@ function runScript(scriptPath: string): Promise<number> {
   });
 }
 
+/**
+ * Aborta el arranque de forma ruidosa y verificable.
+ *
+ * Cierra el pre-server ANTES de salir: si quedara escuchando, Railway vería el
+ * healthcheck en verde mientras el proceso se muere, y el deploy podría darse
+ * por bueno. Sale con 1 para que el reintento y, si persiste, el rollback a la
+ * versión anterior queden en manos de la plataforma.
+ */
+async function abortar(motivo: string, explicacion: string): Promise<never> {
+  process.stderr.write('\n');
+  process.stderr.write('═══════════════════════════════════════════════════════════\n');
+  process.stderr.write('  ARRANQUE ABORTADO\n');
+  process.stderr.write('═══════════════════════════════════════════════════════════\n');
+  process.stderr.write(`[entry] ${motivo}\n`);
+  process.stderr.write(`[entry] ${explicacion}\n\n`);
+  await new Promise<void>((resolve) => pre.close(() => resolve()));
+  process.exit(1);
+}
+
 // ─── 1. Mini-server para el healthcheck ────────────────────────────────────
 
 const pre = http.createServer((_req, res) => {
@@ -61,7 +80,27 @@ process.stderr.write(`[entry] Pre-server en :${PORT} — Railway puede hacer hea
 process.stderr.write('[entry] Corriendo migraciones...\n');
 const migrateCode = await runScript(join(ROOT, 'scripts', 'migrate-deploy.mjs'));
 if (migrateCode !== 0) {
-  process.stderr.write(`[entry] WARN: migraciones salieron con código ${migrateCode}\n`);
+  await abortar(
+    `Las migraciones salieron con código ${migrateCode}.`,
+    'Arrancar igual deja la app sirviendo tráfico contra un esquema incompleto: las lecturas' +
+    ' andan, las escrituras tiran 500, y el healthcheck da verde igual.',
+  );
+}
+
+// ─── 2b. El esquema real, no el que Prisma cree que aplicó ──────────────────
+//
+// `migrate deploy` puede salir 0 y la base estar incompleta igual: si una
+// migración quedó marcada como aplicada sin haber corrido entera, Prisma dice
+// "no pending migrations" y sigue de largo. Pasó el 28/07/2026 con `audit_logs`
+// y tuvo la app rota en producción sin que ninguna señal lo mostrara.
+process.stderr.write('[entry] Verificando el esquema contra la base...\n');
+const schemaCode = await runScript(join(ROOT, 'scripts', 'verify-schema.mjs'));
+if (schemaCode !== 0) {
+  await abortar(
+    'Faltan tablas en la base (ver el detalle arriba).',
+    'El servidor no arranca a propósito: es preferible que Railway mantenga la versión' +
+    ' anterior a servir una app que falla en cada escritura.',
+  );
 }
 
 // ─── 3. RLS (no fatal, pero NO silencioso) ──────────────────────────────────
