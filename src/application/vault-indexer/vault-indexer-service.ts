@@ -80,7 +80,8 @@ export class VaultIndexerService {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
     }
 
-    const githubToken = process.env.VAULT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+    const rawToken = process.env.VAULT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+    const githubToken = rawToken ? rawToken.trim() : undefined;
     const cloneUrl = githubToken
       ? `https://${githubToken}@github.com/Coste-AR/costear-knowledge-base.git`
       : 'https://github.com/Coste-AR/costear-knowledge-base.git';
