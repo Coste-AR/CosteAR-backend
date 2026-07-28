@@ -22,7 +22,7 @@ export interface IndexVaultResult {
 }
 
 const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 5;
 
 // Módulo-nivel a propósito: hay varios disparadores de indexVault que corren
 // en el mismo proceso (botón manual del admin, cron nocturno, aprobar una
