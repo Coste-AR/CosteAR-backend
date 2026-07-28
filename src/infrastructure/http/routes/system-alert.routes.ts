@@ -24,8 +24,8 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
         source: 'sentry',
         level: String(data.issue.level || 'error'),
         message: String(data.issue.title || 'Unknown Sentry Error'),
-        sentryIssueId: data.issue.id ? String(data.issue.id) : null,
-        sentryUrl: data.issue.web_url ? String(data.issue.web_url) : null,
+        sentryIssueId: data.issue.id ? String(data.issue.id) : undefined,
+        sentryUrl: data.issue.web_url ? String(data.issue.web_url) : undefined,
       });
     } else if (body?.level && body?.message) {
       // Fallback for simple webhook testing or different event types
@@ -33,8 +33,8 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
         source: 'sentry',
         level: String(body.level),
         message: String(body.message),
-        sentryIssueId: body.id ? String(body.id) : null,
-        sentryUrl: body.url ? String(body.url) : null,
+        sentryIssueId: body.id ? String(body.id) : undefined,
+        sentryUrl: body.url ? String(body.url) : undefined,
       });
     }
 
