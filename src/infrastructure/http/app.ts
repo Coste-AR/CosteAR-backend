@@ -8,6 +8,8 @@ import rateLimit from '@fastify/rate-limit';
 import { getRedisClient } from '../redis/client.js';
 import { getEnv } from '../config/env.js';
 import { errorHandler } from './error-handler.js';
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { registerAuthRoutes } from './routes/auth.routes.js';
 import { registerAccessGateRoutes } from './routes/access-gate.routes.js';
 import { registerCompanyRoutes } from './routes/company.routes.js';
@@ -40,6 +42,15 @@ import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
 export async function buildApp(): Promise<FastifyInstance> {
   const env = getEnv();
 
+  if (env.SENTRY_DSN) {
+    Sentry.init({
+      dsn: env.SENTRY_DSN,
+      integrations: [nodeProfilingIntegration()],
+      tracesSampleRate: 1.0,
+      profilesSampleRate: 1.0,
+    });
+  }
+
   const app = Fastify({
     logger:
       env.NODE_ENV === 'development'
@@ -52,6 +63,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.setErrorHandler(errorHandler);
+
+  if (env.SENTRY_DSN) {
+    Sentry.setupFastifyErrorHandler(app);
+  }
 
   // --- Seguridad de transporte y cabeceras ---
   await app.register(helmet, {

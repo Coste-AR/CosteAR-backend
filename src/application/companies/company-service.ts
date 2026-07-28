@@ -20,14 +20,14 @@ export class CompanyService {
 
   async list(userId: string) {
     return this.db.company.findMany({
-      where: { userId },
+      where: { userId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { costStructures: true } } },
     });
   }
 
   async getById(userId: string, id: string) {
-    const company = await this.db.company.findFirst({ where: { id, userId } });
+    const company = await this.db.company.findFirst({ where: { id, userId, deletedAt: null } });
     if (!company) throw new NotFoundError('Empresa no encontrada');
     return company;
   }
@@ -107,10 +107,8 @@ export class CompanyService {
   async remove(userId: string, id: string, ctx: AuditContext) {
     await this.getById(userId, id); // valida pertenencia
     await this.db.$transaction([
-      this.db.processedCAE.deleteMany({ where: { companyId: id } }),
-      this.db.costLedgerEntry.deleteMany({ where: { companyId: id } }),
-      this.db.supplierFingerprint.deleteMany({ where: { companyId: id } }),
-      this.db.company.delete({ where: { id } }),
+      // Soft delete: solo marcamos la empresa como eliminada, no borramos cascada
+      this.db.company.update({ where: { id }, data: { deletedAt: new Date() } }),
     ]);
     await recordAudit(
       { ...ctx, userId, action: 'company.delete', entityType: 'Company', entityId: id },

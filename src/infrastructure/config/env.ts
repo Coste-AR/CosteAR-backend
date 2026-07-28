@@ -52,6 +52,8 @@ const envSchema = z.object({
   ACCESS_GATE_HASH: z
     .string()
     .default('$argon2id$v=19$m=65536,t=3,p=4$MPvy55gNDLwuV9DhPoRgbw$Z4Ag/77XbyG1OBrNA7rMiEG9dYt0/jkHwDRAEfplvVw'),
+
+  SENTRY_DSN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

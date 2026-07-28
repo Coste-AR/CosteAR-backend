@@ -138,6 +138,7 @@ model Company {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  deletedAt   DateTime? // Soft delete
 
   // Modelo de períodos (problema C): el RITMO de costeo de la empresa. Se elige
   // una vez y el sistema arma los períodos solo. Por defecto, mensual.
@@ -281,6 +282,7 @@ model CostPeriod {
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt
+  deletedAt DateTime? // Soft delete
 
   // Costeo por Procesos (B04): cuadros de movimiento de unidades del período.
   unitMovementSchedules UnitMovementSchedule[]
