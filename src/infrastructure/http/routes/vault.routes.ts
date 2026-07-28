@@ -159,7 +159,13 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
       // sistema, no un dato sensible de un tenant. Sin esto, cualquier falla acá
       // (rate limit de Voyage, git clone caído, etc.) se ve en el admin como un
       // "Error interno del servidor" genérico y sin ninguna pista de qué pasó.
-      const message = err instanceof Error ? err.message : 'Error desconocido al reindexar la bóveda';
+      let message = err instanceof Error ? err.message : 'Error desconocido al reindexar la bóveda';
+      
+      const token = process.env.VAULT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+      if (token) {
+        message = message.split(token).join('***');
+      }
+      
       throw new UnprocessableEntityError(message);
     }
   });

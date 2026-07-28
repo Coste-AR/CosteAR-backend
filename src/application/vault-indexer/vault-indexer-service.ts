@@ -80,7 +80,10 @@ export class VaultIndexerService {
       throw new Error('VOYAGE_API_KEY no configurada: no se puede indexar sin embeddings.');
     }
 
-    const cloneUrl = 'https://github.com/Coste-AR/costear-knowledge-base.git';
+    const githubToken = process.env.VAULT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+    const cloneUrl = githubToken
+      ? `https://${githubToken}@github.com/Coste-AR/costear-knowledge-base.git`
+      : 'https://github.com/Coste-AR/costear-knowledge-base.git';
     const hadGitFolder = existsSync(join(vaultPath, '.git')); // estado ANTES de tocar nada, para diagnóstico
 
     if (forceClone && existsSync(vaultPath)) {
