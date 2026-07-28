@@ -22,19 +22,19 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
     if (action === 'created' && data?.issue) {
       await alertService.create({
         source: 'sentry',
-        level: data.issue.level || 'error',
-        message: data.issue.title || 'Unknown Sentry Error',
-        sentryIssueId: data.issue.id,
-        sentryUrl: data.issue.web_url,
+        level: String(data.issue.level || 'error'),
+        message: String(data.issue.title || 'Unknown Sentry Error'),
+        sentryIssueId: data.issue.id ? String(data.issue.id) : null,
+        sentryUrl: data.issue.web_url ? String(data.issue.web_url) : null,
       });
     } else if (body?.level && body?.message) {
       // Fallback for simple webhook testing or different event types
       await alertService.create({
         source: 'sentry',
-        level: body.level,
-        message: body.message,
-        sentryIssueId: body.id?.toString(),
-        sentryUrl: body.url,
+        level: String(body.level),
+        message: String(body.message),
+        sentryIssueId: body.id ? String(body.id) : null,
+        sentryUrl: body.url ? String(body.url) : null,
       });
     }
 
