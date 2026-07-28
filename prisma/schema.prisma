@@ -1386,3 +1386,20 @@ model ByProductLine {
   @@index([allocationId])
   @@map("joint_cost_by_product_lines")
 }
+
+// ---------------------------------------------------------------------------
+// Alertas del Sistema (Sentry Webhooks)
+// ---------------------------------------------------------------------------
+
+model SystemAlert {
+  id            String    @id @default(uuid()) @db.Uuid
+  source        String    // ej. "sentry"
+  level         String    // ej. "error", "warning", "fatal"
+  message       String
+  sentryIssueId String?
+  sentryUrl     String?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@map("system_alerts")
+}

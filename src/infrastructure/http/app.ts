@@ -31,6 +31,7 @@ import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 import { registerVaultRoutes } from './routes/vault.routes.js';
 import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
+import { registerSystemAlertRoutes } from './routes/system-alert.routes.js';
 import { registerBenchmarkRoutes } from './routes/benchmark.routes.js';
 import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
 
@@ -183,6 +184,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerVaultRoutes(api);
       await registerVaultProposalRoutes(api);
       await registerAdminRoutes(api);
+      await registerSystemAlertRoutes(api);
     },
     { prefix },
   );
