@@ -101,11 +101,11 @@ export class VaultIndexerService {
 
     if (!existsSync(vaultPath)) {
       console.log(`[vault-indexer] Bóveda no encontrada en ${vaultPath}. Clonando de GitHub...`);
-      execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
+      execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'pipe' });
     } else if (hadGitFolder) {
       try {
         console.log(`[vault-indexer] Actualizando bóveda en ${vaultPath}...`);
-        execSync('git pull', { cwd: vaultPath, stdio: 'inherit' });
+        execSync('git pull', { cwd: vaultPath, stdio: 'pipe' });
       } catch {
         // Hay un .git pero el pull falla: checkout corrupto o divergido (clone
         // previo interrumpido a mitad de camino, disco efímero de Railway
@@ -115,7 +115,7 @@ export class VaultIndexerService {
         // clona de cero en vez de usarlo a ciegas.
         console.warn(`[vault-indexer] git pull falló en ${vaultPath} (checkout roto). Reclonando de cero...`);
         await rm(vaultPath, { recursive: true, force: true });
-        execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'inherit' });
+        execSync(`git clone ${cloneUrl} "${vaultPath}"`, { stdio: 'pipe' });
       }
     } else {
       // El directorio existe pero no es un checkout git (típico en tests, o si
