@@ -37,7 +37,14 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
         sentryUrl: body.url ? String(body.url) : undefined,
       });
     }
+    
+    // Some webhook systems (or Sentry test buttons) sometimes send a GET or OPTIONS to verify.
+    // So we just return success.
+    return reply.status(200).send({ success: true });
+  });
 
+  // Handle GET for Sentry just in case it verifies the endpoint
+  fastify.get('/webhooks/sentry', async (_request, reply) => {
     return reply.status(200).send({ success: true });
   });
 
