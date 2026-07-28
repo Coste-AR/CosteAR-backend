@@ -20,6 +20,19 @@ vi.mock('@/application/audit/audit-logger.js', () => ({
 const USER = 'user-1';
 const STRUCTURE = 'struct-1';
 
+/**
+ * Stub del servicio macro para los tests que NO miran el contraste de inflación.
+ *
+ * `compare()` consulta la inflación acumulada cuando los dos períodos están
+ * CLOSED. Sin inyectar esto, CostPeriodService construye un MacroService con el
+ * prisma REAL por defecto (es su valor por default), y el test sale a buscar
+ * macro_snapshots a una base que en CI no existe → PrismaClientInitializationError.
+ *
+ * `null` es la respuesta legítima de "no hay datos macro para ese rango", y
+ * compare() ya la maneja (`if (inflation)`).
+ */
+const sinMacro = () => ({ cumulativeInflation: vi.fn(async () => null) });
+
 /** El resultado congelado de un mes (solo los campos que la comparación mira). */
 function snapshot(mp: number, mod: number, cif: number) {
   return {
@@ -109,7 +122,7 @@ describe('COMPARAR períodos (servicio)', () => {
   it('sin elegir nada, compara el último contra el anterior', async () => {
     // Vienen del más nuevo al más viejo, como los devuelve la base.
     const db = makeDb([junio, mayo]);
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
 
     const c = await svc.compare(USER, STRUCTURE);
 
@@ -122,7 +135,7 @@ describe('COMPARAR períodos (servicio)', () => {
 
   it('un mes cerrado con su resultado congelado se LEE, no se recalcula', async () => {
     const db = makeDb([junio, mayo]);
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
 
     const c = await svc.compare(USER, STRUCTURE);
 
@@ -134,7 +147,7 @@ describe('COMPARAR períodos (servicio)', () => {
 
   it('la variación va del más viejo al más nuevo, aunque los manden al revés', async () => {
     const db = makeDb([junio, mayo]);
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
 
     const c = await svc.compare(USER, STRUCTURE, '2026-06', '2026-05'); // al revés a propósito
 
@@ -145,7 +158,7 @@ describe('COMPARAR períodos (servicio)', () => {
 
   it('con un solo período todavía no hay nada que comparar, y lo explica', async () => {
     const db = makeDb([junio]);
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
 
     await expect(svc.compare(USER, STRUCTURE)).rejects.toThrow(ValidationError);
     await expect(svc.compare(USER, STRUCTURE)).rejects.toThrow(/al menos dos períodos/i);
@@ -153,14 +166,14 @@ describe('COMPARAR períodos (servicio)', () => {
 
   it('un período que no existe es un 404, no un número inventado', async () => {
     const db = makeDb([junio, mayo]);
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
 
     await expect(svc.compare(USER, STRUCTURE, '2026-01', '2026-06')).rejects.toThrow(NotFoundError);
   });
 
   it('no se compara un período contra sí mismo', async () => {
     const db = makeDb([junio, mayo]);
-    const svc = new CostPeriodService(db as never);
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
 
     await expect(svc.compare(USER, STRUCTURE, '2026-06', '2026-06')).rejects.toThrow(/distintos/i);
   });

@@ -78,8 +78,33 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
       return reply.status(401).send({ error: { message: 'API key requerida' } });
     }
     const input = submitViaKeySchema.parse(request.body);
-    const entry = await connSvc.submitDataViaApiKey(apiKey, input);
-    return reply.status(201).send({ data: { id: entry.id, status: entry.status } });
+    const result = await connSvc.submitDataViaApiKey(apiKey, input);
+
+    // Contrato estable: `id`, `status` e `isDuplicate` van SIEMPRE, en los dos
+    // casos. Un cliente que lee `data.id` nunca se rompe, y uno que quiera
+    // distinguir el duplicado no necesita chequear si el campo existe.
+    //
+    // 201 = se creó una entrada nueva. 200 = ya existía (no se creó nada).
+    // En el duplicado, `id` apunta a la entrada YA existente: es a lo que
+    // corresponde el comprobante que acaba de mandar.
+    if (result.isDuplicate) {
+      return reply.status(200).send({
+        data: {
+          id: result.duplicateEntryId,
+          status: result.duplicateStatus,
+          isDuplicate: true,
+          message: result.message,
+        },
+      });
+    }
+    return reply.status(201).send({
+      data: {
+        id: result.id,
+        status: result.status,
+        isDuplicate: false,
+        classification: result.classification,
+      },
+    });
   });
 
   // ----- Validaciones (costista revisa) -----

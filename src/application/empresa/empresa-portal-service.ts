@@ -5,12 +5,7 @@ import { NotFoundError, ForbiddenError, ConflictError } from '../../domain/error
 import { EmailService } from '../../infrastructure/email/email-service.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { randomBytes } from 'node:crypto';
-import { classifyDocument } from '../../infrastructure/classifier/cascade-classifier.js';
-import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
-import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
-import { buildStrongDedupeKey } from '../../infrastructure/classifier/utils/dedupe-key.js';
-import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
-import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
+import { ingestDataEntry } from '../ingest/ingest-data-entry.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -364,169 +359,23 @@ export class EmpresaPortalService {
       costStructureId = structure.id;
     }
 
-    // ── Step 1: Fetch company industry for industry-aware classification ────────
-    const company = await this.db.company.findUnique({
-      where: { id: companyId },
-      select: { industry: true, description: true },
-    });
-    const industry = company?.industry ?? null;
-    const companyContext = company?.description ?? null;
-
-    // ── Step 2: Run Groq document analysis (extraction + quality + OCR) ────────
-    const aiAnalysis = await this.groq.analyzeDocument({
-      text: input.rawContent,
-      fileData: input.fileData,
-      fileMimeType: input.fileMimeType,
-      fileName: input.fileName,
-      companyContext,
-    });
-
-    // ── Step 3: Build enriched text (solves image classification problem) ──────
-    // Para imágenes: rawContent = "[Archivo: img.jpg]" → sin señales.
-    // enrichedText combina el OCR de Groq con los datos extraídos para que
-    // las capas 1-4 puedan clasificar correctamente.
-    const enrichedText = buildEnrichedText(input.rawContent, aiAnalysis);
-
-    // ── Step 4: Extract supplier CUIT — desde enrichedText (incluye OCR) ──────
-    const textToClassify = enrichedText || input.rawContent || (input.fileName ?? '');
-    const foundCuits = extractCuits(textToClassify);
-    const supplierCuit = foundCuits[0] ?? null;
-
-    // ── Step 5: Check for duplicate CAE ───────────────────────────────────────
-    const cae = extractCAE(textToClassify);
-    if (cae) {
-      const existingCAE = await this.db.processedCAE.findUnique({ where: { cae } });
-      if (existingCAE) {
-        return {
-          isDuplicate: true,
-          duplicateEntryId: existingCAE.dataEntryId,
-          message: 'Este documento ya fue enviado anteriormente.',
-        };
-      }
-    }
-
-    // ── Step 5b: Dedup sin CAE — clave fuerte proveedor + nro comprobante ──────
-    // Cubre el caso típico: el operario manda la misma factura (foto) dos veces.
-    // Solo bloquea con clave fuerte (ambos datos presentes) para no rechazar
-    // compras legítimas repetidas. Ignora entradas ya rechazadas.
-    const dedupeKey = buildStrongDedupeKey({
-      supplier:      aiAnalysis?.extractedData?.supplier ?? null,
-      invoiceNumber: aiAnalysis?.extractedData?.invoiceNumber ?? null,
-    });
-    if (dedupeKey) {
-      const existingDup = await this.db.dataEntry.findFirst({
-        where: {
-          connectionId: membership.connectionId,
-          dedupeKey,
-          status: { not: 'REJECTED' },
-        },
-        select: { id: true },
-      });
-      if (existingDup) {
-        return {
-          isDuplicate: true,
-          duplicateEntryId: existingDup.id,
-          message: 'Este comprobante ya fue enviado antes (mismo proveedor y número).',
-        };
-      }
-    }
-
-    // ── Step 6: Run cascade classifier v2 ─────────────────────────────────────
-    const classification = await classifyDocument({
-      text: input.rawContent || (input.fileName ?? ''),
-      enrichedText,
-      industry,
-      sourceType: input.sourceType,
-      costistId,
-      companyId,
-      dataEntryId: 'pending',
-      supplierCuit,
-      groqQuality: aiAnalysis?.quality ?? null,
-      extractedData: aiAnalysis?.extractedData as Record<string, unknown> | null ?? null,
-    });
-
-    if (classification.qualityGate === 'FAIL') {
-      throw new ConflictError(
-        classification.explanation ||
-        'El documento es ilegible o no se pudo leer bien. Por favor, enviá una foto o archivo más claro y con mejor iluminación.'
-      );
-    }
-
-    // ── Step 5: Upload file to Cloudinary (if present) ────────────────────────
-    let fileUrl: string | null = null;
-    if (input.fileData && input.fileMimeType && input.fileName) {
-      try {
-        fileUrl = await uploadToCloudinary(input.fileData, input.fileMimeType, input.fileName);
-      } catch (err) {
-        // No bloqueamos el flujo si Cloudinary falla — el archivo queda sin URL
-        console.error('[Cloudinary] Upload failed:', err);
-      }
-    }
-
-    // ── Step 6: Save DataEntry ─────────────────────────────────────────────────
-    const aiJson = aiAnalysis ? JSON.stringify(aiAnalysis) : null;
-
-    const entry = await this.db.dataEntry.create({
-      data: {
+    // ── Ingesta: análisis IA + dedup + clasificación + persistencia ────────────
+    // Camino compartido con `/datos/submit` y el webhook de WhatsApp para que
+    // ninguna entrada llegue al costista sin ClassificationAudit.
+    return ingestDataEntry(
+      {
         connectionId: membership.connectionId,
         costistId,
-        costStructureId,
-        rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
+        companyId,
+        rawContent: input.rawContent,
         sourceType: input.sourceType,
-        status: 'PENDING',
-        fileName: input.fileName ?? null,
-        fileData: null,           // ya no guardamos base64 en la DB
-        fileMimeType: input.fileMimeType ?? null,
-        fileUrl,
-        dedupeKey,
-        reviewNote: aiJson,
+        costStructureId,
+        fileName: input.fileName,
+        fileData: input.fileData,
+        fileMimeType: input.fileMimeType,
       },
-    });
-
-    // ── Step 7: Persist audit + CAE in a transaction ──────────────────────────
-    await this.db.$transaction(async (tx) => {
-      await tx.classificationAudit.create({
-        data: {
-          dataEntryId: entry.id,
-          companyId,
-          costistId,
-          qualityGate: classification.qualityGate,
-          definitiveSignal: classification.definitiveSignal,
-          corroboratingSignals: classification.signals as unknown as Parameters<typeof tx.classificationAudit.create>[0]['data']['corroboratingSignals'],
-          numericValidationDelta: 0,
-          supplierFingerprintUsed: classification.supplierFingerprintUsed,
-          aiUsed: classification.aiUsed,
-          confidenceCap: classification.confidenceCap,
-          documentType: classification.documentType,
-          costSection: classification.costSection,
-          confidence: classification.confidence,
-          requiresReview: classification.requiresReview,
-          intent: classification.intent,
-          industryCategory: classification.industryCategory,
-          explanation: classification.explanation,
-        },
-      });
-
-      if (cae) {
-        await tx.processedCAE.create({
-          data: { cae, dataEntryId: entry.id, companyId },
-        });
-      }
-    });
-
-    return {
-      id: entry.id,
-      status: entry.status,
-      aiResponse: aiJson,
-      classification: {
-        documentType: classification.documentType,
-        costSection: classification.costSection,
-        confidence: classification.confidence,
-        requiresReview: classification.requiresReview,
-        qualityGate: classification.qualityGate,
-      },
-      isDuplicate: false,
-    };
+      { db: this.db, groq: this.groq },
+    );
   }
 
   // ── Operador: historial de envíos ──────────────────────────────────────────
