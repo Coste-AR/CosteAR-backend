@@ -144,12 +144,13 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
   app.post('/vault/index', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
     const { VaultIndexerService } = await import('../../../application/vault-indexer/vault-indexer-service.js');
     const path = await import('node:path');
-    
+
+    const { forceClone } = z.object({ forceClone: z.boolean().optional() }).parse(request.body ?? {});
     const vaultPath = process.env.VAULT_PATH || '../CosteAR-vault';
     const resolvedVaultPath = path.resolve(vaultPath);
     const indexer = new VaultIndexerService();
     try {
-      const result = await indexer.indexVault(resolvedVaultPath);
+      const result = await indexer.indexVault(resolvedVaultPath, { forceClone });
       return reply.status(200).send({ data: result });
     } catch (err) {
       // Este endpoint es solo-admin (requireRole('ADMIN') arriba): a diferencia
