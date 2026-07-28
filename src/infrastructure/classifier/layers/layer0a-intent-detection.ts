@@ -1,5 +1,5 @@
 // src/infrastructure/classifier/layers/layer0a-intent-detection.ts
-import type { InputIntent, IndustryCategory, WasteNature } from '../types.js';
+import type { InputIntent, WasteNature } from '../types.js';
 import type { IndustryProfile } from '../industry/industry-profile.js';
 
 export interface IntentResult {

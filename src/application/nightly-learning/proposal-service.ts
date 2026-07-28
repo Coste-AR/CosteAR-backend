@@ -2,9 +2,8 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { UnprocessableEntityError, NotFoundError } from '../../domain/errors/domain-error.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { execFile, execSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getEnv } from '../../infrastructure/config/env.js';
 import { VaultIndexerService } from '../vault-indexer/vault-indexer-service.js';
 
 const execFileAsync = promisify(execFile);

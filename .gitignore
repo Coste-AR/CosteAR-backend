@@ -5,6 +5,8 @@ dist/
 *.log
 coverage/
 .DS_Store
+# Cache incremental de tsc: lo regenera cada build, no va al repo.
+tsconfig.tsbuildinfo
 prisma/*.db
 keys/
 graphify-out/

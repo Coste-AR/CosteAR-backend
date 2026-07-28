@@ -1,8 +1,8 @@
-import type { PrismaClient, Prisma } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
-import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
+import { type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
-import { MissingInputError } from '../../domain/errors/calculation-errors.js';
+import { MissingInputError, CostingSystemNotAvailableError } from '../../domain/errors/calculation-errors.js';
 import {
   rawMaterialSectionSchema,
   directLaborConfigSchema,
@@ -12,6 +12,7 @@ import {
 import { type CalculationInput } from '../../domain/calculations/calculate.js';
 import { type TreeNode } from './tree-builder.js';
 import { selectCostingEngine } from './costing-engine.js';
+import { persistCalculationRun } from './calculation-run-persistence.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
 
 /**
@@ -39,7 +40,7 @@ export interface Incompletitud {
  * Arma la marca de incompletitud a partir de los datos sin imputar. Sin datos
  * pendientes, `incompleto: false` (el resultado es confiable).
  */
-function buildIncompletitud(pending: { id: string; label: string }[]): Incompletitud {
+export function buildIncompletitud(pending: { id: string; label: string }[]): Incompletitud {
   if (pending.length === 0) {
     return { incompleto: false, motivos: [], datosPendientes: [] };
   }
@@ -73,11 +74,17 @@ export class CalculationRunService {
   async calculate(userId: string, structureId: string, actor: TraceActor) {
     const s = await this.requireStructure(userId, structureId);
 
-    // DESPACHO por sistema de costeo (patrón Strategy, B02). Se elige el motor
-    // ANTES de validar las secciones de Órdenes: si la estructura es Procesos,
-    // corta acá con un 422 accionable en castellano (placeholder que reemplaza
-    // B17), sin confundir al costista con "falta cargar Materia Prima". Para
-    // Órdenes —o estructuras viejas sin el campo— devuelve el motor de Órdenes.
+    // DESPACHO por sistema de costeo (patrón Strategy, B02). Este endpoint es el
+    // cálculo de UNA estructura de Órdenes (un solo número por estructura). El
+    // Costeo por Procesos se calcula por PERÍODO y DEPARTAMENTO con su propio
+    // motor (B17) y su propio endpoint; una estructura de Procesos que cae acá va
+    // por el camino equivocado, así que se corta con un 422 accionable en
+    // castellano —nunca un 500— antes de validar las secciones de Órdenes (no
+    // tiene sentido pedirle "cargá Materia Prima"). Para Órdenes —o estructuras
+    // viejas sin el campo— sigue con el motor de Órdenes.
+    if (s.costingSystem === 'PROCESSES') {
+      throw new CostingSystemNotAvailableError();
+    }
     const engine = selectCostingEngine(s.costingSystem);
 
     if (!s.rawMaterialConfig) {
@@ -148,37 +155,17 @@ export class CalculationRunService {
     const results = { ...output, incompletitud };
 
     return withTenant(userId, async (tx) => {
-      const last = await tx.calculationRun.findFirst({
-        where: { structureId },
-        orderBy: { runN: 'desc' },
+      // Persistencia COMPARTIDA (misma que usará el motor de Procesos, B17): una
+      // corrida + su árbol + la auditoría, en esta transacción. No se duplica.
+      const { run } = await persistCalculationRun(tx, {
+        structureId,
+        engineVersion: engine.engineVersion,
+        executedBy: actor.id,
+        inputsSnapshot: input,
+        results,
+        tree,
+        audit: { actor, after: { grossMargin: output.grossMargin, grossMarginPct: output.grossMarginPct } },
       });
-      const runN = (last?.runN ?? 0) + 1;
-
-      const run = await tx.calculationRun.create({
-        data: {
-          structureId,
-          runN,
-          engineVersion: engine.engineVersion,
-          executedBy: actor.id,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          inputsSnapshot: input as any,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          results: results as any,
-        },
-      });
-
-      await persistTree(tx, run.id, tree, null);
-
-      await recordTraceAudit(
-        {
-          entityType: 'CostStructure',
-          entityId: structureId,
-          action: 'calcular',
-          actor,
-          after: { runId: run.id, runN, grossMargin: output.grossMargin, grossMarginPct: output.grossMarginPct },
-        },
-        tx,
-      );
 
       return { run, results, tree, incompletitud };
     });
@@ -268,31 +255,5 @@ export class CalculationRunService {
         grossMarginPct: results.grossMarginPct ?? null,
       };
     });
-  }
-}
-
-async function persistTree(
-  tx: Prisma.TransactionClient,
-  runId: string,
-  nodes: TreeNode[],
-  parentId: string | null,
-): Promise<void> {
-  let ord = 0;
-  for (const node of nodes) {
-    const created = await tx.calculationNode.create({
-      data: {
-        runId,
-        parentId,
-        ord: ord++,
-        label: node.label,
-        formula: node.formula,
-        valueNum: node.value,
-        unit: node.unit,
-        sourceDpVersionIds: node.sourceDataPointId ? [node.sourceDataPointId] : [],
-      },
-    });
-    if (node.children.length > 0) {
-      await persistTree(tx, runId, node.children, created.id);
-    }
   }
 }
