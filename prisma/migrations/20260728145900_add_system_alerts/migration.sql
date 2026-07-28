@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE "system_alerts" (
     "id" UUID NOT NULL,
     "source" TEXT NOT NULL,
