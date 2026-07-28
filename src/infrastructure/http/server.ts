@@ -13,8 +13,8 @@ import { getEnv } from '../config/env.js';
 import { startMacroSyncWorker } from '../workers/macro-sync.worker.js';
 import { startRecalculateWorker } from '../workers/recalculate.worker.js';
 import { startNightlyLearningWorker } from '../workers/nightly-learning.worker.js';
-import { macroSyncQueue, nightlyLearningQueue } from '../workers/queues.js';
-import { scheduleMacroSync } from '../workers/scheduler.js';
+import { macroSyncQueue } from '../workers/queues.js';
+import { registerRepeatableJobs } from '../workers/repeatable-jobs.js';
 
 /**
  * Punto de entrada del servidor HTTP.
@@ -50,34 +50,16 @@ async function main(): Promise<void> {
     app.log.warn({ err }, 'Workers BullMQ no pudieron iniciarse — modo degradado');
   }
 
-  // --- Cron + startup sync (degradable) ---
-  if (macroSyncQueue) {
-    try {
-      await scheduleMacroSync(macroSyncQueue, env.MACRO_SYNC_CRON);
-      app.log.info(`Cron macro-sync programado: ${env.MACRO_SYNC_CRON}`);
-      if (env.NODE_ENV === 'production') {
-        await macroSyncQueue.add('startup-sync', {}, { delay: 5_000 });
-      }
-    } catch (err) {
-      app.log.warn({ err }, 'Scheduler BullMQ no pudo iniciarse — sync automática desactivada');
+  // --- Jobs recurrentes + startup sync (degradable) ---
+  // Un solo lugar registra los crons (ver workers/repeatable-jobs.ts). Antes se
+  // programaban acá y en workers/index.ts con nombres y timezone distintos.
+  try {
+    await registerRepeatableJobs(env.MACRO_SYNC_CRON);
+    if (env.NODE_ENV === 'production' && macroSyncQueue) {
+      await macroSyncQueue.add('startup-sync', {}, { delay: 5_000 });
     }
-  }
-
-  // --- Cron del pipeline nocturno (degradable) ---
-  if (nightlyLearningQueue) {
-    try {
-      await nightlyLearningQueue.add(
-        'nightly-pipeline',
-        {},
-        {
-          repeat: { pattern: '0 2 * * *', tz: 'America/Argentina/Buenos_Aires' },
-          jobId: 'scheduled-nightly-learning',
-        },
-      );
-      app.log.info('Cron nightly-learning programado: 0 2 * * *');
-    } catch (err) {
-      app.log.warn({ err }, 'Cron nightly-learning no pudo programarse');
-    }
+  } catch (err) {
+    app.log.warn({ err }, 'Jobs recurrentes no pudieron programarse — sync automática desactivada');
   }
 
   // --- Graceful shutdown ---

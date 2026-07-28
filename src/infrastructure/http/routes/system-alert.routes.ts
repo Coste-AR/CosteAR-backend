@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { SystemAlertService } from '../../../application/system/system-alert-service.js';
 import { authenticate, requireRole } from '../plugins/authenticate.js';
 
