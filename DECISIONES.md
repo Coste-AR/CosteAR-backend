@@ -2389,3 +2389,64 @@ verificadas sobre las llamadas reales; orden parcial e id ajeno rechazados; la b
 cierra el hueco; Órdenes → 422, estructura inexistente → 404; `chainFrozen` en los dos estados. Suite completa:
 **660 passed / 1 skipped** (80 archivos), cero regresión. `tsc --noEmit` limpio. Sin migración: la tabla
 `process_departments` y su RLS existen desde B03.
+
+## Ingesta unificada — el clasificador no corría en dos de los tres canales
+
+**El bug.** Había tres caminos de entrada de documentos y solo uno clasificaba. El portal del
+operador llamaba a `classifyDocument`; `POST /datos/submit` (API key) y el webhook de WhatsApp
+creaban el `DataEntry` a mano y nunca lo invocaban, así que no se generaba `ClassificationAudit`.
+Sin ese audit el documento es invisible para el resto del sistema: la UI de Validaciones no muestra
+tipo ni sección, la aprobación masiva lo saltea, y `review()` tiene todo el bloque de aprobación
+dentro de un `if (audit)` — o sea que al aprobarlo no se generaba línea del libro mayor, no se
+aprendía el fingerprint del proveedor y **no se poblaba la estructura de costos**. El dato entraba,
+se aprobaba, y el costo no llegaba a ningún lado. Sin error y sin aviso.
+
+**Decisión: un solo camino de ingesta.** `src/application/ingest/ingest-data-entry.ts` concentra
+análisis IA, dedup, clasificación y persistencia. Los tres canales lo llaman. El portal dejó de
+tener su copia (−179 líneas). La causa raíz no era el clasificador sino la duplicación: la lógica
+vivía dentro de un servicio y nadie la replicó al agregar los canales nuevos. **Si se agrega un
+canal, tiene que llamar a `ingestDataEntry()`** — crear `DataEntry` por fuera reintroduce el bug.
+
+**Decisión: `sourceType` WHATSAPP → TEXT para clasificar.** El enum de `ClassifierInput` no
+contempla `WHATSAPP`; un mensaje de WhatsApp es texto libre a todos los efectos. La entrada
+persistida conserva el canal real.
+
+**Decisión: `rejectIllegible` por canal.** El portal sigue devolviendo 409 si el quality gate falla
+(hay alguien del otro lado que puede sacar mejor la foto). El webhook de WhatsApp guarda la entrada
+igual, marcada para revisión: ahí nadie lee el error, así que tirarlo equivale a perder el dato en
+silencio.
+
+**Decisión: contrato estable en `/datos/submit`.** Es superficie pública por API key, consumible
+por integraciones que viven fuera de estos repos. El fix introduce el caso "duplicado", que antes no
+existía en ese canal. Para no romper a nadie, `id`, `status` e `isDuplicate` van SIEMPRE en las dos
+respuestas (201 alta nueva / 200 ya existía), y en el duplicado `status` es el estado real de la
+entrada previa, consultado, no asumido. Documentado en `docs/api-ingesta.md` con la regla explícita:
+agregar campos sí, renombrar o quitar esos tres no.
+
+## Jobs recurrentes — registro duplicado y timezone equivocado
+
+**El bug.** `server.ts` (vía `scheduleMacroSync`) registraba el cron como `macro-sync-cron` y **sin
+`tz`**; `workers/index.ts` lo registraba como `scheduled-sync` con `tz` ART. Dos consecuencias:
+son dos repetibles distintos en Redis (se duplicaba la sync con los dos procesos vivos), y el de
+`server.ts` corría a la hora equivocada — sin `tz` BullMQ usa la hora del proceso, los contenedores
+están en UTC, así que `0 18 * * 1-5` disparaba 18:00 UTC = **15:00 ART**, tres horas antes de lo que
+decía su propio comentario.
+
+**Decisión: registro único y convergente.** `src/infrastructure/workers/repeatable-jobs.ts` con
+`name` + `jobId` + `pattern` + `tz` canónicos, llamado por los dos procesos. Se eliminó
+`workers/scheduler.ts`. La función borra los repetibles que NO coinciden con el canónico en vez de
+"borrar todo y recrear": así limpia sola los nombres legacy que ya están en Redis de deploys
+anteriores, el cron bueno nunca deja de existir ni por un instante, y si el web y el worker la
+corren a la vez converge igual (el último agrega el mismo repeat key, que para BullMQ es un no-op).
+
+**`TIMEZONE` explícito en el módulo** para que la hora del contenedor no pueda volver a cambiar
+cuándo corre un job de negocio.
+
+**Al desplegar:** la primera corrida loguea `removido repetible obsoleto (...)` por cada cron viejo
+que encuentre. Es la limpieza esperada. A partir de ahí la sync macro pasa a correr **a las 18:00
+ART de verdad** — el horario se corre tres horas respecto de lo que venía pasando.
+
+**Verificación.** 18 tests nuevos (5 de ingesta, 5 de contrato del endpoint, 8 del cron), suite
+**684 passed / 3 failed** — los 3 son `cost-period-compare.test.ts`, que necesita Postgres en
+`localhost:5433` y ya fallaban antes (verificado con `git stash`). `tsc --noEmit` limpio, ESLint sin
+errores. Sin migración.
