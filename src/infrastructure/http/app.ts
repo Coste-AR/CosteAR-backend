@@ -96,6 +96,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     /^https:\/\/costear-frontend[a-z0-9-]*\.vercel\.app$/,
     /^https:\/\/coste-ar-frontend[a-z0-9-]*\.vercel\.app$/,
     /^http:\/\/localhost:\d+$/,
+    /^https:\/\/.*sentry\.io$/,
   ];
   const isAllowed = (origin: string) =>
     allowedOrigins.includes(origin) || alwaysAllowed.some((re) => re.test(origin));
