@@ -4,9 +4,13 @@ import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { buildLedgerDraft } from './ledger-builder.js';
 import { populateCostStructureFromApproval } from './cost-structure-populator.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
 
 export class ValidacionesService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly alerts: SystemAlertService = new SystemAlertService(),
+  ) {}
 
   /**
    * Lista las entradas pendientes de validación para el costista autenticado.
@@ -290,7 +294,13 @@ export class ValidacionesService {
       try {
         await this.db.costLedgerEntry.create({ data: ledgerPayload });
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         console.error('[ledger] No se pudo crear la línea de costo:', err);
+        await this.alerts.create({
+          source: 'validaciones',
+          level: 'error',
+          message: `No se pudo crear la línea de libro mayor para la entrada ${entryId}: ${message}`,
+        });
       }
     }
 
@@ -321,7 +331,13 @@ export class ValidacionesService {
           });
         }
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         console.error('[populator] Error al poblar CostStructure:', err);
+        await this.alerts.create({
+          source: 'validaciones',
+          level: 'error',
+          message: `No se pudo poblar CostStructure a partir de la aprobación de la entrada ${entryId}: ${message}`,
+        });
       }
     }
 

@@ -512,7 +512,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   // --- Costo unitario de producción (el número final del sistema) ---
   // costo de producción total ÷ unidades producidas. Guarda contra división por
   // cero: si todavía no se cargó la cantidad producida, el unitario queda en 0.
-  const unitsProduced = Number(input.sales.quantity) || 0;
+  const unitsProduced = input.sales.quantity ?? 0;
   const unitProductionCost = unitsProduced > 0
     ? statement.productionCost.divide(unitsProduced).toNumber()
     : 0;

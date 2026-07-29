@@ -11,6 +11,7 @@ import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.
 import { buildStrongDedupeKey } from '../../infrastructure/classifier/utils/dedupe-key.js';
 import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
 import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -37,6 +38,7 @@ export class EmpresaPortalService {
     private readonly db: PrismaClient = prisma,
     private readonly emailService: EmailService = new EmailService(),
     private readonly groq: GroqService = new GroqService(),
+    private readonly alerts: SystemAlertService = new SystemAlertService(),
   ) {}
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -67,6 +69,7 @@ export class EmpresaPortalService {
     tempPassword?: string;
     inviteCode: string;
     isNewUser: boolean;
+    emailSent: boolean;
   }> {
     const normalizedEmail = operatorEmail.toLowerCase().trim();
 
@@ -112,6 +115,7 @@ export class EmpresaPortalService {
         },
       });
 
+      let emailSent = true;
       try {
         await this.emailService.sendOperatorInviteCode(
           normalizedEmail,
@@ -120,10 +124,16 @@ export class EmpresaPortalService {
           inviteCode,
         );
       } catch (err) {
+        emailSent = false;
         console.warn('[empresa-portal] Email de código de invitación no enviado:', err);
+        await this.alerts.create({
+          source: 'empresa-portal',
+          level: 'warning',
+          message: `No se pudo enviar el email de código de invitación a ${normalizedEmail} (código: ${inviteCode}). Pasáselo manualmente.`,
+        });
       }
 
-      return { email: normalizedEmail, inviteCode, isNewUser: false };
+      return { email: normalizedEmail, inviteCode, isNewUser: false, emailSent };
     }
 
     // CASO A: usuario nuevo
@@ -160,6 +170,7 @@ export class EmpresaPortalService {
       },
     });
 
+    let emailSent = true;
     try {
       await this.emailService.sendOperatorInvite(
         normalizedEmail,
@@ -169,10 +180,16 @@ export class EmpresaPortalService {
         inviteCode,
       );
     } catch (err) {
+      emailSent = false;
       console.warn('[empresa-portal] Email de invitación no enviado:', err);
+      await this.alerts.create({
+        source: 'empresa-portal',
+        level: 'warning',
+        message: `No se pudo enviar el email de invitación a ${normalizedEmail} (código: ${inviteCode}). Pasáselo manualmente.`,
+      });
     }
 
-    return { email: normalizedEmail, tempPassword, inviteCode, isNewUser: true };
+    return { email: normalizedEmail, tempPassword, inviteCode, isNewUser: true, emailSent };
   }
 
   // ── Operador: aceptar invitación por código ────────────────────────────────
@@ -459,7 +476,13 @@ export class EmpresaPortalService {
         fileUrl = await uploadToCloudinary(input.fileData, input.fileMimeType, input.fileName);
       } catch (err) {
         // No bloqueamos el flujo si Cloudinary falla — el archivo queda sin URL
+        const message = err instanceof Error ? err.message : String(err);
         console.error('[Cloudinary] Upload failed:', err);
+        await this.alerts.create({
+          source: 'empresa-portal',
+          level: 'warning',
+          message: `Falló el upload a Cloudinary de "${input.fileName}" (costistId: ${costistId}): ${message}. La entrada se guarda sin archivo adjunto.`,
+        });
       }
     }
 
