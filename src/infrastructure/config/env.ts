@@ -54,6 +54,11 @@ const envSchema = z.object({
     .default('$argon2id$v=19$m=65536,t=3,p=4$MPvy55gNDLwuV9DhPoRgbw$Z4Ag/77XbyG1OBrNA7rMiEG9dYt0/jkHwDRAEfplvVw'),
 
   SENTRY_DSN: z.string().optional(),
+  // Firma HMAC-SHA256 del webhook de Sentry (header sentry-hook-signature).
+  // Es el "Client Secret" que Sentry muestra al crear la integración interna
+  // (Settings → Developer Settings → tu integración → Webhooks). Sin esto
+  // configurado, el webhook rechaza todo (falla cerrado, no abierto).
+  SENTRY_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
