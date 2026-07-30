@@ -27,7 +27,7 @@ export class ValidacionesService {
         select: {
           id: true, rawContent: true, sourceType: true, status: true,
           correctedContent: true, reviewNote: true, reviewedAt: true, createdAt: true,
-          fileName: true, fileMimeType: true, fileUrl: true,
+          fileName: true, fileMimeType: true, fileUrl: true, costStructureId: true,
           // fileData excluido del listado (legacy base64 — usar fileUrl)
           connection: {
             include: { company: { select: { id: true, name: true, industry: true } } },
@@ -47,7 +47,54 @@ export class ValidacionesService {
       }),
       this.db.dataEntry.count({ where: { costistId, status: 'PENDING' } }),
     ]);
-    return { items, total, page, limit };
+
+    // A qué CostStructure apuntaría cada entrada si se aprobara AHORA —
+    // mismo criterio que usa el populador (costStructureId explícito, o la
+    // activa/borrador de esa empresa). Sirve para que Validaciones muestre
+    // el selector de departamento ANTES de aprobar cuando es Costeo por
+    // Procesos, sin esperar a que el documento caiga en la cola de pendientes.
+    const targetByEntry = await this.resolveTargetStructures(costistId, items);
+    const itemsWithTarget = items.map((e) => ({ ...e, targetCostStructure: targetByEntry.get(e.id) ?? null }));
+
+    return { items: itemsWithTarget, total, page, limit };
+  }
+
+  /** Ver comentario en `listPending`. */
+  private async resolveTargetStructures(
+    costistId: string,
+    items: { id: string; costStructureId: string | null; connection: { company: { id: string } } }[],
+  ): Promise<Map<string, { id: string; productName: string; costingSystem: string } | null>> {
+    const explicitIds = [...new Set(items.filter((e) => e.costStructureId).map((e) => e.costStructureId!))];
+    const fallbackCompanyIds = [...new Set(items.filter((e) => !e.costStructureId).map((e) => e.connection.company.id))];
+
+    const [explicitStructures, fallbackStructures] = await Promise.all([
+      explicitIds.length
+        ? this.db.costStructure.findMany({
+            where: { id: { in: explicitIds }, deletedAt: null },
+            select: { id: true, productName: true, costingSystem: true },
+          })
+        : Promise.resolve([]),
+      fallbackCompanyIds.length
+        ? this.db.costStructure.findMany({
+            where: { companyId: { in: fallbackCompanyIds }, userId: costistId, status: { in: ['ACTIVE', 'DRAFT'] }, deletedAt: null },
+            orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+            select: { id: true, productName: true, costingSystem: true, companyId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const byId = new Map(explicitStructures.map((s) => [s.id, s]));
+    // El primero por companyId gana (orderBy ya prioriza ACTIVE y lo más reciente).
+    const byCompany = new Map<string, (typeof fallbackStructures)[number]>();
+    for (const s of fallbackStructures) {
+      if (!byCompany.has(s.companyId)) byCompany.set(s.companyId, s);
+    }
+
+    const result = new Map<string, { id: string; productName: string; costingSystem: string } | null>();
+    for (const e of items) {
+      result.set(e.id, e.costStructureId ? (byId.get(e.costStructureId) ?? null) : (byCompany.get(e.connection.company.id) ?? null));
+    }
+    return result;
   }
 
   /**
