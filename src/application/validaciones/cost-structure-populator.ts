@@ -22,6 +22,7 @@ import {
   requireWritablePeriod,
   type PeriodMirrorData,
 } from '../cost-structures/period-sync.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
 
 // ─── Tipos internos de CostStructure ─────────────────────────────────────────
 
@@ -402,6 +403,7 @@ export async function populateCostStructureFromApproval(
      *  EXACTAMENTE a esa estructura (aislamiento por producto). */
     costStructureId?: string | null;
   },
+  alerts: SystemAlertService = new SystemAlertService(),
 ): Promise<void> {
   const { companyId, costistId, reviewNote, costStructureId } = params;
 
@@ -430,29 +432,62 @@ export async function populateCostStructureFromApproval(
   const secs = ai.sections ?? {};
   const updateData: Record<string, unknown> = {};
 
+  // Costeo por Procesos guarda MP/MOD/CIP en tablas propias (ProcessDepartment,
+  // UnitMovementSchedule, JointCostAllocation) — NINGÚN servicio de ese motor lee
+  // rawMaterialConfig/directLaborConfig/indirectCostConfig. Antes de este chequeo,
+  // un documento clasificado para una estructura PROCESSES se "poblaba" en esos
+  // campos igual: no tiraba error, pero el dato quedaba escrito en un lugar que el
+  // motor de procesos nunca mira — se perdía en silencio para quien lo cargó.
+  // Todavía no hay una forma automática de decidir a qué departamento/etapa va
+  // cada documento (es una decisión de producto, no algo para inferir acá), así
+  // que por ahora se avisa en vez de fingir que se cargó.
+  const skippedSections: string[] = [];
+  const isProcessCosting = structure.costingSystem === 'PROCESSES';
+
   try {
     // ── Materia Prima ──────────────────────────────────────────────────────────
     if (secs.rawMaterial?.present) {
-      updateData.rawMaterialConfig = populateRawMaterial(
-        structure.rawMaterialConfig as RawMaterialConfig | null,
-        secs.rawMaterial,
-      );
+      if (isProcessCosting) {
+        skippedSections.push('Materia Prima');
+      } else {
+        updateData.rawMaterialConfig = populateRawMaterial(
+          structure.rawMaterialConfig as RawMaterialConfig | null,
+          secs.rawMaterial,
+        );
+      }
     }
 
     // ── Mano de Obra ──────────────────────────────────────────────────────────
     if (secs.directLabor?.present) {
-      updateData.directLaborConfig = populateDirectLabor(
-        structure.directLaborConfig as DirectLaborConfig | null,
-        secs.directLabor,
-      );
+      if (isProcessCosting) {
+        skippedSections.push('Mano de Obra');
+      } else {
+        updateData.directLaborConfig = populateDirectLabor(
+          structure.directLaborConfig as DirectLaborConfig | null,
+          secs.directLabor,
+        );
+      }
     }
 
     // ── Costos Indirectos ─────────────────────────────────────────────────────
     if (secs.indirectCosts?.present) {
-      updateData.indirectCostConfig = populateIndirectCosts(
-        structure.indirectCostConfig as IndirectCostConfig | null,
-        secs.indirectCosts,
-      );
+      if (isProcessCosting) {
+        skippedSections.push('Costos Indirectos');
+      } else {
+        updateData.indirectCostConfig = populateIndirectCosts(
+          structure.indirectCostConfig as IndirectCostConfig | null,
+          secs.indirectCosts,
+        );
+      }
+    }
+
+    if (skippedSections.length > 0) {
+      const message =
+        `Documento clasificado (${skippedSections.join(', ')}) para la estructura "${structure.productName}" ` +
+        `(${structure.period}), pero es de Costeo por Procesos: la población automática todavía no está ` +
+        `soportada para ese modo. Hay que cargar los datos a mano en el departamento/etapa que corresponda.`;
+      console.warn(`[populator] ${message}`);
+      await alerts.create({ source: 'populator', level: 'warning', message });
     }
 
     // ── Ventas ────────────────────────────────────────────────────────────────
