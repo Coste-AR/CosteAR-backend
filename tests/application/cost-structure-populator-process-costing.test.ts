@@ -74,6 +74,31 @@ describe('populateCostStructureFromApproval — Costeo por Procesos', () => {
     );
   });
 
+  it('si falla al escribir (ej. período cerrado), genera un SystemAlert en vez de perder el dato en silencio', async () => {
+    db.costStructure.findFirst.mockResolvedValue({ ...baseStructure, costingSystem: 'ORDERS' });
+    // requireWritablePeriod: hay un período pero está cerrado → tira ValidationError.
+    db.costPeriod.findFirst
+      .mockResolvedValueOnce(null) // findOpenPeriod: no hay ninguno abierto
+      .mockResolvedValueOnce({ id: 'per-1', label: 'Julio 2026', status: 'CLOSED' }); // último período
+
+    await populateCostStructureFromApproval(
+      service(),
+      {
+        companyId: 'co-1',
+        costistId: 'user-1',
+        costSection: 'MATERIA_PRIMA',
+        reviewNote,
+        supplier: 'Proveedor SRL',
+      },
+      alerts as never,
+    );
+
+    expect(db.costStructure.update).not.toHaveBeenCalled();
+    expect(alerts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'populator', level: 'error' }),
+    );
+  });
+
   it('sigue poblando rawMaterialConfig normalmente para una estructura ORDERS (sin regresión)', async () => {
     db.costStructure.findFirst.mockResolvedValue({ ...baseStructure, costingSystem: 'ORDERS' });
 

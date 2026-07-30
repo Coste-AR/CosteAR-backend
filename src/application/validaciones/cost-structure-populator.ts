@@ -519,6 +519,18 @@ export async function populateCostStructureFromApproval(
     console.log(`[populator] CostStructure ${structure.id} actualizada. Secciones: ${Object.keys(updateData).join(', ')}`);
 
   } catch (err) {
+    // No-fatal a propósito (la aprobación del documento ya quedó firme, no
+    // tiene sentido tirarla abajo por un fallo del populador) — pero antes
+    // esto quedaba SOLO en logs de Railway. Un caso real: requireWritablePeriod
+    // tira si el período está cerrado, y una tanda de aprobaciones contra una
+    // empresa recién cerrada perdía sus datos en silencio, una por una, sin
+    // que nadie se enterara. Ahora también genera un SystemAlert.
+    const message = err instanceof Error ? err.message : String(err);
     console.error('[populator] Error al poblar CostStructure:', err);
+    await alerts.create({
+      source: 'populator',
+      level: 'error',
+      message: `No se pudo poblar la estructura "${structure.productName}" (${structure.period}) con el documento aprobado: ${message}`,
+    });
   }
 }
