@@ -34,14 +34,14 @@ export async function registerAllocationBaseRoutes(app: FastifyInstance): Promis
   // Catálogo de bases visibles para una empresa (sistema + propias).
   app.get('/companies/:id/allocation-bases', { preHandler: authenticate }, async (request) => {
     const { id: companyId } = idParam.parse(request.params);
-    const bases = await service.listCatalog(companyId);
+    const bases = await service.listCatalog(request.authUser!.id, companyId);
     return { data: bases };
   });
 
   // Alta de base personalizada.
   app.post('/allocation-bases', { preHandler: authenticate }, async (request, reply) => {
     const input = createBaseSchema.parse(request.body);
-    const base = await service.createCustom(input.companyId, input);
+    const base = await service.createCustom(request.authUser!.id, input.companyId, input);
     return reply.status(201).send({ data: base });
   });
 
