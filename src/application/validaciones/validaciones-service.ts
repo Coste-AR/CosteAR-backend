@@ -1,6 +1,6 @@
 import type { PrismaClient, DataEntryStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
-import { NotFoundError, ForbiddenError } from '../../domain/errors/domain-error.js';
+import { NotFoundError, ForbiddenError, UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { buildLedgerDraft } from './ledger-builder.js';
 import { populateCostStructureFromApproval } from './cost-structure-populator.js';
@@ -101,6 +101,11 @@ export class ValidacionesService {
       correctedContent?: string;
       correctedDocumentType?: string;
       correctedCostSection?: string;
+      /** Costeo por Procesos: departamento elegido por el costista al aprobar.
+       *  Decisión siempre humana — la IA nunca lo sugiere, salvo el default de
+       *  UI para Materia Prima (depto. 1), que igual llega acá como elección
+       *  explícita del usuario. Sin esto, el documento queda pendiente. */
+      processDepartmentId?: string | null;
     },
   ) {
     const entry = await this.db.dataEntry.findUnique({
@@ -110,6 +115,22 @@ export class ValidacionesService {
     if (!entry) throw new NotFoundError('Entrada no encontrada');
     if (entry.costistId !== costistId) throw new ForbiddenError('No tenés permiso para revisar esta entrada');
     if (entry.status !== 'PENDING') throw new ForbiddenError('Solo se pueden revisar entradas pendientes');
+
+    // El departamento es una elección del costista sobre SU propia estructura:
+    // se valida acá (no en el populador, que corre después y no-fatal) para
+    // no dejar guardado un FK a un departamento de otra empresa/usuario.
+    if (input.processDepartmentId) {
+      const dept = await this.db.processDepartment.findFirst({
+        where: { id: input.processDepartmentId, deletedAt: null },
+        select: { structure: { select: { id: true, userId: true } } },
+      });
+      if (!dept || dept.structure.userId !== costistId) {
+        throw new ForbiddenError('El departamento elegido no pertenece a una estructura tuya.');
+      }
+      if (entry.costStructureId && dept.structure.id !== entry.costStructureId) {
+        throw new ForbiddenError('El departamento elegido no corresponde al producto de este documento.');
+      }
+    }
 
     // El payload del libro mayor se arma dentro de la transacción (necesita la
     // verdad de la clasificación) pero se INSERTA después de que la aprobación
@@ -132,6 +153,8 @@ export class ValidacionesService {
           correctedContent: input.correctedContent ?? null,
           reviewedAt: new Date(),
           reviewedBy: costistId,
+          // undefined ⇒ Prisma no toca la columna (nadie eligió departamento).
+          processDepartmentId: input.processDepartmentId,
         },
       });
       await tx.validationHistory.create({
@@ -321,17 +344,19 @@ export class ValidacionesService {
         const correctionSection = latestAudit?.costaCorrection
           ? (latestAudit.costaCorrection as Record<string, string>)['section']
           : undefined;
-        const lp = ledgerPayload as { costSection?: string; supplier?: string | null } | null;
+        const lp = ledgerPayload as { costSection?: string; supplier?: string | null; amount?: number } | null;
         const finalSection = correctionSection ?? latestAudit?.costSection ?? lp?.costSection;
 
         if (finalSection && finalSection !== 'DESCONOCIDO') {
           const result = await populateCostStructureFromApproval(this.db, {
-            companyId:       entry.connection.companyId,
+            companyId:           entry.connection.companyId,
             costistId,
-            costSection:     finalSection,
-            reviewNote:      entry.reviewNote,
-            supplier:        lp?.supplier ?? null,
-            costStructureId: entry.costStructureId,
+            costSection:         finalSection,
+            reviewNote:          entry.reviewNote,
+            supplier:            lp?.supplier ?? null,
+            costStructureId:     entry.costStructureId,
+            amount:              lp?.amount ?? null,
+            processDepartmentId: input.processDepartmentId ?? null,
           }, this.alerts);
           populationWarning = result.skippedReason;
         }
@@ -568,6 +593,111 @@ export class ValidacionesService {
       where: { entryId },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  /**
+   * Cola de pendientes de Costeo por Procesos: documentos ya aprobados/corregidos
+   * cuya clasificación final es MP/MOD/CIF pero que TODAVÍA no tienen departamento
+   * asignado — o sea, documentos cuyo monto quedó sin acumular en ningún
+   * `UnitMovementSchedule` porque nadie eligió a mano a qué etapa corresponden.
+   * Nada se pierde: hasta que se asignan, quedan visibles acá.
+   */
+  async listUnassignedForStructure(costistId: string, costStructureId: string) {
+    const structure = await this.db.costStructure.findFirst({
+      where: { id: costStructureId, userId: costistId, deletedAt: null },
+      select: { id: true, costingSystem: true },
+    });
+    if (!structure) throw new NotFoundError('Estructura de costos no encontrada');
+    if (structure.costingSystem !== 'PROCESSES') {
+      throw new UnprocessableEntityError('Esta estructura no usa Costeo por Procesos.');
+    }
+
+    const entries = await this.db.dataEntry.findMany({
+      where: {
+        costistId,
+        costStructureId,
+        processDepartmentId: null,
+        status: { in: ['APPROVED', 'CORRECTED'] },
+      },
+      orderBy: { reviewedAt: 'desc' },
+      select: {
+        id: true, rawContent: true, fileName: true, fileUrl: true, reviewedAt: true,
+        classificationAudits: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { costSection: true, documentType: true },
+        },
+      },
+    });
+
+    // Solo MP/MOD/CIF tienen un departamento al que ir — el resto (ventas,
+    // gastos) no pertenece a esta cola aunque haya quedado sin costStructureId
+    // específico en algún caso raro.
+    const relevant = new Set(['MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS']);
+    return entries.filter((e) => relevant.has(e.classificationAudits[0]?.costSection ?? ''));
+  }
+
+  /**
+   * Asigna (o reasigna) el departamento de Costeo por Procesos de un documento
+   * YA aprobado, y dispara la acumulación de su monto en `UnitMovementSchedule`
+   * que quedó pendiente por falta de esa decisión. Reintentable: si ya se había
+   * acumulado antes con este mismo departamento, no vuelve a sumarlo dos veces
+   * porque un documento solo puede tener UN `processDepartmentId` a la vez — para
+   * cambiarlo hay que revertir a mano en el cuadro (ver nota en el HTTP handler).
+   */
+  async assignDepartment(entryId: string, costistId: string, processDepartmentId: string) {
+    const entry = await this.db.dataEntry.findUnique({
+      where: { id: entryId },
+      include: { connection: { select: { companyId: true } } },
+    });
+    if (!entry) throw new NotFoundError('Entrada no encontrada');
+    if (entry.costistId !== costistId) throw new ForbiddenError('No tenés permiso');
+    if (entry.status !== 'APPROVED' && entry.status !== 'CORRECTED') {
+      throw new UnprocessableEntityError('Solo se puede asignar departamento a un documento ya aprobado.');
+    }
+    if (entry.processDepartmentId) {
+      throw new UnprocessableEntityError(
+        'Este documento ya tiene un departamento asignado. Corregilo desde el cuadro de movimiento del departamento actual.',
+      );
+    }
+
+    const dept = await this.db.processDepartment.findFirst({
+      where: { id: processDepartmentId, deletedAt: null },
+      select: { structure: { select: { id: true, userId: true } } },
+    });
+    if (!dept || dept.structure.userId !== costistId) {
+      throw new ForbiddenError('El departamento elegido no pertenece a una estructura tuya.');
+    }
+    if (entry.costStructureId && dept.structure.id !== entry.costStructureId) {
+      throw new ForbiddenError('El departamento elegido no corresponde al producto de este documento.');
+    }
+
+    const ledger = await this.db.costLedgerEntry.findFirst({
+      where: { dataEntryId: entryId },
+      orderBy: { createdAt: 'desc' },
+      select: { costSection: true, amount: true },
+    });
+
+    await this.db.dataEntry.update({ where: { id: entryId }, data: { processDepartmentId } });
+
+    if (!ledger) {
+      // Se aprobó sin generar línea de libro mayor (sin monto reconocible en su
+      // momento): queda asignado al departamento, pero no hay nada para acumular.
+      return { populationWarning: 'El documento no tiene un monto registrado — cargá el importe a mano en el cuadro del departamento.' };
+    }
+
+    const result = await populateCostStructureFromApproval(this.db, {
+      companyId:           entry.connection.companyId,
+      costistId,
+      costSection:         ledger.costSection,
+      reviewNote:          entry.reviewNote,
+      supplier:            null,
+      costStructureId:     entry.costStructureId,
+      amount:              Number(ledger.amount),
+      processDepartmentId,
+    }, this.alerts);
+
+    return { populationWarning: result.skippedReason };
   }
 
 }
