@@ -1,11 +1,21 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { classifyDocument } from '@/infrastructure/classifier/cascade-classifier.js';
-import { resetEnvCache } from '@/infrastructure/config/env.js';
 
 const { groqFetchMock } = vi.hoisted(() => ({ groqFetchMock: vi.fn() }));
 
 vi.mock('@/infrastructure/ai/groq-rate-limiter.js', () => ({
   groqFetch: groqFetchMock,
+}));
+
+// Mismo patrón que groq-costista-chat.test.ts / groq-usage-logging.test.ts:
+// mockear getEnv() directamente (en vez de mutar process.env + resetEnvCache)
+// para no depender de en qué orden corren los tests dentro del archivo ni de
+// estado global compartido con otros archivos — eso fue justo lo que hizo
+// flaquear este test en CI (pasaba siempre local, falló en GitHub Actions
+// porque GroqClient ya había cacheado la key placeholder antes de que
+// process.env.GROQ_API_KEY se actualizara).
+vi.mock('@/infrastructure/config/env.js', () => ({
+  getEnv: () => ({ GROQ_API_KEY: 'gsk_test_key_1234567890' }),
 }));
 
 const BASE_INPUT = { costistId: 'c-001', companyId: 'co-001', dataEntryId: 'de-001' };
@@ -51,22 +61,11 @@ describe('classifyDocument — cascade orchestrator', () => {
     expect(result.documentType).toBe('DESCONOCIDO');
   });
 
-  // Estos tres tests SÍ llegan a la Capa 5 (IA), así que necesitan Groq
-  // "configurado" y mockeado — a diferencia de los de arriba, que resuelven
-  // por reglas deterministas y nunca llaman a Groq.
+  // Este test SÍ llega a la Capa 5 (IA) — a diferencia de los de arriba, que
+  // resuelven por reglas deterministas y nunca llaman a Groq. GROQ_API_KEY
+  // ya está mockeada como "configurada" arriba (vi.mock de env.js) para todo
+  // el archivo; acá solo falta mockear la respuesta del fetch.
   describe('con Groq configurado (mockeado, sin red real)', () => {
-    const ORIGINAL_KEY = process.env.GROQ_API_KEY;
-
-    beforeAll(() => {
-      process.env.GROQ_API_KEY = 'gsk_test_key_1234567890';
-      resetEnvCache();
-    });
-
-    afterAll(() => {
-      process.env.GROQ_API_KEY = ORIGINAL_KEY;
-      resetEnvCache();
-    });
-
     function mockGroqReply(reply: Record<string, unknown>) {
       groqFetchMock.mockResolvedValueOnce({
         ok: true,
