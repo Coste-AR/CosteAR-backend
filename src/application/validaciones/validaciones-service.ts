@@ -306,6 +306,10 @@ export class ValidacionesService {
 
     // Populación automática de CostStructure: no-fatal, fuera de transacción.
     // Solo se ejecuta cuando se aprueba/corrige (no en rechazo).
+    // populationWarning viaja en la respuesta para que quien aprobó el
+    // documento se entere EN EL MOMENTO si el dato no se aplicó — antes esto
+    // solo se sabía revisando /admin/system-alerts.
+    let populationWarning: string | undefined;
     if (input.status === 'APPROVED' || input.status === 'CORRECTED') {
       // Leer el audit actualizado para obtener la sección verdadera
       try {
@@ -321,7 +325,7 @@ export class ValidacionesService {
         const finalSection = correctionSection ?? latestAudit?.costSection ?? lp?.costSection;
 
         if (finalSection && finalSection !== 'DESCONOCIDO') {
-          await populateCostStructureFromApproval(this.db, {
+          const result = await populateCostStructureFromApproval(this.db, {
             companyId:       entry.connection.companyId,
             costistId,
             costSection:     finalSection,
@@ -329,6 +333,7 @@ export class ValidacionesService {
             supplier:        lp?.supplier ?? null,
             costStructureId: entry.costStructureId,
           }, this.alerts);
+          populationWarning = result.skippedReason;
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -338,10 +343,11 @@ export class ValidacionesService {
           level: 'error',
           message: `No se pudo poblar CostStructure a partir de la aprobación de la entrada ${entryId}: ${message}`,
         });
+        populationWarning = `No se pudo aplicar automáticamente a la estructura: ${message}`;
       }
     }
 
-    return updated;
+    return { ...updated, populationWarning };
   }
 
   /**
@@ -508,7 +514,10 @@ export class ValidacionesService {
    * manual. Devuelve cuántas aprobó. Reusa review() para que cada aprobación
    * dispare el libro mayor y el aprendizaje, igual que una aprobación individual.
    */
-  async bulkApproveConfident(costistId: string, companyId?: string): Promise<{ approved: number; skipped: number }> {
+  async bulkApproveConfident(
+    costistId: string,
+    companyId?: string,
+  ): Promise<{ approved: number; skipped: number; populationWarnings: number }> {
     const pending = await this.db.dataEntry.findMany({
       where: {
         costistId,
@@ -527,17 +536,24 @@ export class ValidacionesService {
 
     let approved = 0;
     let skipped = 0;
+    // Cuenta las aprobaciones cuyo dato NO se pudo aplicar a la estructura
+    // (mismo motivo que en la revisión individual). Antes bulkApprove
+    // descartaba por completo el resultado de review() por cada entrada —
+    // alguien podía aprobar 20 documentos en un click y no enterarse de que
+    // ninguno se cargó porque la empresa usa Costeo por Procesos.
+    let populationWarnings = 0;
     for (const entry of pending) {
       const audit = entry.classificationAudits[0];
       // Solo las que el clasificador marcó como seguras (no requieren revisión).
       if (audit && !audit.requiresReview) {
-        await this.review(entry.id, costistId, { status: 'APPROVED' });
+        const result = await this.review(entry.id, costistId, { status: 'APPROVED' });
+        if (result.populationWarning) populationWarnings++;
         approved++;
       } else {
         skipped++;
       }
     }
-    return { approved, skipped };
+    return { approved, skipped, populationWarnings };
   }
 
   /**
