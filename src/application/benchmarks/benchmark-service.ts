@@ -8,6 +8,15 @@ export interface BenchmarkStats {
   marginPct: number;
 }
 
+/**
+ * Mínimo de empresas para mostrar un "promedio" de rubro. Sin este piso, con
+ * una sola empresa en el rubro el "promedio" ES el dato confidencial de esa
+ * empresa puntual — cualquier costista que conozca/adivine el rubro de otro
+ * puede leer sus presupuestos objetivo. Hallazgo de la auditoría de
+ * aislamiento (2026-07-29).
+ */
+const MIN_SAMPLE_SIZE = 3;
+
 export class BenchmarkService {
   async getIndustryBenchmark(industry: string): Promise<BenchmarkStats | null> {
     const budgets = await prisma.companyTargetBudget.findMany({
@@ -16,15 +25,15 @@ export class BenchmarkService {
       },
     });
 
-    if (budgets.length === 0) return null;
+    if (budgets.length < MIN_SAMPLE_SIZE) return null;
 
     return this.calculateAverages(budgets);
   }
 
   async getGeneralBenchmark(): Promise<BenchmarkStats | null> {
     const budgets = await prisma.companyTargetBudget.findMany();
-    
-    if (budgets.length === 0) return null;
+
+    if (budgets.length < MIN_SAMPLE_SIZE) return null;
 
     return this.calculateAverages(budgets);
   }
