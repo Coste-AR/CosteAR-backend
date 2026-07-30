@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ConflictError } from '../../domain/errors/domain-error.js';
+import { ingestDataEntry } from '../ingest/ingest-data-entry.js';
 
 export class EmpresaConnectionService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -98,14 +99,15 @@ export class EmpresaConnectionService {
     });
     if (!conn || !conn.isActive) throw new NotFoundError('API key inválida');
 
-    return this.db.dataEntry.create({
-      data: {
+    return ingestDataEntry(
+      {
         connectionId: conn.id,
         costistId: conn.costistId,
+        companyId: conn.companyId,
         rawContent: payload.rawContent,
         sourceType: payload.sourceType,
-        status: 'PENDING',
       },
-    });
+      { db: this.db },
+    );
   }
 }
