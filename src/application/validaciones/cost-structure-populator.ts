@@ -391,6 +391,134 @@ function populateIndirectCosts(
 
 // ─── Función principal ────────────────────────────────────────────────────────
 
+/**
+ * Resultado de un intento de población, para que el costista que aprobó el
+ * documento se entere EN EL MOMENTO si el dato no se aplicó — antes esto
+ * solo se sabía revisando /admin/system-alerts, y quien aprobaba no veía
+ * ninguna diferencia entre "se aplicó" y "no se pudo aplicar".
+ */
+export interface PopulateResult {
+  populated: boolean;
+  /** Solo seteado cuando HABÍA algo para aplicar y no se pudo — no para el
+   *  caso normal de "este documento no traía datos estructurados". */
+  skippedReason?: string;
+}
+
+/** Elemento del costo de Procesos al que puede acumularse el monto de un
+ *  documento — solo estos tres tienen un campo $ del período en
+ *  `UnitMovementSchedule` (ver P2 §3.1 Sección B del corpus de cátedra). */
+const SECTION_TO_COST_FIELD: Partial<Record<string, 'periodCostMp' | 'periodCostMo' | 'periodCostCif'>> = {
+  MATERIA_PRIMA: 'periodCostMp',
+  MANO_DE_OBRA: 'periodCostMo',
+  COSTOS_INDIRECTOS: 'periodCostCif',
+};
+
+const COST_FIELD_LABEL: Record<'periodCostMp' | 'periodCostMo' | 'periodCostCif', string> = {
+  periodCostMp: 'Materia Prima',
+  periodCostMo: 'Mano de Obra',
+  periodCostCif: 'Costos Indirectos',
+};
+
+/**
+ * Upsert aditivo — NUNCA pisa un importe ya acumulado, siempre suma.
+ *
+ * NO usa `{ increment }` de Prisma: el campo arranca en NULL (nadie cargó el
+ * cuadro de unidades todavía) y en Postgres `NULL + N` da NULL, no N — el
+ * primer `increment` sobre un `UnitMovementSchedule` recién creado por OTRO
+ * elemento del costo (ej. ya tiene `periodCostMp` pero nunca `periodCostMo`)
+ * quedaba silenciosamente en NULL para siempre. Por eso lee el valor actual y
+ * escribe la suma explícita.
+ */
+async function upsertPeriodCost(
+  db: PrismaClient,
+  departmentId: string,
+  periodId: string,
+  costField: 'periodCostMp' | 'periodCostMo' | 'periodCostCif',
+  amount: number,
+): Promise<void> {
+  const where = { departmentId_periodId: { departmentId, periodId } };
+  const existing = await db.unitMovementSchedule.findUnique({
+    where,
+    select: { periodCostMp: true, periodCostMo: true, periodCostCif: true },
+  });
+  const next = Number(existing?.[costField] ?? 0) + amount;
+
+  if (costField === 'periodCostMp') {
+    await db.unitMovementSchedule.upsert({
+      where, create: { departmentId, periodId, periodCostMp: next }, update: { periodCostMp: next },
+    });
+  } else if (costField === 'periodCostMo') {
+    await db.unitMovementSchedule.upsert({
+      where, create: { departmentId, periodId, periodCostMo: next }, update: { periodCostMo: next },
+    });
+  } else {
+    await db.unitMovementSchedule.upsert({
+      where, create: { departmentId, periodId, periodCostCif: next }, update: { periodCostCif: next },
+    });
+  }
+}
+
+/**
+ * Costeo por Procesos: intenta acumular el monto de UN documento clasificado
+ * (MP/MOD/CIF) en el `UnitMovementSchedule` del departamento+período que le
+ * corresponde. El departamento SIEMPRE lo elige el costista — acá nunca se
+ * infiere ni se adivina (ver DECISIONES). Sin departamento asignado, el
+ * documento queda "pendiente" (lo recoge la cola de Costeo por Procesos).
+ */
+async function accumulateProcessCost(
+  db: PrismaClient,
+  args: {
+    structure: { id: string; productName: string; period: string };
+    costField: 'periodCostMp' | 'periodCostMo' | 'periodCostCif';
+    amount: number | null | undefined;
+    processDepartmentId: string | null | undefined;
+  },
+): Promise<{ applied: boolean; skippedReason: string }> {
+  const { structure, costField, amount, processDepartmentId } = args;
+  const label = COST_FIELD_LABEL[costField];
+
+  if (!processDepartmentId) {
+    return {
+      applied: false,
+      skippedReason:
+        `Es de Costeo por Procesos: falta elegir a qué departamento va este documento de ${label}. ` +
+        `Quedó en la cola de pendientes de Costeo por Procesos.`,
+    };
+  }
+
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) {
+    return {
+      applied: false,
+      skippedReason: `El documento de ${label} no trae un monto total reconocible — cargalo a mano en el departamento asignado.`,
+    };
+  }
+
+  const department = await db.processDepartment.findFirst({
+    where: { id: processDepartmentId, structureId: structure.id, deletedAt: null },
+  });
+  if (!department) {
+    return { applied: false, skippedReason: 'El departamento asignado no existe o ya no pertenece a esta estructura.' };
+  }
+
+  const period = await requireWritablePeriod(db, structure.id);
+  if (!period) {
+    return {
+      applied: false,
+      skippedReason:
+        `"${structure.productName}" todavía no tiene períodos de costeo creados — abrí uno en Costeo por Procesos ` +
+        `antes de asignar documentos a un departamento.`,
+    };
+  }
+
+  await upsertPeriodCost(db, department.id, period.id, costField, amount);
+
+  console.log(
+    `[populator] Costeo por Procesos: +${amount} en ${costField} de "${department.name}" ` +
+      `(${structure.productName}, período ${period.label}).`,
+  );
+  return { applied: true, skippedReason: '' };
+}
+
 export async function populateCostStructureFromApproval(
   db: PrismaClient,
   params: {
@@ -402,15 +530,26 @@ export async function populateCostStructureFromApproval(
     /** Producto destino elegido por el cargador. Si viene, la población va
      *  EXACTAMENTE a esa estructura (aislamiento por producto). */
     costStructureId?: string | null;
+    /** Monto total del documento (el mismo importe que la línea del libro
+     *  mayor). Solo se usa para Costeo por Procesos — el resto sigue
+     *  parseando reviewNote como siempre. */
+    amount?: number | null;
+    /** Departamento de Costeo por Procesos elegido por el costista. Decisión
+     *  siempre humana; si falta, el documento queda en la cola de pendientes. */
+    processDepartmentId?: string | null;
   },
   alerts: SystemAlertService = new SystemAlertService(),
-): Promise<void> {
+): Promise<PopulateResult> {
   const { companyId, costistId, reviewNote, costStructureId } = params;
 
+  // Ojo: NO cortar acá si `reviewNote` no parsea. Costeo por Procesos no lo
+  // necesita — la sección y el monto ya llegan explícitos por parámetro (los
+  // mismos que ya se usaron para la línea del libro mayor). Cortar temprano
+  // dejaba `assignDepartment` (que reasigna un documento ya aprobado, sin
+  // volver a tocar reviewNote) sin poder acumular nunca nada.
   const ai = parseReviewNote(reviewNote);
   if (!ai) {
-    console.log('[populator] reviewNote vacío o inválido — nada que poblar.');
-    return;
+    console.log('[populator] reviewNote vacío o inválido — sigue igual para Costeo por Procesos.');
   }
 
   // Si el dato apunta a un producto específico, se usa ESE (aislamiento).
@@ -426,29 +565,35 @@ export async function populateCostStructureFromApproval(
 
   if (!structure) {
     console.log(`[populator] No hay CostStructure destino para company=${companyId}. Crear primero.`);
-    return;
+    return { populated: false };
   }
 
-  const secs = ai.sections ?? {};
+  const secs = ai?.sections ?? {};
   const updateData: Record<string, unknown> = {};
 
   // Costeo por Procesos guarda MP/MOD/CIP en tablas propias (ProcessDepartment,
   // UnitMovementSchedule, JointCostAllocation) — NINGÚN servicio de ese motor lee
-  // rawMaterialConfig/directLaborConfig/indirectCostConfig. Antes de este chequeo,
-  // un documento clasificado para una estructura PROCESSES se "poblaba" en esos
-  // campos igual: no tiraba error, pero el dato quedaba escrito en un lugar que el
-  // motor de procesos nunca mira — se perdía en silencio para quien lo cargó.
-  // Todavía no hay una forma automática de decidir a qué departamento/etapa va
-  // cada documento (es una decisión de producto, no algo para inferir acá), así
-  // que por ahora se avisa en vez de fingir que se cargó.
+  // rawMaterialConfig/directLaborConfig/indirectCostConfig. Un documento
+  // clasificado para una estructura PROCESSES nunca escribe en esos campos:
+  // en vez de eso, si trae la sección que coincide con la clasificación final
+  // (MP/MOD/CIF) y ya tiene un departamento asignado, su monto se acumula en
+  // `UnitMovementSchedule` (ver `accumulateProcessCost`). El departamento
+  // SIEMPRE lo elige el costista (nunca se infiere acá); sin uno asignado el
+  // documento queda en la cola de pendientes de Costeo por Procesos.
   const skippedSections: string[] = [];
   const isProcessCosting = structure.costingSystem === 'PROCESSES';
+  // La sección "verdad" (clasificada o corregida por el costista) es la única
+  // que se intenta acumular automáticamente en Procesos — un documento puede
+  // traer varias secciones en su extracción IA (`secs`), pero solo tiene UN
+  // monto total y UNA clasificación final; adivinar cómo repartirlo entre
+  // varias sería el tipo de bug que no rompe: miente.
+  const processCostField = isProcessCosting ? SECTION_TO_COST_FIELD[params.costSection] : undefined;
 
   try {
     // ── Materia Prima ──────────────────────────────────────────────────────────
     if (secs.rawMaterial?.present) {
       if (isProcessCosting) {
-        skippedSections.push('Materia Prima');
+        if (processCostField !== 'periodCostMp') skippedSections.push('Materia Prima');
       } else {
         updateData.rawMaterialConfig = populateRawMaterial(
           structure.rawMaterialConfig as RawMaterialConfig | null,
@@ -460,7 +605,7 @@ export async function populateCostStructureFromApproval(
     // ── Mano de Obra ──────────────────────────────────────────────────────────
     if (secs.directLabor?.present) {
       if (isProcessCosting) {
-        skippedSections.push('Mano de Obra');
+        if (processCostField !== 'periodCostMo') skippedSections.push('Mano de Obra');
       } else {
         updateData.directLaborConfig = populateDirectLabor(
           structure.directLaborConfig as DirectLaborConfig | null,
@@ -472,7 +617,7 @@ export async function populateCostStructureFromApproval(
     // ── Costos Indirectos ─────────────────────────────────────────────────────
     if (secs.indirectCosts?.present) {
       if (isProcessCosting) {
-        skippedSections.push('Costos Indirectos');
+        if (processCostField !== 'periodCostCif') skippedSections.push('Costos Indirectos');
       } else {
         updateData.indirectCostConfig = populateIndirectCosts(
           structure.indirectCostConfig as IndirectCostConfig | null,
@@ -481,13 +626,43 @@ export async function populateCostStructureFromApproval(
       }
     }
 
+    let skippedMessage: string | undefined;
+    let processCostApplied = false;
+
+    // ── Costeo por Procesos: acumular el monto en el departamento asignado ──────
+    if (processCostField) {
+      const result = await accumulateProcessCost(db, {
+        structure,
+        costField: processCostField,
+        amount: params.amount,
+        processDepartmentId: params.processDepartmentId,
+      });
+      processCostApplied = result.applied;
+      if (!result.applied) {
+        skippedMessage = result.skippedReason;
+        if (!params.processDepartmentId) {
+          // Sin departamento no hay a quién avisarle con un toast puntual —
+          // el aviso vive en la cola de pendientes; igual queda en system-alerts.
+          await alerts.create({
+            source: 'populator',
+            level: 'warning',
+            message:
+              `Documento (${COST_FIELD_LABEL[processCostField]}) para "${structure.productName}" (${structure.period}): ${result.skippedReason}`,
+          });
+        }
+      }
+    }
+
     if (skippedSections.length > 0) {
-      const message =
+      const extraMessage =
+        `Es de Costeo por Procesos: la población automática de ${skippedSections.join(', ')} todavía no está ` +
+        `soportada para ese modo. Cargá los datos a mano en el departamento/etapa que corresponda.`;
+      skippedMessage = skippedMessage ? `${skippedMessage} ${extraMessage}` : extraMessage;
+      const alertMessage =
         `Documento clasificado (${skippedSections.join(', ')}) para la estructura "${structure.productName}" ` +
-        `(${structure.period}), pero es de Costeo por Procesos: la población automática todavía no está ` +
-        `soportada para ese modo. Hay que cargar los datos a mano en el departamento/etapa que corresponda.`;
-      console.warn(`[populator] ${message}`);
-      await alerts.create({ source: 'populator', level: 'warning', message });
+        `(${structure.period}), pero ${extraMessage}`;
+      console.warn(`[populator] ${alertMessage}`);
+      await alerts.create({ source: 'populator', level: 'warning', message: alertMessage });
     }
 
     // ── Ventas ────────────────────────────────────────────────────────────────
@@ -501,8 +676,13 @@ export async function populateCostStructureFromApproval(
     }
 
     if (Object.keys(updateData).length === 0) {
+      if (processCostApplied) {
+        // Se acumuló en UnitMovementSchedule (Procesos); no hay nada más que
+        // escribir en CostStructure/CostPeriod para este documento.
+        return { populated: true, skippedReason: skippedMessage };
+      }
       console.log('[populator] El documento no contenía secciones con present:true — nada que poblar.');
-      return;
+      return { populated: false, skippedReason: skippedMessage };
     }
 
     // C — Fase 3: un documento tampoco entra a un mes cerrado, y lo que entra al
@@ -517,6 +697,7 @@ export async function populateCostStructureFromApproval(
       });
     }
     console.log(`[populator] CostStructure ${structure.id} actualizada. Secciones: ${Object.keys(updateData).join(', ')}`);
+    return { populated: true, skippedReason: skippedMessage };
 
   } catch (err) {
     // No-fatal a propósito (la aprobación del documento ya quedó firme, no
@@ -532,5 +713,6 @@ export async function populateCostStructureFromApproval(
       level: 'error',
       message: `No se pudo poblar la estructura "${structure.productName}" (${structure.period}) con el documento aprobado: ${message}`,
     });
+    return { populated: false, skippedReason: `No se pudo aplicar automáticamente a la estructura: ${message}` };
   }
 }

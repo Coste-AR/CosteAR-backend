@@ -183,28 +183,36 @@ export async function ingestDataEntry(
 
   const aiJson = aiAnalysis ? JSON.stringify(aiAnalysis) : null;
 
-  const entry = await db.dataEntry.create({
-    data: {
-      connectionId: input.connectionId,
-      costistId: input.costistId,
-      costStructureId: input.costStructureId ?? null,
-      rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
-      sourceType: input.sourceType,
-      status: 'PENDING',
-      fileName: input.fileName ?? null,
-      fileData: null,           // ya no guardamos base64 en la DB
-      fileMimeType: input.fileMimeType ?? null,
-      fileUrl,
-      dedupeKey,
-      reviewNote: aiJson,
-    },
-  });
+  // DataEntry + ClassificationAudit + ProcessedCAE en UNA sola transacción.
+  // Antes el DataEntry se creaba afuera: si la transacción de audit/CAE
+  // fallaba (ej. dos envíos casi simultáneos del mismo comprobante chocando
+  // contra el índice único de ProcessedCAE.cae — plausible en el webhook de
+  // WhatsApp con reintentos), quedaba un DataEntry húerfano sin
+  // ClassificationAudit. Por el header de este archivo: una entrada sin
+  // audit es invisible para Validaciones, se saltea la aprobación masiva, y
+  // nunca dispara el libro mayor ni el populador. Ahora, si algo falla,
+  // no queda nada a medio crear.
+  const entry = await db.$transaction(async (tx) => {
+    const created = await tx.dataEntry.create({
+      data: {
+        connectionId: input.connectionId,
+        costistId: input.costistId,
+        costStructureId: input.costStructureId ?? null,
+        rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
+        sourceType: input.sourceType,
+        status: 'PENDING',
+        fileName: input.fileName ?? null,
+        fileData: null,           // ya no guardamos base64 en la DB
+        fileMimeType: input.fileMimeType ?? null,
+        fileUrl,
+        dedupeKey,
+        reviewNote: aiJson,
+      },
+    });
 
-  // ── Audit + CAE en una transacción ──────────────────────────────────────────
-  await db.$transaction(async (tx) => {
     await tx.classificationAudit.create({
       data: {
-        dataEntryId: entry.id,
+        dataEntryId: created.id,
         companyId: input.companyId,
         costistId: input.costistId,
         qualityGate: classification.qualityGate,
@@ -226,9 +234,11 @@ export async function ingestDataEntry(
 
     if (cae) {
       await tx.processedCAE.create({
-        data: { cae, dataEntryId: entry.id, companyId: input.companyId },
+        data: { cae, dataEntryId: created.id, companyId: input.companyId },
       });
     }
+
+    return created;
   });
 
   return {

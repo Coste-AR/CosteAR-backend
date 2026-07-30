@@ -138,7 +138,7 @@ export class ProcessCalculationService {
     structureId: string,
     periodId: string,
   ): Promise<ProcessContext> {
-    const structure = await this.db.costStructure.findFirst({ where: { id: structureId, userId } });
+    const structure = await this.db.costStructure.findFirst({ where: { id: structureId, userId, deletedAt: null } });
     if (!structure) throw new NotFoundError('Estructura de costos no encontrada');
     if (structure.costingSystem !== 'PROCESSES') {
       throw new UnprocessableEntityError(

@@ -574,6 +574,14 @@ model DataEntry {
   costStructureId String?        @db.Uuid
   costStructure   CostStructure? @relation(fields: [costStructureId], references: [id], onDelete: SetNull)
 
+  // Costeo por Procesos: departamento al que el COSTISTA asignó a mano el monto
+  // de este documento aprobado (nunca lo infiere la IA — ver cost-structure-populator.ts).
+  // Null = todavía sin asignar: el documento aparece en la cola de pendientes de
+  // Costeo por Procesos hasta que alguien elija el departamento. Solo se usa
+  // cuando la CostStructure destino es PROCESSES; en ORDERS queda siempre null.
+  processDepartmentId String?            @db.Uuid
+  processDepartment   ProcessDepartment? @relation(fields: [processDepartmentId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -584,6 +592,7 @@ model DataEntry {
   @@index([costistId, status])
   @@index([connectionId, dedupeKey])
   @@index([costStructureId])
+  @@index([processDepartmentId])
   @@map("data_entries")
 }
 
@@ -1155,6 +1164,8 @@ model ProcessDepartment {
   // Costeo por Procesos (B05): repartos de costos conjuntos cuyo punto de
   // separación ocurre en este departamento.
   jointCostAllocations JointCostAllocation[]
+  // Documentos del clasificador (Validaciones) asignados a este departamento.
+  dataEntries          DataEntry[]
 
   @@unique([structureId, sequence])
   @@index([structureId])

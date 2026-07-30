@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockTx, mockDb, mockClassify } = vi.hoisted(() => {
   const tx = {
+    dataEntry: { create: vi.fn() },
     classificationAudit: { create: vi.fn() },
     processedCAE: { create: vi.fn() },
   };
@@ -20,7 +21,7 @@ const { mockTx, mockDb, mockClassify } = vi.hoisted(() => {
     mockDb: {
       company: { findUnique: vi.fn() },
       processedCAE: { findUnique: vi.fn() },
-      dataEntry: { create: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn() },
+      dataEntry: { findFirst: vi.fn(), findUnique: vi.fn() },
       $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
     },
     mockClassify: vi.fn(),
@@ -68,7 +69,7 @@ beforeEach(() => {
   mockDb.processedCAE.findUnique.mockResolvedValue(null);
   mockDb.dataEntry.findFirst.mockResolvedValue(null);
   mockDb.dataEntry.findUnique.mockResolvedValue({ status: 'PENDING' });
-  mockDb.dataEntry.create.mockResolvedValue({ id: 'entry-1', status: 'PENDING' });
+  mockTx.dataEntry.create.mockResolvedValue({ id: 'entry-1', status: 'PENDING' });
   mockDb.$transaction.mockImplementation(async (fn: (t: typeof mockTx) => unknown) => fn(mockTx));
   fakeGroq.analyzeDocument.mockResolvedValue(null);
   mockClassify.mockResolvedValue(classificationResult());
@@ -82,7 +83,7 @@ describe('ingestDataEntry', () => {
 
     expect(res.isDuplicate).toBe(false);
     expect(res.id).toBe('entry-1');
-    expect(mockDb.dataEntry.create).toHaveBeenCalledOnce();
+    expect(mockTx.dataEntry.create).toHaveBeenCalledOnce();
     expect(mockTx.classificationAudit.create).toHaveBeenCalledOnce();
 
     const audit = mockTx.classificationAudit.create.mock.calls[0]![0].data;
@@ -99,7 +100,7 @@ describe('ingestDataEntry', () => {
 
     expect(mockClassify.mock.calls[0]![0].sourceType).toBe('TEXT');
     // La entrada persistida sí conserva el canal real.
-    expect(mockDb.dataEntry.create.mock.calls[0]![0].data.sourceType).toBe('WHATSAPP');
+    expect(mockTx.dataEntry.create.mock.calls[0]![0].data.sourceType).toBe('WHATSAPP');
   });
 
   it('con rejectIllegible=false guarda la entrada ilegible en vez de perderla', async () => {
@@ -132,7 +133,7 @@ describe('ingestDataEntry', () => {
       ingestDataEntry({ ...baseInput, rejectIllegible: true }, { db: mockDb as never, groq: fakeGroq as never }),
     ).rejects.toThrow();
 
-    expect(mockDb.dataEntry.create).not.toHaveBeenCalled();
+    expect(mockTx.dataEntry.create).not.toHaveBeenCalled();
     expect(mockTx.classificationAudit.create).not.toHaveBeenCalled();
   });
 
@@ -151,7 +152,36 @@ describe('ingestDataEntry', () => {
     // El estado real de la entrada previa, no uno asumido: quien reenvía el
     // comprobante necesita saber si ya fue aprobado.
     expect(res.duplicateStatus).toBe('APPROVED');
-    expect(mockDb.dataEntry.create).not.toHaveBeenCalled();
+    expect(mockTx.dataEntry.create).not.toHaveBeenCalled();
     expect(mockClassify).not.toHaveBeenCalled();
+  });
+
+  // Bug 2026-07-30: DataEntry se creaba AFUERA de la transacción de audit/CAE.
+  // Si dos envíos casi simultáneos del mismo comprobante pasaban ambos el
+  // chequeo de "no es duplicado" (carrera real en el webhook de WhatsApp con
+  // reintentos) y el segundo chocaba contra el índice único de
+  // ProcessedCAE.cae, quedaba un DataEntry sin ClassificationAudit —
+  // invisible para Validaciones. Ahora todo vive en la misma transacción: si
+  // el CAE falla, el DataEntry tampoco queda creado.
+  it('si falla la transacción (ej. CAE duplicado por carrera), no persiste ni el DataEntry ni el audit', async () => {
+    const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry.js');
+    mockDb.$transaction.mockImplementation(async (fn: (t: typeof mockTx) => unknown) => {
+      // Simula que Prisma revierte todo el bloque si processedCAE.create
+      // tira por el índice único (dos requests concurrentes con el mismo CAE).
+      mockTx.processedCAE.create.mockRejectedValueOnce(new Error('Unique constraint failed on the fields: (`cae`)'));
+      return fn(mockTx);
+    });
+
+    await expect(
+      ingestDataEntry(
+        { ...baseInput, rawContent: 'Factura con CAE 71234567890123 vto 30/09/2025' },
+        { db: mockDb as never, groq: fakeGroq as never },
+      ),
+    ).rejects.toThrow(/Unique constraint/);
+
+    // dataEntry.create sí se llamó (adentro de la transacción simulada), pero
+    // como toda la promesa de $transaction rechaza, Prisma real haría
+    // rollback — no queda nada a medio crear del lado de la base real.
+    expect(mockTx.dataEntry.create).toHaveBeenCalledOnce();
   });
 });

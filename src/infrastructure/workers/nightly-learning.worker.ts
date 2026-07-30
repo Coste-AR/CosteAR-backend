@@ -24,6 +24,12 @@ export function startNightlyLearningWorker(): Worker {
   worker.on('failed', (job, err) => {
     console.error(`[nightly-learning] Job ${job?.id} falló:`, err);
   });
+  // Sin este listener, un error de conexión a Redis (no de un job) queda sin
+  // manejar: BullMQ/ioredis lo emite como 'error' del EventEmitter, y sin
+  // oyentes eso se propaga como unhandledRejection — que server.ts trata como
+  // fatal y tira todo el proceso abajo. Los otros dos workers (macro-sync,
+  // recalculate) ya tenían este mismo listener; a este le faltaba.
+  worker.on('error', (err) => console.warn('[worker] nightly-learning error:', err.message));
 
   return worker;
 }

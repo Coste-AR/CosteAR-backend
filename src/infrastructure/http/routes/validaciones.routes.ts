@@ -22,6 +22,13 @@ const reviewSchema = z.object({
   // Es la verdad de oro que alimenta el aprendizaje del clasificador.
   correctedDocumentType: z.enum(DOC_TYPES).optional(),
   correctedCostSection: z.enum(COST_SECTIONS).optional(),
+  // Costeo por Procesos: departamento elegido a mano al aprobar (opcional —
+  // sin esto el documento queda en la cola de pendientes de Costeo por Procesos).
+  processDepartmentId: z.string().uuid().optional(),
+});
+
+const assignDepartmentSchema = z.object({
+  processDepartmentId: z.string().uuid(),
 });
 
 const submitViaKeySchema = z.object({
@@ -223,5 +230,20 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     const { entryId } = request.params as { entryId: string };
     const history = await svc.getEntryHistory(entryId, request.authUser!.id);
     return reply.send({ data: history });
+  });
+
+  // Costeo por Procesos: documentos aprobados sin departamento asignado todavía.
+  app.get('/validaciones/pending-departments/:costStructureId', { preHandler: authenticate }, async (request, reply) => {
+    const { costStructureId } = request.params as { costStructureId: string };
+    const items = await svc.listUnassignedForStructure(request.authUser!.id, costStructureId);
+    return reply.send({ data: items });
+  });
+
+  // Costeo por Procesos: asignar (a mano) el departamento de un documento ya aprobado.
+  app.post('/validaciones/:entryId/assign-department', { preHandler: authenticate }, async (request, reply) => {
+    const { entryId } = request.params as { entryId: string };
+    const { processDepartmentId } = assignDepartmentSchema.parse(request.body);
+    const result = await svc.assignDepartment(entryId, request.authUser!.id, processDepartmentId);
+    return reply.send({ data: result });
   });
 }
