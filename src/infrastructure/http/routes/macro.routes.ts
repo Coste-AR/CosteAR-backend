@@ -66,6 +66,15 @@ export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Carga manual de variable macro (paritarias, tarifas, ajustes propios).
    * Registra el snapshot y dispara recálculo automático.
+   *
+   * A propósito, cualquier costista autenticado puede llamar esto — es una
+   * pantalla colaborativa real (ver MacroPage.tsx en el frontend): cualquiera
+   * puede cargar una paritaria o forzar un sync de BCRA/INDEC para que se
+   * beneficien todos. MacroSnapshot es una tabla global, así que "cualquier
+   * costista puede escribir estado compartido" ES el diseño, no un descuido.
+   * Quedó marcado en la auditoría de aislamiento como caso ambiguo; se
+   * revisó el uso real en el frontend y se confirma que es intencional — no
+   * se restringe a ADMIN.
    */
   app.post('/macro/manual-entry', { preHandler: authenticate }, async (request, reply) => {
     const input = manualEntrySchema.parse(request.body);

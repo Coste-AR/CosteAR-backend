@@ -25,8 +25,15 @@ export class AllocationBaseService {
     return s;
   }
 
+  private async requireCompany(userId: string, companyId: string) {
+    const c = await this.db.company.findFirst({ where: { id: companyId, userId } });
+    if (!c) throw new NotFoundError('Empresa no encontrada');
+    return c;
+  }
+
   /** Catálogo visible para una empresa: bases del sistema + las propias. */
-  async listCatalog(companyId: string | null) {
+  async listCatalog(userId: string, companyId: string) {
+    await this.requireCompany(userId, companyId);
     return this.db.allocationBase.findMany({
       where: { OR: [{ companyId: null }, { companyId }] },
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
@@ -35,9 +42,11 @@ export class AllocationBaseService {
 
   /** Alta de una base personalizada de la empresa (extensible por el costista). */
   async createCustom(
+    userId: string,
     companyId: string,
     input: { code: string; name: string; unit: string; description?: string },
   ) {
+    await this.requireCompany(userId, companyId);
     return this.db.allocationBase.create({
       data: {
         companyId,

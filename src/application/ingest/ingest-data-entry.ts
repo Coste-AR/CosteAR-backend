@@ -9,6 +9,7 @@ import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.
 import { buildStrongDedupeKey } from '../../infrastructure/classifier/utils/dedupe-key.js';
 import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
 import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
 
 export type IngestSourceType = 'TEXT' | 'PDF' | 'IMAGE' | 'WHATSAPP';
 
@@ -67,10 +68,11 @@ export interface IngestResult {
  */
 export async function ingestDataEntry(
   input: IngestInput,
-  deps: { db?: PrismaClient; groq?: GroqService } = {},
+  deps: { db?: PrismaClient; groq?: GroqService; alerts?: SystemAlertService } = {},
 ): Promise<IngestResult> {
   const db = deps.db ?? prisma;
   const groq = deps.groq ?? new GroqService();
+  const alerts = deps.alerts ?? new SystemAlertService();
   const rejectIllegible = input.rejectIllegible ?? true;
 
   // ── Rubro de la empresa (clasificación consciente de la industria) ──────────
@@ -167,7 +169,15 @@ export async function ingestDataEntry(
     try {
       fileUrl = await uploadToCloudinary(input.fileData, input.fileMimeType, input.fileName);
     } catch (err) {
+      // No bloqueamos el flujo si Cloudinary falla — el archivo queda sin URL,
+      // pero eso antes solo quedaba en logs de Railway, invisible para todos.
+      const message = err instanceof Error ? err.message : String(err);
       console.error('[Cloudinary] Upload failed:', err);
+      await alerts.create({
+        source: 'ingest',
+        level: 'warning',
+        message: `Falló el upload a Cloudinary de "${input.fileName}" (costistId: ${input.costistId}, canal: ${input.sourceType}): ${message}. La entrada se guarda sin archivo adjunto.`,
+      });
     }
   }
 

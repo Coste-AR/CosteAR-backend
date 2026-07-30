@@ -6,6 +6,7 @@ import { EmailService } from '../../infrastructure/email/email-service.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { randomBytes } from 'node:crypto';
 import { ingestDataEntry } from '../ingest/ingest-data-entry.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -32,6 +33,7 @@ export class EmpresaPortalService {
     private readonly db: PrismaClient = prisma,
     private readonly emailService: EmailService = new EmailService(),
     private readonly groq: GroqService = new GroqService(),
+    private readonly alerts: SystemAlertService = new SystemAlertService(),
   ) {}
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -62,6 +64,7 @@ export class EmpresaPortalService {
     tempPassword?: string;
     inviteCode: string;
     isNewUser: boolean;
+    emailSent: boolean;
   }> {
     const normalizedEmail = operatorEmail.toLowerCase().trim();
 
@@ -107,6 +110,7 @@ export class EmpresaPortalService {
         },
       });
 
+      let emailSent = true;
       try {
         await this.emailService.sendOperatorInviteCode(
           normalizedEmail,
@@ -115,10 +119,16 @@ export class EmpresaPortalService {
           inviteCode,
         );
       } catch (err) {
+        emailSent = false;
         console.warn('[empresa-portal] Email de código de invitación no enviado:', err);
+        await this.alerts.create({
+          source: 'empresa-portal',
+          level: 'warning',
+          message: `No se pudo enviar el email de código de invitación a ${normalizedEmail} (código: ${inviteCode}). Pasáselo manualmente.`,
+        });
       }
 
-      return { email: normalizedEmail, inviteCode, isNewUser: false };
+      return { email: normalizedEmail, inviteCode, isNewUser: false, emailSent };
     }
 
     // CASO A: usuario nuevo
@@ -155,6 +165,7 @@ export class EmpresaPortalService {
       },
     });
 
+    let emailSent = true;
     try {
       await this.emailService.sendOperatorInvite(
         normalizedEmail,
@@ -164,10 +175,16 @@ export class EmpresaPortalService {
         inviteCode,
       );
     } catch (err) {
+      emailSent = false;
       console.warn('[empresa-portal] Email de invitación no enviado:', err);
+      await this.alerts.create({
+        source: 'empresa-portal',
+        level: 'warning',
+        message: `No se pudo enviar el email de invitación a ${normalizedEmail} (código: ${inviteCode}). Pasáselo manualmente.`,
+      });
     }
 
-    return { email: normalizedEmail, tempPassword, inviteCode, isNewUser: true };
+    return { email: normalizedEmail, tempPassword, inviteCode, isNewUser: true, emailSent };
   }
 
   // ── Operador: aceptar invitación por código ────────────────────────────────
@@ -374,7 +391,7 @@ export class EmpresaPortalService {
         fileData: input.fileData,
         fileMimeType: input.fileMimeType,
       },
-      { db: this.db, groq: this.groq },
+      { db: this.db, groq: this.groq, alerts: this.alerts },
     );
   }
 
