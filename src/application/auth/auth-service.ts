@@ -16,6 +16,7 @@ import {
   generateBackupCodes,
 } from '../../infrastructure/crypto/totp.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
+import { TermsService } from '../legal/terms-service.js';
 import {
   InvalidCredentialsError,
   AccountLockedError,
@@ -24,7 +25,7 @@ import {
   InvalidTwoFactorError,
   InvalidRefreshTokenError,
 } from '../../domain/errors/auth-errors.js';
-import { ForbiddenError } from '../../domain/errors/domain-error.js';
+import { ForbiddenError, ValidationError } from '../../domain/errors/domain-error.js';
 import { getEnv } from '../../infrastructure/config/env.js';
 import type {
   RegisterInput,
@@ -43,12 +44,19 @@ export interface TokenPair {
 }
 
 export interface AuthResult {
-  user: { id: string; email: string; name: string; role: string; mustChangePassword: boolean };
+  user: {
+    id: string; email: string; name: string; role: string; mustChangePassword: boolean;
+    /** true = tiene que aceptar los Términos y Condiciones antes de seguir. */
+    needsTermsAcceptance: boolean;
+  };
   tokens: TokenPair;
 }
 
 export class AuthService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly terms: TermsService = new TermsService(db),
+  ) {}
 
   async emailExists(email: string): Promise<boolean> {
     const user = await this.db.user.findUnique({ where: { email }, select: { id: true } });
@@ -79,9 +87,20 @@ export class AuthService {
       throw new EmailAlreadyExistsError();
     }
 
+    // La versión que el frontend le mostró tiene que ser la vigente AHORA —
+    // no confiamos en el string que manda el cliente por si quedó una pestaña
+    // vieja abierta con una versión de Términos ya reemplazada.
+    const currentTerms = await this.terms.requireCurrentVersion();
+    if (input.termsVersionId !== currentTerms.id) {
+      await recordAudit({ ...ctx, action: 'auth.register.stale_terms_version' }, this.db);
+      throw new ValidationError('Los Términos y Condiciones cambiaron. Recargá la página y volvé a intentar.');
+    }
+
     const passwordHash = await hashPassword(input.password);
 
-    // Alta completa en una transacción: usuario + preferencias + cartera inicial.
+    // Alta completa en una transacción: usuario + preferencias + cartera
+    // inicial + la ACEPTACIÓN de términos — es la firma del contrato, no
+    // puede quedar un usuario creado sin su aceptación registrada.
     const user = await this.db.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
@@ -95,6 +114,15 @@ export class AuthService {
           province: input.province,
           onboardedAt: new Date(),
           alertSettings: { create: { marginThresholdPct: input.marginThresholdPct } },
+        },
+      });
+
+      await tx.termsAcceptance.create({
+        data: {
+          userId: created.id,
+          termsVersionId: currentTerms.id,
+          ipAddress: ctx.ipAddress ?? null,
+          userAgent: ctx.userAgent ?? null,
         },
       });
 
@@ -116,12 +144,13 @@ export class AuthService {
         ...ctx,
         userId: user.id,
         action: 'auth.register.success',
-        newValue: { initialClients: input.initialClients?.length ?? 0 },
+        newValue: { initialClients: input.initialClients?.length ?? 0, termsVersion: currentTerms.version },
       },
       this.db,
     );
     const tokens = await this.issueTokens(user, ctx);
-    return { user: this.publicUser(user), tokens };
+    // needsTermsAcceptance siempre false acá: la acabamos de crear arriba.
+    return { user: { ...this.publicUser(user), needsTermsAcceptance: false }, tokens };
   }
 
   // -- Login --------------------------------------------------------------
@@ -185,7 +214,8 @@ export class AuthService {
     await this.resetFailedAttempts(user.id);
     await recordAudit({ ...ctx, userId: user.id, action: 'auth.login.success' }, this.db);
     const tokens = await this.issueTokens(user, ctx);
-    return { user: this.publicUser(user), tokens };
+    const { needs } = await this.terms.needsAcceptance(user.id, user.role);
+    return { user: { ...this.publicUser(user), needsTermsAcceptance: needs }, tokens };
   }
 
   // -- Refresh (rotación + invalidación de familia) -----------------------
