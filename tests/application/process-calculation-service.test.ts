@@ -16,6 +16,8 @@ const mockTx = {
   unitMovementSchedule: { findUnique: vi.fn() },
   jointCostAllocation: { findUnique: vi.fn() },
   dataPoint: { findMany: vi.fn() },
+  // Lock de fila que persistCalculationRun toma antes de asignar runN.
+  $queryRaw: vi.fn().mockResolvedValue([]),
   calculationRun: { findFirst: vi.fn(), create: vi.fn() },
   calculationNode: { create: vi.fn() },
   traceAuditLog: { create: vi.fn() },
