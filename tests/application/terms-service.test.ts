@@ -24,10 +24,19 @@ beforeEach(() => {
 });
 
 describe('TermsService.needsAcceptance', () => {
-  it('false para roles que no son COSTISTA (ADMIN, EMPRESA_OPERATOR) — nunca consulta la base', async () => {
+  it('false para ADMIN — nunca consulta la base (personal interno, no pasa por el frontend de costistas)', async () => {
     const result = await service().needsAcceptance('user-1', 'ADMIN');
     expect(result).toEqual({ needs: false, current: null });
     expect(db.termsVersion.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('true si un EMPRESA_OPERATOR nunca aceptó ninguna versión (también es cliente, no personal interno)', async () => {
+    db.termsVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1 });
+    db.termsAcceptance.findUnique.mockResolvedValue(null);
+
+    const result = await service().needsAcceptance('user-1', 'EMPRESA_OPERATOR');
+
+    expect(result.needs).toBe(true);
   });
 
   it('true si el costista nunca aceptó ninguna versión', async () => {

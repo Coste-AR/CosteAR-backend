@@ -36,9 +36,15 @@ export class TermsService {
     return current;
   }
 
-  /** Para el gate post-login/registro: ¿este usuario tiene que (re)aceptar? */
+  /**
+   * Para el gate post-login/registro: ¿este usuario tiene que (re)aceptar?
+   * Se le pide a costistas Y a operarios de empresa (EMPRESA_OPERATOR) —
+   * cualquiera que use la plataforma como cliente. Al personal interno
+   * (ADMIN) no: nunca pasa por el frontend de costistas (login lo manda
+   * directo al panel de admin), y el contrato es con quien usa el producto.
+   */
   async needsAcceptance(userId: string, role: string): Promise<{ needs: boolean; current: TermsVersion | null }> {
-    if (role !== 'COSTISTA') return { needs: false, current: null };
+    if (role === 'ADMIN') return { needs: false, current: null };
 
     const current = await this.getCurrentVersion();
     if (!current) return { needs: false, current: null };
