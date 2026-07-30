@@ -84,4 +84,15 @@ describe('findTableByHeaders', () => {
     const rows = findTableByHeaders(wb, ['Departamento', 'Remun. básica', 'Horas-Hombre']);
     expect(rows).toEqual([['Depto Productivo 1', 4500000, 12000]]);
   });
+
+  // Bug 2026-07-30: ver el mismo caso en label-finder.test.ts. Una celda
+  // numérica real (no texto) con exactamente 3 decimales se inflaba x1000.
+  it('NO infla x1000 una celda numérica real con exactamente 3 decimales', async () => {
+    const wb = await wbFromRows([
+      ['Departamento', 'Remun. básica', 'Horas-Hombre'],
+      ['Depto A', 123.456, 8.755],
+    ]);
+    const rows = findTableByHeaders(wb, ['Departamento', 'Remun. básica', 'Horas-Hombre']);
+    expect(rows).toEqual([['Depto A', 123.456, 8.755]]);
+  });
 });
