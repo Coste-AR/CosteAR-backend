@@ -77,6 +77,21 @@ if (rlsCode !== 0) {
   );
 }
 
+// ─── 3b. Términos y condiciones — sembrar v1 si no hay ninguna versión activa ─
+//
+// Sin esto, un ambiente nuevo (o resetado) no tiene NINGUNA TermsVersion, y
+// terms-service.ts tira error en requireCurrentVersion() — lo que bloquea
+// TODO registro y login, no solo lo relacionado a términos. No fatal por el
+// mismo motivo que RLS: preferible arrancar en modo degradado y que se vea
+// en los logs, a que un fallo transitorio tumbe todo el arranque.
+
+const termsCode = await runScript(join(ROOT, 'scripts', 'ensure-initial-terms.mjs'));
+if (termsCode !== 0) {
+  process.stderr.write(
+    `[entry] WARN: siembra de Términos y Condiciones salió con código ${termsCode} — el registro/login puede estar bloqueado hasta que se resuelva\n`,
+  );
+}
+
 // ─── 4. Cerrar pre-server y arrancar Fastify ────────────────────────────────
 
 process.stderr.write('[entry] Cerrando pre-server y arrancando Fastify...\n');

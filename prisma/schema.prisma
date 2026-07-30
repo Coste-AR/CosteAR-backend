@@ -85,7 +85,53 @@ model User {
   // Chat de consulta a la bóveda (admin RAG chat)
   vaultChatSessions VaultChatSession[]
 
+  // Términos y condiciones — qué versión(es) aceptó.
+  termsAcceptances TermsAcceptance[]
+
   @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Términos y condiciones
+// ---------------------------------------------------------------------------
+//
+// Versionado explícito, nunca se edita el contenido de una versión ya
+// publicada: publicar cambios crea una fila nueva. Así "qué aceptó cada
+// usuario" queda fijo para siempre (es la prueba de la firma), y cambiar el
+// texto automáticamente deja a todos los usuarios existentes con
+// `needsTermsAcceptance = true` hasta que vuelvan a aceptar — sin necesidad
+// de ningún job ni flag adicional.
+
+model TermsVersion {
+  id        String   @id @default(uuid()) @db.Uuid
+  // Incremental, 1 2 3... — no es el id, es el número que ve el usuario/admin.
+  version   Int      @unique
+  content   String // Markdown.
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  // Qué admin la publicó (no bloqueante si el admin se borra después).
+  createdBy String?  @db.Uuid
+
+  acceptances TermsAcceptance[]
+
+  @@index([isActive])
+  @@map("terms_versions")
+}
+
+model TermsAcceptance {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  termsVersionId String       @db.Uuid
+  termsVersion   TermsVersion @relation(fields: [termsVersionId], references: [id], onDelete: Cascade)
+  acceptedAt     DateTime     @default(now())
+  // Contexto de la firma — mismo criterio que AuditLog/RefreshToken.
+  ipAddress      String?
+  userAgent      String?
+
+  @@unique([userId, termsVersionId])
+  @@index([userId])
+  @@map("terms_acceptances")
 }
 
 // Refresh tokens opacos, rotados en cada uso. Se guarda solo el hash.

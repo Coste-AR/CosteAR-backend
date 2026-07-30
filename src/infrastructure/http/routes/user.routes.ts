@@ -7,6 +7,7 @@ import { changePasswordSchema } from '../../../shared/schemas/auth.schema.js';
 import { recordAudit } from '../../../application/audit/audit-logger.js';
 import { NotFoundError, UnauthorizedError, ValidationError } from '../../../domain/errors/domain-error.js';
 import { uploadToCloudinary } from '../../cloudinary/cloudinary-upload.js';
+import { TermsService } from '../../../application/legal/terms-service.js';
 
 const updateProfileSchema = z.object({ name: z.string().min(2).max(120).trim() });
 
@@ -17,9 +18,15 @@ const avatarSchema = z.object({
 });
 
 export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
+  const terms = new TermsService();
+
   app.get('/user/profile', { preHandler: authenticate }, async (request) => {
     const user = await prisma.user.findUnique({ where: { id: request.authUser!.id } });
     if (!user) throw new NotFoundError('Usuario no encontrado');
+    // Se recalcula en cada carga de la app (no solo al loguear): una sesión
+    // puede durar días, y si en el medio se publica una versión nueva de los
+    // Términos, tiene que detectarse acá, no recién en el próximo login.
+    const { needs } = await terms.needsAcceptance(user.id, user.role);
     return {
       data: {
         id: user.id,
@@ -28,6 +35,8 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
         role: user.role,
         avatarUrl: user.avatarUrl,
         twoFactorEnabled: user.twoFactorEnabled,
+        mustChangePassword: user.mustChangePassword,
+        needsTermsAcceptance: needs,
       },
     };
   });
