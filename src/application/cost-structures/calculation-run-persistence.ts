@@ -46,11 +46,38 @@ export interface PersistCalculationRunParams {
  * El `runN` es el siguiente correlativo de la estructura (append-only: nunca se
  * pisa una corrida anterior). La auditoría se registra en la MISMA transacción
  * (regla dura: AUDIT en la misma tx).
+ *
+ * CONCURRENCIA — por qué hay un lock explícito acá
+ * ------------------------------------------------
+ * Asignar `runN` es un read-then-write: se lee el máximo actual y se escribe el
+ * siguiente. Sin lock, dos corridas simultáneas sobre la MISMA estructura leen
+ * las dos `runN = N`, las dos intentan escribir `N + 1`, y la segunda choca
+ * contra `@@unique([structureId, runN])`. No es un error recuperable: revienta
+ * la transacción entera, y como la auditoría va en la misma tx (regla del repo),
+ * se pierde también el rastro de que se intentó calcular.
+ *
+ * Hoy no se manifiesta porque solo calcula el costista, de a una. Se va a
+ * manifestar en cuanto exista el cálculo diario automático corriendo en paralelo
+ * con el botón de "calcular" — que es justo lo que se viene.
+ *
+ * El `FOR UPDATE` toma el lock de la fila de ESA estructura hasta que la
+ * transacción commitea, serializando sus corridas. No bloquea a otras
+ * estructuras: dos empresas distintas calculan en paralelo sin verse.
+ *
+ * Se eligió el lock por sobre un reintento ante el error de unicidad porque el
+ * reintento tapa el síntoma: deja pasar la carrera y espera que la segunda vuelta
+ * tenga suerte. Y por sobre una secuencia de Postgres porque `runN` tiene que ser
+ * correlativo POR ESTRUCTURA (una secuencia global dejaría huecos, y el número de
+ * corrida es visible para el costista).
  */
 export async function persistCalculationRun(
   tx: Prisma.TransactionClient,
   params: PersistCalculationRunParams,
 ): Promise<{ run: { id: string; runN: number }; runN: number }> {
+  // Lock de la fila de la estructura. Tiene que ir ANTES de leer el máximo:
+  // si va después, la lectura ya ocurrió y la carrera está perdida.
+  await tx.$queryRaw`SELECT id FROM cost_structures WHERE id = ${params.structureId}::uuid FOR UPDATE`;
+
   const last = await tx.calculationRun.findFirst({
     where: { structureId: params.structureId },
     orderBy: { runN: 'desc' },
