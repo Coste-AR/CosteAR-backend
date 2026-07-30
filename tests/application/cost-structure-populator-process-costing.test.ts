@@ -14,7 +14,7 @@ const db = {
   costStructure: { findFirst: vi.fn(), update: vi.fn() },
   costPeriod: { findFirst: vi.fn(), update: vi.fn() },
   processDepartment: { findFirst: vi.fn() },
-  unitMovementSchedule: { upsert: vi.fn() },
+  unitMovementSchedule: { upsert: vi.fn(), findUnique: vi.fn() },
 };
 
 const alerts = { create: vi.fn() };
@@ -133,9 +133,10 @@ describe('populateCostStructureFromApproval — Costeo por Procesos, con departa
     db.costPeriod.findFirst.mockResolvedValue(openPeriod); // findOpenPeriod: hay uno abierto
     db.processDepartment.findFirst.mockResolvedValue({ id: 'dept-1', name: 'Mezclado' });
     db.unitMovementSchedule.upsert.mockResolvedValue({});
+    db.unitMovementSchedule.findUnique.mockResolvedValue(null); // todavía no existe el cuadro
   });
 
-  it('acumula el monto en periodCostMp con un upsert ADITIVO (nunca pisa)', async () => {
+  it('acumula el monto en periodCostMp (fila nueva)', async () => {
     db.costStructure.findFirst.mockResolvedValue({ ...baseStructure, costingSystem: 'PROCESSES' });
 
     const result = await populateCostStructureFromApproval(
@@ -157,10 +158,58 @@ describe('populateCostStructureFromApproval — Costeo por Procesos, con departa
     expect(db.unitMovementSchedule.upsert).toHaveBeenCalledWith({
       where: { departmentId_periodId: { departmentId: 'dept-1', periodId: 'per-1' } },
       create: { departmentId: 'dept-1', periodId: 'per-1', periodCostMp: 15000 },
-      update: { periodCostMp: { increment: 15000 } },
+      update: { periodCostMp: 15000 },
     });
     // Nunca escribe en el JSON legado, aunque haya departamento.
     expect(db.costStructure.update).not.toHaveBeenCalled();
+  });
+
+  // Bug de verificación manual 2026-07-30: con `{ increment }` de Prisma, un
+  // campo que arranca en NULL (nadie cargó todavía ese elemento del costo)
+  // queda en NULL para siempre — en Postgres `NULL + N` da NULL, no N. Pasó
+  // en vivo: MP se acumuló bien (fila nueva), pero MOD sobre esa MISMA fila
+  // (que ya existía por MP, con periodCostMo todavía null) quedó silenciosamente
+  // en null. Este test fija esa regla: sumar sobre null da el monto, no null.
+  it('acumula sobre una fila EXISTENTE cuyo campo todavía es null (no queda en null)', async () => {
+    db.costStructure.findFirst.mockResolvedValue({ ...baseStructure, costingSystem: 'PROCESSES' });
+    db.unitMovementSchedule.findUnique.mockResolvedValue({
+      periodCostMp: 45000, periodCostMo: null, periodCostCif: null,
+    });
+    const laborNote = JSON.stringify({ sections: { directLabor: { present: true, departments: [] } } });
+
+    const result = await populateCostStructureFromApproval(
+      service(),
+      {
+        companyId: 'co-1', costistId: 'user-1', costSection: 'MANO_DE_OBRA',
+        reviewNote: laborNote, supplier: null, amount: 32000, processDepartmentId: 'dept-1',
+      },
+      alerts as never,
+    );
+
+    expect(result.populated).toBe(true);
+    expect(db.unitMovementSchedule.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { periodCostMo: 32000 } }),
+    );
+  });
+
+  it('un segundo documento del MISMO elemento SUMA sobre el importe ya acumulado (no lo pisa)', async () => {
+    db.costStructure.findFirst.mockResolvedValue({ ...baseStructure, costingSystem: 'PROCESSES' });
+    db.unitMovementSchedule.findUnique.mockResolvedValue({
+      periodCostMp: 15000, periodCostMo: null, periodCostCif: null,
+    });
+
+    await populateCostStructureFromApproval(
+      service(),
+      {
+        companyId: 'co-1', costistId: 'user-1', costSection: 'MATERIA_PRIMA',
+        reviewNote, supplier: null, amount: 5000, processDepartmentId: 'dept-1',
+      },
+      alerts as never,
+    );
+
+    expect(db.unitMovementSchedule.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { periodCostMp: 20000 } }),
+    );
   });
 
   it('MANO_DE_OBRA acumula en periodCostMo, COSTOS_INDIRECTOS en periodCostCif', async () => {
@@ -267,6 +316,30 @@ describe('populateCostStructureFromApproval — Costeo por Procesos, con departa
     expect(result.populated).toBe(false);
     expect(result.skippedReason).toContain('períodos de costeo');
     expect(db.unitMovementSchedule.upsert).not.toHaveBeenCalled();
+  });
+
+  // Bug encontrado en verificación manual 2026-07-30: assignDepartment() (cola
+  // de pendientes) llama a este populador para un documento YA aprobado, cuyo
+  // reviewNote puede no venir seteado (viene de un DataEntry viejo, o creado
+  // por un camino que nunca guardó el JSON de la IA). La acumulación en
+  // Procesos NO depende de reviewNote — costSection y amount ya llegan
+  // explícitos — así que no debe cortar temprano por reviewNote ausente.
+  it('acumula igual aunque reviewNote sea null (la cola de pendientes no siempre lo tiene)', async () => {
+    db.costStructure.findFirst.mockResolvedValue({ ...baseStructure, costingSystem: 'PROCESSES' });
+
+    const result = await populateCostStructureFromApproval(
+      service(),
+      {
+        companyId: 'co-1', costistId: 'user-1', costSection: 'MANO_DE_OBRA',
+        reviewNote: null, supplier: null, amount: 32000, processDepartmentId: 'dept-1',
+      },
+      alerts as never,
+    );
+
+    expect(result.populated).toBe(true);
+    expect(db.unitMovementSchedule.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: expect.objectContaining({ periodCostMo: 32000 }) }),
+    );
   });
 
   it('Ventas se sigue poblando en CostStructure aunque el costeo sea por Procesos (sin regresión)', async () => {

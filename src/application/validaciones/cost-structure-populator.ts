@@ -419,7 +419,16 @@ const COST_FIELD_LABEL: Record<'periodCostMp' | 'periodCostMo' | 'periodCostCif'
   periodCostCif: 'Costos Indirectos',
 };
 
-/** Upsert aditivo — NUNCA pisa un importe ya acumulado, siempre suma. */
+/**
+ * Upsert aditivo — NUNCA pisa un importe ya acumulado, siempre suma.
+ *
+ * NO usa `{ increment }` de Prisma: el campo arranca en NULL (nadie cargó el
+ * cuadro de unidades todavía) y en Postgres `NULL + N` da NULL, no N — el
+ * primer `increment` sobre un `UnitMovementSchedule` recién creado por OTRO
+ * elemento del costo (ej. ya tiene `periodCostMp` pero nunca `periodCostMo`)
+ * quedaba silenciosamente en NULL para siempre. Por eso lee el valor actual y
+ * escribe la suma explícita.
+ */
 async function upsertPeriodCost(
   db: PrismaClient,
   departmentId: string,
@@ -428,17 +437,23 @@ async function upsertPeriodCost(
   amount: number,
 ): Promise<void> {
   const where = { departmentId_periodId: { departmentId, periodId } };
+  const existing = await db.unitMovementSchedule.findUnique({
+    where,
+    select: { periodCostMp: true, periodCostMo: true, periodCostCif: true },
+  });
+  const next = Number(existing?.[costField] ?? 0) + amount;
+
   if (costField === 'periodCostMp') {
     await db.unitMovementSchedule.upsert({
-      where, create: { departmentId, periodId, periodCostMp: amount }, update: { periodCostMp: { increment: amount } },
+      where, create: { departmentId, periodId, periodCostMp: next }, update: { periodCostMp: next },
     });
   } else if (costField === 'periodCostMo') {
     await db.unitMovementSchedule.upsert({
-      where, create: { departmentId, periodId, periodCostMo: amount }, update: { periodCostMo: { increment: amount } },
+      where, create: { departmentId, periodId, periodCostMo: next }, update: { periodCostMo: next },
     });
   } else {
     await db.unitMovementSchedule.upsert({
-      where, create: { departmentId, periodId, periodCostCif: amount }, update: { periodCostCif: { increment: amount } },
+      where, create: { departmentId, periodId, periodCostCif: next }, update: { periodCostCif: next },
     });
   }
 }
@@ -527,10 +542,14 @@ export async function populateCostStructureFromApproval(
 ): Promise<PopulateResult> {
   const { companyId, costistId, reviewNote, costStructureId } = params;
 
+  // Ojo: NO cortar acá si `reviewNote` no parsea. Costeo por Procesos no lo
+  // necesita — la sección y el monto ya llegan explícitos por parámetro (los
+  // mismos que ya se usaron para la línea del libro mayor). Cortar temprano
+  // dejaba `assignDepartment` (que reasigna un documento ya aprobado, sin
+  // volver a tocar reviewNote) sin poder acumular nunca nada.
   const ai = parseReviewNote(reviewNote);
   if (!ai) {
-    console.log('[populator] reviewNote vacío o inválido — nada que poblar.');
-    return { populated: false };
+    console.log('[populator] reviewNote vacío o inválido — sigue igual para Costeo por Procesos.');
   }
 
   // Si el dato apunta a un producto específico, se usa ESE (aislamiento).
@@ -549,7 +568,7 @@ export async function populateCostStructureFromApproval(
     return { populated: false };
   }
 
-  const secs = ai.sections ?? {};
+  const secs = ai?.sections ?? {};
   const updateData: Record<string, unknown> = {};
 
   // Costeo por Procesos guarda MP/MOD/CIP en tablas propias (ProcessDepartment,
