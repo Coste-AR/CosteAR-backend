@@ -328,7 +328,7 @@ export class ValidacionesService {
             reviewNote:      entry.reviewNote,
             supplier:        lp?.supplier ?? null,
             costStructureId: entry.costStructureId,
-          });
+          }, this.alerts);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

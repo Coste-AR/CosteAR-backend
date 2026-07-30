@@ -1,5 +1,5 @@
 import type ExcelJS from 'exceljs';
-import { cellText } from './xlsx-reader.js';
+import { cellText, cellNumber } from './xlsx-reader.js';
 
 function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -118,13 +118,15 @@ function findNearbyNumber(
   colNumber: number,
 ): number | null {
   for (let c = colNumber + 1; c <= colNumber + RIGHT_SCAN; c++) {
-    const n = toNumber(cellText(row.getCell(c)));
+    const cell = row.getCell(c);
+    const n = cellNumber(cell) ?? toNumber(cellText(cell));
     if (n !== null) return n;
   }
   for (let r = rowNumber + 1; r <= rowNumber + BELOW_ROWS; r++) {
     const belowRow = ws.getRow(r);
     for (let c = colNumber; c <= colNumber + 1; c++) {
-      const n = toNumber(cellText(belowRow.getCell(c)));
+      const cell = belowRow.getCell(c);
+      const n = cellNumber(cell) ?? toNumber(cellText(cell));
       if (n !== null) return n;
     }
   }

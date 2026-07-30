@@ -1,5 +1,5 @@
 import type ExcelJS from 'exceljs';
-import { cellText } from './xlsx-reader.js';
+import { cellText, cellNumber } from './xlsx-reader.js';
 import { toNumber } from './label-finder.js';
 
 function normalize(s: string): string {
@@ -42,7 +42,13 @@ export function findTableByHeaders(wb: ExcelJS.Workbook, headers: HeaderSpec[]):
         if (first === null) break; // primera columna vacía → fin de la tabla
         const values: unknown[] = [];
         for (let c = 1; c <= headers.length; c++) {
-          const text = cellText(dataRow.getCell(c));
+          const cell = dataRow.getCell(c);
+          // Si ExcelJS ya tipó la celda como número, se usa ese valor directo
+          // — nunca pasa por el parser de texto ambiguo (ver cellNumber).
+          const direct = cellNumber(cell);
+          if (direct !== null) { values.push(direct); continue; }
+
+          const text = cellText(cell);
           // Solo se intenta parsear como número si el texto ENTERO tiene forma
           // numérica (dígitos, puntos de miles, coma decimal, signo). Si no se
           // ancla así, `toNumber` (pensado para celdas que ya se sabe que son

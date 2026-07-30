@@ -155,4 +155,26 @@ describe('findNumberByLabel', () => {
 
     expect(findNumberByLabel(wb, ['Costo unitario'])).toBeNull();
   });
+
+  // ── Bug 2026-07-30: una celda NUMÉRICA real (no texto) con exactamente 3
+  // decimales se inflaba x1000 porque toNumber la trataba como si el punto
+  // fuera separador de miles. String(123.456) da "123.456", indistinguible
+  // por texto de "ciento veintitrés mil cuatrocientos cincuenta y seis"
+  // agrupado por miles — pero como celda numérica real de Excel, NUNCA es
+  // eso. Corrompía costos unitarios reales (muy común terminar con 3
+  // decimales después de una división) sin ningún error ni aviso.
+  it('NO infla x1000 una celda numérica real con exactamente 3 decimales', async () => {
+    const wb = await wbFromRows([['Costo unitario', 123.456]]);
+    expect(findNumberByLabel(wb, ['Costo unitario'])).toBe(123.456);
+  });
+
+  it('NO infla x1000 una celda numérica real chica con 3 decimales (ej. tasa)', async () => {
+    const wb = await wbFromRows([['Tasa de mantenimiento', 8.755]]);
+    expect(findNumberByLabel(wb, ['Tasa de mantenimiento'])).toBe(8.755);
+  });
+
+  it('sigue interpretando "24.000" como miles cuando es texto tipeado a mano (sin regresión)', async () => {
+    const wb = await wbFromRows([['Demanda anual', '24.000']]);
+    expect(findNumberByLabel(wb, ['Demanda anual'])).toBe(24000);
+  });
 });

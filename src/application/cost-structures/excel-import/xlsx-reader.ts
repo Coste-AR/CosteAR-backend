@@ -71,3 +71,27 @@ export function cellText(cell: ExcelJS.Cell): string | null {
 
   return String(v).trim() || null;
 }
+
+/**
+ * Da el valor numérico REAL de una celda, cuando ExcelJS ya la tipó como
+ * número (o como fórmula cuyo resultado es número) — sin pasar por texto.
+ *
+ * Por qué existe: `toNumber` (label-finder.ts) interpreta un punto como
+ * separador de miles cuando el texto tiene forma "123.456" (grupo de 3
+ * dígitos tras el punto). Eso es correcto para texto tipeado a mano
+ * ("24.000" = veinticuatro mil), pero una celda numérica real de ExcelJS se
+ * stringifica con `String(v)`, que SIEMPRE usa el punto como decimal — un
+ * costo unitario real de 123,456 (con 3 decimales, nada raro después de una
+ * división) se leía como texto "123.456" y `toNumber` lo inflaba a 123456,
+ * sin ningún error ni aviso. Cuando la celda YA es numérica no hace falta
+ * adivinar: se usa el valor tal cual.
+ */
+export function cellNumber(cell: ExcelJS.Cell): number | null {
+  const v = cell.value;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (v && typeof v === 'object' && ('formula' in v || 'sharedFormula' in v)) {
+    const result = (v as ExcelJS.CellFormulaValue | ExcelJS.CellSharedFormulaValue).result;
+    if (typeof result === 'number') return Number.isFinite(result) ? result : null;
+  }
+  return null;
+}
