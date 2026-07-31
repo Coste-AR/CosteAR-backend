@@ -147,6 +147,37 @@ Cómo entra en el plan: F4 captura *quién* informa el avance, y F3 le pide el
 recuento a ese rol cuando corresponde, en vez de marcar la corrida como
 incompleta y dejarla ahí.
 
+### D7 — La oficina técnica NO es un rol nuevo: es un permiso + la procedencia del dato
+
+Decidido el 31/07 tras D6. Se evaluó agregar un `UserRole` nuevo y se descartó.
+
+**Por qué no un rol.** `EMPRESA_OPERATOR` ya es "personal de la empresa cliente"
+— la oficina técnica *es* eso. Un valor nuevo en `UserRole` obliga a tocar auth,
+RLS, guards, invitaciones y el panel admin, y deja dos roles que en el 95% de las
+pantallas hacen exactamente lo mismo. Es mucha superficie nueva para expresar
+"este operario, además, informa el recuento".
+
+**Por qué esto sí.** Lo que la cátedra exige no es *quién se loguea*: es que el
+grado de avance quede registrado como **informado por la oficina técnica y no
+estimado por el área de costos**. Eso es un atributo del DATO, no de la cuenta de
+usuario. Y coincide con lo que pidió el socio: configuración previa (el permiso
+se otorga en el setup) + notificación reactiva (se le pide a quien lo tiene), con
+la responsabilidad del sistema acotada porque quedó por escrito quién informó qué.
+
+Dos piezas:
+
+1. **Permiso**: `OperatorMembership.canReportWipCount` — el costista se lo
+   habilita a los operarios que correspondan, en el setup.
+2. **Procedencia**: en `UnitMovementSchedule`, `countedAt` / `countedBy` /
+   `countSource` (`TECHNICAL_OFFICE` | `COSTIST_ESTIMATE` | `CARRIED_OVER` |
+   `NOT_COUNTED`).
+
+El beneficio grande está en `COSTIST_ESTIMATE`: el sistema **no prohíbe** que el
+costista cargue el avance si la planta no responde — sería inusable —, pero lo
+marca como estimado. Un informe apoyado en avances estimados por costos se puede
+señalar como tal, que es exactamente la distinción que hace la cátedra, y el
+drill-down de trazabilidad la muestra en vez de esconderla.
+
 ---
 
 ## 3. Fases
