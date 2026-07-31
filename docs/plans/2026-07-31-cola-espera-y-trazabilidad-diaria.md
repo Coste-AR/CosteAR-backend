@@ -52,13 +52,30 @@ pidió que se configure al crear la estructura de costos, y que admita "cada 10 
 - `CostStructure.periodLengthDays Int?` y `CostStructure.periodAnchorDate Date?`
   — solo para `CUSTOM_DAYS`.
 
-**Por qué esto y no "calcular el costo de cada día":** el costeo por procesos
-necesita las unidades que quedaron sin terminar y su % de avance, y ese dato sale
-de un recuento físico. Ninguna planta cuenta todos los días. Lo que se calcula
+**Por qué esto y no "calcular el costo de cada día".** Ojo con la formulación:
+la cátedra **sí admite períodos cortos**. Textual de la clase 40 y de P3:
+
+> Período: el corte temporal (día, semana, quincena, mes) **según la dinámica de
+> la empresa**. En un ingenio los cortes son cada 2-3 días porque el jugo de caña
+> fermenta.
+
+O sea que "el costo del martes" no es un disparate teórico: es lo correcto para
+una empresa cuya dinámica lo pida. Lo que **no** se puede es fijar el corte por
+software, desde afuera, sin mirar el proceso productivo.
+
+El límite real no es el calendario, es otro: para cerrar un período hace falta el
+grado de avance de lo que quedó sin terminar, y ese dato **no lo produce el
+sistema ni el costista** (ver D6). Si la oficina técnica puede informarlo cada
+dos días, el período puede ser de dos días. Si informa una vez por mes, el
+período es mensual — calcular más seguido no agregaría información, solo la
+inventaría.
+
+Por eso el sistema no impone una frecuencia: la pregunta la contesta el cliente
+en el setup, y `CUSTOM_DAYS` cubre desde 1 día hasta un año. Lo que se calcula
 todos los días es **el período abierto con los datos que llegaron hasta hoy** —
-una foto diaria del mes en curso, no "el costo del martes". El escenario de la
-reunión sale igual: el día 2 se calcula solo y queda sin validar, el día 3 el
-costista ve todo incluido, y en trazabilidad quedan las corridas día por día.
+una foto diaria del período en curso. El escenario de la reunión sale igual: el
+día 2 se calcula solo y queda sin validar, el día 3 el costista ve todo incluido,
+y en trazabilidad quedan las corridas día por día.
 
 ### D2 — El booleano de validación va en la corrida, no en el período
 
@@ -100,6 +117,35 @@ guarda `reopenCount` / `reopenedAt` / `reopenReason` para dejar rastro.
 `CalculationRun.executedBy` es FK obligatoria a `User`. Las automáticas se
 guardan con el dueño de la estructura, **pero** con `trigger = AUTO_DAILY`, y la
 UI nunca dice "lo calculaste vos": dice "cálculo automático del sistema".
+
+### D6 — El recuento lo informa la oficina técnica, no el costista
+
+Esto sale de la bóveda y **no estaba en el acta ni en las respuestas del socio**.
+Las clases lo dicen tres veces, con las mismas palabras:
+
+> El grado de avance lo determina la oficina técnica (ingenieros/planta) **al
+> cierre de cada período, por departamento y por elemento** — el área de costos
+> lo recibe y aplica, **no lo estima**. (clase 36)
+
+> El grado de avance lo determina el ingeniero/responsable técnico del proceso,
+> no el área de costos. (clase 34)
+
+Tiene tres consecuencias de producto que el plan original no contemplaba:
+
+1. **Hay una segunda cola de espera**, distinta de la de documentos: la del
+   recuento de la oficina técnica. Es un insumo de otro rol, que entra por otro
+   canal y en otro momento (al cierre del período, no continuamente).
+2. **El recuento es por departamento Y por elemento**, no un número por período.
+   Una unidad puede estar al 100% en MP y al 50% en conversión. El modelo ya lo
+   soporta (`finalWipMpAvance` / `finalWipConvAvance`), pero el flujo de captura
+   no existe.
+3. **El costista no puede completarlo él.** Si el sistema le pide a él el dato
+   que la cátedra dice explícitamente que no le corresponde estimar, lo empuja a
+   inventar un número — y ese número después se ve como si fuera un hecho.
+
+Cómo entra en el plan: F4 captura *quién* informa el avance, y F3 le pide el
+recuento a ese rol cuando corresponde, en vez de marcar la corrida como
+incompleta y dejarla ahí.
 
 ---
 
@@ -181,7 +227,15 @@ aparece como resultado vigente hasta que alguien la valida.
 
 **Procesos, caso borde importante:** si el período no tiene un recuento fresco de
 existencia final, la corrida diaria se hace igual **pero queda marcada como
-provisoria por falta de recuento**. No inventamos unidades ni % de avance.
+provisoria por falta de recuento**, y se le pide el dato a la oficina técnica
+(D6) — no al costista, que según la cátedra no debe estimarlo. No inventamos
+unidades ni % de avance.
+
+**Excepción del primer período** (clase 40 y P3 §3): en el primer período de una
+campaña **ningún departamento tiene inventario inicial**, y los departamentos
+`sequence > 1` tampoco tienen nada recibido todavía. Una corrida ahí no se puede
+marcar como incompleta por falta de existencia inicial: no es que falte el dato,
+es que no existe. Va con test propio.
 
 **Tests:** el gate de standby no genera corrida sin cambios; una estructura rota
 no frena el lote; la corrida incompleta se guarda con sus motivos.
@@ -204,6 +258,13 @@ crea los departamentos en orden, marca coproductos/subproductos, guarda
 frecuencia y política de datos atrasados, y sella `setup_completed_at`. Mientras
 esté sin sellar, una estructura `PROCESSES` no puede calcular: 422 con mensaje
 accionable, nunca 500.
+
+**Paso nuevo del wizard (D6):** quién informa el grado de avance de la
+producción en proceso, y cada cuánto puede hacerlo. De esa respuesta sale la
+frecuencia máxima que le podemos ofrecer al cliente sin inventar números: si la
+oficina técnica releva cada 15 días, ofrecer un ciclo de 3 no tiene sentido. El
+wizard lo dice explícitamente en vez de dejar que el costista elija una
+frecuencia que su propia planta no puede alimentar.
 
 **Frontend:** wizard de 4 pasos al elegir "Costeo por Procesos", con la
 advertencia previa que pidió el socio ("¿qué pasa si hago esto?") en cada
@@ -292,10 +353,39 @@ F5 depende de F1 y F2. F6 depende de F2 y F3. F7 después de todo.
 
 ---
 
-## 6. Lo que este plan NO resuelve
+## 6. Fuentes de la bóveda usadas
 
-- El recuento físico sigue siendo manual: nadie puede inferir cuántas unidades a
-  medio hacer quedaron en la planta.
+Todo lo de arriba está contrastado contra `costear-vault/costear-knowledge-base`:
+
+- `costeo-procesos/corpus-catedra/P3` §3 y §4 — período como corte temporal según
+  la dinámica de la empresa; identidad "inventario final del período 1 =
+  inventario inicial del período 2".
+- Clase 40 — el corte de 2-3 días del ingenio; el primer período de una zafra sin
+  inventario inicial; el grado de avance por elemento lo informa el ingeniero.
+- Clase 36 — el grado de avance lo determina la oficina técnica al cierre de cada
+  período, por departamento y por elemento; el área de costos lo recibe y aplica.
+- Clase 34 — misma regla, dicha de nuevo: lo determina el responsable técnico del
+  proceso, no el área de costos.
+
+**Chequeo de consistencia que dio bien:** la clase 36 enuncia la producción
+equivalente **restando** el inventario inicial × grado de avance (variante PEPS),
+mientras P3 y la clase 40 la enuncian sin restarlo (promedio ponderado). El motor
+usa promedio ponderado y está documentado como método único por decisión de
+cátedra (`process-costing.ts:950`, DECISIONES.md B10). No hay contradicción con lo
+implementado; queda anotado acá para que nadie lo "corrija" leyendo solo la 36.
+
+Y una frase de la clase 36 que es, literalmente, la tesis de esta arquitectura:
+
+> "El número es una consecuencia. Lo que importa es cómo captás la información y
+> cómo la acomodás en el cuadro."
+
+---
+
+## 7. Lo que este plan NO resuelve
+
+- El recuento físico sigue siendo un input humano de la oficina técnica: nadie
+  puede inferir cuántas unidades a medio hacer quedaron en la planta ni con qué
+  grado de avance. Lo que el plan sí hace es pedírselo al rol correcto (D6).
 - No hay validación automática por confianza del sistema (la idea de que "a
   medida que se entrene, valide solo"). Requiere historial de correcciones que
   todavía no tenemos volumen para usar.
