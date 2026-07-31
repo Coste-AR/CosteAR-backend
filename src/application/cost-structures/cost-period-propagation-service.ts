@@ -6,8 +6,8 @@ import {
   periodBounds,
   nextPeriodCode,
   normalizeLegacyCode,
-  type Periodicity,
 } from '../../domain/periods/period-calendar.js';
+import { effectiveRhythm } from '../../domain/periods/effective-rhythm.js';
 import {
   closingStockOf,
   type MaterialClosingBalance,
@@ -82,7 +82,7 @@ export class CostPeriodPropagationService {
 
   async previewNext(userId: string, structureId: string) {
     const structure = await this.requireStructure(userId, structureId);
-    const periodicity = structure.company.periodicity as Periodicity;
+    const periodicity = effectiveRhythm(structure, structure.company.periodicity);
 
     const open = await this.db.costPeriod.findFirst({ where: { structureId, status: 'OPEN' } });
     const last = await this.db.costPeriod.findFirst({
@@ -142,7 +142,7 @@ export class CostPeriodPropagationService {
     ctx: AuditContext,
   ) {
     const structure = await this.requireStructure(userId, structureId);
-    const periodicity = structure.company.periodicity as Periodicity;
+    const periodicity = effectiveRhythm(structure, structure.company.periodicity);
 
     const open = await this.db.costPeriod.findFirst({ where: { structureId, status: 'OPEN' } });
     if (open) {
