@@ -250,12 +250,15 @@ enum CostingSystem {
 // ---------------------------------------------------------------------------
 
 /**
- * Ritmo de costeo de la empresa.
+ * Ritmo de costeo. `CUSTOM_DAYS` son ciclos de días fijos (cada 10, cada 15) y
+ * no se deducen solos de una fecha: necesitan además el largo del ciclo y la
+ * fecha desde la que se cuentan, que viven en `CostStructure`.
  */
 enum Periodicity {
   MONTHLY
   BIWEEKLY
   QUARTERLY
+  CUSTOM_DAYS
 }
 
 enum CostPeriodStatus {
@@ -350,6 +353,32 @@ model CostStructure {
   period        String // "YYYY-MM"
   status        CostStructureStatus @default(DRAFT)
   costingSystem CostingSystem       @default(ORDERS)
+
+  // ---------------------------------------------------------------------------
+  // FRECUENCIA DE COSTEO POR ESTRUCTURA
+  //
+  // Hasta acá el ritmo era uno solo para toda la empresa (`Company.periodicity`).
+  // No alcanza: una misma empresa puede querer costear un producto por mes y
+  // otro cada 15 días, y la frecuencia se decide al armar la estructura, no al
+  // dar de alta la empresa.
+  //
+  // `null` = hereda el ritmo de la empresa, que es exactamente lo que hacían
+  // todas las estructuras hasta hoy. Por eso la columna es nullable y sin
+  // default: ninguna estructura existente cambia de comportamiento.
+  // ---------------------------------------------------------------------------
+  /**
+   * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
+   */
+  periodicity      Periodicity?
+  /**
+   * Largo del ciclo en días. Obligatorio (y solo válido) con `CUSTOM_DAYS`.
+   */
+  periodLengthDays Int?
+  /**
+   * Día desde el que se cuentan los ciclos. Obligatorio (y solo válido) con
+   * `CUSTOM_DAYS`: sin ancla, "cada 10 días" no define ningún período concreto.
+   */
+  periodAnchorDate DateTime? @db.Date
 
   // Configuración de los tres elementos del costo (JSONB tipado en la app).
   rawMaterialConfig  Json?
