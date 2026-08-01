@@ -337,6 +337,8 @@ model CostPeriod {
   unitMovementSchedules UnitMovementSchedule[]
   // Costeo por Procesos (B05): repartos de costos conjuntos del período.
   jointCostAllocations  JointCostAllocation[]
+  // Todas las corridas del período (manuales, automáticas y la del cierre).
+  calculationRuns       CalculationRun[]
 
   @@unique([structureId, code])
   @@index([companyId, code])
@@ -958,6 +960,16 @@ model TraceAuditLog {
 
 // Una corrida del motor de cálculo. Inmutable — cada recálculo es un run
 // nuevo con su propio árbol de nodos.
+/**
+ * Qué disparó una corrida. `AUTO_DAILY` es el recálculo diario del período
+ * abierto; `CLOSE`, el que corre una vez al cerrar el período y queda congelado.
+ */
+enum RunTrigger {
+  MANUAL
+  AUTO_DAILY
+  CLOSE
+}
+
 model CalculationRun {
   id             String        @id @default(uuid()) @db.Uuid
   structureId    String        @db.Uuid
@@ -970,9 +982,43 @@ model CalculationRun {
   inputsSnapshot Json
   results        Json
 
+  // ---------------------------------------------------------------------------
+  // A QUÉ PERÍODO PERTENECE Y SI ESTÁ VALIDADA
+  //
+  // Las corridas colgaban solo de la estructura. Alcanzaba mientras calculaba
+  // únicamente el costista, a mano: la última corrida era, por definición, la
+  // que valía. Con el recálculo diario automático deja de alcanzar — hay que
+  // saber de qué período es cada corrida, y cuáles miró un humano.
+  //
+  // El booleano va acá y no en el período a propósito: un período tiene MUCHAS
+  // corridas (una por día), y lo que el costista valida es una foto concreta,
+  // no el período entero.
+  // ---------------------------------------------------------------------------
+  /**
+   * Período al que pertenece. Nullable: las corridas anteriores al modelo de
+   * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
+   * dejarlas sin él.
+   */
+  periodId String?     @db.Uuid
+  period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+
+  trigger RunTrigger @default(MANUAL)
+
+  /**
+   * true = un humano la miró y la dio por buena. Solo las validadas se muestran
+   * como resultado vigente; las demás existen igual y se ven en trazabilidad.
+   */
+  validated   Boolean   @default(false)
+  validatedAt DateTime? @db.Timestamptz
+  validatedBy String?   @db.Uuid
+
   nodes CalculationNode[]
 
   @@unique([structureId, runN])
+  // Historial de un período, de la más nueva a la más vieja.
+  @@index([periodId, executedAt])
+  // "El resultado vigente de esta estructura": la última validada.
+  @@index([structureId, validated, executedAt])
   @@map("calculation_runs")
 }
 
