@@ -266,6 +266,78 @@ enum CostPeriodStatus {
   CLOSED
 }
 
+/**
+ * Qué hacer cuando llega un dato cuya fecha cae en un período YA CERRADO.
+ *
+ * El default es preguntar. La decisión de qué pasa con la plata de un mes que
+ * ya se dio por bueno es del costista, no del sistema — y si el costista eligió
+ * de antemano en el setup, esa elección ES su autorización y no hace falta
+ * molestarlo cada vez.
+ *
+ *   ASK             — se le avisa y decide en el momento (default).
+ *   CURRENT_PERIOD  — se imputa al período abierto de hoy.
+ *   REOPEN          — se reabre el cerrado y se repropaga hacia adelante.
+ */
+enum LateDataPolicy {
+  ASK
+  CURRENT_PERIOD
+  REOPEN
+}
+
+/** Qué se resolvió (o está por resolverse) con un dato atrasado. */
+enum LateDataChoice {
+  CURRENT_PERIOD
+  REOPEN
+  DISCARD
+}
+
+/**
+ * Un dato llegó tarde: su fecha cae en un período que ya está cerrado.
+ *
+ * Mientras la decisión está pendiente el dato NO entra a ningún cálculo — el
+ * mismo criterio que ya usa un dato sin imputar. Es preferible un resultado que
+ * avisa que le falta algo, a uno completo que metió plata en el mes equivocado
+ * sin que nadie lo autorizara.
+ */
+model LateDataDecision {
+  id           String        @id @default(uuid()) @db.Uuid
+  dataPointId  String        @db.Uuid
+  dataPoint    DataPoint     @relation(fields: [dataPointId], references: [id], onDelete: Cascade)
+  structureId  String        @db.Uuid
+  structure    CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  userId       String        @db.Uuid // denormalizado para RLS y para la bandeja del costista
+
+  /** Período cerrado al que apuntaba la fecha del dato. */
+  targetPeriodCode String
+  /** Período abierto en el momento de detectarlo (la alternativa que se ofrece). */
+  openPeriodCode   String?
+
+  /** La política que estaba vigente cuando se detectó (para leer el histórico). */
+  policyAtDetection LateDataPolicy
+
+  /**
+   * NULL = pendiente de decisión. Con valor, ya se resolvió.
+   */
+  choice     LateDataChoice?
+  reason     String?
+  resolvedAt DateTime?       @db.Timestamptz
+  resolvedBy String?         @db.Uuid
+  /**
+   * true si la resolvió la política previa del costista en vez de una decisión
+   * en el momento. No es lo mismo "lo decidió ahora" que "lo dejó decidido
+   * antes", y el historial tiene que poder distinguirlo.
+   */
+  autoResolved Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  // Un dato no puede tener dos decisiones pendientes para el mismo período.
+  @@unique([dataPointId, targetPeriodCode])
+  @@index([userId, resolvedAt])
+  @@index([structureId, resolvedAt])
+  @@map("late_data_decisions")
+}
+
 model CostPeriod {
   id          String        @id @default(uuid()) @db.Uuid
   structureId String        @db.Uuid
@@ -392,6 +464,12 @@ model CostStructure {
    */
   periodAnchorDate DateTime? @db.Date
 
+  /**
+   * Qué hacer con un dato que llega para un período ya cerrado. Default:
+   * preguntarle al costista en el momento.
+   */
+  lateDataPolicy LateDataPolicy @default(ASK)
+
   // Configuración de los tres elementos del costo (JSONB tipado en la app).
   rawMaterialConfig  Json?
   directLaborConfig  Json?
@@ -422,6 +500,8 @@ model CostStructure {
   calculationRuns      CalculationRun[]
   // Modelo de períodos (problema C).
   periods              CostPeriod[]
+  // Datos que llegaron para un período ya cerrado y esperan decisión.
+  lateDataDecisions    LateDataDecision[]
   // Costeo por Procesos (B03): departamentos de la cadena secuencial.
   processDepartments   ProcessDepartment[]
   // Costeo por Procesos (B05): repartos de costos conjuntos de la estructura.
@@ -896,6 +976,8 @@ model DataPoint {
   createdAt       DateTime      @default(now()) @db.Timestamptz
 
   versions DataPointVersion[]
+  // Decisiones pendientes/resueltas por haber llegado tarde a un período cerrado.
+  lateDataDecisions LateDataDecision[]
 
   @@index([structureId])
   @@index([structureId, element])
