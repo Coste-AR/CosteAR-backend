@@ -12,7 +12,7 @@ import {
 import { type CalculationInput } from '../../domain/calculations/calculate.js';
 import { type TreeNode } from './tree-builder.js';
 import { selectCostingEngine } from './costing-engine.js';
-import { persistCalculationRun } from './calculation-run-persistence.js';
+import { persistCalculationRun, type RunTrigger } from './calculation-run-persistence.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
 
 /**
@@ -71,7 +71,12 @@ export class CalculationRunService {
     return s;
   }
 
-  async calculate(userId: string, structureId: string, actor: TraceActor) {
+  async calculate(
+    userId: string,
+    structureId: string,
+    actor: TraceActor,
+    trigger: RunTrigger = 'MANUAL',
+  ) {
     const s = await this.requireStructure(userId, structureId);
 
     // DESPACHO por sistema de costeo (patrón Strategy, B02). Este endpoint es el
@@ -172,6 +177,7 @@ export class CalculationRunService {
         engineVersion: engine.engineVersion,
         executedBy: actor.id,
         periodId: openPeriod?.id ?? null,
+        trigger,
         inputsSnapshot: input,
         results,
         tree,

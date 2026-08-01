@@ -3,7 +3,7 @@ import { prisma, withTenant } from '../../../infrastructure/database/prisma.js';
 import { type TraceActor } from '../../audit/trace-audit.js';
 import { NotFoundError, UnprocessableEntityError, DomainError } from '../../../domain/errors/domain-error.js';
 import { selectCostingEngine } from '../costing-engine.js';
-import { persistCalculationRun } from '../calculation-run-persistence.js';
+import { persistCalculationRun, type RunTrigger } from '../calculation-run-persistence.js';
 import { buildIncompletitud } from '../calculation-run-service.js';
 import type { TreeNode } from '../tree-builder.js';
 import type {
@@ -46,7 +46,13 @@ export class ProcessCalculationService {
    * corrida + su árbol de derivación. Devuelve el resultado con la marca de
    * incompletitud (F04) para que el frontend decida si pinta una advertencia.
    */
-  async calculate(userId: string, structureId: string, periodId: string, actor: TraceActor) {
+  async calculate(
+    userId: string,
+    structureId: string,
+    periodId: string,
+    actor: TraceActor,
+    trigger: RunTrigger = 'MANUAL',
+  ) {
     const ctx = await this.buildEngineInput(userId, structureId, periodId);
 
     const engine = selectCostingEngine('PROCESSES');
@@ -80,6 +86,7 @@ export class ProcessCalculationService {
         executedBy: actor.id,
         // Procesos calcula SIEMPRE contra un período concreto: acá nunca es null.
         periodId,
+        trigger,
         inputsSnapshot: { periodId, departments: ctx.engineInput.departments },
         results,
         tree,
