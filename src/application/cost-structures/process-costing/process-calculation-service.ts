@@ -78,6 +78,8 @@ export class ProcessCalculationService {
         structureId,
         engineVersion: engine.engineVersion,
         executedBy: actor.id,
+        // Procesos calcula SIEMPRE contra un período concreto: acá nunca es null.
+        periodId,
         inputsSnapshot: { periodId, departments: ctx.engineInput.departments },
         results,
         tree,

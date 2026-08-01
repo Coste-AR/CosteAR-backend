@@ -154,6 +154,16 @@ export class CalculationRunService {
     // teniendo `grossMargin`, `grossMarginPct`, etc. tal cual.
     const results = { ...output, incompletitud };
 
+    // A qué período pertenece esta corrida. Órdenes calcula "la estructura", no
+    // un período, así que se le adjudica el que esté abierto — que es el que el
+    // costista está viendo cuando aprieta el botón. Si todavía no hay ninguno
+    // (estructura recién creada), queda en null: mejor sin período que con uno
+    // inventado.
+    const openPeriod = await this.db.costPeriod.findFirst({
+      where: { structureId, status: 'OPEN', deletedAt: null },
+      select: { id: true },
+    });
+
     return withTenant(userId, async (tx) => {
       // Persistencia COMPARTIDA (misma que usará el motor de Procesos, B17): una
       // corrida + su árbol + la auditoría, en esta transacción. No se duplica.
@@ -161,6 +171,7 @@ export class CalculationRunService {
         structureId,
         engineVersion: engine.engineVersion,
         executedBy: actor.id,
+        periodId: openPeriod?.id ?? null,
         inputsSnapshot: input,
         results,
         tree,

@@ -42,6 +42,10 @@ const mockTx = {
   // Lock de fila que persistCalculationRun toma antes de asignar runN.
   $queryRaw: vi.fn().mockResolvedValue([]),
   calculationRun: { findFirst: vi.fn(), create: vi.fn() },
+  // La corrida se adjudica al período abierto de la estructura. Estas pruebas
+  // son sobre la incompletitud, no sobre períodos: sin período abierto la
+  // corrida queda con `periodId: null` y el cálculo sigue igual.
+  costPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
   calculationNode: { create: vi.fn().mockResolvedValue({ id: 'node-1' }) },
   traceAuditLog: { create: vi.fn(), count: vi.fn(), findMany: vi.fn() },
 };
