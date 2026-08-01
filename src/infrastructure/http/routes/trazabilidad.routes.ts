@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DataPointService } from '../../../application/trazabilidad/data-point-service.js';
 import { CalculationRunService } from '../../../application/cost-structures/calculation-run-service.js';
+import { LateDataService } from '../../../application/cost-structures/late-data-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import {
   createDataPointSchema,
@@ -12,6 +13,15 @@ import {
 } from '../../../shared/schemas/trazabilidad.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+const resolveLateDataSchema = z.object({
+  choice: z.enum(['CURRENT_PERIOD', 'REOPEN', 'DISCARD']),
+  // El motivo es obligatorio y largo a propósito: esta decisión mueve plata de
+  // un mes a otro, y dentro de seis meses alguien va a preguntar por qué.
+  reason: z
+    .string()
+    .trim()
+    .min(10, 'Explicá por qué tomaste esta decisión (al menos 10 caracteres). Queda registrado.'),
+});
 const runsQuery = z.object({
   soloValidadas: z
     .enum(['true', 'false'])
@@ -37,6 +47,7 @@ function actorFrom(request: FastifyRequest, area: string) {
 export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<void> {
   const service = new DataPointService();
   const runService = new CalculationRunService();
+  const lateDataService = new LateDataService();
 
   app.post('/structures/:id/calculate', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
@@ -87,6 +98,29 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     const result = await runService.validateRun(
       request.authUser!.id,
       id,
+      actorFrom(request, 'costista'),
+    );
+    return { data: result };
+  });
+
+  // ---------------------------------------------------------------------------
+  // Datos atrasados: los que llegaron para un período ya cerrado.
+  // ---------------------------------------------------------------------------
+
+  // La bandeja del costista. Cada ítem trae las opciones con su CONSECUENCIA
+  // escrita: "¿qué pasa si hago esto?" antes de apretar, no después.
+  app.get('/late-data-decisions', { preHandler: authenticate }, async (request) => {
+    return { data: await lateDataService.listPending(request.authUser!.id) };
+  });
+
+  app.post('/late-data-decisions/:id/resolve', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const { choice, reason } = resolveLateDataSchema.parse(request.body);
+    const result = await lateDataService.resolve(
+      request.authUser!.id,
+      id,
+      choice,
+      reason,
       actorFrom(request, 'costista'),
     );
     return { data: result };
