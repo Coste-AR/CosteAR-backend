@@ -246,6 +246,81 @@ export class CostPeriodPropagationService {
   }
 
   /**
+   * REPROPAGACIÓN HACIA ADELANTE.
+   *
+   * Se usa cuando un período ya cerrado se toca de nuevo (llegó una factura
+   * atrasada y el costista autorizó reabrirlo). La identidad de la cátedra
+   * —"el inventario final del período 1 es el inventario inicial del período
+   * 2"— no es una convención: es la misma mercadería. Si el período 1 cambia y
+   * el 2 no se actualiza, la cadena queda aritméticamente rota y el costo
+   * unitario de todos los meses siguientes miente.
+   *
+   * Recorre los períodos POSTERIORES en orden y reescribe la existencia inicial
+   * de cada uno con lo que dejó el anterior, reusando exactamente el mismo
+   * cálculo que usa la apertura normal (`processWipCarryOver`): el número que
+   * arrastra una corrección y el que arrastra una apertura son, por
+   * construcción, el mismo número.
+   *
+   * Devuelve qué períodos tocó, para que quien la llame lo deje asentado en la
+   * bitácora y el costista vea qué meses se movieron por su decisión.
+   */
+  async repropagateForward(
+    userId: string,
+    structureId: string,
+    fromPeriodCode: string,
+  ): Promise<{ periodCode: string; periodLabel: string; departamentos: number }[]> {
+    const structure = await this.requireStructure(userId, structureId);
+    if (structure.costingSystem !== 'PROCESSES') return [];
+
+    const posteriores = await this.db.costPeriod.findMany({
+      where: { structureId, deletedAt: null, code: { gt: fromPeriodCode } },
+      orderBy: { code: 'asc' },
+    });
+    if (posteriores.length === 0) return [];
+
+    const anterior = await this.db.costPeriod.findFirst({
+      where: { structureId, deletedAt: null, code: fromPeriodCode },
+    });
+    if (!anterior) return [];
+
+    const tocados: { periodCode: string; periodLabel: string; departamentos: number }[] = [];
+    let previo = anterior as unknown as PeriodLike;
+
+    for (const periodo of posteriores) {
+      // El motor tiene que poder valuar la existencia final del período previo.
+      // Si no puede (datos incompletos a mitad de la cadena), se corta acá: es
+      // preferible dejar la cadena a medio propagar y avisar, a escribir un
+      // arrastre inventado en los meses que siguen.
+      const carries = await this.processWipCarryOver(userId, structureId, previo);
+      if (carries.length === 0) break;
+
+      for (const c of carries) {
+        await this.db.unitMovementSchedule.updateMany({
+          where: { departmentId: c.departmentId, periodId: periodo.id },
+          data: {
+            initialWip: c.initialWip,
+            initialWipMpAvance: c.initialWipMpAvance,
+            initialWipConvAvance: c.initialWipConvAvance,
+            initialWipCostMp: c.initialWipCostMp,
+            initialWipCostMo: c.initialWipCostMo,
+            initialWipCostCif: c.initialWipCostCif,
+            initialWipCostPrevDept: c.initialWipCostPrevDept,
+          },
+        });
+      }
+
+      tocados.push({
+        periodCode: periodo.code,
+        periodLabel: periodo.label,
+        departamentos: carries.length,
+      });
+      previo = periodo as unknown as PeriodLike;
+    }
+
+    return tocados;
+  }
+
+  /**
    * ARRASTRE DE PRODUCCIÓN EN PROCESO ENTRE PERÍODOS (B18).
    *
    * Regla de la cátedra: "el inventario final del período 1 es el inventario
