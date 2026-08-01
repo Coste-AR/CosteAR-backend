@@ -1,6 +1,6 @@
 // src/infrastructure/workers/repeatable-jobs.ts
 import type { Queue } from 'bullmq';
-import { macroSyncQueue, nightlyLearningQueue } from './queues.js';
+import { macroSyncQueue, nightlyLearningQueue, dailyRunQueue } from './queues.js';
 
 /**
  * Registro ÚNICO de los jobs recurrentes.
@@ -24,6 +24,9 @@ import { macroSyncQueue, nightlyLearningQueue } from './queues.js';
 
 const TIMEZONE = 'America/Argentina/Buenos_Aires';
 const NIGHTLY_CRON = '0 2 * * *';
+// Después del aprendizaje nocturno (02:00), para que el cálculo del día tome
+// cualquier corrección que ese pipeline haya dejado aplicada.
+const DAILY_RUN_CRON = '0 3 * * *';
 
 interface RepeatableSpec {
   name: string;
@@ -88,5 +91,11 @@ export async function registerRepeatableJobs(macroCron: string): Promise<void> {
     name: 'nightly-pipeline',
     pattern: NIGHTLY_CRON,
     jobId: 'scheduled-nightly-learning',
+  });
+
+  await ensureRepeatable(dailyRunQueue, 'daily-run', {
+    name: 'daily-run',
+    pattern: DAILY_RUN_CRON,
+    jobId: 'scheduled-daily-run',
   });
 }
