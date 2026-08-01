@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
-import { type TraceActor } from '../audit/trace-audit.js';
+import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
 import { MissingInputError, CostingSystemNotAvailableError } from '../../domain/errors/calculation-errors.js';
 import {
@@ -246,25 +246,127 @@ export class CalculationRunService {
     return { runId: run.id, runN: run.runN, engineVersion: run.engineVersion, tree: toTree(null) };
   }
 
-  async listRuns(userId: string, structureId: string) {
+  /**
+   * Historial de corridas. Por defecto devuelve TODAS —incluidas las automáticas
+   * sin validar—, porque esta es la vista de trazabilidad y su razón de ser es
+   * mostrar absolutamente todo lo que pasó. `soloValidadas` existe para las
+   * pantallas que quieren únicamente lo que un humano firmó.
+   */
+  async listRuns(userId: string, structureId: string, soloValidadas = false) {
     await this.requireStructure(userId, structureId);
     const runs = await this.db.calculationRun.findMany({
-      where: { structureId },
+      where: { structureId, ...(soloValidadas ? { validated: true } : {}) },
       orderBy: { runN: 'desc' },
-      include: { executedByUser: true },
+      include: { executedByUser: true, period: { select: { code: true, label: true } } },
       take: 100,
     });
-    return runs.map((r) => {
-      const results = r.results as { grossMargin?: number; grossMarginPct?: number };
-      return {
-        id: r.id,
-        runN: r.runN,
-        engineVersion: r.engineVersion,
-        executedBy: r.executedByUser.name,
-        executedAt: r.executedAt.toISOString(),
-        grossMargin: results.grossMargin ?? null,
-        grossMarginPct: results.grossMarginPct ?? null,
-      };
+    return runs.map((r) => this.toRunSummary(r));
+  }
+
+  /**
+   * El resultado que vale hoy: la última corrida VALIDADA.
+   *
+   * Si no hay ninguna validada, no devuelve vacío —eso le escondería al costista
+   * que el sistema viene calculando— sino la última automática marcada como
+   * provisoria. Es la diferencia entre "no hay datos" y "hay datos que nadie
+   * miró todavía", y son dos situaciones muy distintas para quien decide precios.
+   */
+  async currentResult(userId: string, structureId: string) {
+    await this.requireStructure(userId, structureId);
+
+    const validada = await this.db.calculationRun.findFirst({
+      where: { structureId, validated: true },
+      orderBy: { executedAt: 'desc' },
+      include: { executedByUser: true, period: { select: { code: true, label: true } } },
     });
+    if (validada) return { provisorio: false, run: this.toRunSummary(validada) };
+
+    const automatica = await this.db.calculationRun.findFirst({
+      where: { structureId },
+      orderBy: { executedAt: 'desc' },
+      include: { executedByUser: true, period: { select: { code: true, label: true } } },
+    });
+    if (!automatica) return { provisorio: false, run: null };
+
+    return {
+      provisorio: true,
+      motivo:
+        'Este resultado lo calculó el sistema solo y todavía no lo revisó nadie. ' +
+        'Revisá los datos del período y validalo antes de tomarlo por bueno.',
+      run: this.toRunSummary(automatica),
+    };
+  }
+
+  /**
+   * Un humano da por buena una corrida automática.
+   *
+   * Es de una sola dirección a propósito: no hay "desvalidar". Validar es un
+   * hecho con fecha y autor, y borrarlo dejaría el historial diciendo que nadie
+   * miró algo que sí se miró. Si el resultado estaba mal, el camino es corregir
+   * los datos y calcular de nuevo — que genera una corrida nueva y deja las dos
+   * a la vista.
+   */
+  async validateRun(userId: string, runId: string, actor: TraceActor) {
+    const run = await this.db.calculationRun.findFirst({
+      where: { id: runId, structure: { userId } },
+    });
+    if (!run) throw new NotFoundError('Corrida de cálculo no encontrada');
+
+    // Revalidar no es un error del usuario: es apretar dos veces. Se devuelve el
+    // estado tal cual, sin pisar quién validó primero ni cuándo.
+    if (run.validated) {
+      return { id: run.id, runN: run.runN, validated: true, yaEstaba: true };
+    }
+
+    return withTenant(userId, async (tx) => {
+      const updated = await tx.calculationRun.update({
+        where: { id: runId },
+        data: { validated: true, validatedAt: new Date(), validatedBy: actor.id },
+      });
+
+      await recordTraceAudit(
+        {
+          entityType: 'CostStructure',
+          entityId: run.structureId,
+          action: 'validar_calculo',
+          actor,
+          after: { runId: run.id, runN: run.runN, trigger: run.trigger },
+        },
+        tx,
+      );
+
+      return { id: updated.id, runN: updated.runN, validated: true, yaEstaba: false };
+    });
+  }
+
+  /** Forma común de una corrida para las listas y el resultado vigente. */
+  private toRunSummary(r: {
+    id: string;
+    runN: number;
+    engineVersion: string;
+    executedAt: Date;
+    trigger: string;
+    validated: boolean;
+    validatedAt: Date | null;
+    results: unknown;
+    executedByUser: { name: string };
+    period: { code: string; label: string } | null;
+  }) {
+    const results = r.results as { grossMargin?: number; grossMarginPct?: number };
+    return {
+      id: r.id,
+      runN: r.runN,
+      engineVersion: r.engineVersion,
+      // En una corrida automática `executedBy` es el dueño de la estructura
+      // porque la FK lo exige. Decir su nombre sería mentir: no la apretó él.
+      executedBy: r.trigger === 'AUTO_DAILY' ? 'Cálculo automático del sistema' : r.executedByUser.name,
+      executedAt: r.executedAt.toISOString(),
+      trigger: r.trigger,
+      validated: r.validated,
+      validatedAt: r.validatedAt?.toISOString() ?? null,
+      periodo: r.period ? { code: r.period.code, label: r.period.label } : null,
+      grossMargin: results.grossMargin ?? null,
+      grossMarginPct: results.grossMarginPct ?? null,
+    };
   }
 }

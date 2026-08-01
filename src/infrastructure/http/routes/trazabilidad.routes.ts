@@ -12,6 +12,12 @@ import {
 } from '../../../shared/schemas/trazabilidad.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+const runsQuery = z.object({
+  soloValidadas: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+});
 const paginationQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
@@ -54,10 +60,36 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     return { data: tree };
   });
 
+  // Historial completo de corridas. Por defecto vienen TODAS, incluidas las
+  // automáticas sin validar: esta es la vista de trazabilidad y su razón de ser
+  // es no esconder nada. `?soloValidadas=true` para las pantallas que quieren
+  // únicamente lo que un humano firmó.
   app.get('/structures/:id/runs', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
-    const runs = await runService.listRuns(request.authUser!.id, id);
+    const { soloValidadas } = runsQuery.parse(request.query);
+    const runs = await runService.listRuns(request.authUser!.id, id, soloValidadas);
     return { data: runs };
+  });
+
+  // El resultado que vale hoy. Si nadie validó todavía, devuelve la última
+  // corrida automática con `provisorio: true` y el motivo en castellano — no
+  // vacío, que le escondería al costista que el sistema viene calculando.
+  app.get('/structures/:id/resultado-vigente', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    return { data: await runService.currentResult(request.authUser!.id, id) };
+  });
+
+  // Un humano da por buena una corrida automática. No existe el inverso:
+  // validar es un hecho con fecha y autor, y borrarlo dejaría el historial
+  // diciendo que nadie miró algo que sí se miró.
+  app.post('/calculation-runs/:id/validate', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const result = await runService.validateRun(
+      request.authUser!.id,
+      id,
+      actorFrom(request, 'costista'),
+    );
+    return { data: result };
   });
 
   // Crear un data point (bootstrap de un dato nuevo — la spec no numera este
