@@ -324,6 +324,16 @@ model CostPeriod {
   resultEngineVersion String?
   resultAt            DateTime? @db.Timestamptz
 
+  /**
+   * Última vez que el job diario calculó este período. NULL = nunca.
+   *
+   * Es el "standby": el job compara contra esta marca y se saltea los períodos
+   * donde no llegó nada nuevo. Recalcular sin datos nuevos daría el mismo
+   * número y enterraría el historial bajo treinta corridas idénticas, justo en
+   * la pantalla cuyo valor es poder leerlo.
+   */
+  lastAutoRunAt DateTime? @db.Timestamptz
+
   // Reapertura: se permite, pero deja rastro (quién, cuándo, por qué).
   reopenCount  Int       @default(0)
   reopenedAt   DateTime? @db.Timestamptz
