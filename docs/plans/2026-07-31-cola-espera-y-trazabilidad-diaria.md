@@ -2,8 +2,19 @@
 title: "Plan de implementación — Cola de espera, corrida diaria y trazabilidad total"
 fecha: 2026-07-31
 origen: "Reunión 30/07/2026 + respuestas del socio (Granola 180dcece)"
-estado: propuesta — pendiente de aprobación del equipo
+estado: F1-F3, F5 y F6 implementadas — F4 pendiente
 ---
+
+> **Estado al 01/08/2026.** Implementadas y verificadas: **F1** (frecuencia por
+> estructura), **F2** (período y validación en la corrida), **F3** (job diario),
+> **F5** (datos atrasados) y **F6** (historial visible, bandeja y banda de
+> provisorio). Pendiente: **F4** — el setup previo obligatorio y, dentro de él,
+> el permiso de recuento y los campos de procedencia de D7, que son los que
+> cierran el requisito de la cátedra sobre quién informa el grado de avance.
+> **F7** sigue fuera de alcance por decisión del equipo.
+>
+> Backend en `feat/periodos-frecuencia-por-estructura`, frontend en
+> `feat/trazabilidad-corridas-y-datos-atrasados`, las dos salidas de `dev`.
 
 # Plan — Cola de espera, corrida diaria y trazabilidad
 
