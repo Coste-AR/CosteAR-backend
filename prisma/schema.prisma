@@ -1385,6 +1385,32 @@ model ProcessDepartment {
   @@map("process_departments")
 }
 
+/**
+ * De dónde salió el grado de avance de la existencia final.
+ *
+ * No es un detalle burocrático: la cátedra lo dice tres veces (clases 34, 36 y
+ * 40). "El grado de avance lo determina la oficina técnica al cierre de cada
+ * período, por departamento y por elemento — el área de costos lo recibe y
+ * aplica, NO LO ESTIMA."
+ *
+ * El sistema no puede impedir que el costista lo cargue si la planta no
+ * responde (sería inusable), pero sí puede dejar constancia de quién lo informó.
+ * Un informe apoyado en avances estimados por costos y otro apoyado en un
+ * recuento de planta no valen lo mismo, y esa diferencia tiene que estar a la
+ * vista en vez de escondida.
+ *
+ *   TECHNICAL_OFFICE — lo informó planta/oficina técnica. Lo que pide la cátedra.
+ *   COSTIST_ESTIMATE — lo estimó el área de costos. Válido, pero marcado.
+ *   CARRIED_OVER     — viene arrastrado del período anterior, sin recuento nuevo.
+ *   NOT_COUNTED      — no hay recuento (el default de lo que ya existía).
+ */
+enum CountSource {
+  TECHNICAL_OFFICE
+  COSTIST_ESTIMATE
+  CARRIED_OVER
+  NOT_COUNTED
+}
+
 // Costeo por Procesos (B04) — cuadro de movimiento de unidades.
 //
 // Una fila por (departamento, período): resume cuántas unidades entran, se
