@@ -1705,6 +1705,18 @@ model SystemAlert {
   message       String
   sentryIssueId String?
   sentryUrl     String?
+  // Datos que el webhook de Sentry (Issue Alert) ya manda en data.issue pero
+  // antes se descartaban, dejando solo el título cortado. NO incluye stack
+  // trace ni breadcrumbs — eso Sentry no lo manda en la alerta de issue, hace
+  // falta pedirlo a su API de eventos con un token que hoy no está configurado;
+  // para eso sigue estando el link "Ver en Sentry".
+  culprit         String?   // dónde: archivo/función donde se originó
+  errorType       String?   // qué: metadata.type (ej. "TypeError")
+  errorValue      String?   // metadata.value (el mensaje de la excepción)
+  occurrenceCount Int?      // metadata.count del issue al momento del webhook
+  firstSeenAt     DateTime?
+  lastSeenAt      DateTime?
+  platform        String?
   resolvedAt    DateTime?
   createdAt     DateTime  @default(now())
 
