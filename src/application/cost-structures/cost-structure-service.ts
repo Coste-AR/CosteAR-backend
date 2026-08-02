@@ -444,6 +444,31 @@ export class CostStructureService {
   async calculate(userId: string, id: string, ctx: AuditContext, inventoryOverride?: unknown) {
     const s = await this.requireStructure(userId, id);
 
+    // ESTE ENDPOINT ES SOLO DE COSTEO POR ÓRDENES.
+    //
+    // Hasta acá no miraba el sistema de costeo y le corría la matemática de
+    // Órdenes a CUALQUIER estructura, incluidas las de Procesos. Dos consecuencias,
+    // las dos malas:
+    //
+    //  1. En Procesos, MP/MOD/CIP viven en el cuadro de movimiento de unidades,
+    //     no en estos JSON. Al estar vacíos, el costista recibía "cargá MP, MOD y
+    //     CIP antes de calcular" — un mensaje que le pide llenar campos que en su
+    //     pantalla no existen, y que dejaba el módulo aparentemente roto.
+    //  2. Peor: si el clasificador había autopoblado esos JSON, el cálculo salía
+    //     igual y PERSISTÍA un costo con matemática de Órdenes sobre una
+    //     estructura de Procesos. Un número mal calculado, guardado, sin que
+    //     nadie se entere.
+    //
+    // El Costeo por Procesos se calcula por PERÍODO y DEPARTAMENTO, con su propio
+    // motor y su propio endpoint. Acá se corta con un 422 que dice a dónde ir.
+    if (s.costingSystem === 'PROCESSES') {
+      throw new UnprocessableEntityError(
+        `«${s.productName}» usa Costeo por Procesos, que se calcula por período y por ` +
+          'departamento. Abrí la pestaña Resultado del período para correr el informe de costos.',
+        { field: 'costingSystem' },
+      );
+    }
+
     if (!s.rawMaterialConfig || !s.directLaborConfig || !s.indirectCostConfig) {
       throw new ValidationError(
         'La estructura está incompleta: cargá MP, MOD y CIP antes de calcular',
