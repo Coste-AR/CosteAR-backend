@@ -470,6 +470,36 @@ model CostStructure {
    */
   lateDataPolicy LateDataPolicy @default(ASK)
 
+  // ---------------------------------------------------------------------------
+  // SETUP PREVIO (el "CTO inicial" de la reunión del 30/07)
+  //
+  // Cuando llega un dato por ingesta, el sistema no sabe nada de la estructura
+  // interna de la empresa y no puede clasificarlo por departamento. La solución
+  // acordada: antes de empezar a costear por procesos, el cliente declara su
+  // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
+  // ---------------------------------------------------------------------------
+  /**
+   * Cuándo se completó el setup. NULL = todavía no. Una estructura de PROCESSES
+   * sin sellar no puede calcular: sin departamentos declarados el resultado no
+   * significaría nada.
+   */
+  setupCompletedAt DateTime? @db.Timestamptz
+  /**
+   * ¿El proceso rinde coproductos o subproductos? Se pregunta en el setup
+   * porque cambia qué pantallas tienen sentido después.
+   */
+  hasJointProducts Boolean   @default(false)
+  /**
+   * Cada cuántos días puede la oficina técnica informar el grado de avance.
+   *
+   * No es lo mismo que `periodLengthDays`: esto es lo que la PLANTA puede hacer,
+   * aquello es lo que el costista ELIGIÓ. Si la planta releva cada 15 días y el
+   * costista pide ciclos de 3, el sistema calcularía tres veces sobre el mismo
+   * recuento y le daría apariencia de dato fresco a algo que no lo es. Guardarlo
+   * permite avisarlo en vez de dejarlo pasar.
+   */
+  wipCountFrequencyDays Int?
+
   // Configuración de los tres elementos del costo (JSONB tipado en la app).
   rawMaterialConfig  Json?
   directLaborConfig  Json?
