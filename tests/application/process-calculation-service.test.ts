@@ -60,6 +60,9 @@ function primeHappyPath() {
     userId: 'user-1',
     productName: 'Alcohol',
     costingSystem: 'PROCESSES',
+    // El camino feliz es el de una estructura ya configurada: sin el setup
+    // sellado, calcular Procesos se frena con un 422 accionable.
+    setupCompletedAt: new Date('2026-04-01T00:00:00Z'),
   });
   mockTx.costPeriod.findFirst.mockResolvedValue({ id: PERIOD, structureId: 'st-1', label: 'Abril 2026' });
   mockTx.processDepartment.findMany.mockResolvedValue([
@@ -134,6 +137,50 @@ describe('ProcessCalculationService', () => {
     await expect(promise).rejects.toBeInstanceOf(UnprocessableEntityError);
     await expect(promise).rejects.toThrow(/Costeo por Órdenes/i);
     expect(mockTx.calculationRun.create).not.toHaveBeenCalled();
+  });
+
+  it('sin el setup previo completo NO calcula, y lo dice de forma accionable', async () => {
+    const { ProcessCalculationService } = await import(
+      '@/application/cost-structures/process-costing/process-calculation-service.js'
+    );
+    primeHappyPath();
+    mockTx.costStructure.findFirst.mockResolvedValue({
+      id: 'st-1',
+      userId: 'user-1',
+      productName: 'Alcohol',
+      costingSystem: 'PROCESSES',
+      setupCompletedAt: null, // nunca declaró su estructura productiva
+    });
+
+    const service = new ProcessCalculationService(mockTx as never);
+    const promise = service.calculate('user-1', 'st-1', PERIOD, actor);
+
+    // 422 accionable, nunca un 500 ni un número vacío que después alguien lee
+    // como si fuera un costo.
+    await expect(promise).rejects.toBeInstanceOf(UnprocessableEntityError);
+    await expect(promise).rejects.toThrow(/configuración inicial/i);
+    expect(mockTx.calculationRun.create).not.toHaveBeenCalled();
+  });
+
+  it('sin setup el INFORME igual se puede leer: la compuerta es para emitir, no para mirar', async () => {
+    const { ProcessCalculationService } = await import(
+      '@/application/cost-structures/process-costing/process-calculation-service.js'
+    );
+    primeHappyPath();
+    mockTx.costStructure.findFirst.mockResolvedValue({
+      id: 'st-1',
+      userId: 'user-1',
+      productName: 'Alcohol',
+      costingSystem: 'PROCESSES',
+      setupCompletedAt: null,
+    });
+
+    const service = new ProcessCalculationService(mockTx as never);
+
+    // Si la compuerta estuviera en el armado del input, una estructura vieja sin
+    // setup no podría ni abrir el período siguiente: el arrastre entre períodos
+    // usa este informe internamente.
+    await expect(service.getProductionReport('user-1', 'st-1', PERIOD)).resolves.toBeDefined();
   });
 
   it('el informe de producción recalcula sin persistir (no crea corrida)', async () => {

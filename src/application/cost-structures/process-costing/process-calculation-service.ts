@@ -53,6 +53,7 @@ export class ProcessCalculationService {
     actor: TraceActor,
     trigger: RunTrigger = 'MANUAL',
   ) {
+    await this.requireSetupCompleted(userId, structureId);
     const ctx = await this.buildEngineInput(userId, structureId, periodId);
 
     const engine = selectCostingEngine('PROCESSES');
@@ -142,6 +143,40 @@ export class ProcessCalculationService {
    * Compartido por `calculate` (persiste) y `getProductionReport` (solo lee), así
    * ambos ven exactamente los mismos números.
    */
+  /**
+   * COMPUERTA DEL SETUP PREVIO.
+   *
+   * Sin el mapa de departamentos declarado, un resultado de Costeo por Procesos
+   * no significa nada: no hay cadena por la que viaje el costo ni lugar al que
+   * adjudicar lo que llega por ingesta. Se frena con un 422 accionable en vez de
+   * producir un número vacío que después alguien lee como si fuera un costo.
+   *
+   * Va en `calculate()` y NO en `buildEngineInput()` a propósito. El armado del
+   * input lo comparte `getProductionReport()`, que además de ser una lectura lo
+   * usa internamente el arrastre entre períodos: si la compuerta estuviera ahí,
+   * una estructura vieja sin setup no podría ni abrir el período siguiente. Lo
+   * que hay que impedir es EMITIR un costo, no leer lo que ya hay.
+   *
+   * Las estructuras de Procesos anteriores a esta validación tienen
+   * `setupCompletedAt` en NULL y caen acá. Es lo correcto: nunca declararon su
+   * estructura productiva, y completar el wizard es un trámite de una sola vez.
+   */
+  private async requireSetupCompleted(userId: string, structureId: string): Promise<void> {
+    const s = await this.db.costStructure.findFirst({
+      where: { id: structureId, userId, deletedAt: null },
+      select: { productName: true, costingSystem: true, setupCompletedAt: true },
+    });
+    if (!s || s.costingSystem !== 'PROCESSES' || s.setupCompletedAt) return;
+
+    throw new UnprocessableEntityError(
+      `Antes de calcular «${s.productName}» hay que completar la configuración inicial: qué ` +
+        'departamentos componen el proceso, si rinde coproductos y cada cuánto se cuenta la ' +
+        'producción en proceso. Es una sola vez, y sin eso el sistema no sabe a qué etapa ' +
+        'corresponde cada costo.',
+      { field: 'setupCompletedAt' },
+    );
+  }
+
   private async buildEngineInput(
     userId: string,
     structureId: string,
@@ -154,6 +189,7 @@ export class ProcessCalculationService {
         `La estructura «${structure.productName}» usa Costeo por Órdenes; este cálculo es solo para estructuras de Costeo por Procesos.`,
       );
     }
+
 
     const period = await this.db.costPeriod.findFirst({ where: { id: periodId, structureId } });
     if (!period) throw new NotFoundError('Período de costos no encontrado');
