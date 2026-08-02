@@ -1525,6 +1525,18 @@ model UnitMovementSchedule {
    */
   initialWipCostPrevDept Decimal? @db.Decimal(18, 4)
 
+  // --- PROCEDENCIA DEL RECUENTO ---
+  /**
+   * Quién informó el grado de avance de la existencia final. Ver `CountSource`.
+   * Las filas anteriores a esta columna quedan en `NOT_COUNTED`, que es la
+   * verdad: nadie registró de dónde salió el número.
+   */
+  countSource CountSource @default(NOT_COUNTED)
+  /** Cuándo se informó el recuento. */
+  countedAt   DateTime?   @db.Timestamptz
+  /** Usuario que lo informó. */
+  countedBy   String?     @db.Uuid
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
