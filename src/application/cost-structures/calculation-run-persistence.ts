@@ -16,12 +16,26 @@ import { type TreeNode } from './tree-builder.js';
  * departamento) y la tabla no se casa con ninguna.
  */
 
+/** Qué disparó la corrida. Espeja el enum `RunTrigger` de Prisma. */
+export type RunTrigger = 'MANUAL' | 'AUTO_DAILY' | 'CLOSE';
+
 export interface PersistCalculationRunParams {
   structureId: string;
   /** Versión del motor con el que se calculó (para leer una corrida vieja). */
   engineVersion: string;
-  /** Usuario que ejecutó la corrida (server-side, del JWT). */
+  /**
+   * Usuario que ejecutó la corrida (server-side, del JWT). En las automáticas es
+   * el dueño de la estructura, porque la FK lo exige — pero `trigger` deja claro
+   * que no la apretó él, y la UI nunca dice "la calculaste vos".
+   */
   executedBy: string;
+  /**
+   * Período al que pertenece. `null` solo si la estructura todavía no tiene
+   * ninguno abierto.
+   */
+  periodId?: string | null;
+  /** Default `MANUAL`: el botón del costista, que es como se calculaba hasta hoy. */
+  trigger?: RunTrigger;
   /** Snapshot de los insumos ya resueltos (JSON). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   inputsSnapshot: any;
@@ -84,12 +98,31 @@ export async function persistCalculationRun(
   });
   const runN = (last?.runN ?? 0) + 1;
 
+  // La validación se DERIVA del disparador, no la elige quien llama.
+  //
+  // Una corrida está validada cuando un humano decidió que se corriera:
+  // `MANUAL` es el botón "calcular" y `CLOSE` es el cierre del período — en los
+  // dos casos hay alguien mirando. `AUTO_DAILY` es el cron, que no valida nada:
+  // deja la foto guardada esperando que alguien la mire.
+  //
+  // Se deriva acá, en un solo lugar, para que ningún motor pueda persistir por
+  // error una corrida automática marcada como aprobada. Es la diferencia entre
+  // un número que alguien firmó y uno que el sistema calculó solo, y es la línea
+  // sobre la que se apoya todo lo que se muestra en pantalla.
+  const trigger = params.trigger ?? 'MANUAL';
+  const validated = trigger !== 'AUTO_DAILY';
+
   const run = await tx.calculationRun.create({
     data: {
       structureId: params.structureId,
       runN,
       engineVersion: params.engineVersion,
       executedBy: params.executedBy,
+      periodId: params.periodId ?? null,
+      trigger,
+      validated,
+      validatedAt: validated ? new Date() : null,
+      validatedBy: validated ? params.executedBy : null,
       inputsSnapshot: params.inputsSnapshot,
       results: params.results,
     },
@@ -103,7 +136,7 @@ export async function persistCalculationRun(
       entityId: params.structureId,
       action: 'calcular',
       actor: params.audit.actor,
-      after: { runId: run.id, runN, ...params.audit.after },
+      after: { runId: run.id, runN, trigger, validated, ...params.audit.after },
     },
     tx,
   );

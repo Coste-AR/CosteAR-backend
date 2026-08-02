@@ -19,7 +19,8 @@ import {
 } from '../../domain/calculations/calculate.js';
 import { AllocationBaseService } from './allocation-base-service.js';
 import { requireWritablePeriod, type PeriodMirrorData } from './period-sync.js';
-import { codeFromDate, type Periodicity } from '../../domain/periods/period-calendar.js';
+import { codeFromDate } from '../../domain/periods/period-calendar.js';
+import { companyRhythm } from '../../domain/periods/effective-rhythm.js';
 import type { IndirectCostConfig } from '../../shared/schemas/cost.schema.js';
 
 /**
@@ -115,8 +116,11 @@ export class CostStructureService {
     // El período de arranque ya no se tipea: sale de la fecha de hoy leída con el RITMO
     // de la empresa. Una empresa quincenal que da de alta un producto el 20 de julio
     // arranca en la 2ª quincena de julio ("2026-07-Q2"), no en "julio" a secas.
-    const period =
-      input.period ?? codeFromDate(new Date(), company.periodicity as Periodicity);
+    //
+    // Acá va el ritmo de la EMPRESA a propósito: la estructura todavía no existe,
+    // así que no puede tener override propio. Si el costista elige una frecuencia
+    // distinta para este producto, se aplica desde el período siguiente.
+    const period = input.period ?? codeFromDate(new Date(), companyRhythm(company.periodicity));
 
     return this.db.$transaction(async (tx) => {
       const structure = await tx.costStructure.create({
