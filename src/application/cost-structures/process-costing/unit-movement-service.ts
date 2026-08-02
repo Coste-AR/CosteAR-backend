@@ -99,7 +99,7 @@ const FIELD_META: Record<CuadroField, { label: string; unit: string; element: 'M
 interface ProcessContext {
   structure: { id: string; productName: string };
   department: { id: string; name: string; sequence: number; defaultConversionAvanceEqualsMO: boolean };
-  period: { id: string; label: string };
+  period: { id: string; label: string; code: string };
 }
 
 type NumericValues = Record<CuadroField, number | undefined>;
@@ -364,7 +364,7 @@ export class UnitMovementService {
         sequence: department.sequence,
         defaultConversionAvanceEqualsMO: department.defaultConversionAvanceEqualsMO,
       },
-      period: { id: period.id, label: period.label },
+      period: { id: period.id, label: period.label, code: period.code },
     };
   }
 
@@ -422,6 +422,19 @@ export class UnitMovementService {
           fieldKey,
           label,
           unit: meta.unit,
+          // EL DATO DEL CUADRO YA SABE DE QUÉ PERÍODO ES.
+          //
+          // La imputación existe para los datos que llegan por ingesta: una
+          // factura no dice a qué mes de costeo pertenece. Un valor del cuadro
+          // de movimiento, sí — se carga PARA un período concreto, y el propio
+          // `fieldKey` lo lleva adentro.
+          //
+          // Sin esto, cada guardado del cuadro dejaba 6 datos sin imputar por
+          // departamento, y el cierre del período los bloquea a todos: con dos
+          // departamentos ya eran 12 fichas que el costista tenía que imputar a
+          // mano, una por una, para poder cerrar el mes. En la práctica, el
+          // período no se podía cerrar.
+          periodoImputado: ctx.period.code,
           sourceArea: body.sourceArea,
           method: body.method,
           valueNum: raw,

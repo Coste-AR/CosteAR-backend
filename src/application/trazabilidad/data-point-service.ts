@@ -59,7 +59,13 @@ export class DataPointService {
   async createInTx(
     tx: Prisma.TransactionClient,
     structureId: string,
-    input: CreateDataPointInput,
+    /**
+     * `periodoImputado` es opcional y solo lo manda quien SABE a qué período
+     * pertenece el dato en el momento de crearlo. Un comprobante que entra por
+     * ingesta no lo sabe —de ahí toda la maquinaria de imputación—, pero un
+     * valor del cuadro de movimiento sí: se carga PARA un período concreto.
+     */
+    input: CreateDataPointInput & { periodoImputado?: string },
     actor: TraceActor,
   ) {
     const dp = await tx.dataPoint.create({
@@ -70,6 +76,7 @@ export class DataPointService {
         label: input.label,
         unit: input.unit,
         sourceArea: input.sourceArea,
+        periodoImputado: input.periodoImputado ?? null,
         fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
       },
     });

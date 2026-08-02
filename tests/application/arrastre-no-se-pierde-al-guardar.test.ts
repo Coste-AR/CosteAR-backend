@@ -45,7 +45,7 @@ function makeDb() {
         id: DEPT, name: 'Faena', sequence: 1, defaultConversionAvanceEqualsMO: true,
       })),
     },
-    costPeriod: { findFirst: vi.fn(async () => ({ id: PERIOD, structureId: 'st-1', label: 'Agosto' })) },
+    costPeriod: { findFirst: vi.fn(async () => ({ id: PERIOD, structureId: 'st-1', label: 'Agosto', code: '2026-08' })) },
     unitMovementSchedule: {
       findUnique: vi.fn(async () => arrastreDeJulio),
       upsert: vi.fn(async ({ update }: { update: Record<string, unknown> }) => {
@@ -148,5 +148,38 @@ describe('El arrastre del período anterior sobrevive a un guardado', () => {
     // En el primer período de una campaña ningún departamento tiene existencia
     // inicial: no falta el dato, no existe.
     expect(db.guardado.data!.initialWip).toBe(0);
+  });
+});
+
+/**
+ * EL CIERRE QUE NO SE PODÍA HACER.
+ *
+ * Cada valor del cuadro se persiste como dato trazable. Se creaban SIN período
+ * imputado, y el cierre del período bloquea sobre datos sin imputar: con dos
+ * departamentos quedaban 12 fichas que el costista tenía que imputar a mano, una
+ * por una, para poder cerrar el mes. En la práctica el período no se cerraba.
+ *
+ * La imputación existe para los datos que llegan por ingesta: una factura no
+ * dice a qué mes de costeo pertenece. Un valor del cuadro sí — se carga PARA un
+ * período concreto.
+ */
+describe('Los datos del cuadro nacen imputados a su período', () => {
+  it('el dato trazable se crea con el período al que pertenece', async () => {
+    const db = makeDb();
+
+    await guardar(db, {
+      startedInProduction: 8000,
+      transferredOut: 9000,
+      finalWip: 1000,
+      sourceArea: 'planta',
+      method: 'manual',
+    });
+
+    const creados = db.dataPoint.create.mock.calls.map((c) => c[0].data);
+    expect(creados.length).toBeGreaterThan(0);
+    // Sin esto, cada uno de estos bloquea el cierre del mes.
+    for (const d of creados) {
+      expect(d.periodoImputado).toBe('2026-08');
+    }
   });
 });
