@@ -12,6 +12,7 @@ import { buildApp } from './app.js';
 import { getEnv } from '../config/env.js';
 import { startMacroSyncWorker } from '../workers/macro-sync.worker.js';
 import { startRecalculateWorker } from '../workers/recalculate.worker.js';
+import { startDailyRunWorker } from '../workers/daily-run.worker.js';
 import { startNightlyLearningWorker } from '../workers/nightly-learning.worker.js';
 import { macroSyncQueue } from '../workers/queues.js';
 import { registerRepeatableJobs } from '../workers/repeatable-jobs.js';
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
   let macroWorker: Awaited<ReturnType<typeof startMacroSyncWorker>> | null = null;
   let recalcWorker: Awaited<ReturnType<typeof startRecalculateWorker>> | null = null;
   let nightlyWorker: Awaited<ReturnType<typeof startNightlyLearningWorker>> | null = null;
+  let dailyRunWorker: Awaited<ReturnType<typeof startDailyRunWorker>> | null = null;
 
   try {
     macroWorker = startMacroSyncWorker();
@@ -45,7 +47,13 @@ async function main(): Promise<void> {
     // Sin este worker, /admin/nightly/run encola el job pero nadie lo procesa
     // (quedaba PENDING para siempre — ver docs/plans para el detalle del bug).
     nightlyWorker = startNightlyLearningWorker();
-    app.log.info('Workers BullMQ activos: macro-sync, recalculate, nightly-learning');
+    // Mismo error que el comentario de arriba describe, cometido de nuevo con el
+    // cálculo diario: `registerRepeatableJobs` programa el cron de `daily-run`,
+    // pero si nadie consume la cola el job se encola y nadie lo levanta. El
+    // worker estaba SOLO en `workers/index.ts`, y `railway.toml` define un único
+    // proceso — así que en el deploy real no había quién lo procesara.
+    dailyRunWorker = startDailyRunWorker();
+    app.log.info('Workers BullMQ activos: macro-sync, recalculate, nightly-learning, daily-run');
   } catch (err) {
     app.log.warn({ err }, 'Workers BullMQ no pudieron iniciarse — modo degradado');
   }
@@ -65,7 +73,7 @@ async function main(): Promise<void> {
   // --- Graceful shutdown ---
   const close = async (signal: string): Promise<void> => {
     app.log.info(`Recibido ${signal}, cerrando servidor...`);
-    await Promise.all([macroWorker?.close(), recalcWorker?.close(), nightlyWorker?.close()].filter(Boolean));
+    await Promise.all([macroWorker?.close(), recalcWorker?.close(), nightlyWorker?.close(), dailyRunWorker?.close()].filter(Boolean));
     await app.close();
     process.exit(0);
   };
