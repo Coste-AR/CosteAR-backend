@@ -2,19 +2,22 @@
 title: "Plan de implementación — Cola de espera, corrida diaria y trazabilidad total"
 fecha: 2026-07-31
 origen: "Reunión 30/07/2026 + respuestas del socio (Granola 180dcece)"
-estado: F1-F3, F5 y F6 implementadas — F4 pendiente
+estado: F1-F6 implementadas (backend) — falta el wizard en el frontend
 ---
 
-> **Estado al 01/08/2026.** Implementadas y verificadas: **F1** (frecuencia por
-> estructura), **F2** (período y validación en la corrida), **F3** (job diario),
-> **F5** (datos atrasados) y **F6** (historial visible, bandeja y banda de
-> provisorio). Pendiente: **F4** — el setup previo obligatorio y, dentro de él,
-> el permiso de recuento y los campos de procedencia de D7, que son los que
-> cierran el requisito de la cátedra sobre quién informa el grado de avance.
-> **F7** sigue fuera de alcance por decisión del equipo.
+> **Estado al 02/08/2026.** Implementadas y verificadas **F1 a F6**. **F7**
+> (alertas por anomalía) sigue fuera de alcance por decisión del equipo.
 >
-> Backend en `feat/periodos-frecuencia-por-estructura`, frontend en
-> `feat/trazabilidad-corridas-y-datos-atrasados`, las dos salidas de `dev`.
+> El backend de **F4** está completo: reglas del setup, servicio, endpoints,
+> compuerta de cálculo, el permiso `canReportWipCount` y la procedencia del
+> recuento (D7). **Falta el wizard en el frontend** — hoy el setup se puede
+> completar por API pero no hay pantalla, así que una estructura de Procesos
+> nueva queda bloqueada para calcular hasta que exista.
+>
+> Ese bloqueo alcanza también a las estructuras de Procesos que ya existían:
+> tienen `setupCompletedAt` en NULL y caen en la compuerta. Es intencional —
+> nunca declararon su estructura productiva— pero hay que tenerlo presente al
+> desplegar.
 
 # Plan — Cola de espera, corrida diaria y trazabilidad
 
