@@ -23,6 +23,9 @@ const mockTx = {
   dataPointVersion: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
   traceAuditLog: { create: vi.fn(), findFirst: vi.fn(), count: vi.fn(), findMany: vi.fn() },
   costStructure: { findFirst: vi.fn() },
+  // Imputar chequea si el período destino está cerrado (datos atrasados). Estas
+  // pruebas son sobre la bitácora, con el período abierto: el camino normal.
+  costPeriod: { findFirst: vi.fn().mockResolvedValue({ status: 'OPEN' }) },
   calculationRun: { findMany: vi.fn() },
 };
 

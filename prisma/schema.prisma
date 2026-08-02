@@ -250,17 +250,92 @@ enum CostingSystem {
 // ---------------------------------------------------------------------------
 
 /**
- * Ritmo de costeo de la empresa.
+ * Ritmo de costeo. `CUSTOM_DAYS` son ciclos de días fijos (cada 10, cada 15) y
+ * no se deducen solos de una fecha: necesitan además el largo del ciclo y la
+ * fecha desde la que se cuentan, que viven en `CostStructure`.
  */
 enum Periodicity {
   MONTHLY
   BIWEEKLY
   QUARTERLY
+  CUSTOM_DAYS
 }
 
 enum CostPeriodStatus {
   OPEN
   CLOSED
+}
+
+/**
+ * Qué hacer cuando llega un dato cuya fecha cae en un período YA CERRADO.
+ *
+ * El default es preguntar. La decisión de qué pasa con la plata de un mes que
+ * ya se dio por bueno es del costista, no del sistema — y si el costista eligió
+ * de antemano en el setup, esa elección ES su autorización y no hace falta
+ * molestarlo cada vez.
+ *
+ *   ASK             — se le avisa y decide en el momento (default).
+ *   CURRENT_PERIOD  — se imputa al período abierto de hoy.
+ *   REOPEN          — se reabre el cerrado y se repropaga hacia adelante.
+ */
+enum LateDataPolicy {
+  ASK
+  CURRENT_PERIOD
+  REOPEN
+}
+
+/** Qué se resolvió (o está por resolverse) con un dato atrasado. */
+enum LateDataChoice {
+  CURRENT_PERIOD
+  REOPEN
+  DISCARD
+}
+
+/**
+ * Un dato llegó tarde: su fecha cae en un período que ya está cerrado.
+ *
+ * Mientras la decisión está pendiente el dato NO entra a ningún cálculo — el
+ * mismo criterio que ya usa un dato sin imputar. Es preferible un resultado que
+ * avisa que le falta algo, a uno completo que metió plata en el mes equivocado
+ * sin que nadie lo autorizara.
+ */
+model LateDataDecision {
+  id           String        @id @default(uuid()) @db.Uuid
+  dataPointId  String        @db.Uuid
+  dataPoint    DataPoint     @relation(fields: [dataPointId], references: [id], onDelete: Cascade)
+  structureId  String        @db.Uuid
+  structure    CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  userId       String        @db.Uuid // denormalizado para RLS y para la bandeja del costista
+
+  /** Período cerrado al que apuntaba la fecha del dato. */
+  targetPeriodCode String
+  /** Período abierto en el momento de detectarlo (la alternativa que se ofrece). */
+  openPeriodCode   String?
+
+  /** La política que estaba vigente cuando se detectó (para leer el histórico). */
+  policyAtDetection LateDataPolicy
+
+  /**
+   * NULL = pendiente de decisión. Con valor, ya se resolvió.
+   */
+  choice     LateDataChoice?
+  reason     String?
+  resolvedAt DateTime?       @db.Timestamptz
+  resolvedBy String?         @db.Uuid
+  /**
+   * true si la resolvió la política previa del costista en vez de una decisión
+   * en el momento. No es lo mismo "lo decidió ahora" que "lo dejó decidido
+   * antes", y el historial tiene que poder distinguirlo.
+   */
+  autoResolved Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  // Un dato no puede tener dos decisiones pendientes para el mismo período.
+  @@unique([dataPointId, targetPeriodCode])
+  @@index([userId, resolvedAt])
+  @@index([structureId, resolvedAt])
+  @@map("late_data_decisions")
 }
 
 model CostPeriod {
@@ -321,6 +396,16 @@ model CostPeriod {
   resultEngineVersion String?
   resultAt            DateTime? @db.Timestamptz
 
+  /**
+   * Última vez que el job diario calculó este período. NULL = nunca.
+   *
+   * Es el "standby": el job compara contra esta marca y se saltea los períodos
+   * donde no llegó nada nuevo. Recalcular sin datos nuevos daría el mismo
+   * número y enterraría el historial bajo treinta corridas idénticas, justo en
+   * la pantalla cuyo valor es poder leerlo.
+   */
+  lastAutoRunAt DateTime? @db.Timestamptz
+
   // Reapertura: se permite, pero deja rastro (quién, cuándo, por qué).
   reopenCount  Int       @default(0)
   reopenedAt   DateTime? @db.Timestamptz
@@ -334,6 +419,8 @@ model CostPeriod {
   unitMovementSchedules UnitMovementSchedule[]
   // Costeo por Procesos (B05): repartos de costos conjuntos del período.
   jointCostAllocations  JointCostAllocation[]
+  // Todas las corridas del período (manuales, automáticas y la del cierre).
+  calculationRuns       CalculationRun[]
 
   @@unique([structureId, code])
   @@index([companyId, code])
@@ -350,6 +437,38 @@ model CostStructure {
   period        String // "YYYY-MM"
   status        CostStructureStatus @default(DRAFT)
   costingSystem CostingSystem       @default(ORDERS)
+
+  // ---------------------------------------------------------------------------
+  // FRECUENCIA DE COSTEO POR ESTRUCTURA
+  //
+  // Hasta acá el ritmo era uno solo para toda la empresa (`Company.periodicity`).
+  // No alcanza: una misma empresa puede querer costear un producto por mes y
+  // otro cada 15 días, y la frecuencia se decide al armar la estructura, no al
+  // dar de alta la empresa.
+  //
+  // `null` = hereda el ritmo de la empresa, que es exactamente lo que hacían
+  // todas las estructuras hasta hoy. Por eso la columna es nullable y sin
+  // default: ninguna estructura existente cambia de comportamiento.
+  // ---------------------------------------------------------------------------
+  /**
+   * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
+   */
+  periodicity      Periodicity?
+  /**
+   * Largo del ciclo en días. Obligatorio (y solo válido) con `CUSTOM_DAYS`.
+   */
+  periodLengthDays Int?
+  /**
+   * Día desde el que se cuentan los ciclos. Obligatorio (y solo válido) con
+   * `CUSTOM_DAYS`: sin ancla, "cada 10 días" no define ningún período concreto.
+   */
+  periodAnchorDate DateTime? @db.Date
+
+  /**
+   * Qué hacer con un dato que llega para un período ya cerrado. Default:
+   * preguntarle al costista en el momento.
+   */
+  lateDataPolicy LateDataPolicy @default(ASK)
 
   // Configuración de los tres elementos del costo (JSONB tipado en la app).
   rawMaterialConfig  Json?
@@ -381,6 +500,8 @@ model CostStructure {
   calculationRuns      CalculationRun[]
   // Modelo de períodos (problema C).
   periods              CostPeriod[]
+  // Datos que llegaron para un período ya cerrado y esperan decisión.
+  lateDataDecisions    LateDataDecision[]
   // Costeo por Procesos (B03): departamentos de la cadena secuencial.
   processDepartments   ProcessDepartment[]
   // Costeo por Procesos (B05): repartos de costos conjuntos de la estructura.
@@ -855,6 +976,8 @@ model DataPoint {
   createdAt       DateTime      @default(now()) @db.Timestamptz
 
   versions DataPointVersion[]
+  // Decisiones pendientes/resueltas por haber llegado tarde a un período cerrado.
+  lateDataDecisions LateDataDecision[]
 
   @@index([structureId])
   @@index([structureId, element])
@@ -929,6 +1052,16 @@ model TraceAuditLog {
 
 // Una corrida del motor de cálculo. Inmutable — cada recálculo es un run
 // nuevo con su propio árbol de nodos.
+/**
+ * Qué disparó una corrida. `AUTO_DAILY` es el recálculo diario del período
+ * abierto; `CLOSE`, el que corre una vez al cerrar el período y queda congelado.
+ */
+enum RunTrigger {
+  MANUAL
+  AUTO_DAILY
+  CLOSE
+}
+
 model CalculationRun {
   id             String        @id @default(uuid()) @db.Uuid
   structureId    String        @db.Uuid
@@ -941,9 +1074,43 @@ model CalculationRun {
   inputsSnapshot Json
   results        Json
 
+  // ---------------------------------------------------------------------------
+  // A QUÉ PERÍODO PERTENECE Y SI ESTÁ VALIDADA
+  //
+  // Las corridas colgaban solo de la estructura. Alcanzaba mientras calculaba
+  // únicamente el costista, a mano: la última corrida era, por definición, la
+  // que valía. Con el recálculo diario automático deja de alcanzar — hay que
+  // saber de qué período es cada corrida, y cuáles miró un humano.
+  //
+  // El booleano va acá y no en el período a propósito: un período tiene MUCHAS
+  // corridas (una por día), y lo que el costista valida es una foto concreta,
+  // no el período entero.
+  // ---------------------------------------------------------------------------
+  /**
+   * Período al que pertenece. Nullable: las corridas anteriores al modelo de
+   * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
+   * dejarlas sin él.
+   */
+  periodId String?     @db.Uuid
+  period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+
+  trigger RunTrigger @default(MANUAL)
+
+  /**
+   * true = un humano la miró y la dio por buena. Solo las validadas se muestran
+   * como resultado vigente; las demás existen igual y se ven en trazabilidad.
+   */
+  validated   Boolean   @default(false)
+  validatedAt DateTime? @db.Timestamptz
+  validatedBy String?   @db.Uuid
+
   nodes CalculationNode[]
 
   @@unique([structureId, runN])
+  // Historial de un período, de la más nueva a la más vieja.
+  @@index([periodId, executedAt])
+  // "El resultado vigente de esta estructura": la última validada.
+  @@index([structureId, validated, executedAt])
   @@map("calculation_runs")
 }
 
