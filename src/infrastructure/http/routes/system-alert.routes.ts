@@ -14,6 +14,35 @@ export function sanitizeUrl(url: unknown): string | undefined {
   return /^https?:\/\//i.test(url) ? url : undefined;
 }
 
+function toDate(value: unknown): Date | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function toInt(value: unknown): number | undefined {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+
+/**
+ * Extrae lo que Sentry manda en el issue de una Issue Alert (no es el evento
+ * completo — no trae stack trace ni breadcrumbs, eso requiere la API de
+ * eventos de Sentry con un token que hoy no está configurado). Es todo lo
+ * que antes se descartaba, dejando solo message/level/id/url.
+ */
+function extractIssueDetails(issue: any) {
+  return {
+    culprit: typeof issue?.culprit === 'string' ? issue.culprit : undefined,
+    errorType: typeof issue?.metadata?.type === 'string' ? issue.metadata.type : undefined,
+    errorValue: typeof issue?.metadata?.value === 'string' ? issue.metadata.value : undefined,
+    occurrenceCount: toInt(issue?.count),
+    firstSeenAt: toDate(issue?.firstSeen),
+    lastSeenAt: toDate(issue?.lastSeen),
+    platform: typeof issue?.platform === 'string' ? issue.platform : undefined,
+  };
+}
+
 export function verifySentrySignature(request: WebhookRequest, secret: string): boolean {
   const header = request.headers['sentry-hook-signature'];
   if (typeof header !== 'string' || !header || !request.rawBody) return false;
@@ -64,6 +93,7 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
           message: String(data.issue.title || 'Unknown Sentry Error'),
           sentryIssueId: data.issue.id ? String(data.issue.id) : undefined,
           sentryUrl: sanitizeUrl(data.issue.web_url),
+          ...extractIssueDetails(data.issue),
         });
       } else if (body?.level && body?.message) {
         // Fallback for simple webhook testing or different event types
