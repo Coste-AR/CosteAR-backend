@@ -25,6 +25,7 @@ import { MissingAllocationBaseError } from '../../domain/errors/calculation-erro
 import {
   calcCostStatement,
   calcGrossMargin,
+  checkRawMaterialConsistency,
   type CostStatementResult,
   type MarginResult,
 } from '../../domain/calculations/cost-statement.js';
@@ -75,6 +76,17 @@ export interface CalculationOutput {
   costOfGoodsSold: number;
   grossMargin: number;
   grossMarginPct: number;
+  /**
+   * Controles de consistencia del cálculo. Opcional: las corridas y los períodos
+   * congelados ANTES de que esto existiera no lo tienen, y decir `matches: true`
+   * sobre un cálculo que nunca se chequeó sería peor que no decir nada.
+   */
+  consistency?: {
+    /** La MP consumida por ficha de stock coincide con la del estado de costos. */
+    rawMaterialMatches: boolean;
+    /** Diferencia (estado de costos − ficha de stock). Cero cuando coincide. */
+    rawMaterialDifference: number;
+  };
   detail: {
     rawMaterial: {
       // Agregados (compat con la vista de resultado): lote del primer material,
@@ -520,6 +532,27 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     ? statement.costOfGoodsSold.divide(unitsProduced).toNumber()
     : 0;
 
+  // CHEQUEO DE CONSISTENCIA DE MATERIA PRIMA.
+  //
+  // La MP consumida se puede saber por dos caminos, y tienen que dar lo mismo:
+  //   (a) sumando lo que cada ficha de stock (PPP) dice que salió, y
+  //   (b) Existencia inicial + Compras − Existencia final, del estado de costos.
+  //
+  // Si difieren, hay una inconsistencia real en los datos —un movimiento que no
+  // se reflejó en el stock, una existencia final pisada a mano— y el costo está
+  // mal por esa diferencia. La cátedra pide este control expresamente.
+  //
+  // La función ya existía, con tests, y NO SE LLAMABA DESDE NINGÚN LADO: el
+  // sistema tenía el detector de inconsistencias apagado. Se engancha acá, que
+  // es donde están los dos números.
+  //
+  // NO bloquea el cálculo: informa. Un costista al que le frenan el cálculo por
+  // una diferencia de redondeo no puede trabajar; uno al que se le avisa, sí.
+  const rmConsistency = checkRawMaterialConsistency(
+    statement.rawMaterialConsumed,
+    rawMaterialConsumed,
+  );
+
   return {
     rawMaterialConsumed: rawMaterialConsumed.toNumber(),
     directLaborTotal: directLaborTotal.toNumber(),
@@ -528,6 +561,10 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     costOfGoodsSold: statement.costOfGoodsSold.toNumber(),
     grossMargin: margin.grossMargin.toNumber(),
     grossMarginPct: margin.grossMarginPct.toPercent(),
+    consistency: {
+      rawMaterialMatches: rmConsistency.matches,
+      rawMaterialDifference: rmConsistency.difference.toNumber(),
+    },
     detail: {
       rawMaterial: {
         optimalLot: materials[0]?.optimalLot.toNumber() ?? 0,
