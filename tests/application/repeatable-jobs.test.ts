@@ -11,14 +11,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * corren en UTC, así que '0 18 * * 1-5' disparaba a las 15:00 ART.
  */
 
-const { macroSyncQueue, nightlyLearningQueue } = vi.hoisted(() => ({
+const { macroSyncQueue, nightlyLearningQueue, dailyRunQueue } = vi.hoisted(() => ({
   macroSyncQueue: { getRepeatableJobs: vi.fn(), removeRepeatableByKey: vi.fn(), add: vi.fn() },
   nightlyLearningQueue: { getRepeatableJobs: vi.fn(), removeRepeatableByKey: vi.fn(), add: vi.fn() },
+  dailyRunQueue: { getRepeatableJobs: vi.fn(), removeRepeatableByKey: vi.fn(), add: vi.fn() },
 }));
 
 vi.mock('@/infrastructure/workers/queues.js', () => ({
   macroSyncQueue,
   nightlyLearningQueue,
+  dailyRunQueue,
   recalculateQueue: {},
 }));
 
@@ -29,6 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   macroSyncQueue.getRepeatableJobs.mockResolvedValue([]);
   nightlyLearningQueue.getRepeatableJobs.mockResolvedValue([]);
+  dailyRunQueue.getRepeatableJobs.mockResolvedValue([]);
 });
 
 async function run(cron = CRON) {
@@ -55,6 +58,17 @@ describe('registerRepeatableJobs', () => {
     await run();
     const [name, , opts] = nightlyLearningQueue.add.mock.calls[0]!;
     expect(name).toBe('nightly-pipeline');
+    expect(opts.repeat.tz).toBe(TZ);
+  });
+
+  it('el cálculo diario corre a las 3, DESPUÉS del pipeline nocturno de las 2', async () => {
+    await run();
+    const [name, , opts] = dailyRunQueue.add.mock.calls[0]!;
+    expect(name).toBe('daily-run');
+    expect(opts.jobId).toBe('scheduled-daily-run');
+    // El orden importa: el cálculo del día tiene que ver las correcciones que
+    // el aprendizaje nocturno haya dejado aplicadas.
+    expect(opts.repeat.pattern).toBe('0 3 * * *');
     expect(opts.repeat.tz).toBe(TZ);
   });
 
@@ -121,6 +135,7 @@ describe('registerRepeatableJobs', () => {
     vi.doMock('@/infrastructure/workers/queues.js', () => ({
       macroSyncQueue: null,
       nightlyLearningQueue: null,
+      dailyRunQueue: null,
       recalculateQueue: {},
     }));
     const { registerRepeatableJobs } = await import('@/infrastructure/workers/repeatable-jobs.js');

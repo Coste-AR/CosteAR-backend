@@ -3,6 +3,7 @@ import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
 import { fmtMoney, fmtNumber } from './format.js';
+import { LateDataService } from '../cost-structures/late-data-service.js';
 import type {
   CreateDataPointInput,
   AddVersionInput,
@@ -17,7 +18,10 @@ import type {
  * correcciones siempre insertan una versión nueva (R1).
  */
 export class DataPointService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly lateData: LateDataService = new LateDataService(db),
+  ) {}
 
   /** Confirma que el data point pertenece a una estructura del usuario. */
   async requireDataPoint(userId: string, id: string) {
@@ -217,6 +221,22 @@ export class DataPointService {
    */
   async imputar(userId: string, id: string, periodo: string, sourceArea: string, actor: TraceActor) {
     const dp = await this.requireDataPoint(userId, id);
+
+    // ¿El período al que lo están mandando ya está cerrado? Si sí, esto no es
+    // una imputación más: es plata que entra a un mes que alguien ya dio por
+    // bueno. La decisión no la toma este método — se registra el conflicto y se
+    // aplica la política de la estructura, que puede ser preguntar.
+    if (await this.lateData.isClosed(dp.structureId, periodo)) {
+      const outcome = await this.lateData.handle(userId, id, dp.structureId, periodo, {
+        ...actor,
+        area: sourceArea,
+      });
+      // Si quedó pendiente, el dato NO se imputa: sigue fuera de todo cálculo
+      // hasta que alguien decida.
+      if (outcome.pendiente) return { ...dp, lateData: outcome };
+      return { ...(await this.requireDataPoint(userId, id)), lateData: outcome };
+    }
+
     return withTenant(userId, async (tx) => {
       const updated = await tx.dataPoint.update({
         where: { id },
