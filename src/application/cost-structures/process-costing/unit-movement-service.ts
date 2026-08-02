@@ -183,9 +183,46 @@ export class UnitMovementService {
   ) {
     const ctx = await this.resolveContext(userId, structureId, deptId, periodId);
 
+    // LA EXISTENCIA INICIAL NO ES UN DATO DE ESTE FORMULARIO.
+    //
+    // Las unidades que arrancan el mes, su grado de avance y su costo NO los
+    // carga el costista: los escribe el arrastre desde el período anterior
+    // (B18). Este guardado es del cuadro de movimiento del mes, y si el cliente
+    // no manda esos campos hay que CONSERVAR los que ya están.
+    //
+    // El bug que esto arregla: los importes ya se conservaban (`body.X`
+    // undefined ⇒ Prisma no toca la columna), pero las UNIDADES se reescribían
+    // siempre desde el body. Un guardado sin `initialWip` dejaba la existencia
+    // inicial en 0 CONSERVANDO su plata: quedaban los pesos sin las unidades que
+    // los justifican, y el costo unitario se inflaba —11% en el caso probado—
+    // porque el mismo costo se repartía entre menos unidades.
+    //
+    // Lo peor era que el informe seguía cuadrando: el error es coherente consigo
+    // mismo, así que la verificación de "cuadra / no cuadra" no lo veía y alguien
+    // que revisara el informe lo daba por bueno.
+    const existente = await this.db.unitMovementSchedule.findUnique({
+      where: { departmentId_periodId: { departmentId: deptId, periodId } },
+      select: {
+        initialWip: true,
+        initialWipMpAvance: true,
+        initialWipConvAvance: true,
+      },
+    });
+
+    const conArrastre: UnitMovementInputBody = {
+      ...body,
+      initialWip: body.initialWip ?? (existente ? Number(existente.initialWip) : undefined),
+      initialWipMpAvance:
+        body.initialWipMpAvance ??
+        (existente?.initialWipMpAvance == null ? undefined : Number(existente.initialWipMpAvance)),
+      initialWipConvAvance:
+        body.initialWipConvAvance ??
+        (existente?.initialWipConvAvance == null ? undefined : Number(existente.initialWipConvAvance)),
+    };
+
     // 1) Validación de dominio ANTES de escribir: si el cuadro no cuadra o pide
     //    derivar dos incógnitas, sale un 422 y no se toca la base.
-    const resolved = this.resolve(ctx, this.bodyValues(body));
+    const resolved = this.resolve(ctx, this.bodyValues(conArrastre));
 
     return withTenant(userId, async (tx) => {
       const prev = await tx.unitMovementSchedule.findUnique({
@@ -208,7 +245,7 @@ export class UnitMovementService {
           }
         : {};
 
-      const data = { ...this.scheduleData(resolved, body), ...procedencia };
+      const data = { ...this.scheduleData(resolved, conArrastre), ...procedencia };
       const saved = await tx.unitMovementSchedule.upsert({
         where: { departmentId_periodId: { departmentId: deptId, periodId } },
         create: { departmentId: deptId, periodId, ...data },
