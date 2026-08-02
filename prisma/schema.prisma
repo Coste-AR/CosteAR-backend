@@ -470,6 +470,36 @@ model CostStructure {
    */
   lateDataPolicy LateDataPolicy @default(ASK)
 
+  // ---------------------------------------------------------------------------
+  // SETUP PREVIO (el "CTO inicial" de la reunión del 30/07)
+  //
+  // Cuando llega un dato por ingesta, el sistema no sabe nada de la estructura
+  // interna de la empresa y no puede clasificarlo por departamento. La solución
+  // acordada: antes de empezar a costear por procesos, el cliente declara su
+  // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
+  // ---------------------------------------------------------------------------
+  /**
+   * Cuándo se completó el setup. NULL = todavía no. Una estructura de PROCESSES
+   * sin sellar no puede calcular: sin departamentos declarados el resultado no
+   * significaría nada.
+   */
+  setupCompletedAt DateTime? @db.Timestamptz
+  /**
+   * ¿El proceso rinde coproductos o subproductos? Se pregunta en el setup
+   * porque cambia qué pantallas tienen sentido después.
+   */
+  hasJointProducts Boolean   @default(false)
+  /**
+   * Cada cuántos días puede la oficina técnica informar el grado de avance.
+   *
+   * No es lo mismo que `periodLengthDays`: esto es lo que la PLANTA puede hacer,
+   * aquello es lo que el costista ELIGIÓ. Si la planta releva cada 15 días y el
+   * costista pide ciclos de 3, el sistema calcularía tres veces sobre el mismo
+   * recuento y le daría apariencia de dato fresco a algo que no lo es. Guardarlo
+   * permite avisarlo en vez de dejarlo pasar.
+   */
+  wipCountFrequencyDays Int?
+
   // Configuración de los tres elementos del costo (JSONB tipado en la app).
   rawMaterialConfig  Json?
   directLaborConfig  Json?
@@ -652,6 +682,21 @@ model OperatorMembership {
   connection   EmpresaConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   isActive     Boolean           @default(true)
   joinedAt     DateTime          @default(now())
+
+  /**
+   * Este operario pertenece a la oficina técnica y puede informar el grado de
+   * avance de la producción en proceso.
+   *
+   * Es un permiso y no un rol nuevo a propósito: `EMPRESA_OPERATOR` ya es
+   * "personal de la empresa cliente", que es exactamente lo que es la oficina
+   * técnica. Un rol aparte obligaría a tocar auth, RLS, guards, invitaciones y
+   * el panel admin para terminar con dos roles que en casi toda la app hacen lo
+   * mismo. Lo que hay que distinguir no es quién se loguea: es de dónde salió el
+   * dato (ver `CountSource`).
+   *
+   * Lo habilita el costista, por operario, en el setup de la estructura.
+   */
+  canReportWipCount Boolean @default(false)
 
   @@unique([operatorId, connectionId])
   @@index([operatorId])
@@ -1385,6 +1430,32 @@ model ProcessDepartment {
   @@map("process_departments")
 }
 
+/**
+ * De dónde salió el grado de avance de la existencia final.
+ *
+ * No es un detalle burocrático: la cátedra lo dice tres veces (clases 34, 36 y
+ * 40). "El grado de avance lo determina la oficina técnica al cierre de cada
+ * período, por departamento y por elemento — el área de costos lo recibe y
+ * aplica, NO LO ESTIMA."
+ *
+ * El sistema no puede impedir que el costista lo cargue si la planta no
+ * responde (sería inusable), pero sí puede dejar constancia de quién lo informó.
+ * Un informe apoyado en avances estimados por costos y otro apoyado en un
+ * recuento de planta no valen lo mismo, y esa diferencia tiene que estar a la
+ * vista en vez de escondida.
+ *
+ *   TECHNICAL_OFFICE — lo informó planta/oficina técnica. Lo que pide la cátedra.
+ *   COSTIST_ESTIMATE — lo estimó el área de costos. Válido, pero marcado.
+ *   CARRIED_OVER     — viene arrastrado del período anterior, sin recuento nuevo.
+ *   NOT_COUNTED      — no hay recuento (el default de lo que ya existía).
+ */
+enum CountSource {
+  TECHNICAL_OFFICE
+  COSTIST_ESTIMATE
+  CARRIED_OVER
+  NOT_COUNTED
+}
+
 // Costeo por Procesos (B04) — cuadro de movimiento de unidades.
 //
 // Una fila por (departamento, período): resume cuántas unidades entran, se
@@ -1498,6 +1569,18 @@ model UnitMovementSchedule {
    * nadie la persistía, así que al abrir el mes siguiente volvía en 0.
    */
   initialWipCostPrevDept Decimal? @db.Decimal(18, 4)
+
+  // --- PROCEDENCIA DEL RECUENTO ---
+  /**
+   * Quién informó el grado de avance de la existencia final. Ver `CountSource`.
+   * Las filas anteriores a esta columna quedan en `NOT_COUNTED`, que es la
+   * verdad: nadie registró de dónde salió el número.
+   */
+  countSource CountSource @default(NOT_COUNTED)
+  /** Cuándo se informó el recuento. */
+  countedAt   DateTime?   @db.Timestamptz
+  /** Usuario que lo informó. */
+  countedBy   String?     @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
