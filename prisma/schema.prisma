@@ -653,6 +653,21 @@ model OperatorMembership {
   isActive     Boolean           @default(true)
   joinedAt     DateTime          @default(now())
 
+  /**
+   * Este operario pertenece a la oficina técnica y puede informar el grado de
+   * avance de la producción en proceso.
+   *
+   * Es un permiso y no un rol nuevo a propósito: `EMPRESA_OPERATOR` ya es
+   * "personal de la empresa cliente", que es exactamente lo que es la oficina
+   * técnica. Un rol aparte obligaría a tocar auth, RLS, guards, invitaciones y
+   * el panel admin para terminar con dos roles que en casi toda la app hacen lo
+   * mismo. Lo que hay que distinguir no es quién se loguea: es de dónde salió el
+   * dato (ver `CountSource`).
+   *
+   * Lo habilita el costista, por operario, en el setup de la estructura.
+   */
+  canReportWipCount Boolean @default(false)
+
   @@unique([operatorId, connectionId])
   @@index([operatorId])
   @@index([connectionId])
