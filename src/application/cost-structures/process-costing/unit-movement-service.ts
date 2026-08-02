@@ -149,6 +149,30 @@ export class UnitMovementService {
    * (deriva por diferencia y verifica que cuadra), y traza cada valor manual.
    * TODO en una sola transacción atómica y auditada.
    */
+  /**
+   * ¿Quién está informando este grado de avance?
+   *
+   * `TECHNICAL_OFFICE` si lo carga un operario de la empresa con el permiso de
+   * recuento habilitado (la oficina técnica). `COSTIST_ESTIMATE` en cualquier
+   * otro caso — típicamente el costista cargándolo él porque planta no
+   * respondió.
+   *
+   * Los dos se aceptan. Prohibir el segundo dejaría el sistema inusable el día
+   * que planta no contesta, y el costista terminaría cargándolo igual desde otro
+   * lado. Lo que no se puede es que los dos queden iguales en la base: un
+   * informe apoyado en un recuento real y otro apoyado en una estimación no
+   * valen lo mismo, y esa diferencia se lee después en la trazabilidad.
+   */
+  private async countSourceFor(userId: string, actor: TraceActor): Promise<'TECHNICAL_OFFICE' | 'COSTIST_ESTIMATE'> {
+    if (actor.id === userId) return 'COSTIST_ESTIMATE'; // el costista, dueño de la estructura
+
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId: actor.id, isActive: true, canReportWipCount: true },
+      select: { id: true },
+    });
+    return membership ? 'TECHNICAL_OFFICE' : 'COSTIST_ESTIMATE';
+  }
+
   async save(
     userId: string,
     structureId: string,
@@ -169,7 +193,22 @@ export class UnitMovementService {
         select: { id: true },
       });
 
-      const data = this.scheduleData(resolved, body);
+      // PROCEDENCIA DEL RECUENTO (D7). Solo se anota cuando este guardado trae
+      // grados de avance de la existencia final: son el dato que, según la
+      // cátedra, informa la oficina técnica y el área de costos "recibe y
+      // aplica, no estima". Un guardado que solo toca unidades o costos no es un
+      // recuento y no debe pisar la procedencia del que sí lo fue.
+      const traeAvances =
+        body.finalWipMpAvance !== undefined || body.finalWipConvAvance !== undefined;
+      const procedencia = traeAvances
+        ? {
+            countSource: await this.countSourceFor(userId, actor),
+            countedAt: new Date(),
+            countedBy: actor.id,
+          }
+        : {};
+
+      const data = { ...this.scheduleData(resolved, body), ...procedencia };
       const saved = await tx.unitMovementSchedule.upsert({
         where: { departmentId_periodId: { departmentId: deptId, periodId } },
         create: { departmentId: deptId, periodId, ...data },

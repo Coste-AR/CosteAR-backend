@@ -11,6 +11,13 @@ export class SystemAlertService {
     message: string;
     sentryIssueId?: string;
     sentryUrl?: string;
+    culprit?: string;
+    errorType?: string;
+    errorValue?: string;
+    occurrenceCount?: number;
+    firstSeenAt?: Date;
+    lastSeenAt?: Date;
+    platform?: string;
   }) {
     return this.db.systemAlert.create({
       data,
