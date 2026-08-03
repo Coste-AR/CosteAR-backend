@@ -160,4 +160,44 @@ describe('Caso Dorado — costeo Por Órdenes', () => {
     expect(r.detail.directLabor.workingDays).toBe(232);
     expect(r.detail.directLabor.itcsPercent).toBeGreaterThan(1);
   });
+
+  /**
+   * EL CONTROL QUE ESTABA APAGADO.
+   *
+   * La MP consumida se puede saber por dos caminos, y tienen que dar lo mismo:
+   *
+   *   (a) sumando lo que cada ficha de stock (PPP) dice que salió;
+   *   (b) Existencia inicial + Compras − Existencia final, del estado de costos.
+   *
+   * `checkRawMaterialConsistency` compara los dos. Existía, tenía tests propios, y
+   * no se llamaba desde ningún lado: el detector de inconsistencias estaba
+   * implementado y apagado. Ahora el cálculo lo corre e informa el resultado.
+   */
+  describe('Consistencia de materia prima', () => {
+    it('el cálculo la informa', () => {
+      const r = runCalculation(input);
+
+      expect(r.consistency).toBeDefined();
+      expect(typeof r.consistency!.rawMaterialMatches).toBe('boolean');
+    });
+
+    it('sobre el caso de cátedra los dos caminos coinciden', () => {
+      const r = runCalculation(input);
+
+      expect(r.consistency!.rawMaterialMatches).toBe(true);
+      expect(r.consistency!.rawMaterialDifference).toBe(0);
+    });
+
+    it('NO bloquea el cálculo: informa', () => {
+      const r = runCalculation(input);
+
+      // Un costista al que le frenan el cálculo por una diferencia de redondeo no
+      // puede trabajar; uno al que se le avisa, sí. El resto de los tests de este
+      // archivo fija los números del caso; acá solo importa que el cálculo siga
+      // produciéndolos.
+      expect(r.rawMaterialConsumed).toBeGreaterThan(0);
+      expect(r.productionCost).toBeGreaterThan(0);
+    });
+  });
+
 });

@@ -76,6 +76,19 @@ export class CostStructureService {
       include: { company: true },
     });
     if (!s) throw new NotFoundError('Estructura de costos no encontrada');
+    // El Excel reproduce el estado de costos de ÓRDENES, hoja por hoja. Para una
+    // estructura de Procesos produciría un archivo con la estructura y los
+    // números equivocados — y como el archivo sale del sistema y circula por
+    // mail, un número mal calculado ahí es de los más difíciles de rastrear
+    // después. Mejor no emitirlo.
+    if (s.costingSystem === 'PROCESSES') {
+      throw new UnprocessableEntityError(
+        `«${s.productName}» usa Costeo por Procesos. El export a Excel todavía reproduce el ` +
+          'estado de costos de Costeo por Órdenes, así que no aplica. Usá el informe de costos ' +
+          'del período desde la pestaña Resultado.',
+        { field: 'costingSystem' },
+      );
+    }
     if (!s.rawMaterialConfig || !s.directLaborConfig || !s.indirectCostConfig) {
       throw new ValidationError('Cargá MP, MOD y CIP antes de exportar');
     }
@@ -532,6 +545,18 @@ export class CostStructureService {
 
   async simulate(userId: string, id: string, shocks: { rawMaterial?: number, directLabor?: number, indirectCosts?: number, sales?: number }) {
     const s = await this.requireStructure(userId, id);
+
+    // El simulador aplica shocks sobre el motor de Órdenes. En Procesos los
+    // costos no viven en estos JSON, así que simular acá daría números sin
+    // relación con la estructura. No es alcanzable desde la interfaz —la pestaña
+    // Simulador es solo de Órdenes— pero el endpoint está abierto a quien lo llame.
+    if (s.costingSystem === 'PROCESSES') {
+      throw new UnprocessableEntityError(
+        `«${s.productName}» usa Costeo por Procesos. El simulador de escenarios todavía es ` +
+          'solo de Costeo por Órdenes.',
+        { field: 'costingSystem' },
+      );
+    }
 
     if (!s.rawMaterialConfig || !s.directLaborConfig || !s.indirectCostConfig) {
       throw new ValidationError('La estructura está incompleta: cargá MP, MOD y CIP antes de simular');
