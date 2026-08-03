@@ -104,3 +104,34 @@ describe('El cálculo de Órdenes rechaza las estructuras de Procesos', () => {
     await expect(svc.calculate('user-1', 'st-1', ctx)).rejects.toThrow(/incompleta/i);
   });
 });
+
+/**
+ * A4 y A5: el mismo patrón en dos puertas más. El export a Excel y el simulador
+ * de escenarios también corrían el motor de Órdenes sin preguntar.
+ */
+describe('Las otras dos puertas al motor de Órdenes', () => {
+  it('el export a Excel no emite un archivo con los números equivocados', async () => {
+    mockDb.costStructure.findFirst.mockResolvedValue({
+      ...procesosConJsonPoblado,
+      company: { name: 'ACME' },
+    });
+    const svc = await service();
+
+    const promise = svc.exportToExcel('user-1', 'st-1');
+
+    // Un archivo sale del sistema y circula por mail: un número mal calculado
+    // ahí es de los más difíciles de rastrear después.
+    await expect(promise).rejects.toBeInstanceOf(UnprocessableEntityError);
+    await expect(promise).rejects.toThrow(/Costeo por Procesos/i);
+  });
+
+  it('el simulador de escenarios tampoco corre sobre Procesos', async () => {
+    mockDb.costStructure.findFirst.mockResolvedValue(procesosConJsonPoblado);
+    const svc = await service();
+
+    // No es alcanzable desde la interfaz, pero el endpoint está abierto.
+    await expect(svc.simulate('user-1', 'st-1', { rawMaterial: 0.1 })).rejects.toThrow(
+      /Costeo por Procesos/i,
+    );
+  });
+});

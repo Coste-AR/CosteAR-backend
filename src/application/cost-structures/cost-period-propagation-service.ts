@@ -295,17 +295,26 @@ export class CostPeriodPropagationService {
       if (carries.length === 0) break;
 
       for (const c of carries) {
-        await this.db.unitMovementSchedule.updateMany({
-          where: { departmentId: c.departmentId, periodId: periodo.id },
-          data: {
-            initialWip: c.initialWip,
-            initialWipMpAvance: c.initialWipMpAvance,
-            initialWipConvAvance: c.initialWipConvAvance,
-            initialWipCostMp: c.initialWipCostMp,
-            initialWipCostMo: c.initialWipCostMo,
-            initialWipCostCif: c.initialWipCostCif,
-            initialWipCostPrevDept: c.initialWipCostPrevDept,
-          },
+        // UPSERT y no update: el período siguiente puede no tener todavía cuadro
+        // de movimiento para este departamento. Con un `updateMany` eso no
+        // escribía nada Y NO FALLABA — la repropagación informaba haber tocado
+        // un mes en el que no había escrito una sola fila, y esa mentira quedaba
+        // asentada en la bitácora. Crear la fila es exactamente lo que hace la
+        // apertura normal de un período (`openNext`), así que el arrastre queda
+        // igual por los dos caminos.
+        const arrastre = {
+          initialWip: c.initialWip,
+          initialWipMpAvance: c.initialWipMpAvance,
+          initialWipConvAvance: c.initialWipConvAvance,
+          initialWipCostMp: c.initialWipCostMp,
+          initialWipCostMo: c.initialWipCostMo,
+          initialWipCostCif: c.initialWipCostCif,
+          initialWipCostPrevDept: c.initialWipCostPrevDept,
+        };
+        await this.db.unitMovementSchedule.upsert({
+          where: { departmentId_periodId: { departmentId: c.departmentId, periodId: periodo.id } },
+          create: { departmentId: c.departmentId, periodId: periodo.id, ...arrastre },
+          update: arrastre,
         });
       }
 

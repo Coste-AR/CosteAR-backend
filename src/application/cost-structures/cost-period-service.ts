@@ -18,6 +18,8 @@ import {
 } from '../../shared/schemas/cost.schema.js';
 import { comparePeriods, type PeriodSide, type MacroContrast } from './period-comparison.js';
 import { MacroService } from '../macro/macro-service.js';
+import { ProcessCalculationService } from './process-costing/process-calculation-service.js';
+import { freezeProcessPeriod } from '../../domain/calculations/freeze-process-period.js';
 /**
  * PERÍODOS DE COSTEO (problema C — Fases 1 y 3).
  *
@@ -51,7 +53,71 @@ export class CostPeriodService {
   constructor(
     private readonly db: PrismaClient = prisma,
     private readonly macro: MacroService = new MacroService(),
+    private readonly processCalc: ProcessCalculationService = new ProcessCalculationService(db),
   ) {}
+
+  /**
+   * LOS NÚMEROS DEL PERÍODO, POR EL MOTOR QUE CORRESPONDA.
+   *
+   * Acá estaba el bug más grave del módulo de Procesos: el cierre y la
+   * comparación corrían SIEMPRE el motor de Órdenes. En una estructura de
+   * Procesos los JSON de MP/MOD/CIP están vacíos por diseño —los costos viven en
+   * el cuadro de movimiento de unidades— así que el cierre fallaba siempre. Y
+   * como no se puede abrir un período nuevo mientras haya otro abierto, la
+   * estructura quedaba trabada en su primer período para siempre.
+   */
+  private async resolveResult(
+    period: PeriodLike & { id: string; salesUnitPrice: unknown; salesQuantity: unknown; productionQuantity: unknown },
+    structure: { id: string; userId: string; costingSystem: string; productName: string },
+    accion: 'cerrar' | 'comparar',
+  ): Promise<FrozenCalculation> {
+    if (structure.costingSystem !== 'PROCESSES') return this.computeResult(period, accion);
+
+    try {
+      // El informe del motor da el costo de lo TERMINADO por cada departamento.
+      const report = await this.processCalc.getProductionReport(
+        structure.userId,
+        structure.id,
+        period.id,
+      );
+
+      // Los costos INCURRIDOS en el período salen del cuadro de movimiento, que
+      // es donde el costista los cargó. No se derivan del informe porque cuando
+      // el departamento unifica conversión, MO y CIF vienen sumados en una sola
+      // columna y separarlos ahí sería repartir un número en vez de leer el real.
+      const schedules = await this.db.unitMovementSchedule.findMany({
+        where: { periodId: period.id },
+      });
+      const porDepto = new Map(schedules.map((s) => [s.departmentId, s]));
+
+      return freezeProcessPeriod({
+        departments: report.departments.map((d) => {
+          const s = porDepto.get(d.id);
+          return {
+            name: d.name,
+            sequence: d.sequence,
+            periodCostMp: Number(s?.periodCostMp ?? 0),
+            periodCostMo: Number(s?.periodCostMo ?? 0),
+            periodCostCif: Number(s?.periodCostCif ?? 0),
+            costoTerminadasYTransferidas: Number(d.report.costoTerminadasYTransferidas),
+            costoTerminadasEnStock: Number(d.report.costoTerminadasEnStock),
+            costoUnitarioTotalAcumulado: Number(d.report.costoUnitarioTotalAcumulado),
+          };
+        }),
+        salesUnitPrice: Number(period.salesUnitPrice ?? 0),
+        salesQuantity: Number(period.salesQuantity ?? 0),
+        productionQuantity: period.productionQuantity == null ? null : Number(period.productionQuantity),
+      });
+    } catch (e) {
+      // El motor de Procesos ya redacta sus errores en castellano y accionables
+      // (cuadro que no cuadra, departamento sin datos). Se pasan tal cual en vez
+      // de taparlos con el mensaje de Órdenes, que mandaba al costista a
+      // completar secciones que en su pantalla no existen.
+      throw new ValidationError(
+        `No se puede ${accion} "${period.label}": ${(e as Error).message}`,
+      );
+    }
+  }
 
   private async requireStructure(userId: string, structureId: string) {
     const s = await this.db.costStructure.findFirst({
@@ -148,7 +214,8 @@ export class CostPeriodService {
 
     // Si el motor no puede correr, el período NO se cierra: un mes cerrado sin
     // números es exactamente el agujero que esto viene a tapar.
-    const frozen = this.computeResult(period, 'cerrar');
+    const estructura = await this.requireStructure(userId, period.structureId);
+    const frozen = await this.resolveResult(period, estructura, 'cerrar');
 
     const closed = await this.db.$transaction(async (tx) => {
       const updated = await tx.costPeriod.update({
@@ -297,7 +364,11 @@ export class CostPeriodService {
     // variación se lee "de mayo a junio", no "de junio a mayo".
     const [older, newer] = from.code < to.code ? [from, to] : [to, from];
 
-    const comparison = comparePeriods(this.toSide(older), this.toSide(newer));
+    const estructura = await this.requireStructure(userId, structureId);
+    const comparison = comparePeriods(
+      await this.toSide(older, estructura),
+      await this.toSide(newer, estructura),
+    );
 
     let macroContrast: MacroContrast | null = null;
     if (older.status === 'CLOSED' && newer.status === 'CLOSED') {
@@ -320,7 +391,10 @@ export class CostPeriodService {
   }
 
   /** Un período tal como lo necesita la comparación, con sus números resueltos. */
-  private toSide(period: CostPeriod): PeriodSide {
+  private async toSide(
+    period: CostPeriod,
+    structure: { id: string; userId: string; costingSystem: string; productName: string },
+  ): Promise<PeriodSide> {
     const frozen = period.resultSnapshot as FrozenCalculation | null;
     const useFrozen = period.status === 'CLOSED' && frozen != null;
 
@@ -329,7 +403,7 @@ export class CostPeriodService {
       label: period.label,
       status: period.status as 'OPEN' | 'CLOSED',
       source: useFrozen ? 'frozen' : 'recomputed',
-      result: useFrozen ? frozen : this.computeResult(period, 'comparar'),
+      result: useFrozen ? frozen : await this.resolveResult(period, structure, 'comparar'),
       rawMaterialConfig: period.rawMaterialConfig,
       indirectCostConfig: period.indirectCostConfig,
       // El costo unitario se divide por lo PRODUCIDO, no por lo vendido: producir
