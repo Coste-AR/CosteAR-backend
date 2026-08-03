@@ -103,7 +103,23 @@ const num = (v: number | null | undefined): number => (v == null ? 0 : Number(v)
  *   4. Cuadro que no cuadra (entran ≠ salen).
  *   5. Existencia final con unidades pero sin grado de avance en conversión.
  *   6. Punto de separación con productos cargados y sin método de reparto.
+ *   7. Recibidas de un departamento ≠ transferidas del anterior.
  */
+/**
+ * Unidades que SALEN terminadas de un departamento hacia el siguiente.
+ *
+ * Si el costista no las cargó, el cuadro las deduce por diferencia — el mismo
+ * despeje que hace el dominio. Hace falta resolverlas para poder compararlas
+ * contra lo que declaró el departamento de al lado.
+ */
+function transferidasResueltas(s: ProcessScheduleCheck): number {
+  if (s.transferredOut != null) return num(s.transferredOut);
+  const entran =
+    num(s.initialWip) + num(s.startedInProduction) + num(s.receivedFromPrevious) + num(s.unitIncrease);
+  const perdidas = s.totalLossReported != null ? num(s.totalLossReported) : num(s.normalLoss);
+  return entran - (num(s.finishedInStock) + perdidas + num(s.finalWip));
+}
+
 export function validateProcessInputs(departments: ProcessDepartmentCheck[]): void {
   if (departments.length === 0) return;
 
@@ -192,6 +208,44 @@ export function validateProcessInputs(departments: ProcessDepartmentCheck[]): vo
           'grado de avance en conversión (mano de obra y carga fabril). Sin ese dato esas unidades se ' +
           'valuarían en cero. Cargá el % de avance de la existencia final.',
       );
+    }
+
+    // 7 — LA PLATA NO PUEDE EVAPORARSE ENTRE DEPARTAMENTOS.
+    //
+    // Las "recibidas del departamento anterior" se tipean a mano, y hasta acá
+    // nadie verificaba que coincidieran con las que el anterior transfirió: cada
+    // cuadro se validaba contra sí mismo, nunca contra el de al lado.
+    //
+    // Caso real probado en auditoría: el departamento 1 transfirió 42.000 litros
+    // por $16.800.000 y se cargó que el 2 recibió 30.000. Entraron $12.000.000.
+    // Se evaporaron $4.800.000 —el 28% del costo— sin una sola advertencia, y el
+    // costo unitario final quedó en $513,89 en vez de $489,58: un número que
+    // parece razonable y está mal.
+    //
+    // Corta el cálculo en vez de avisar: para un producto cuya promesa es la
+    // trazabilidad, dejar pasar un costo con plata desaparecida es peor que no
+    // dar ningún número.
+    //
+    // Nota sobre unidades de medida: el sistema no convierte entre
+    // departamentos. Si el 1º entrega litros y el 2º recibe cajas, esta
+    // comprobación también corta — y está bien que corte, porque sin conversión
+    // la plata tampoco se conserva. Convertir unidades es una funcionalidad a
+    // construir, no una validación a ablandar.
+    const anterior = ordered[ordered.indexOf(dept) - 1];
+    if (anterior?.schedule && dept.sequence > 1) {
+      const transferidas = transferidasResueltas(anterior.schedule);
+      const recibidas = num(s.receivedFromPrevious);
+      const diferencia = transferidas - recibidas;
+      if (Math.abs(diferencia) > 1e-4) {
+        const faltan = diferencia > 0;
+        throw new MissingInputError(
+          'unitMovementSchedule.receivedFromPrevious',
+          `"${anterior.name}" transfirió ${transferidas} unidades pero en "${dept.name}" cargaste que ` +
+            `recibió ${recibidas}. ${faltan ? 'Faltan' : 'Sobran'} ${Math.abs(diferencia)} unidades, y con ` +
+            'ellas se pierde (o se inventa) el costo que traían. Las unidades que salen de una etapa tienen ' +
+            'que ser las que entran a la siguiente: corregí una de las dos antes de calcular.',
+        );
+      }
     }
 
     // 6 — Punto de separación sin criterio de reparto: el costo conjunto no se
