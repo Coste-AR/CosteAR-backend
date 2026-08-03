@@ -133,13 +133,27 @@ export class UnitMovementService {
       };
     }
 
-    const resolved = this.resolve(ctx, this.rowValues(row));
+    // LECTURA, NO GUARDADO. `resolve()` aplica la validación de "cuadro
+    // completo" (R1/R5 del dominio), pensada para GUARDAR. Un mes recién
+    // abierto trae la existencia inicial que puso el arrastre (B18) pero
+    // todavía no las salidas: faltan las dos incógnitas a la vez y el dominio
+    // lanza `ProcessValidationError`. Antes esa excepción tumbaba el `GET`
+    // entero con un 422, y la pantalla ni siquiera podía dibujar la existencia
+    // inicial arrastrada (H9). Acá se devuelve lo que HAY (`saved`) con
+    // `resolved: null`, y la pantalla lo muestra incompleto en vez de romperse.
+    let resolved: UnitMovementSchedule | null = null;
+    try {
+      resolved = this.resolve(ctx, this.rowValues(row));
+    } catch (e) {
+      if (!(e instanceof ProcessValidationError)) throw e;
+    }
+
     return {
       department: ctx.department.name,
       period: ctx.period.label,
       exists: true,
       saved: this.serializeRow(row),
-      resolved: this.serialize(resolved),
+      resolved: resolved ? this.serialize(resolved) : null,
       traces: await this.tracesFor(ctx),
     };
   }
