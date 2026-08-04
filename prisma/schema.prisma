@@ -1412,6 +1412,16 @@ model ProcessDepartment {
   // false = MO y CIF se siguen por separado.
   defaultConversionAvanceEqualsMO Boolean       @default(true)
 
+  // Unidad física de este departamento (H12): "toneladas", "litros", "kg" —
+  // texto libre, la cátedra no fija un vocabulario único. NULL = no declarada,
+  // que es el estado de todo departamento creado antes de este campo.
+  unit String? @db.VarChar(40)
+  // Cuántas unidades de ESTE departamento produce cada unidad recibida del
+  // anterior (ej. 1 tonelada de fruta → 550 litros de jugo ⇒ 550). Solo tiene
+  // sentido para sequence > 1 — el primer departamento no recibe de nadie.
+  // NULL = factor 1 (comportamiento actual: exige igualdad exacta).
+  conversionFromPrevious Decimal? @db.Decimal(18, 6)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   // Soft-delete: mismo patrón que CostStructure (papelera recuperable).

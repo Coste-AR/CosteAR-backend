@@ -66,6 +66,24 @@ describe('Qué impide sellar el setup', () => {
     // No declararla es válido: no todo el mundo lo sabe al momento del setup.
     expect(validateSetup({ ...base, wipCountFrequencyDays: null })).toEqual([]);
   });
+
+  // H12 — unidad de medida por departamento + conversión entre etapas.
+  it('un factor de conversión de cero o negativo se rechaza: no significa nada físicamente', () => {
+    const conFactor = (factor: number) => ({
+      ...base,
+      departments: [dep('Molienda', 1), { ...dep('Destilado', 2), conversionFromPrevious: factor }],
+    });
+    expect(validateSetup(conFactor(0))).toHaveLength(1);
+    expect(validateSetup(conFactor(-5))).toHaveLength(1);
+    expect(validateSetup(conFactor(0)).some((p) => /mayor a cero/.test(p.message))).toBe(true);
+  });
+
+  it('un factor de conversión positivo, o ninguno, es válido', () => {
+    const dep2 = { ...dep('Destilado', 2), conversionFromPrevious: 550, unit: 'litros' };
+    expect(validateSetup({ ...base, departments: [dep('Molienda', 1), dep2] })).toEqual([]);
+    // No declarar unidad ni factor también es válido: es el caso de siempre.
+    expect(validateSetup(base)).toEqual([]);
+  });
 });
 
 describe('Lo que se avisa pero NO se bloquea', () => {
