@@ -11,6 +11,14 @@ export interface SetupDepartment {
   name: string;
   /** 1 = primer departamento de la cadena. */
   sequence: number;
+  /** Unidad física de este departamento (H12): "toneladas", "litros", "kg". */
+  unit?: string | null;
+  /**
+   * Cuántas unidades de ESTE departamento produce cada unidad recibida del
+   * anterior (H12). Solo tiene sentido para sequence > 1; en el primero se
+   * ignora, igual que "recibidas del anterior" en el cuadro de movimiento.
+   */
+  conversionFromPrevious?: number | null;
 }
 
 export interface SetupInput {
@@ -104,6 +112,20 @@ export function validateSetup(input: SetupInput): SetupProblem[] {
     problems.push({
       field: 'wipCountFrequencyDays',
       message: 'Cada cuántos días se cuenta la producción en proceso tiene que ser un número entre 1 y 366.',
+    });
+  }
+
+  // H12 — un factor de conversión de cero o negativo no significa nada
+  // físicamente: no existe "cada unidad recibida produce -3 unidades".
+  const factorInvalido = deps.some(
+    (d) => d.conversionFromPrevious != null && d.conversionFromPrevious <= 0,
+  );
+  if (factorInvalido) {
+    problems.push({
+      field: 'departments',
+      message:
+        'El factor de conversión entre departamentos tiene que ser mayor a cero: es cuántas unidades ' +
+        'del departamento actual produce cada unidad recibida del anterior.',
     });
   }
 

@@ -88,10 +88,14 @@ export function freezeProcessPeriod(input: ProcessFreezeInput): FrozenCalculatio
   const grossMargin = salesRevenue - costOfGoodsSold;
   const grossMarginPct = safeDiv(grossMargin, salesRevenue) * 100;
 
-  // Unidades para el costo unitario: las PRODUCIDAS. Si no están cargadas se cae
-  // a las vendidas, que es lo que hace el resto del sistema — no es un número
-  // inventado, es el mismo criterio de siempre.
-  const unitsProduced = input.productionQuantity ?? input.salesQuantity;
+  // Unidades para el costo unitario: las PRODUCIDAS. `productionQuantity` y
+  // `salesQuantity` son campos de la pestaña Venta (Costeo por Órdenes) que en
+  // Procesos nunca se cargan — caer a `salesQuantity` acá siempre da 0. La
+  // fuente real ya está calculada arriba: terminadas y transferidas + terminadas
+  // en stock del último departamento, que es exactamente `productionCost /
+  // finalUnitCost`. Solo si ni eso hay (finalUnitCost 0) se cae a las vendidas.
+  const unitsProduced =
+    input.productionQuantity ?? (finalUnitCost !== 0 ? productionCost / finalUnitCost : input.salesQuantity);
 
   return {
     rawMaterialConsumed,
@@ -163,7 +167,11 @@ export function freezeProcessPeriod(input: ProcessFreezeInput): FrozenCalculatio
       },
       unitCost: {
         unitsProduced,
-        unitProductionCost: safeDiv(productionCost, unitsProduced),
+        // El costo unitario ya está calculado arriba (`finalUnitCost`): dividir
+        // productionCost/unitsProduced de nuevo es la misma cuenta rehecha con
+        // más riesgo de redondeo, y si unitsProduced cae a 0 devuelve $0 sobre un
+        // costo que el motor sí calculó bien (H11).
+        unitProductionCost: finalUnitCost,
         unitCostOfGoodsSold: safeDiv(costOfGoodsSold, unitsProduced),
       },
     },

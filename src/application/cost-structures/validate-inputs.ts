@@ -84,6 +84,12 @@ export interface ProcessDepartmentCheck {
   hasByProductLines: boolean;
   /** Método de reparto de costos conjuntos elegido, si hay. */
   jointMethod: string | null;
+  /**
+   * H12: cuántas unidades de ESTE departamento produce cada unidad recibida
+   * del anterior (ej. 1 tonelada → 550 litros ⇒ 550). `null`/`undefined` =
+   * factor 1 (exige igualdad exacta, el comportamiento de antes de H12).
+   */
+  conversionFromPrevious?: number | null;
 }
 
 const num = (v: number | null | undefined): number => (v == null ? 0 : Number(v));
@@ -226,24 +232,31 @@ export function validateProcessInputs(departments: ProcessDepartmentCheck[]): vo
     // trazabilidad, dejar pasar un costo con plata desaparecida es peor que no
     // dar ningún número.
     //
-    // Nota sobre unidades de medida: el sistema no convierte entre
-    // departamentos. Si el 1º entrega litros y el 2º recibe cajas, esta
-    // comprobación también corta — y está bien que corte, porque sin conversión
-    // la plata tampoco se conserva. Convertir unidades es una funcionalidad a
-    // construir, no una validación a ablandar.
+    // H12 — CONVERSIÓN ENTRE DEPARTAMENTOS CON DISTINTA UNIDAD.
+    //
+    // Si el departamento declaró un factor (ej. 1 tonelada de fruta → 550
+    // litros de jugo), las recibidas se comparan contra las transferidas DEL
+    // ANTERIOR YA CONVERTIDAS a la unidad de este departamento, no 1 a 1. Sin
+    // factor declarado (el caso de siempre, y el de todo departamento anterior
+    // a H12) el factor es 1 y esto es exactamente el chequeo de H2: exige
+    // igualdad exacta, porque sin conversión la plata tampoco se conserva.
     const anterior = ordered[ordered.indexOf(dept) - 1];
     if (anterior?.schedule && dept.sequence > 1) {
+      const factor = dept.conversionFromPrevious ?? 1;
       const transferidas = transferidasResueltas(anterior.schedule);
+      const esperadas = transferidas * factor;
       const recibidas = num(s.receivedFromPrevious);
-      const diferencia = transferidas - recibidas;
+      const diferencia = esperadas - recibidas;
       if (Math.abs(diferencia) > 1e-4) {
         const faltan = diferencia > 0;
+        const conversion = factor !== 1 ? ` (${transferidas} × factor ${factor} = ${esperadas})` : '';
         throw new MissingInputError(
           'unitMovementSchedule.receivedFromPrevious',
           `"${anterior.name}" transfirió ${transferidas} unidades pero en "${dept.name}" cargaste que ` +
-            `recibió ${recibidas}. ${faltan ? 'Faltan' : 'Sobran'} ${Math.abs(diferencia)} unidades, y con ` +
-            'ellas se pierde (o se inventa) el costo que traían. Las unidades que salen de una etapa tienen ' +
-            'que ser las que entran a la siguiente: corregí una de las dos antes de calcular.',
+            `recibió ${recibidas}. Se esperaban ${esperadas}${conversion}. ` +
+            `${faltan ? 'Faltan' : 'Sobran'} ${Math.abs(diferencia)} unidades, y con ellas se pierde (o se ` +
+            'inventa) el costo que traían. Las unidades que salen de una etapa, convertidas por el factor ' +
+            'declarado, tienen que ser las que entran a la siguiente: corregí una de las dos antes de calcular.',
         );
       }
     }

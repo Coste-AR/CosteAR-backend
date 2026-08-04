@@ -216,6 +216,7 @@ export class ProcessCalculationService {
         name: string;
         sequence: number;
         defaultConversionAvanceEqualsMO: boolean;
+        conversionFromPrevious: Prisma.Decimal | number | null;
       };
       schedule: Record<string, unknown> | null;
       joint: {
@@ -257,6 +258,7 @@ export class ProcessCalculationService {
           : null,
         hasByProductLines: (joint?.products?.length ?? 0) > 0,
         jointMethod: joint?.method ?? null,
+        conversionFromPrevious: numOrNull(dept.conversionFromPrevious),
       })),
     );
 

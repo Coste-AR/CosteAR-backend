@@ -60,7 +60,13 @@ export class ProcessSetupService {
       this.db.processDepartment.findMany({
         where: { structureId, deletedAt: null },
         orderBy: { sequence: 'asc' },
-        select: { id: true, name: true, sequence: true },
+        select: {
+          id: true,
+          name: true,
+          sequence: true,
+          unit: true,
+          conversionFromPrevious: true,
+        },
       }),
       this.db.operatorMembership.findMany({
         where: { connection: { costistId: userId }, isActive: true },
@@ -78,7 +84,10 @@ export class ProcessSetupService {
       hasJointProducts: structure.hasJointProducts,
       wipCountFrequencyDays: structure.wipCountFrequencyDays,
       periodLengthDays: structure.periodLengthDays,
-      departments,
+      departments: departments.map((d) => ({
+        ...d,
+        conversionFromPrevious: d.conversionFromPrevious == null ? null : Number(d.conversionFromPrevious),
+      })),
       operarios: memberships.map((m) => ({
         membershipId: m.id,
         nombre: m.operator.name,
@@ -122,26 +131,39 @@ export class ProcessSetupService {
     const existentes = await this.db.processDepartment.findMany({
       where: { structureId, deletedAt: null },
       orderBy: { sequence: 'asc' },
-      select: { id: true, name: true, sequence: true },
+      select: { id: true, name: true, sequence: true, unit: true, conversionFromPrevious: true },
     });
     const porSecuencia = new Map(existentes.map((d) => [d.sequence, d]));
 
     return withTenant(userId, async (tx) => {
       for (const dep of input.departments) {
         const yaEsta = porSecuencia.get(dep.sequence);
+        // H12: factor solo aplica desde el segundo departamento — el primero no
+        // recibe de nadie, igual que "recibidas del anterior" en el cuadro.
+        const unit = dep.unit?.trim() || null;
+        const conversionFromPrevious = dep.sequence > 1 ? (dep.conversionFromPrevious ?? null) : null;
+
         if (yaEsta) {
           // Renombrar es seguro: la identidad de un departamento es su id, no su
-          // nombre, y los cuadros de movimiento cuelgan del id.
-          if (yaEsta.name !== dep.name.trim()) {
+          // nombre, y los cuadros de movimiento cuelgan del id. Unidad y factor
+          // se pueden ajustar en cualquier re-corrida del wizard, por la misma
+          // razón: no cambian el significado de un cuadro ya cargado, solo cómo
+          // se interpreta la comparación entre departamentos hacia adelante.
+          if (
+            yaEsta.name !== dep.name.trim() ||
+            yaEsta.unit !== unit ||
+            (yaEsta.conversionFromPrevious == null ? null : Number(yaEsta.conversionFromPrevious)) !==
+              conversionFromPrevious
+          ) {
             await tx.processDepartment.update({
               where: { id: yaEsta.id },
-              data: { name: dep.name.trim() },
+              data: { name: dep.name.trim(), unit, conversionFromPrevious },
             });
           }
           continue;
         }
         await tx.processDepartment.create({
-          data: { structureId, name: dep.name.trim(), sequence: dep.sequence },
+          data: { structureId, name: dep.name.trim(), sequence: dep.sequence, unit, conversionFromPrevious },
         });
       }
 

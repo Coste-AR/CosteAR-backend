@@ -10,6 +10,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * Estos tests fijan la invariante: TODA entrada que se persiste tiene su audit.
  */
 
+// Corriendo solo, este archivo pasa en ~1s. Compitiendo con los otros 91 de la
+// suite completa se queda sin tiempo contra el default de 5s (H14): no está
+// roto, es contención de recursos entre workers. Se le sube el límite acá en
+// vez de tocar el default global.
+vi.setConfig({ testTimeout: 15000 });
+
 const { mockTx, mockDb, mockClassify } = vi.hoisted(() => {
   const tx = {
     dataEntry: { create: vi.fn() },

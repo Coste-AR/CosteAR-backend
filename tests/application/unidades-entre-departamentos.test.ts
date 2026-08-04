@@ -118,3 +118,33 @@ describe('Las unidades que salen de una etapa son las que entran a la siguiente'
     expect(() => validateProcessInputs([molienda(), conAumento])).not.toThrow();
   });
 });
+
+describe('H12 — departamentos con unidades distintas, con factor de conversión declarado', () => {
+  it('con factor declarado, compara transferidas × factor contra recibidas', () => {
+    // Molienda transfiere 42.000 toneladas de fruta; Destilado declaró que
+    // cada tonelada rinde 10 litros ⇒ se esperan 420.000 litros recibidos.
+    const destiladoConFactor = { ...empaque(420_000), conversionFromPrevious: 10 };
+    expect(() => validateProcessInputs([molienda(), destiladoConFactor])).not.toThrow();
+  });
+
+  it('con factor declarado, sigue cortando si no coincide: la plata tampoco se conserva sin conversión', () => {
+    const destiladoConFactor = { ...empaque(300_000), conversionFromPrevious: 10 };
+    const correr = () => validateProcessInputs([molienda(), destiladoConFactor]);
+
+    expect(correr).toThrow(MissingInputError);
+    expect(correr).toThrow(/Se esperaban 420000/);
+    expect(correr).toThrow(/× factor 10/);
+  });
+
+  it('sin factor declarado, sigue exigiendo igualdad exacta 1 a 1 (H2 intacto)', () => {
+    // Ningún departamento existente antes de H12 declaró factor: tiene que
+    // comportarse exactamente igual que antes.
+    const correr = () => validateProcessInputs([molienda(), empaque(30_000)]);
+    expect(correr).toThrow(/Faltan 12000/);
+  });
+
+  it('un factor de 1 explícito es indistinguible de no declararlo', () => {
+    const destiladoFactor1 = { ...empaque(42_000), conversionFromPrevious: 1 };
+    expect(() => validateProcessInputs([molienda(), destiladoFactor1])).not.toThrow();
+  });
+});

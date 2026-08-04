@@ -103,6 +103,39 @@ describe('UnitMovementService — B15', () => {
     expect(got.resolved!.transferredOut).toBe(8000);
   });
 
+  it('get sobre un mes recién abierto (solo existencia inicial, sin salidas) NO tira 422: devuelve saved con resolved null (H9)', async () => {
+    mockProcessesContext();
+    const service = await makeService();
+
+    // Lo que deja el arrastre (B18) al abrir el período: existencia inicial con
+    // sus avances y costo, y nada más — ni transferredOut ni finalWip, así que
+    // el dominio no puede derivar por diferencia (faltan las dos incógnitas).
+    mockTx.unitMovementSchedule.findUnique.mockResolvedValue({
+      id: 'sch-1',
+      initialWip: 7500,
+      startedInProduction: null,
+      receivedFromPrevious: null,
+      unitIncrease: null,
+      transferredOut: null,
+      finishedInStock: null,
+      normalLossPct: null,
+      totalLossReported: null,
+      finalWip: null,
+      initialWipMpAvance: 1,
+      initialWipConvAvance: 0.4,
+      initialWipCostMp: 1000,
+      initialWipCostMo: 500,
+      initialWipCostCif: 300,
+    });
+
+    const got = await service.get('user-1', 'st-1', 'dept-1', 'per-1');
+
+    expect(got.exists).toBe(true);
+    expect(got.resolved).toBeNull();
+    expect(got.saved!.initialWip).toBe(7500);
+    expect(got.saved!.initialWipMpAvance).toBe(1);
+  });
+
   it('un cuadro que no cuadra → 422 (ProcessValidationError) nombrando el departamento', async () => {
     mockProcessesContext();
     const service = await makeService();
