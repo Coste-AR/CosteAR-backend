@@ -20,6 +20,8 @@ const setupSchema = z.object({
       z.object({
         name: z.string().trim().min(1, 'Cada departamento necesita un nombre.'),
         sequence: z.number().int().min(1),
+        unit: z.string().trim().max(40).nullable().optional(),
+        conversionFromPrevious: z.number().positive().nullable().optional(),
       }),
     )
     .min(1, 'Agregá al menos un departamento.'),
