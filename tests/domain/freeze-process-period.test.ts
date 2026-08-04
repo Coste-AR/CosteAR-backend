@@ -117,8 +117,19 @@ describe('Costo unitario', () => {
     expect(f.detail.unitCost.unitProductionCost).toBe(220);
   });
 
-  it('sin unidades producidas cae a las vendidas (mismo criterio que el resto del sistema)', () => {
+  it('sin productionQuantity (Procesos nunca lo carga) deriva las unidades del último departamento, no de las vendidas (H11)', () => {
     const f = freezeProcessPeriod({ ...base, productionQuantity: null });
+
+    // 176.000 (productionCost) ÷ 220 (finalUnitCost) = 800: las mismas 800
+    // unidades producidas que da el caso con productionQuantity cargado. Caer a
+    // las 700 vendidas —el criterio de Órdenes— infla el costo unitario y es
+    // exactamente el bug que H11 encontró en un período cerrado real.
+    expect(f.detail.unitCost.unitsProduced).toBe(800);
+    expect(f.detail.unitCost.unitProductionCost).toBe(220);
+  });
+
+  it('sin departamentos ni costo (finalUnitCost 0) cae a las vendidas para no dividir por cero', () => {
+    const f = freezeProcessPeriod({ ...base, departments: [], productionQuantity: null });
     expect(f.detail.unitCost.unitsProduced).toBe(700);
   });
 });

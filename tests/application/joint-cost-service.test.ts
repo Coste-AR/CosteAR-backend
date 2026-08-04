@@ -35,7 +35,7 @@ function mockProcessesContext() {
     costingSystem: 'PROCESSES',
   });
   mockTx.processDepartment.findFirst.mockResolvedValue({ id: 'dept-1', name: 'Extracción' });
-  mockTx.costPeriod.findFirst.mockResolvedValue({ id: 'per-1', label: 'Abril 2026' });
+  mockTx.costPeriod.findFirst.mockResolvedValue({ id: 'per-1', label: 'Abril 2026', code: '2026-04' });
 }
 
 /** upsert de la cabecera devuelve la fila persistida. */
@@ -118,6 +118,33 @@ describe('JointCostService — B16', () => {
     expect(got.exists).toBe(true);
     expect(got.result!.lines.map((l) => l.unitCost)).toEqual([60, 60, 60]);
     expect(got.result!.totalAllocated).toBe(570000);
+  });
+
+  it('cada DataPoint que crea el reparto nace imputado a su período (H6: si no, traba el cierre)', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    await service.save(
+      'user-1',
+      'st-1',
+      'dept-1',
+      'per-1',
+      {
+        deptId: 'dept-1',
+        method: 'PHYSICAL_UNITS',
+        jointCostTotal: 570000,
+        products: [{ productName: 'A', kind: 'coproduct', unitsObtained: 2500 }],
+        sourceArea: 'planta',
+        captureMethod: 'manual',
+      },
+      actor,
+    );
+
+    expect(mockTx.dataPoint.create).toHaveBeenCalled();
+    for (const call of mockTx.dataPoint.create.mock.calls) {
+      expect(call[0].data.periodoImputado).toBe('2026-04');
+    }
   });
 
   it('los 4 métodos computan correctamente (números ancla FX-J1 del dominio)', async () => {

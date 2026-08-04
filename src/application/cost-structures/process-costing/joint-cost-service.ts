@@ -74,7 +74,7 @@ const JOINT_TOTAL_META = { label: 'Costo conjunto total', unit: '$', element: 'M
 interface JointContext {
   structure: { id: string; productName: string };
   department: { id: string; name: string };
-  period: { id: string; label: string };
+  period: { id: string; label: string; code: string };
 }
 
 /** Fila persistida de una línea de producto (subconjunto que usamos). */
@@ -270,7 +270,7 @@ export class JointCostService {
     return {
       structure: { id: structure.id, productName: structure.productName },
       department: { id: department.id, name: department.name },
-      period: { id: period.id, label: period.label },
+      period: { id: period.id, label: period.label, code: period.code },
     };
   }
 
@@ -428,6 +428,11 @@ export class JointCostService {
           fieldKey,
           label,
           unit: meta.unit,
+          // El dato del reparto ya sabe de qué período es (igual que el cuadro de
+          // movimiento, unit-movement-service.ts). Sin esto nacía sin imputar y
+          // trababa el cierre del mes: con un punto de separación de 3 productos
+          // eran 10 fichas para imputar a mano antes de poder cerrar (H6).
+          periodoImputado: ctx.period.code,
           sourceArea: body.sourceArea,
           method: body.captureMethod,
           valueNum: raw,
