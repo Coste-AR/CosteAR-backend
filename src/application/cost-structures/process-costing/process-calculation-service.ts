@@ -275,7 +275,13 @@ export class ProcessCalculationService {
 
   /** Mapea una fila persistida (departamento + cuadro + reparto) al insumo del motor. */
   private toDepartmentInput(
-    dept: { id: string; name: string; sequence: number; defaultConversionAvanceEqualsMO: boolean },
+    dept: {
+      id: string;
+      name: string;
+      sequence: number;
+      defaultConversionAvanceEqualsMO: boolean;
+      conversionFromPrevious: Prisma.Decimal | number | null;
+    },
     schedule: Record<string, unknown>,
     joint: { method: JointAllocationMethod; jointCostTotal: Prisma.Decimal | number; products: Array<Record<string, unknown>> } | null,
     periodId: string,
@@ -313,6 +319,11 @@ export class ProcessCalculationService {
       // períodos (B18); en un departamento inicial o en el primer período de la
       // estructura no hay nada que arrastrar y queda en 0.
       initialWipTransferredCost: n(schedule.initialWipCostPrevDept) ?? 0,
+      // Factor de conversión de unidades declarado en el setup (H12). El motor
+      // lo necesita para llevar el costo unitario del anterior a la unidad de
+      // este departamento: la validación sola no alcanza, porque controla las
+      // unidades pero no la plata que cruza.
+      conversionFromPrevious: n(dept.conversionFromPrevious),
       jointAllocation: joint
         ? {
             method: joint.method,
