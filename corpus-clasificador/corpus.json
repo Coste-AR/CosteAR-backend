@@ -1,0 +1,215 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "fecha": "2026-08-07",
+    "rubro": "Avicultura de postura (~200.000 gallinas ponedoras) — Tucumán",
+    "proposito": "Vara de medición del clasificador para las correcciones CL-01 a CL-09.",
+    "origen": "RECONSTRUIDO. No es el corpus original de 35 comprobantes de la auditoría del 06/08/2026 — ese no está versionado en ningún repo. Cada caso de acá se reconstruyó a partir de un hecho declarado por escrito en Plan-Implementacion-Clasificador-2026-08-06.md, y su clasificación correcta se justifica con una regla citable de las clases de la cátedra (vault Obsidian, '001.1 - Clases (Mirta)'). Ver ground-truth.md para la trazabilidad caso por caso.",
+    "advertencia": "Las métricas que salgan de este corpus NO son comparables contra la línea de base de la auditoría (accuracy 67,6% / precisión a confianza ≥90 74,1% sobre 34 documentos). Este corpus tiene menos casos y está sesgado hacia los errores conocidos, así que su accuracy absoluta es pesimista por construcción. Sirve para comparar ANTES y DESPUÉS de un mismo cambio, y para que un error corregido no vuelva. No para citar un número de accuracy del producto.",
+    "campos": {
+      "origen": "'medido' = el plan declara el comportamiento observado del sistema para este caso. 'requisito' = el plan declara la regla correcta pero no reporta una medición sobre un documento concreto.",
+      "texto": "Reconstruido en formato post-OCR con el mismo estilo que tests/classifier/vault-accuracy.harness.test.ts. Lo que NO es reconstruido: los montos, la clasificación esperada y el comportamiento de base, que salen del plan.",
+      "baseline": "Comportamiento medido por la auditoría del 06/08/2026, tal como lo reporta el plan. null cuando el plan no lo reporta.",
+      "regla": "Regla de la cátedra que justifica la clasificación esperada, con archivo y línea del vault.",
+      "correccion": "Qué corrección del plan cubre este caso."
+    }
+  },
+
+  "casos": [
+    {
+      "id": "MP-01",
+      "origen": "medido",
+      "correccion": "CL-01",
+      "expected": "MATERIA_PRIMA",
+      "montos": { "netAmount": 11025000, "taxAmount": 1157625, "totalAmount": 12182625, "alicuota": 0.105 },
+      "baseline": { "costSection": "MATERIA_PRIMA", "ok": true, "montoQueLlegoAlCosto": 12182625, "sobrecosteo": "+10,5 %" },
+      "nota": "La clasificación es correcta. El defecto medido es de MONTO: el costeo tomó el total con IVA en vez del neto.",
+      "regla": "Clase 4, línea 27 — 'IVA: solo aplica si la empresa es responsable no inscripta o monotributista; si es responsable inscripta, el IVA no forma parte del costo de adquisición'. El cliente es Responsable Inscripto con saldo a favor.",
+      "text": "FACTURA A\nCAE Nº: 75200000000101\nCUIT: 30-58790011-4\nPUNTO DE VENTA 0003\nProveedor: Granos del Norte SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 12/06/2026\nComprobante Nº 0003-00001854\n\n45 toneladas de maíz partido para alimentación de ponedoras\n\nSubtotal neto: $ 11.025.000,00\nIVA 10,5%: $ 1.157.625,00\nTOTAL: $ 12.182.625,00"
+    },
+    {
+      "id": "MP-03",
+      "origen": "medido",
+      "correccion": "CL-01",
+      "expected": "MATERIA_PRIMA",
+      "montos": { "netAmount": 9870000, "taxAmount": 1036350, "totalAmount": 10906350, "alicuota": 0.105 },
+      "baseline": { "costSection": "MATERIA_PRIMA", "ok": true, "montoQueLlegoAlCosto": 10906350, "sobrecosteo": "+10,5 %" },
+      "nota": "Ídem MP-01: clasificación correcta, monto inflado por IVA.",
+      "regla": "Clase 4, línea 27 — el IVA no forma parte del costo de adquisición para un Responsable Inscripto.",
+      "text": "FACTURA A\nCAE Nº: 75200000000103\nCUIT: 30-61220876-2\nPUNTO DE VENTA 0002\nProveedor: Nutrición Avícola SA\nCondición frente al IVA: Responsable Inscripto\nFecha: 18/06/2026\nComprobante Nº 0002-00000977\n\n60 toneladas de alimento balanceado para gallina ponedora fase 2\n\nSubtotal neto: $ 9.870.000,00\nIVA 10,5%: $ 1.036.350,00\nTOTAL: $ 10.906.350,00"
+    },
+    {
+      "id": "MP-06",
+      "origen": "medido",
+      "correccion": "CL-01",
+      "expected": "MATERIA_PRIMA",
+      "montos": { "netAmount": 10000000, "taxAmount": 2100000, "totalAmount": 12100000, "alicuota": 0.21 },
+      "baseline": { "costSection": "MATERIA_PRIMA", "ok": true, "montoQueLlegoAlCosto": 12100000, "sobrecosteo": "+21,0 %" },
+      "nota": "El caso más caro: alícuota 21 %. Clasificación correcta, monto inflado un 21 %.",
+      "regla": "Clase 4, línea 27 — el IVA no forma parte del costo de adquisición para un Responsable Inscripto.",
+      "text": "FACTURA A\nCAE Nº: 75200000000106\nCUIT: 30-70995512-8\nPUNTO DE VENTA 0001\nProveedor: Premezclas Vitamínicas del Litoral SA\nCondición frente al IVA: Responsable Inscripto\nFecha: 25/06/2026\nComprobante Nº 0001-00004312\n\n8 toneladas de núcleo vitamínico mineral para postura\n\nSubtotal neto: $ 10.000.000,00\nIVA 21%: $ 2.100.000,00\nTOTAL: $ 12.100.000,00"
+    },
+
+    {
+      "id": "MO-03",
+      "origen": "medido",
+      "correccion": "CL-02",
+      "expected": "COSTOS_INDIRECTOS",
+      "baseline": { "costSection": "MANO_DE_OBRA", "confidence": 99, "requiresAI": false, "ok": false, "nota": "Error de ALTA CONFIANZA. La rama UNKNOWN de routePayroll devuelve el mismo objeto que la rama MOD." },
+      "nota": "La veterinaria no transforma la materia prima: no participa de la elaboración del huevo. Es mano de obra indirecta.",
+      "regla": "Clase 1, línea 60 — 'Indirecta: no participa directamente en la transformación (ej. capataz, gerente de producción)'. Clase 11, línea 207 — 'Mano de obra indirecta: gerente de producción, personal de limpieza, mecánicos de mantenimiento'. La MO indirecta es componente de CIP (Clase 1, línea 64).",
+      "text": "RECIBO DE SUELDO\nEmpleado: Laura Bianchi — Veterinaria responsable de sanidad del plantel\nCUIL 27-30112233-4\nPeríodo: junio 2026\nSUELDO BÁSICO\nOBRA SOCIAL: OSDE\nANSES\nJUBILACIÓN\nFecha: 01/07/2026"
+    },
+    {
+      "id": "MO-04",
+      "origen": "medido",
+      "correccion": "CL-02",
+      "expected": "DESCONOCIDO",
+      "esperaEscalamiento": true,
+      "baseline": { "costSection": "MANO_DE_OBRA", "confidence": 99, "requiresAI": false, "ok": false, "nota": "Error de ALTA CONFIANZA. 'No sé qué puesto es' se resolvió como 'mano de obra directa' con confianza 99." },
+      "nota": "Un recibo sin puesto declarado no permite decidir si el empleado transforma la MP. Lo correcto es escalar, nunca afirmar MOD.",
+      "regla": "Clase 1, líneas 59-60 — la distinción MOD/MOI depende de si la persona 'transforma la MP en producto final, identificable'. Sin el puesto no hay forma de determinarlo, y el plan CL-02 lo declara explícitamente: 'When the role is unknown, the correct behaviour is to escalate — never to assert MOD.'",
+      "text": "RECIBO DE SUELDO\nEmpleado: Ramiro Quiroga\nCUIL 20-31445566-9\nPeríodo: junio 2026\nSUELDO BÁSICO\nOBRA SOCIAL\nANSES\nJUBILACIÓN\nFecha: 01/07/2026"
+    },
+    {
+      "id": "MO-CAPATAZ",
+      "origen": "medido",
+      "correccion": "CL-02",
+      "expected": "COSTOS_INDIRECTOS",
+      "esGuardaDeRegresion": true,
+      "baseline": { "costSection": "COSTOS_INDIRECTOS", "confidence": 60, "requiresAI": true, "ok": true, "nota": "Hoy es CORRECTO. Está en el corpus como guarda: CL-02 no debe romperlo." },
+      "nota": "Guarda de regresión. El capataz ya rutea bien a CIP; arreglar la rama UNKNOWN no debe cambiarlo.",
+      "regla": "Clase 1, línea 60 — 'Indirecta: no participa directamente en la transformación (ej. capataz, gerente de producción)'.",
+      "text": "RECIBO DE SUELDO\nEmpleado: Héctor Sosa — Capataz de galpones\nCUIL 20-24778899-1\nPeríodo: junio 2026\nSUELDO BÁSICO\nOBRA SOCIAL\nANSES\nJUBILACIÓN\nFecha: 01/07/2026"
+    },
+    {
+      "id": "MO-OPERARIO",
+      "origen": "medido",
+      "correccion": "CL-02",
+      "expected": "MANO_DE_OBRA",
+      "esGuardaDeRegresion": true,
+      "baseline": { "costSection": "MANO_DE_OBRA", "ok": true, "nota": "Hoy es CORRECTO. Criterio de aceptación 4 de CL-02: 'no romper el camino que funciona'." },
+      "nota": "Guarda de regresión. El operario de galpón sí participa de la producción: es MOD y debe seguir siéndolo con confianza alta.",
+      "regla": "Clase 1, línea 59 — 'Directa: transforma la MP en producto final, identificable (ej. operarios que cortan, cosen, etiquetan)'.",
+      "text": "RECIBO DE SUELDO\nEmpleado: Marcos Villalba — Operario de galpón de postura\nCUIL 20-29334455-7\nPeríodo: junio 2026\nSUELDO BÁSICO\nOBRA SOCIAL\nANSES\nJUBILACIÓN\nHORAS EXTRA\nFecha: 01/07/2026"
+    },
+
+    {
+      "id": "MULTI-01",
+      "origen": "medido",
+      "correccion": "CL-02",
+      "expected": "MULTIPLE",
+      "montos": { "materiaPrima": 12360000, "manoDeObra": 11760000, "costosIndirectos": 11652000, "total": 35772000 },
+      "baseline": { "costSection": "MANO_DE_OBRA", "ok": false, "nota": "Colapsó: se guardó UNA sola línea de $35.772.000 en MANO_DE_OBRA. analyzeDocument detectó bien MULTIPLE; Layer 4 lo pisó al reportar requiresAI:false." },
+      "nota": "Documento con las tres secciones. La suma de los tres importes es exactamente el monto de la línea colapsada, lo que confirma el mecanismo del defecto.",
+      "regla": "Clase 1, líneas 50-52 — los tres elementos del costo (MP, MO, CIP) son categorías distintas y no deben mezclarse en una sola imputación.",
+      "text": "LIQUIDACIÓN DE GASTOS DEL ESTABLECIMIENTO\nPeríodo: junio 2026\nEstablecimiento avícola — Tucumán\n\nMateria prima — maíz y balanceado consumido: $ 12.360.000,00\nMano de obra — jornales de operarios de galpón: $ 11.760.000,00\nCostos indirectos — energía, mantenimiento y sanidad: $ 11.652.000,00\n\nTOTAL DEL PERÍODO: $ 35.772.000,00"
+    },
+    {
+      "id": "GA-05",
+      "origen": "medido",
+      "correccion": "CL-02, CL-03",
+      "expected": "GASTO_COMERCIALIZACION",
+      "baseline": { "costSection": "MANO_DE_OBRA", "ok": false, "nota": "La IA respondió gasto de comercialización; Layer 4 corrió después y lo pisó a MANO_DE_OBRA. El costista leyó '…lo que indica un gasto de comercialización' mientras el sistema imputó MANO_DE_OBRA." },
+      "nota": "Es además el caso testigo de CL-03: la explicación mostrada contradice la imputación guardada.",
+      "regla": "Clase 1, línea 66 — 'Ojito: solo son CIP si son de producción; los gastos de administración, venta y financieros no son CIP'.",
+      "text": "FACTURA A\nCAE Nº: 75200000000205\nCUIT: 30-71234567-5\nPUNTO DE VENTA 0001\nProveedor: Distribuidora Comercial del Norte SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 20/06/2026\n\nComisión sobre venta de huevo a supermercados — junio 2026\nViáticos de vendedores de la zona norte"
+    },
+
+    {
+      "id": "CIP-01",
+      "origen": "medido",
+      "correccion": "CL-04, CL-05",
+      "expected": "COSTOS_INDIRECTOS",
+      "baseline": { "costSection": "GASTO_ADMINISTRACION", "confidence": 97, "ok": false, "nota": "Error de ALTA CONFIANZA. No matchea ninguna keyword de CIP: 'energía eléctrica'/'electricidad'/'kwh' faltan en UNIVERSAL_CIP_KEYWORDS y el regex existente es \\benergia\\b sin tilde." },
+      "nota": "El costo indirecto más universal de cualquier PyME industrial, y no matchea nada.",
+      "regla": "Clase 1, línea 64 — los CIP incluyen 'energía eléctrica, fuerza motriz, calefacción, mantenimiento'. Clase 11, línea 211 — 'Energía eléctrica (iluminación y fuerza motriz)'.",
+      "text": "FACTURA A\nCAE Nº: 75200000000301\nCUIT: 30-54668943-1\nPUNTO DE VENTA 0044\nProveedor: EDET SA — Empresa de Distribución Eléctrica de Tucumán\nCondición frente al IVA: Responsable Inscripto\nFecha: 05/07/2026\n\nEnergía eléctrica — suministro galpones de postura\nConsumo del período: 184.500 kWh\nCargo fijo y cargo variable por energía"
+    },
+    {
+      "id": "CIP-02",
+      "origen": "medido",
+      "correccion": "CL-04",
+      "expected": "COSTOS_INDIRECTOS",
+      "baseline": { "costSection": "MATERIA_PRIMA", "confidence": 97, "ok": false, "nota": "Error de ALTA CONFIANZA. El perfil AGRO tiene fuelIsMP:true, regla escrita para tractores de cultivo." },
+      "nota": "El gasoil del grupo electrógeno y de la calefacción no se incorpora al huevo: es fuerza motriz y calefacción, o sea CIP.",
+      "regla": "Clase 1, línea 64 — los CIP incluyen 'energía eléctrica, fuerza motriz, calefacción'. La MP directa es la 'identificable con el objeto de costo' (Clase 1, línea 58); el gasoil del generador no lo es.",
+      "text": "FACTURA A\nCAE Nº: 75200000000302\nCUIT: 30-50001234-7\nPUNTO DE VENTA 0012\nProveedor: YPF — Estación de Servicio Ruta 9\nCondición frente al IVA: Responsable Inscripto\nFecha: 28/06/2026\n\n6.000 litros de gasoil para grupo electrógeno y calefacción de galpones"
+    },
+    {
+      "id": "CIP-04",
+      "origen": "medido",
+      "correccion": "CL-04",
+      "expected": "COSTOS_INDIRECTOS",
+      "baseline": { "costSection": "MATERIA_PRIMA", "confidence": 97, "ok": false, "nota": "Error de ALTA CONFIANZA. 'vacuna' está en los mpKeywords del perfil AGRO." },
+      "nota": "La vacuna no se incorpora al huevo. Es material indirecto de producción.",
+      "regla": "Clase 1, línea 58 — MP indirecta: 'no identificable en cantidad exacta o de importe mínimo (ej. hilo en una remera); pasa automáticamente a CIP'. Clase 11, línea 206 — los materiales indirectos son componente de CIP.",
+      "text": "FACTURA A\nCAE Nº: 75200000000304\nCUIT: 30-63447781-9\nPUNTO DE VENTA 0007\nProveedor: Laboratorio Biológico Avícola SA\nCondición frente al IVA: Responsable Inscripto\nFecha: 15/06/2026\n\nVacuna contra Newcastle — 200.000 dosis para el plantel\nVacuna bronquitis infecciosa — 200.000 dosis"
+    },
+
+    {
+      "id": "FLE-02",
+      "origen": "medido",
+      "correccion": "CL-06",
+      "expected": "MATERIA_PRIMA",
+      "referenciaComprobante": "0003-00001902",
+      "baseline": { "costSection": "COSTOS_INDIRECTOS", "confidence": 97, "ok": false, "nota": "Error de ALTA CONFIANZA. Agravante: el hint de rubro que se le manda a la IA dice literalmente 'flete de granos es COSTOS_INDIRECTOS', así que la IA obedece una instrucción equivocada." },
+      "nota": "Flete facturado por separado que referencia explícitamente el comprobante de la compra de MP que transportó.",
+      "regla": "Clase 4, líneas 15-18 — el costo de adquisición acumula el flete hasta destino ('Costo de nacionalización + flete carretero hasta destino (ej. Tucumán) = costo de adquisición total'). El flete SOBRE LA COMPRA de un material es parte del costo de ese material.",
+      "text": "FACTURA A\nCAE Nº: 75200000000401\nCUIT: 30-66889900-3\nPUNTO DE VENTA 0005\nProveedor: Transportes Rivadavia SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 22/06/2026\n\nFlete por la compra de 38 toneladas de maíz - Factura 0003-00001902\nOrigen: Granos del Norte SRL — Destino: establecimiento Tucumán"
+    },
+    {
+      "id": "FLE-01",
+      "origen": "medido",
+      "correccion": "CL-06",
+      "expected": "COSTOS_INDIRECTOS",
+      "esGuardaDeRegresion": true,
+      "baseline": { "costSection": "COSTOS_INDIRECTOS", "ok": true, "nota": "Hoy es CORRECTO. Criterio de aceptación 2 de CL-06: 'Un flete de planta, sin referencia a una compra, sigue yendo a CIP'." },
+      "nota": "Guarda de regresión. Mismo sustantivo que FLE-02, destino contable distinto: el flete interno no está sobre una compra.",
+      "regla": "Clase 1, línea 64 — el movimiento interno de producción es CIP. Clase 4, líneas 15-18 — solo el flete que integra el costo de adquisición se activa contra la MP.",
+      "text": "FACTURA A\nCAE Nº: 75200000000402\nCUIT: 30-66889900-3\nPUNTO DE VENTA 0005\nProveedor: Transportes Rivadavia SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 30/06/2026\n\nFlete interno entre galpones del establecimiento — movimiento de plantel\nServicio de acarreo dentro de la planta"
+    },
+
+    {
+      "id": "MP-MAIZ-REF",
+      "origen": "requisito",
+      "correccion": "CL-06",
+      "expected": "MATERIA_PRIMA",
+      "esComprobanteReferenciado": "0003-00001902",
+      "baseline": null,
+      "nota": "Es el comprobante que FLE-02 referencia. El plan no dice qué documento del corpus original cumplía este rol, así que se construye acá para que la cadena flete → compra sea verificable de punta a punta.",
+      "regla": "Clase 1, línea 58 — el maíz es MP directa: identificable con el objeto de costo.",
+      "text": "FACTURA A\nCAE Nº: 75200000000102\nCUIT: 30-58790011-4\nPUNTO DE VENTA 0003\nProveedor: Granos del Norte SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 20/06/2026\nComprobante Nº 0003-00001902\n\n38 toneladas de maíz para alimentación de ponedoras"
+    },
+    {
+      "id": "MP-BALANCEADO",
+      "origen": "requisito",
+      "correccion": "CL-04",
+      "expected": "MATERIA_PRIMA",
+      "baseline": null,
+      "nota": "CL-04 declara que 'balanceado y maíz dominan la materia prima' de una explotación de postura y pide 'balanceado' en mpKeywords.",
+      "regla": "Clase 1, línea 58 — MP directa identificable con el objeto de costo: el alimento se convierte en huevo.",
+      "text": "FACTURA A\nCAE Nº: 75200000000110\nCUIT: 30-61220876-2\nPUNTO DE VENTA 0002\nProveedor: Nutrición Avícola SA\nCondición frente al IVA: Responsable Inscripto\nFecha: 08/07/2026\n\n80 toneladas de alimento balanceado para ponedora en producción"
+    },
+    {
+      "id": "MP-MAPLE",
+      "origen": "requisito",
+      "correccion": "CL-04",
+      "expected": "MATERIA_PRIMA",
+      "baseline": null,
+      "nota": "CL-04 pide 'maple' en mpKeywords. ATENCIÓN — pregunta abierta: el maple es envase del producto terminado. La cátedra lo trataría como MP directa solo si es identificable con el objeto de costo (lo es: un maple por cada 30 huevos); si se lo considerara de importe mínimo sería material indirecto → CIP. Se sigue el plan y se lo espera como MP, pero conviene confirmarlo con la cátedra antes de cerrar CL-04.",
+      "regla": "Clase 1, línea 58 — MP directa si es identificable con el objeto de costo. Requisito explícito de CL-04.",
+      "text": "FACTURA A\nCAE Nº: 75200000000111\nCUIT: 30-70044556-2\nPUNTO DE VENTA 0001\nProveedor: Envases Celulósicos del Norte SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 10/07/2026\n\n120.000 maples de cartón para 30 huevos\n8.000 cajas de cartón corrugado para despacho"
+    },
+    {
+      "id": "CIP-MANT-GALPON",
+      "origen": "requisito",
+      "correccion": "CL-04",
+      "expected": "COSTOS_INDIRECTOS",
+      "baseline": null,
+      "nota": "CL-04 pide 'mantenimiento de galpones' en cipKeywords.",
+      "regla": "Clase 1, línea 64 — los CIP incluyen mantenimiento. Clase 11, líneas 206-213 — mantenimiento y reparaciones de la estructura productiva son CIP.",
+      "text": "FACTURA A\nCAE Nº: 75200000000305\nCUIT: 30-59887744-6\nPUNTO DE VENTA 0003\nProveedor: Servicios Rurales Integrales SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 12/07/2026\n\nMantenimiento de galpones de postura — reparación de comederos y bebederos\nReemplazo de chapas de techo del galpón 4"
+    }
+  ]
+}
