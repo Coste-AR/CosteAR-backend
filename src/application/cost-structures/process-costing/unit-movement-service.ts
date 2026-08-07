@@ -152,7 +152,7 @@ export class UnitMovementService {
       department: ctx.department.name,
       period: ctx.period.label,
       exists: true,
-      saved: this.serializeRow(row),
+      saved: this.serializeRow(row, await this.countedByName(row.countedBy)),
       resolved: resolved ? this.serialize(resolved) : null,
       traces: await this.tracesFor(ctx),
     };
@@ -289,7 +289,7 @@ export class UnitMovementService {
       return {
         department: ctx.department.name,
         period: ctx.period.label,
-        saved: this.serializeRow(saved),
+        saved: this.serializeRow(saved, await this.countedByName(saved.countedBy, tx)),
         resolved: this.serialize(resolved),
       };
     });
@@ -583,7 +583,22 @@ export class UnitMovementService {
     };
   }
 
-  private serializeRow(row: Record<string, unknown>) {
+  /**
+   * Nombre de quien informó el recuento. `null` si todavía no lo informó nadie
+   * o si ese usuario ya no existe: la pantalla tiene que poder decir "no
+   * consta" en vez de mostrar un uuid, que además nunca viaja en una traza que
+   * después se muestra (mismo criterio que el resto del módulo).
+   */
+  private async countedByName(
+    countedBy: unknown,
+    client: Pick<PrismaClient, 'user'> = this.db,
+  ): Promise<string | null> {
+    if (typeof countedBy !== 'string') return null;
+    const user = await client.user.findUnique({ where: { id: countedBy }, select: { name: true } });
+    return user?.name ?? null;
+  }
+
+  private serializeRow(row: Record<string, unknown>, countedByName: string | null = null) {
     const n = (x: unknown): number | null => (x == null ? null : Number(x));
     return {
       initialWip: n(row.initialWip),
@@ -611,6 +626,20 @@ export class UnitMovementService {
       // costista. Viaja igual para que la pantalla pueda mostrar de dónde sale
       // el costo del departamento anterior contenido en la existencia inicial.
       initialWipCostPrevDept: n(row.initialWipCostPrevDept),
+
+      // PROCEDENCIA DEL RECUENTO (D7). El backend ya la guardaba desde que se
+      // construyó `countSourceFor()`, pero no la devolvía ningún endpoint: el
+      // asistente de setup le promete al cliente que la diferencia entre "lo
+      // informó la planta" y "lo estimó el área de costos" se ve en la
+      // trazabilidad, y hasta acá no se veía en ningún lado.
+      //
+      // `NOT_COUNTED` (el default de la columna) no es un hueco: es el estado
+      // real de un mes recién abierto por el arrastre, cuya existencia FINAL
+      // todavía no contó nadie. Mostrarlo es justamente lo que distingue ese
+      // mes de uno con recuento hecho.
+      countSource: typeof row.countSource === 'string' ? row.countSource : null,
+      countedAt: row.countedAt instanceof Date ? row.countedAt.toISOString() : null,
+      countedByName,
     };
   }
 }
