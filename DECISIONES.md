@@ -2610,3 +2610,171 @@ persiste el cálculo**, no el 500 de antes; con bp cargado calcula y persiste). 
 archivos de tests de motor, costos indirectos, prorrateos, períodos e importación Excel:
 **443 passed**, cero regresión. `tsc --noEmit` limpio; `eslint` sin errores en los archivos tocados.
 Sin migración.
+
+## Auditoría de RLS — el aislamiento entre inquilinos no tenía red de contención
+
+**El hallazgo.** Row-Level Security estaba escrito pero era **inerte**. Dos problemas distintos, uno
+de infraestructura y otro de datos:
+
+1. **El rol de la app es SUPERUSER** (implica `BYPASSRLS`), así que PostgreSQL ni siquiera evalúa las
+   políticas — tampoco las `FORCE`. Comprobado en vivo: con `app.user_id` seteado en el inquilino A,
+   un `SELECT * FROM cost_structures` devolvía filas del inquilino B. Este punto lo resuelve
+   infraestructura con un rol dedicado; acá no se tocó `DATABASE_URL` ni se creó ningún rol de app.
+2. **12 tablas de inquilino sin una sola política** (`relrowsecurity = f`, 0 políticas):
+   `cost_ledger_entries`, `cost_periods`, `allocation_bases`, `classification_audits`,
+   `company_target_budgets`, `empresa_connections`, `processed_caes`, `supplier_fingerprints`,
+   `daily_signals`, `late_data_decisions`, `vault_chat_sessions`, `audit_logs`.
+
+Lo que sostenía el aislamiento era, íntegramente, que cada servicio se acordara del
+`findFirst({ id, userId })`. No había nada abajo: el día que un endpoint nuevo se olvide el
+`where userId`, no falla ningún test — devuelve datos de otro cliente con un **200**.
+
+**Qué se hizo.** `prisma/rls.sql` pasó de 13 a **28 tablas** con `ENABLE` + `FORCE` + política
+(30 políticas: `allocation_bases` y `audit_logs` llevan dos, ver abajo). Todo idempotente
+(`DROP POLICY IF EXISTS` antes de cada `CREATE`), porque `apply-rls.mjs` corre más de una vez. **Sin
+migración nueva**: RLS en este repo nunca vivió en `prisma/migrations` — se aplica con
+`npm run db:rls`, que es lo que ya hacen `db:setup` y el arranque.
+
+**Cómo se resolvió el dueño en cada caso.** No se inventó ninguna columna; se verificó contra
+`schema.prisma` y contra el `\d` de la base.
+
+| Camino | Tablas |
+| --- | --- |
+| Columna propia `userId` | `cost_periods`, `late_data_decisions`, `vault_chat_sessions` |
+| Columna propia `costistId` (el costista **es** el inquilino, mismo rol que `userId`) | `cost_ledger_entries`, `empresa_connections`, `supplier_fingerprints`, `classification_audits`, `validation_history` |
+| `companyId` → `companies."userId"` | `company_target_budgets`, `processed_caes`, `allocation_bases` |
+| `structureId` → `cost_structures."userId"` | `cost_config_versions`, `allocation_base_values` |
+| `sessionId` → `vault_chat_sessions."userId"` | `vault_chat_messages` |
+
+Cuatro tablas se sumaron **fuera de las 12** porque dejarlas abiertas vaciaba de sentido a las que sí
+se protegieron: `allocation_base_values` (los números de las bases; la base sin sus valores no dice
+nada, los valores sí: m², horas máquina y focos de la planta del cliente), `cost_config_versions`
+(el histórico completo de la configuración del motor), `vault_chat_messages` (proteger la sesión y
+dejar abiertos los mensajes es proteger el sobre y no la carta) y `validation_history`.
+
+**`allocation_bases`: dos políticas, no una.** `companyId` en NULL significa *base precargada del
+sistema*, común a todos; con `companyId`, es base propia del cliente. Una sola política que metiera
+`companyId IS NULL` en el `USING` dejaría a **cualquier** inquilino borrar el catálogo compartido: el
+`USING` también gobierna `UPDATE` y `DELETE`. Van entonces `tenant_isolation` (`FOR ALL`, solo lo
+propio) y `system_bases_readable` (`FOR SELECT`, suma las del sistema). Las políticas permisivas se
+suman con OR por comando: **veo las mías + las del sistema, toco solo las mías**.
+
+**`audit_logs`: se protege, con políticas separadas por comando.** Es infraestructura y tiene dos
+propiedades que una política `"userId" = current_app_user_id()` a secas rompería. Primera: se escribe
+**fuera de todo contexto de inquilino** — un `auth.login.failed` de un email que no existe, jobs,
+webhooks; ahí `userId` es NULL a propósito, y un `WITH CHECK` por `userId` haría fallar justamente
+los registros de seguridad que más importan. Segunda: es append-only por diseño. La solución:
+
+- `tenant_isolation` **FOR SELECT** — cada uno ve solo lo suyo (las filas con `userId` NULL no las ve
+  nadie desde la app; son para el operador de la base).
+- `audit_append_only` **FOR INSERT WITH CHECK (true)** — escribir siempre se puede: la bitácora nunca
+  puede quedarse muda.
+- **Sin política de UPDATE ni de DELETE, a propósito.** Con RLS activo y sin política para esos
+  comandos, Postgres no deja modificar ni borrar **ninguna** fila. El append-only deja de ser una
+  convención de la capa de aplicación y pasa a estar *enforced* por la base.
+
+Se verificó que esto **no rompe el borrado de cuenta**: `audit_logs."userId"` es `ON DELETE SET NULL`
+y las acciones de integridad referencial se ejecutan salteando RLS. Probado con el rol sin
+`BYPASSRLS`: `DELETE FROM users` → 1 fila, y el registro de auditoría quedó vivo con `userId` en NULL.
+
+**`daily_signals`: la única exenta de las 12, y con motivo.** Es el corpus del pipeline nocturno de
+aprendizaje: lo escriben muchos inquilinos y lo lee **entero y a propósito** el job nocturno
+(`nightly-learning-service`) y el panel admin, sin contexto de inquilino. Una política de `SELECT`
+por `userId` dejaría al job leyendo **cero filas en silencio** — el peor desenlace posible: la
+funcionalidad muere sin ruido. Se revisó todo el código: no existe ninguna ruta de lectura de esa
+tabla para un costista (los únicos lectores son el job y `admin.routes`), así que el control efectivo
+es que esas rutas son admin-only. Queda escrito acá y en el allowlist del test.
+
+**Otras exenciones documentadas** (todas en `EXENTAS`, en `tests/config/rls-coverage.test.ts`, cada
+una con su motivo):
+
+- **Identidad y autenticación** — `users` (es la tabla *de* inquilinos, no una tabla *por* inquilino;
+  el login busca por email/CUIT sin contexto), `refresh_tokens` y `password_resets` (se buscan por
+  hash del token para **averiguar** de quién son; exigir el inquilino haría imposible refrescar una
+  sesión), `terms_acceptances` (se lee junto con el usuario en el login/me).
+- **Doble actor: la fila tiene dos dueños legítimos** — `data_entries` (la escribe el operario de la
+  empresa, cuyo `app.user_id` **no** es el del costista, y también la ingesta por apiKey, que no tiene
+  usuario alguno), `operator_memberships` (la ven el operario y el costista dueño de la conexión) y
+  `operator_invites` (se lee **por código**, por alguien que todavía no aceptó y puede no tener
+  cuenta). Acá el problema no es "todavía no seteamos el contexto": es que el modelo de inquilino
+  actual no tiene una columna que represente a los dos actores. Inventar una sería peor que dejarlo
+  escrito.
+- **Datos compartidos** — `macro_snapshots`, `vault_chunks`, `vault_edit_proposals`, `system_alerts`,
+  `terms_versions`.
+- **Trazabilidad heredada** — `evidence` y `trace_audit_log`, ya exentas desde Trazabilidad v1
+  (vínculo indirecto/opcional con el inquilino; `entityType`/`entityId` genéricos no resuelven dueño).
+
+**Consecuencia registrada: la deduplicación de CAE pasa a ser por inquilino.** `processed_caes` tiene
+`companyId` y no `costistId`, así que el dueño sale por la empresa. Hoy `ingest-data-entry` hace
+`findUnique({ where: { cae } })`, una búsqueda **global**: con RLS activo y contexto puesto, un CAE de
+otro inquilino deja de ser visible. Es el comportamiento correcto (el número de comprobante de otro
+cliente no debería frenar una carga), pero es un cambio de semántica y queda anotado.
+
+**Chequeo automático: por qué es un test estático y no una consulta a `pg_policies`.** El CI
+(`.github/workflows`) **no levanta Postgres**: corre lint, build y `npm run test`. Un test que
+consultara la base tendría que saltearse cuando no hay conexión, y un chequeo de aislamiento que se
+saltea en el único lugar por donde pasan obligatoriamente todos los cambios no protege nada: pasa en
+verde el día que alguien agrega una tabla sin política. `tests/config/rls-coverage.test.ts` compara
+las dos fuentes que definen la realidad —`prisma/schema.prisma` (crea las tablas) y `prisma/rls.sql`
+(aplica las políticas)— y **falla si una tabla del schema no está ni protegida ni exenta con motivo
+escrito**. Verificado en vivo: agregando un modelo de prueba al schema, el test rompe con
+`Tablas sin política y sin exención: fake_tenant_things`. Chequea además que toda tabla con política
+tenga `ENABLE` y `FORCE`, que no queden exenciones fantasma de tablas borradas, y que ningún motivo
+sea un placeholder.
+
+**Prueba de fuego con base viva: `tests/security/rls-cross-tenant.test.ts`.** Siembra dos inquilinos
+completos (28 tablas, un grafo entero: usuario → empresa → estructura → período → corridas, nodos,
+libro mayor, bases, chat, auditoría), se conecta con un rol que **no** saltea RLS, pone
+`app.user_id` en el inquilino A y verifica tabla por tabla que A **no ve** la fila de B y **sí ve** la
+propia. Lo segundo no es adorno: una política `USING (false)` también daría cero filas ajenas y sería
+inútil. Verifica además que sin contexto de inquilino no se ve nada de nadie, que la base de
+prorrateo del sistema la ven todos, que `audit_logs` acepta el `INSERT` sin inquilino pero rechaza
+`UPDATE`/`DELETE`, y que A no puede **escribir** una fila a nombre de B (el `WITH CHECK`).
+
+**Qué hace ese test cuando el rol disponible es superusuario** — que hoy, en local, es el caso normal.
+No pasa en verde: **se saltea gritando**. Imprime un cartel enmarcado con el motivo
+(`el rol "costear" saltea RLS (rolsuper=true, rolbypassrls=true)`), la advertencia de que **no probó
+nada**, y el SQL exacto para crear el rol de prueba. El diagnóstico corre al *colectar* el módulo
+—no en un `beforeAll`— para que vitest reporte los 33 tests como `skipped` en vez de 33 verdes
+falsos. Con `RLS_REQUIRE_PROBE=1` el skip se convierte en **fallo**: sirve para el día que exista un
+CI con el rol y alguien lo saque sin querer. Un test de aislamiento que pasa en silencio es peor que
+no tener test: da una garantía falsa.
+
+**Corrida real contra un rol sin BYPASSRLS (lo que se hizo y lo que se observó).** Se creó un rol
+temporal en el Postgres local:
+
+```sql
+CREATE ROLE costear_rls_probe LOGIN PASSWORD '***' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+GRANT USAGE ON SCHEMA public TO costear_rls_probe;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO costear_rls_probe;
+```
+
+y se corrió el test con `RLS_PROBE_DATABASE_URL` apuntando a ese rol. Resultado: **33 passed** — el
+aislamiento se verificó de verdad, no por el `where` de la query. Después se comprobó que el test
+**detecta el agujero real**, reproduciendo las dos formas del hallazgo:
+
+- `DROP POLICY tenant_isolation ON cost_ledger_entries` → 1 failed (A no veía ni su propia fila).
+- `ALTER TABLE cost_ledger_entries DISABLE ROW LEVEL SECURITY` (el estado exacto en el que estaban
+  las 12) → 2 failed, con el mensaje `cost_ledger_entries: A vio 1 fila(s) de B`.
+
+En ambos casos se restauró con `npm run db:rls` y **el rol temporal se borró al terminar**
+(`DROP ROLE costear_rls_probe`). No queda ningún rol nuevo en la base ni ninguna credencial en el
+repo; el `.env` no se tocó.
+
+**Lo que falta y no es de este cambio (para cuando infra cambie el rol de la app).** Las políticas
+son hoy inertes porque el rol saltea RLS. Cuando eso cambie, toda query que no corra dentro de
+`withTenant()` va a ver **cero filas** — y eso ya vale para las 13 tablas que tenían política desde
+antes, no es nuevo de acá. `withTenant` hoy se usa en un puñado de servicios
+(`calculation-run-service`, `late-data-service`, `data-point-service` y los de Costeo por Procesos);
+el resto lee con el cliente Prisma pelado. Antes de flipear el rol hay que: (a) extender `withTenant`
+a todas las rutas de inquilino, (b) resolver el costista dueño en la ingesta por apiKey y envolverla
+igual, y (c) decidir con qué rol corren los jobs que leen cross-tenant a propósito (pipeline nocturno,
+panel admin). Sin eso, el cambio de rol no es una mejora de seguridad: es una caída.
+
+**Verificación.** `npm run prisma:deploy` limpio **dos veces seguidas**; `npm run db:rls` limpio
+**dos veces seguidas** (117 statements, idempotente). Antes: **13 tablas con política**. Después:
+**28 tablas con política, 30 políticas**, todas con `relrowsecurity = t` y `relforcerowsecurity = t`.
+Suite completa (excluyendo los tres archivos que pegan a la API de Groq): **954 passed**, contra una
+línea de base de 949 — los 5 nuevos son los de `rls-coverage`; los 33 de `rls-cross-tenant` figuran
+como skipped porque el rol local es superusuario. `npx tsc --noEmit` limpio; `npx eslint src tests`
+**0 errores** (13 warnings preexistentes). Sin migración: RLS se aplica con `db:rls`.
