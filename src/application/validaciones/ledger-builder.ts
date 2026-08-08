@@ -6,7 +6,17 @@
  *
  * El período sale de la fecha del documento (no de la fecha de aprobación): un
  * costo pertenece al mes del comprobante. Si no hay fecha legible, cae al mes
- * actual. El monto preferido es el total; si no, el neto.
+ * actual.
+ *
+ * EL MONTO ES EL NETO, NUNCA EL TOTAL CON IVA. Para un Responsable Inscripto el
+ * IVA no forma parte del costo de adquisición (Clase 4 de la cátedra, línea 27:
+ * "IVA: solo aplica si la empresa es responsable no inscripta o monotributista;
+ * si es responsable inscripta, el IVA no forma parte del costo de adquisición").
+ * Tomar el total inflaba cada línea de costo un 10,5 % o un 21 % según la
+ * alícuota. El orden es: netAmount → (totalAmount − taxAmount) → totalAmount.
+ * El último escalón es el único caso en que el IVA puede quedar adentro: el
+ * documento no discrimina nada (Factura C, ticket sin desglose), y ahí el total
+ * ES el costo.
  */
 
 interface ExtractedData {
@@ -15,6 +25,7 @@ interface ExtractedData {
   invoiceNumber?: string | null;
   totalAmount?: number | null;
   netAmount?: number | null;
+  taxAmount?: number | null;
   currency?: string | null;
 }
 
@@ -26,6 +37,7 @@ export interface LedgerDraft {
   period: string;
   supplier: string | null;
   description: string;
+  /** Importe NETO (sin IVA) — es lo que entra al costo. Ver `pickCostAmount`. */
   amount: number;
   currency: string;
   docDate: Date | null;
@@ -35,6 +47,43 @@ export interface LedgerDraft {
 function currentPeriod(): string {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Número utilizable o null (descarta null/undefined/NaN/Infinity). */
+function usableNumber(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * El importe que va al costo. Prioridad:
+ *
+ *   1. `netAmount` — lo que el comprobante declara como neto gravado.
+ *   2. `totalAmount − taxAmount` — si el neto no vino pero el IVA sí, el neto es
+ *      derivable por resta exacta (el prompt pide `taxAmount = totalAmount −
+ *      netAmount`). Preferir el total acá sería volver a meter el IVA en el
+ *      costo teniendo el dato para no hacerlo.
+ *   3. `totalAmount` — sin neto y sin IVA discriminado no hay nada que restar.
+ *      Es el caso de la Factura C / ticket, donde el total ES el costo.
+ *
+ * La resta se redondea a 4 decimales (la precisión de la columna) para que el
+ * ruido del punto flotante no genere importes tipo 9999999.999999998.
+ */
+function pickCostAmount(ed: ExtractedData | null): number | null {
+  const net = usableNumber(ed?.netAmount);
+  if (net != null) return net;
+
+  const total = usableNumber(ed?.totalAmount);
+  if (total == null) return null;
+
+  const tax = usableNumber(ed?.taxAmount);
+  // El IVA tiene que ser una porción positiva del total; si no lo es, el dato
+  // está roto (o el "impuesto" no es tal) y restarlo haría más daño que bien.
+  if (tax != null && tax > 0 && tax < total) {
+    return Math.round((total - tax) * 1e4) / 1e4;
+  }
+  return total;
 }
 
 /** Parsea una fecha "YYYY-MM-DD" (u otros formatos comunes) a Date o null. */
@@ -64,11 +113,7 @@ export function buildLedgerDraft(params: {
   }
 
   const ed = ai?.extractedData ?? null;
-  const amount = (ed?.totalAmount != null && Number.isFinite(ed.totalAmount))
-    ? Number(ed.totalAmount)
-    : (ed?.netAmount != null && Number.isFinite(ed.netAmount))
-      ? Number(ed.netAmount)
-      : null;
+  const amount = pickCostAmount(ed);
 
   // Sin monto positivo no hay línea de costo (va a carga manual).
   if (amount == null || !Number.isFinite(amount) || amount <= 0) return null;

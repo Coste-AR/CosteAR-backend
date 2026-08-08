@@ -350,7 +350,23 @@ const FALLOS_CONOCIDOS: Record<string, string> = {
 let corridaBase: Promise<Metricas> | null = null;
 const baseUnaVez = () => (corridaBase ??= correrCorpus(PERFIL_BASE));
 
-describe('Corpus avícola — vara de medición de las correcciones del clasificador', () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// OPT-IN a propósito: este harness pega contra la API de Groq, que tiene cuota.
+//
+// Medido el 07/08/2026: con la cuota del free tier agotada, Groq empezó a pedir
+// esperas de 600-830s por llamada. Aun con el tope de CL-07 recortándolas a 60s,
+// una pasada de 18 casos tardó 900s y timeouteó. Dejarlo en la suite por defecto
+// haría que `npm test` fallara por el estado de una cuota externa y no por el
+// código — el peor tipo de test flaky, porque enseña a ignorar el rojo.
+//
+// Es una vara de medición que se usa deliberadamente antes y después de una
+// corrección, no una compuerta de CI:
+//
+//   CORPUS=1 npx vitest run tests/classifier/corpus-avicola.harness.test.ts
+//   CORPUS=1 CORPUS_REPETICIONES=5 npx vitest run ...   (antes de declarar algo arreglado)
+//   CORPUS=1 CORPUS_PERFILES=1 npx vitest run ...       (comparación de perfiles, CL-04)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.runIf(process.env.CORPUS === '1')('Corpus avícola — vara de medición de las correcciones del clasificador', () => {
   it('mide accuracy, precisión a confianza ≥90 y errores de alta confianza', async () => {
     const m = await baseUnaVez();
     // eslint-disable-next-line no-console

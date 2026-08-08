@@ -17,6 +17,7 @@ import {
   applySecondaryAllocationBases,
   type CalculationInput,
 } from '../../domain/calculations/calculate.js';
+import { parseIndirectCostConfigInput } from './validate-inputs.js';
 import { AllocationBaseService } from './allocation-base-service.js';
 import { requireWritablePeriod, type PeriodMirrorData } from './period-sync.js';
 import { codeFromDate } from '../../domain/periods/period-calendar.js';
@@ -297,7 +298,10 @@ export class CostStructureService {
       data.directLaborConfig = newValue;
     } else {
       oldValue = before.indirectCostConfig;
-      const parsed = indirectCostConfigSchema.parse(rawConfig);
+      // Schema de ENTRADA: además de la forma, rechaza capacidad normal en 0
+      // con un 422 accionable que nombra el centro. Un bp = 0 guardado deja el
+      // producto costeado sin CIF y hace explotar las variaciones al calcular.
+      const parsed = parseIndirectCostConfigInput(rawConfig);
       // Reparto en modo 'base' (primario y secundario): "bajar" las unidades de
       // la base de asignación a números concretos (`distribution`/`toProductive`)
       // para que el motor derive los % (trazable, nunca la IA). No-op si ningún

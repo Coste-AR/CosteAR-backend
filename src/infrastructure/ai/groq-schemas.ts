@@ -17,6 +17,7 @@
 
 import { z } from 'zod';
 import type { DocumentAnalysis, ClassifyResponse } from './groq-service.js';
+import type { CostitaChatResponse } from './groq-costista-chat.js';
 
 // ── Enums (fuente de verdad de los valores aceptados) ──────────────────────
 
@@ -43,11 +44,49 @@ export const COST_SECTIONS = [
 
 const QUALITY = ['legible', 'parcial', 'ilegible'] as const;
 
+/** Acciones que puede proponer el chat del costista. Coincide con el type
+ *  ChatActionType de groq-costista-chat.ts. */
+export const CHAT_ACTION_TYPES = [
+  'CREATE_ENTRY', 'CREATE_ALERT', 'INFO_ONLY', 'VAULT_QUESTION',
+] as const;
+
+/** Severidad de una alerta propuesta. Coincide con ProposedAlert['severity'].
+ *  costista-chat-service.ts la mapea a un AlertType de Prisma. */
+export const ALERT_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH'] as const;
+
+/** Secciones que acepta `proposedEntry`. Es COST_SECTIONS SIN 'MULTIPLE': una
+ *  entrada manual del chat va a una sección concreta, y el type ProposedEntry
+ *  tampoco lo admite. Se enumera aparte en vez de derivarlo con un filter para
+ *  que el tuple quede literal y z.enum infiera la unión exacta. */
+export const CHAT_COST_SECTIONS = [
+  'MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS',
+  'GASTO_COMERCIALIZACION', 'GASTO_ADMINISTRACION', 'GASTO_FINANCIERO',
+  'DESCONOCIDO',
+] as const;
+
 // ── Piezas reutilizables ───────────────────────────────────────────────────
 
 /** Campo numérico: rechaza strings/booleans que el modo json_object todavía
- *  puede dejar pasar. Acepta null (el prompt usa null para "ausente"). */
-const nullableNumber = z.number().nullable().optional();
+ *  puede dejar pasar. Acepta null (el prompt usa null para "ausente").
+ *
+ *  `.finite()` cierra el invariante para quien reutilice estos esquemas sobre
+ *  objetos ya en memoria: por el camino de Groq es inalcanzable (JSON.parse
+ *  nunca produce Infinity/NaN), pero deja el esquema autosuficiente en vez de
+ *  depender de por dónde entró el dato.
+ *
+ *  NO se acota el signo de los importes a propósito: una nota de crédito o un
+ *  ajuste traen importes legítimamente negativos. */
+const nullableNumber = z.number().finite('debe ser un número finito (ni Infinity ni NaN).').nullable().optional();
+
+/** Magnitud que no puede ser negativa por definición (horas trabajadas,
+ *  dotación). Un valor negativo acá se propaga al cálculo de MOD. */
+const nullableNonNegative = z
+  .number()
+  .finite('debe ser un número finito (ni Infinity ni NaN).')
+  .min(0, 'no puede ser negativo.')
+  .nullable()
+  .optional();
+
 const nullableString = z.string().nullable().optional();
 
 const extractedItemSchema = z.object({
@@ -56,6 +95,11 @@ const extractedItemSchema = z.object({
   unitCost: nullableNumber,
   total: nullableNumber,
 }).passthrough();
+
+/** Tope defensivo de ítems por documento. `max_tokens: 2500` ya hace inviable
+ *  una lista mucho más larga; el tope evita que una respuesta degenerada
+ *  infle el JSON que se persiste en `extractedData`. */
+const MAX_EXTRACTED_ITEMS = 200;
 
 // Solo se valida a fondo lo que importa a §3.4: los importes deben ser números.
 // El resto se deja laxo (passthrough) para no rechazar respuestas por variación
@@ -68,11 +112,11 @@ const extractedDataSchema = z.object({
   taxAmount: nullableNumber,
   netAmount: nullableNumber,
   currency: nullableString,
-  items: z.array(extractedItemSchema).optional(),
+  items: z.array(extractedItemSchema).max(MAX_EXTRACTED_ITEMS, `no puede tener más de ${MAX_EXTRACTED_ITEMS} ítems.`).optional(),
   department: nullableString,
   role: nullableString,
-  hoursWorked: nullableNumber,
-  employeeCount: nullableNumber,
+  hoursWorked: nullableNonNegative,
+  employeeCount: nullableNonNegative,
 }).passthrough();
 
 // ── Esquemas de respuesta ──────────────────────────────────────────────────
@@ -95,9 +139,88 @@ export const documentAnalysisSchema = z.object({
 export const classifyResponseSchema = z.object({
   documentType: z.enum(CLASSIFY_DOC_TYPES),
   costSection: z.enum(COST_SECTIONS),
-  confidence: z.number(),
+  // El prompt pide "número 0-100". Sin el rango, un `confidence: 999` validaba
+  // limpio y el único freno era el clamp de Layer 5 (layer5-ai-fallback.ts):
+  // el esquema tiene que ser la barrera, no un refuerzo opcional. El clamp
+  // downstream SE MANTIENE como defensa en profundidad.
+  confidence: z
+    .number()
+    .finite('debe ser un número finito (ni Infinity ni NaN).')
+    .min(0, 'debe estar entre 0 y 100.')
+    .max(100, 'debe estar entre 0 y 100.'),
   reasoning: z.string(),
 }).passthrough();
+
+// ── Chat del costista ──────────────────────────────────────────────────────
+
+/** El prompt del chat pide explícitamente `null` para los campos ausentes
+ *  ("proposedEntry": null), pero las interfaces los declaran opcionales. Se
+ *  acepta null y se normaliza a undefined para no arrastrar los dos vacíos. */
+const chatOptionalString = z.string().nullish().transform((v) => v ?? undefined);
+
+const proposedEntrySchema = z.object({
+  companyId: z.string(),
+  companyName: z.string(),
+  rawContent: z.string(),
+  costSection: z.enum(CHAT_COST_SECTIONS),
+  documentType: z.string(),
+  estimatedImpact: chatOptionalString,
+}).passthrough();
+
+const proposedAlertSchema = z.object({
+  companyId: z.string(),
+  companyName: z.string(),
+  message: z.string(),
+  severity: z.enum(ALERT_SEVERITIES),
+}).passthrough();
+
+/**
+ * Respuesta del chat del costista (`GroqCostitaChat.interpret`).
+ *
+ * Este era el único call site de Groq del repo que hacía un cast a ciegas:
+ * `actionType` llegaba al frontend sin comprobar, y `confidence` — documentada
+ * "0-100" y mostrada al costista — no tenía ni validación ni clamp en ningún
+ * punto del camino (a diferencia de la del clasificador, que sí se clampea en
+ * layer5-ai-fallback.ts). Un `confidence: 999` o un `actionType` inventado
+ * viajaban intactos hasta la UI.
+ *
+ * `proposedEntry.companyId` NO se valida acá contra la cartera: esa sanitización
+ * (rechazar una empresa que no es del costista) necesita el portfolio y se
+ * mantiene en `interpret()`, después del parseo.
+ */
+export const costitaChatResponseSchema = z.object({
+  reply: z.string(),
+  actionType: z.enum(CHAT_ACTION_TYPES),
+  confidence: z
+    .number()
+    .finite('debe ser un número finito (ni Infinity ni NaN).')
+    .min(0, 'debe estar entre 0 y 100.')
+    .max(100, 'debe estar entre 0 y 100.'),
+  proposedEntry: proposedEntrySchema.nullish().transform((v) => v ?? undefined),
+  proposedAlert: proposedAlertSchema.nullish().transform((v) => v ?? undefined),
+}).passthrough();
+
+/**
+ * Resultado seguro cuando la respuesta del chat no valida — la misma forma que
+ * ya usa costista-chat-service.ts cuando la IA no está disponible, así el
+ * costista ve un mensaje conocido en vez de un dato sin validar.
+ *
+ * A diferencia del clasificador, acá NO hay reintento guiado ni salvataje:
+ *  - El chat es interactivo y sincrónico; un segundo round-trip duplica la
+ *    latencia de la respuesta justo en el camino que ya salió mal.
+ *  - Es el call site de Groq de mayor volumen (uno por mensaje), y la cuota se
+ *    comparte con el pipeline de documentos, que sí la necesita.
+ *  - El costo de fallar es una respuesta conversacional que el costista puede
+ *    reintentar reformulando; el del clasificador es un dato contable
+ *    persistido en silencio. Distinto riesgo, distinta maquinaria.
+ */
+export function fallbackCostitaChatResponse(): CostitaChatResponse {
+  return {
+    reply: 'Por el momento no puedo interpretar eso. Probá con otra consulta.',
+    actionType: 'INFO_ONLY',
+    confidence: 0,
+  };
+}
 
 // ── Pista para el reintento guiado ─────────────────────────────────────────
 
@@ -160,6 +283,12 @@ export function salvageDocumentAnalysis(
       clone.documentType = 'otro';
     } else if (p.length === 1 && p[0] === 'quality') {
       clone.quality = 'parcial';
+    } else if (p.length === 2 && p[0] === 'extractedData' && p[1] === 'items') {
+      // Lista degenerada (supera el tope). `items` es opcional, así que la
+      // descartamos entera en vez de anularla (null no valida) y conservamos
+      // el resto de la extracción; queda marcado para revisión humana.
+      const ed = clone.extractedData;
+      if (ed != null && typeof ed === 'object') delete (ed as Record<string, unknown>).items;
     } else if (p[0] === 'extractedData' && p.length >= 2) {
       // Importe/campo suelto inválido → lo anulamos, el resto se conserva.
       nullifyPath(clone, p);

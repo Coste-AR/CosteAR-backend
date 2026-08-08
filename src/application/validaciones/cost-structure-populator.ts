@@ -489,7 +489,7 @@ async function accumulateProcessCost(
   if (amount == null || !Number.isFinite(amount) || amount <= 0) {
     return {
       applied: false,
-      skippedReason: `El documento de ${label} no trae un monto total reconocible — cargalo a mano en el departamento asignado.`,
+      skippedReason: `El documento de ${label} no trae un monto neto reconocible — cargalo a mano en el departamento asignado.`,
     };
   }
 
@@ -530,9 +530,9 @@ export async function populateCostStructureFromApproval(
     /** Producto destino elegido por el cargador. Si viene, la población va
      *  EXACTAMENTE a esa estructura (aislamiento por producto). */
     costStructureId?: string | null;
-    /** Monto total del documento (el mismo importe que la línea del libro
-     *  mayor). Solo se usa para Costeo por Procesos — el resto sigue
-     *  parseando reviewNote como siempre. */
+    /** Monto NETO del documento (sin IVA — el mismo importe que la línea del
+     *  libro mayor, ver `ledger-builder.ts`). Solo se usa para Costeo por
+     *  Procesos — el resto sigue parseando reviewNote como siempre. */
     amount?: number | null;
     /** Departamento de Costeo por Procesos elegido por el costista. Decisión
      *  siempre humana; si falta, el documento queda en la cola de pendientes. */

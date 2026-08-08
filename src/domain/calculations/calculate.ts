@@ -404,6 +404,10 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const indirectPerDepartment: CalculationOutput['raw']['indirectPerDepartment'] = {};
   let indirectCostsApplied = Money.zero();
 
+  // Nombre humano de cada centro: lo que ve el costista cuando el motor corta.
+  // El id interno (prod1, serv2…) nunca sale en un mensaje (F09-4).
+  const centerNameById = new Map(input.indirectCosts.centers.map((c) => [c.id, c.name]));
+
   for (const setting of input.indirectCosts.productiveSettings) {
     // PRESUPUESTO del centro = resultado del prorrateo (primario + cierre del
     // secundario). NO es un dato manual: se deriva automáticamente. Si el centro
@@ -450,6 +454,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
           setting.normalCapacity,
           setting.actualActivity,
           actualCip,
+          centerNameById.get(setting.centerId),
         );
 
     indirectCostsApplied = indirectCostsApplied.add(variance.cipApplied);

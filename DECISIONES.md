@@ -2450,3 +2450,163 @@ ART de verdad** — el horario se corre tres horas respecto de lo que venía pas
 **684 passed / 3 failed** — los 3 son `cost-period-compare.test.ts`, que necesita Postgres en
 `localhost:5433` y ya fallaban antes (verificado con `git stash`). `tsc --noEmit` limpio, ESLint sin
 errores. Sin migración.
+
+## El IVA entraba al costo — precedencia invertida en el libro mayor
+
+**El bug.** `src/application/validaciones/ledger-builder.ts` elegía el importe de la línea de
+costo con `totalAmount` primero y `netAmount` como respaldo. El total INCLUYE el IVA. El prompt de
+Groq ya pedía lo correcto ("el costeo se hace sobre el importe NETO (netAmount), nunca sobre el
+total con IVA") y el modelo obedecía: `netAmount` y `taxAmount` volvían bien. El código tiraba el
+valor bueno y se quedaba con el inflado. Medido de punta a punta por `buildLedgerDraft`, con los
+comprobantes del corpus avícola: MP-06 neto 10.000.000 entraba como 12.100.000 (+21,0 %), MP-03
+neto 9.870.000 como 10.906.350 (+10,5 %), MP-01 neto 11.025.000 como 12.182.625 (+10,5 %). No es
+un error de redondeo: es el margen del producto del cliente, y no avisaba nada.
+
+**La regla.** Vault de la cátedra, `001.1 - Clases (Mirta)/4. Materia prima — costo de adquisición,
+desperdicio y lote económico.md`, línea 27: "IVA: solo aplica si la empresa es responsable no
+inscripta o monotributista; si es responsable inscripta, el IVA no forma parte del costo de
+adquisición". El primer cliente pagante es Responsable Inscripto con saldo a favor de IVA: para él
+el IVA es un crédito fiscal, no un costo. La respuesta es el neto, sin ambigüedad.
+
+**Decisión: precedencia `netAmount` → `totalAmount − taxAmount` → `totalAmount`.** Se invirtió el
+orden y se corrigió el comentario de cabecera del archivo, que documentaba el comportamiento
+equivocado ("El monto preferido es el total; si no, el neto") — el comentario era tan bug como el
+código: era lo que iba a leer el próximo que tocara esto.
+
+**Decisión: con neto ausente pero IVA presente, el neto SE DERIVA (`total − tax`), no se cae al
+total.** El caso existe: el OCR lee "TOTAL" e "IVA 21%" pero se come el renglón del subtotal. Se
+eligió derivar por tres razones. (1) Es aritmética exacta, no una estimación: el prompt define
+`taxAmount = totalAmount − netAmount`, así que la resta reconstruye el mismo número que el
+comprobante trae impreso. (2) Quedarse con el total sería meter un IVA que tenemos identificado y
+cuantificado — el error más caro del producto, cometido a sabiendas. (3) La alternativa conservadora
+(no generar línea y mandar a carga manual) le pasa al costista un trabajo que la máquina puede hacer
+sin margen de error, y en la práctica termina en un importe tipeado a mano, que es más riesgoso que
+la resta. Guarda: solo se resta si `0 < taxAmount < totalAmount`; un IVA en 0, negativo o mayor o
+igual al total es un dato roto y ahí se usa el total tal cual. La resta se redondea a 4 decimales
+(la precisión de `Decimal(18,4)`) para que el punto flotante no genere importes tipo
+`9999999.999999998`.
+
+**Decisión: el último escalón sigue siendo `totalAmount`, y está bien que lo sea.** Sin neto y sin
+IVA discriminado no hay nada que restar: es la Factura C, el ticket sin desglose, el monotributista.
+En esos comprobantes el IVA no es recuperable y el total ES el costo de adquisición — la misma
+línea 27 del vault lo dice al revés. O sea que el fallback no es una concesión: es la otra mitad de
+la regla contable.
+
+**Decisión: un `netAmount` de 0 explícito no habilita el total.** `0` es un número válido, corta la
+cadena y la línea no se crea (queda para carga manual). Antes ese caso caía al total con IVA. Un
+neto en 0 es un dato que no se entendió, no una compra gratis; inventarle un importe con IVA adentro
+sería exactamente el bug que se está arreglando.
+
+**Otros puntos de decisión neto-vs-total, revisados uno por uno.** Se buscó en todo el repo y este
+era el único lugar donde la elección alimenta el costo. Los demás usos de `totalAmount` son
+legítimos y se dejaron intactos: `text-enricher.ts` imprime "Subtotal / IVA / Total" como texto para
+que el clasificador lea el comprobante (es transcripción, no aritmética de costo); `dedupe-key.ts`
+lo declara como identidad del comprobante (nunca como importe); `groq-schemas.ts` / `groq-types.ts`
+solo validan el contrato de extracción. `cost-structure-populator.ts` recibe el importe ya resuelto
+por el libro mayor (`amount: lp?.amount`), así que hereda el arreglo sin tocar nada — se corrigió su
+JSDoc, que decía "Monto total del documento", y el mensaje al costista que hablaba de "monto total
+reconocible". El prompt de Groq NO se tocó: ya era correcto.
+
+**Verificación.** `tests/validaciones/ledger-iva-neto.test.ts`, 10 tests nuevos, con los importes
+leídos de `corpus-clasificador/corpus.json` (casos MP-01, MP-03, MP-06) en vez de tipeados: una sola
+fuente de verdad, y si el corpus cambia el test mide lo nuevo. Cada caso assertea el neto, que el
+monto NO sea el total, que NO sea el importe inflado que registró la auditoría en
+`baseline.montoQueLlegoAlCosto`, que el sobrecosteo relativo sea exactamente 0, y que la diferencia
+contra el total sea el `taxAmount` del comprobante. Se comprobó que la guarda muerde: invirtiendo la
+precedencia a mano, 8 de los 10 tests se ponen rojos con el porcentaje de sobrecosteo impreso en el
+mensaje. `tests/validaciones/ledger-builder.test.ts` se actualizó (dos casos afirmaban la
+precedencia vieja). Suite de `tests/validaciones`: **17 passed**;
+`tests/application/validaciones-process-department.test.ts` (el otro que toca `CostLedgerEntry`):
+**11 passed**. `tsc --noEmit` limpio, `eslint src tests` 0 errores (13 warnings preexistentes). Sin
+migración: `CostLedgerEntry.amount` no cambia de tipo, cambia lo que se le escribe.
+
+**Ojo con lo ya cargado.** Este arreglo corrige lo que entre de ahora en más. Las líneas de
+`cost_ledger_entries` creadas antes siguen con el importe inflado, y los `UnitMovementSchedule` de
+Costeo por Procesos ya acumularon esos montos. No se escribió backfill acá: reescribir importes
+históricos sin la extracción original de cada documento sería adivinar, y algunos períodos pueden
+estar cerrados. Queda como decisión del negocio (recostear con los comprobantes a la vista) y
+pendiente explícito.
+
+## Capacidad normal en 0 — el 500 que salía por la puerta que nadie miraba
+
+**El bug (reproducido de punta a punta).** `PUT /cost-structures/:id/indirect-costs` con
+`normalCapacity: 0` devolvía **200 OK**. El `POST /cost-structures/:id/calculate` siguiente moría con
+un **500 crudo**: `"División por cero en cálculo monetario"`, tirado por `Money.divide`
+(`src/domain/value-objects/money.ts`) desde `calcVarianceAnalysis`, que hace
+`cipBudget.variable.divide(bp)` con `bp = 0`.
+
+Lo llamativo es que la validación YA existía: `validateCalculationInputs` corta con un 422 cuando la
+capacidad normal es 0. El problema es que **solo la llama `CalculationRunService.run()`**. El
+endpoint viejo `POST /cost-structures/:id/calculate` (`CostStructureService.calculate`) llama a
+`runCalculation` derecho, sin validación previa y sin `try/catch`. Dos puertas al mismo motor, una
+sola con guardia. La lección: una validación que vive en un servicio no protege al motor — tiene que
+estar EN el motor.
+
+**Decisión: el 0 se rechaza al guardar, en un schema de ENTRADA separado del de lectura.**
+`indirectCostConfigSchema` no se tocó y sigue aceptando `normalCapacity: 0`, a propósito: **no es
+solo el schema de entrada, es también el que re-parsea el JSONB ya persistido** en cada cálculo,
+export y comparación de períodos. Endurecerlo habría convertido cada estructura vieja con bp = 0 en
+un 500 al leerla — cambiando un bug por otro peor. La regla nueva vive en
+`indirectCostConfigInputSchema` (el mismo schema + un `superRefine`), que solo usa el `PUT`.
+
+Un `ZodError` sale como 400 "Datos de entrada inválidos" por el handler central, y eso no le sirve a
+nadie. Por eso el `PUT` parsea con `parseIndirectCostConfigInput`
+(`application/cost-structures/validate-inputs.ts`), que traduce ese issue puntual a un **422
+`MISSING_INPUT`** con el mismo `field` que ya usaba `validateCalculationInputs`. Cualquier otro
+problema de forma sigue saliendo 400, igual que antes.
+
+**Decisión: el motor LANZA, no devuelve variaciones en cero.** `calcVarianceAnalysis` ahora corta con
+`MissingInputError` (422) si `bp = 0`. La alternativa —devolver variaciones en cero, como hace
+`calcPredeterminedQuota`— era peor: con bp = 0 la cuota predeterminada YA es cero, así que el CIF
+aplicado es cero. Informar "variación presupuesto 0, variación volumen 0" significa decirle al
+costista que la carga fabril se aplicó perfecto, cuando en realidad **no se aplicó un solo peso**: el
+producto sale costeado sin CIF y con un margen que parece sano. Es exactamente el patrón que ya
+cortamos en E3 (actividad real en 0 ≠ "todavía no la sé") y en H2 (unidades que se evaporan entre
+departamentos): **mejor no dar ningún número que dar uno plausible y mal**.
+
+**El guard de `calcPredeterminedQuota` no se tocó.** Sigue devolviendo ceros con bp = 0. Es lo que
+permite que una estructura a medio cargar se pueda seguir mostrando en pantalla, y cambiarlo habría
+movido el corte a un lugar donde el costista todavía no tiene nada que hacer. El corte pasa donde el
+número empieza a ser una AFIRMACIÓN sobre el mes cerrado, no antes.
+
+**Decisión: la estructura que YA tiene 0 guardado da el mismo 422, no un 500.** El bp = 0 sigue
+entrando a la base por caminos que no pasan por el `PUT`: el poblador automático de documentos
+(`application/validaciones/cost-structure-populator.ts`) crea `productiveSettings` con
+`normalCapacity: 0` escribiendo directo en Prisma cuando aparece un centro productivo nuevo. Por eso
+el guard del motor no es redundante con el del schema: **es el único que cubre lo que ya está
+guardado**. Los tres caminos (guardar, validar antes de calcular, motor) emiten **la misma frase**,
+desde `mensajeCapacidadNormalEnCero()` — una sola definición, para que el costista no lea tres textos
+distintos del mismo problema.
+
+**Mensajes por NOMBRE del centro, nunca por id (F09-4).** `calcVarianceAnalysis` recibe un
+`centerName` opcional y `runCalculation` le pasa el nombre humano resuelto desde
+`indirectCosts.centers`. Sin nombre cae a "un centro productivo" — nunca a `prod1`. De paso se
+corrigió el mensaje viejo de `validateCalculationInputs`, que decía `El centro "prod1" no tiene
+capacidad normal cargada (bp = 0)`: filtraba el id interno y hablaba en jerga.
+
+**Consecuencia para el frontend.** La pantalla de Costos Indirectos no puede seguir mandando
+`normalCapacity: 0` como placeholder de un centro recién agregado: ahora eso bloquea el guardado de
+toda la sección con un 422. O se pide la capacidad en el alta del centro, o el centro no se manda en
+`productiveSettings` hasta tenerla.
+
+**Barrido de las otras divisiones.** Se revisaron todos los llamados a `Money.divide` y a
+`Decimal.dividedBy`/`.div()` del dominio y de `application/cost-structures`. `indirect-costs.ts:484`
+(el de este fix) era **el único divisor sin guardia alcanzable desde datos del usuario**. Ya estaban
+protegidos: `calculate.ts` (costo unitario, ternario sobre `unitsProduced > 0`), `direct-labor.ts`
+(`hourlyRate`, `hh.greaterThan(0)`; `iap`, `effectiveWorkDays.greaterThan(0)`), `raw-material.ts`
+(PPP, `balanceQty.isZero()`; Wilson, `denominator.isZero()`), `cost-statement.ts`
+(`salesRevenue.isZero()`), `closing-stock.ts`, `period-comparison.ts`, los cuatro repartos de
+`indirect-costs.ts` (`totalBase*.isZero()`), `joint-costs.ts` (`totalBase.lte(0)` y `units > 0`
+garantizado), `process-costing.ts` (`unidadesAJustificar`, `unidadesBuenas`, `produccionProcesada`) y
+`process-costing-engine.ts` (`conversionFromPrevious`, validado `positive()` en la ruta y `<= 0` en
+`domain/periods/setup-rules.ts`). No se tocó ninguno.
+
+**Verificación.** 9 tests nuevos: 5 unitarios en `tests/domain/indirect-costs.test.ts` (el guard tira
+422 y no el `Error` crudo, nombra el centro, cae al genérico sin nombre, bp > 0 no cambia nada, y la
+cuota predeterminada sigue devolviendo ceros) y 4 de integración HTTP en
+`tests/http/indirect-costs-capacidad-normal.test.ts` (el `PUT` con bp = 0 da **422 y no guarda nada**;
+con bp cargado da 200; el `POST /calculate` sobre una estructura que ya tenía bp = 0 da **422 y no
+persiste el cálculo**, no el 500 de antes; con bp cargado calcula y persiste). Corridos además los 49
+archivos de tests de motor, costos indirectos, prorrateos, períodos e importación Excel:
+**443 passed**, cero regresión. `tsc --noEmit` limpio; `eslint` sin errores en los archivos tocados.
+Sin migración.

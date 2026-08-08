@@ -313,6 +313,13 @@ export const indirectCostConfigSchema = z.object({
       z.object({
         centerId: z.string().min(1),
         budget: fixedVariableSchema.optional().default({ fixed: 0, variable: 0 }),
+        // bp — capacidad normal. Sigue siendo `nonNeg` (acepta 0) A PROPÓSITO:
+        // este schema NO es solo el de entrada, también es el que RE-PARSEA el
+        // JSONB ya persistido en cada cálculo, export y comparación de períodos.
+        // Hay estructuras guardadas con bp = 0 (el poblador automático de
+        // documentos las crea así, escribiendo directo en Prisma), y volverlas
+        // impersables convertiría un dato viejo en un 500 al leer.
+        // El 0 se rechaza AL GUARDAR, en `indirectCostConfigInputSchema`.
         normalCapacity: nonNeg,
         actualActivity: nonNeg,
         actualCip: nonNeg,
@@ -321,6 +328,56 @@ export const indirectCostConfigSchema = z.object({
     .max(100),
 });
 export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
+
+/**
+ * Capacidad normal (bp) en 0 — mensaje ÚNICO.
+ *
+ * La misma frase sale por los tres caminos posibles (al guardar Costos
+ * Indirectos, al validar los insumos antes de calcular y desde el propio motor
+ * si la estructura ya venía con 0 de antes), para que el costista lea siempre
+ * lo mismo y sepa exactamente qué cargar. Nombra el CENTRO por su nombre
+ * humano — nunca su id interno (F09-4).
+ */
+export function mensajeCapacidadNormalEnCero(centro: string): string {
+  return (
+    `El centro «${centro}» tiene la capacidad normal en 0. Sin capacidad normal no hay cuota de CIF ` +
+    'ni análisis de variaciones: el costo del producto saldría sin carga fabril. Cargá la actividad ' +
+    `normal esperada de «${centro}» (horas máquina, horas hombre o unidades) en Costos Indirectos y ` +
+    'volvé a guardar.'
+  );
+}
+
+/** Nombre humano de un centro por su id. Fallback genérico: nunca se filtra el id. */
+export function nombreDeCentro(
+  centers: { id: string; name: string }[],
+  centerId: string,
+): string {
+  return centers.find((c) => c.id === centerId)?.name?.trim() || 'un centro productivo';
+}
+
+/**
+ * Config de Costos Indirectos tal como llega del `PUT` — el schema de ENTRADA.
+ *
+ * Es `indirectCostConfigSchema` + la regla que el schema de lectura no puede
+ * tener: **capacidad normal en 0 no se guarda**. Un bp = 0 persistido deja la
+ * cuota predeterminada en cero (el producto se costea sin CIF) y hace explotar
+ * el análisis de variaciones por división por cero. Se corta en la puerta.
+ *
+ * El issue viaja con `path = ['productiveSettings', <centerId>, 'normalCapacity']`
+ * para que `parseIndirectCostConfigInput` lo convierta en un 422 accionable con
+ * el mismo `field` que ya usaba `validateCalculationInputs`.
+ */
+export const indirectCostConfigInputSchema = indirectCostConfigSchema.superRefine((cfg, ctx) => {
+  for (const setting of cfg.productiveSettings) {
+    if (setting.normalCapacity === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['productiveSettings', setting.centerId, 'normalCapacity'],
+        message: mensajeCapacidadNormalEnCero(nombreDeCentro(cfg.centers, setting.centerId)),
+      });
+    }
+  }
+});
 
 // --- Estructura de costos (crear / actualizar) ---
 

@@ -86,18 +86,62 @@ export function routePayroll(text: string, extractedRole?: string | null): Layer
     };
   }
 
-  let note: string;
   if (bucket === 'MOD') {
-    note = `puesto directo de producción (${matched})`;
-  } else if (role) {
-    note = `puesto "${role}" no reconocido → no contradice mano de obra directa, se asume MOD (revisar)`;
-  } else {
-    note = 'sin puesto informado → se asume MOD (LIMITACIÓN CONOCIDA: sin señal de rol no se distingue MOD de mano de obra indirecta)';
+    return {
+      costSection: 'MANO_DE_OBRA',
+      confidence: 99,
+      requiresAI: false,
+      reasoning: `Liquidación de haberes o planilla de horas → Mano de Obra Directa (puesto directo de producción: ${matched})`,
+    };
   }
+
+  // ── bucket === 'UNKNOWN' ───────────────────────────────────────────────────
+  //
+  // Antes, estas dos ramas devolvían EXACTAMENTE el mismo objeto que la rama MOD
+  // de arriba: MANO_DE_OBRA con confianza 99 y requiresAI false. O sea que "no sé
+  // qué puesto es" era indistinguible de "sé que es un operario", y se imputaba a
+  // mano de obra directa sin pasar por la IA ni por un humano.
+  //
+  // La regla de la cátedra (Clase 1) es que MOD es quien "transforma la MP en
+  // producto final". Sin saber el puesto, eso no se puede determinar: lo correcto
+  // es escalar, nunca afirmar MOD.
+  //
+  // Medido en la auditoría del 06/08/2026: dos de los siete errores de alta
+  // confianza salían de acá (un recibo sin puesto y uno de "Veterinaria
+  // responsable de sanidad del plantel", ambos MANO_DE_OBRA con confianza 99).
+  // Además el requiresAI:false de esta rama es lo que hacía que Layer 4 pisara a
+  // la IA en cascade-classifier, colapsando los documentos MULTIPLE a una sola
+  // sección.
+  //
+  // Las dos ramas devuelven requiresAI:true y confianzas bajas y distintas entre
+  // sí: son dos grados de ignorancia diferentes y el resto del sistema tiene que
+  // poder distinguirlos.
+  //
+  // NOTA: deliberadamente NO se setea `suggestedSection`. En cascade-classifier
+  // ese campo dispara un hint que le afirma a la IA que el puesto "NO es mano de
+  // obra directa", lo cual es cierto para capataz/gerente pero NO acá, donde
+  // justamente no se sabe. Mandar ese hint sería cambiar un sesgo por otro.
+
+  if (role) {
+    // Hay un puesto declarado, pero no está en ninguna de las tres listas. Puede
+    // ser MOD perfectamente (una lista de keywords nunca es exhaustiva), así que
+    // MANO_DE_OBRA queda como hipótesis principal para el caso en que la IA no
+    // esté disponible — pero con confianza baja y pidiendo confirmación.
+    return {
+      costSection: 'MANO_DE_OBRA',
+      confidence: 50,
+      requiresAI: true,
+      reasoning: `Liquidación de haberes o planilla de horas de "${role}": el puesto no coincide con ninguna lista conocida (directo de producción / indirecto / administrativo), así que no se puede determinar si transforma la materia prima. Hipótesis: Mano de Obra Directa, sin confirmar.`,
+    };
+  }
+
+  // Ni siquiera hay puesto declarado: es el grado máximo de ignorancia. Acá ni
+  // siquiera hay una hipótesis defendible, así que el fallback sin IA es
+  // DESCONOCIDO — que escala a un humano — en vez de una imputación inventada.
   return {
-    costSection: 'MANO_DE_OBRA',
-    confidence: 99,
-    requiresAI: false,
-    reasoning: `Liquidación de haberes o planilla de horas → Mano de Obra Directa (${note})`,
+    costSection: 'DESCONOCIDO',
+    confidence: 25,
+    requiresAI: true,
+    reasoning: 'Liquidación de haberes o planilla de horas sin puesto informado: sin el puesto no se puede distinguir mano de obra directa de indirecta ni de personal administrativo. Requiere que alguien indique de qué puesto se trata.',
   };
 }

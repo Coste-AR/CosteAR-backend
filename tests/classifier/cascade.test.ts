@@ -39,10 +39,13 @@ describe('classifyDocument — cascade orchestrator', () => {
     expect(result.aiUsed).toBe(false);
   });
 
-  it('classifies a liquidación at ≥95 confidence without AI', async () => {
+  it('classifies a liquidación WITH a production role at ≥95 confidence without AI', async () => {
+    // El camino rápido determinista: cuando el puesto SÍ se reconoce como mano de
+    // obra directa, la cascada resuelve sin IA y con confianza alta.
     const text = `
       RECIBO DE SUELDO
-      Empleado: María González  CUIL 27-28765432-1
+      Empleado: María González — operaria de línea de producción
+      CUIL 27-28765432-1
       OBRA SOCIAL: OSDE  ANSES: Sí
       SUELDO BÁSICO
       Fecha: 01/06/2026
@@ -52,6 +55,31 @@ describe('classifyDocument — cascade orchestrator', () => {
     expect(result.costSection).toBe('MANO_DE_OBRA');
     expect(result.confidence).toBeGreaterThanOrEqual(95);
     expect(result.aiUsed).toBe(false);
+  });
+
+  it('does NOT assert Mano de Obra Directa for a liquidación with no job title (CL-02)', async () => {
+    // Este caso ANTES afirmaba MANO_DE_OBRA con confianza ≥95 y sin IA: era el
+    // bug CL-02 (dos de los siete errores de alta confianza de la auditoría del
+    // 06/08/2026 salían de acá). "Empleado: María González" da un nombre, no un
+    // puesto, así que no hay forma de saber si esa persona transforma la materia
+    // prima — y la regla de la cátedra (Clase 1) hace depender MOD exactamente
+    // de eso.
+    //
+    // El tipo de documento se sigue reconociendo bien: lo que cambia es que la
+    // SECCIÓN deja de afirmarse.
+    const text = `
+      RECIBO DE SUELDO
+      Empleado: María González  CUIL 27-28765432-1
+      OBRA SOCIAL: OSDE  ANSES: Sí
+      SUELDO BÁSICO
+      Fecha: 01/06/2026
+    `;
+    const result = await classifyDocument({ ...BASE_INPUT, text, groqQuality: 'legible' });
+    expect(result.documentType).toBe('LIQUIDACION_MOD');
+    expect(
+      result.costSection === 'MANO_DE_OBRA' && result.confidence >= 95 && !result.requiresReview,
+      'un recibo sin puesto volvió a imputarse a mano de obra directa con confianza alta',
+    ).toBe(false);
   });
 
   it('returns FAIL gate for ilegible quality', async () => {
