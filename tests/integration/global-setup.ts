@@ -27,10 +27,24 @@ export async function setup(): Promise<void> {
     );
   }
 
+  // Migrar y aplicar políticas necesita permisos de DUEÑO; los tests corren con
+  // el rol de la APLICACIÓN, que a propósito no los tiene. Si `MIGRATION_DATABASE_URL`
+  // está definida, cada cosa usa la conexión que le corresponde.
+  //
+  // Que sean dos roles distintos no es ceremonia. Con un superusuario, Postgres
+  // ignora RLS por completo y esta suite pasaría en verde probando solo los
+  // filtros de la capa de aplicación — sin decir una palabra sobre la mitad de
+  // la protección. Es exactamente lo que pasó en la primera corrida de CI de
+  // esta rama, y lo detectó el propio test del rol.
+  const env = {
+    ...process.env,
+    DATABASE_URL: process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL,
+  };
+
   const run = (script: string) =>
     execFileSync(process.execPath, [join(ROOT, 'scripts', script)], {
       cwd: ROOT,
-      env: process.env,
+      env,
       stdio: 'inherit',
     });
 

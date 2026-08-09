@@ -18,6 +18,16 @@ import { fileURLToPath } from 'node:url';
  *
  * Local:  docker compose up -d postgres && npm run test:integration
  * CI:     job aparte con un servicio `postgres` (ver .github/workflows/ci.yml)
+ *
+ * OJO EN LOCAL: el usuario `costear` de `docker-compose.yml` es SUPERUSUARIO, y
+ * Postgres ignora RLS por completo para un superusuario. Corriendo así, el caso
+ * que verifica el rol falla —correctamente— y los demás pasan por el motivo
+ * equivocado: prueban los filtros de la capa de aplicación y nada de RLS.
+ *
+ * Para una corrida representativa hay que hacer lo mismo que el job de CI: crear
+ * un rol de aplicación sin BYPASSRLS y apuntarle `DATABASE_URL`, dejando
+ * `MIGRATION_DATABASE_URL` en el dueño. Es también la forma correcta de tener
+ * producción, y es lo que `prisma/rls.sql` viene pidiendo en su encabezado.
  */
 export default defineConfig({
   resolve: {
