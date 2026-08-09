@@ -3,6 +3,11 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ForbiddenError, UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { buildLedgerDraft } from './ledger-builder.js';
+import {
+  detectarSenalCondicionIva,
+  contradiceLaCondicionDeclarada,
+  notaDeRevision,
+} from './condicion-iva-signal.js';
 import { populateCostStructureFromApproval } from './cost-structure-populator.js';
 import { SystemAlertService } from '../system/system-alert-service.js';
 
@@ -157,7 +162,15 @@ export class ValidacionesService {
   ) {
     const entry = await this.db.dataEntry.findUnique({
       where: { id: entryId },
-      include: { connection: { select: { companyId: true } } },
+      // `condicionIva` viaja acá, dentro del select que ya se hacía: el importe
+      // que entra al libro mayor (neto para un RI, total con IVA para un
+      // monotributista/exento) lo decide la EMPRESA, no el documento. Es una
+      // columna más en una query existente, sin viaje extra a la base.
+      include: {
+        connection: {
+          select: { companyId: true, company: { select: { condicionIva: true } } },
+        },
+      },
     });
     if (!entry) throw new NotFoundError('Entrada no encontrada');
     if (entry.costistId !== costistId) throw new ForbiddenError('No tenés permiso para revisar esta entrada');
@@ -274,6 +287,7 @@ export class ValidacionesService {
               aiReviewNote: entry.reviewNote,           // JSON del análisis IA (antes de sobrescribir)
               documentType: truthDocumentType,
               fallbackDescription: entry.fileName ?? u.rawContent.slice(0, 120),
+              condicionIva: entry.connection.company.condicionIva,
             });
             if (draft) {
               ledgerPayload = {
@@ -371,6 +385,57 @@ export class ValidacionesService {
           level: 'error',
           message: `No se pudo crear la línea de libro mayor para la entrada ${entryId}: ${message}`,
         });
+      }
+    }
+
+    // ── Señal fiscal de la IA → bandera accionable en la empresa ─────────────
+    // El prompt le pide a la IA que marque en `qualityNote` los indicios de que
+    // la empresa NO es Responsable Inscripto ("Factura C", "Consumidor Final",
+    // "Monotributista", "Responsable No Inscripto"). Hasta acá esa cadena moría
+    // adentro del JSON de `reviewNote` sin cambiar nada. Si contradice la
+    // condición declarada, ahora levanta bandera en `Company` y deja una
+    // DailySignal. NO cambia la condición sola: eso es un hecho registral, lo
+    // confirma el costista. No-fatal: nunca puede voltear una aprobación.
+    if (input.status === 'APPROVED' || input.status === 'CORRECTED') {
+      try {
+        const senal = detectarSenalCondicionIva({
+          aiReviewNote: entry.reviewNote,
+          rawContent: entry.rawContent,
+        });
+        const declarada = entry.connection.company.condicionIva;
+        if (senal && contradiceLaCondicionDeclarada(senal, declarada)) {
+          const nota = notaDeRevision(senal, {
+            documento: entry.fileName ?? entry.rawContent.slice(0, 80),
+          });
+          await this.db.company.update({
+            where: { id: entry.connection.companyId },
+            data: {
+              condicionIvaRevisar: true,
+              condicionIvaRevisarNota: nota,
+              condicionIvaRevisarAt: new Date(),
+            },
+          });
+          await this.db.dailySignal.create({
+            data: {
+              type: 'IMPROVEMENT_REPORT',
+              source: 'VALIDACIONES_CORRECCION',
+              status: 'PENDING',
+              content: `Posible condición frente al IVA incorrecta: ${senal.indicio}`,
+              context: {
+                action: 'CONDICION_IVA_SOSPECHOSA',
+                companyId: entry.connection.companyId,
+                entryId,
+                declarada,
+                sugerida: senal.sugerida,
+                indicio: senal.indicio,
+                origen: senal.origen,
+              },
+              userId: costistId,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[condicion-iva] No se pudo registrar la señal fiscal:', err);
       }
     }
 

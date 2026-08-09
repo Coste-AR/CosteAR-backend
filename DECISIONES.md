@@ -2778,3 +2778,95 @@ Suite completa (excluyendo los tres archivos que pegan a la API de Groq): **954 
 línea de base de 949 — los 5 nuevos son los de `rls-coverage`; los 33 de `rls-cross-tenant` figuran
 como skipped porque el rol local es superusuario. `npx tsc --noEmit` limpio; `npx eslint src tests`
 **0 errores** (13 warnings preexistentes). Sin migración: RLS se aplica con `db:rls`.
+
+---
+
+## CL-03 — La sección imputada y su explicación son una sola cosa
+
+**El bug.** `costSection` y el texto que lee el costista se elegían por separado. Cuando Layer 4
+pisaba a la IA, la sección salía de Layer 4 pero el `reasoning` seguía saliendo de la IA. Medido en
+el documento GA-05 de la auditoría del 06/08/2026: el costista leía *"…lo que indica un gasto de
+comercialización"* mientras el sistema había imputado `MANO_DE_OBRA`.
+
+**Por qué importa más de lo que parece.** La explicación es la función que sostiene toda la promesa
+de trazabilidad del producto. Un texto que justifica una cosa mientras el sistema hizo otra es peor
+que no mostrar explicación: le enseña al costista que la explicación no es confiable, y a partir de
+ahí deja de leerla. Se pierde la función entera, no un caso.
+
+**Decisión: hacer el estado inválido irrepresentable, no chequearlo después.** Se introdujo el tipo
+`SectionDecision` (`{ section, reasoning, decidedBy, ruleDissent }`), y `buildSectionAndExplanation`
+devuelve el par ya armado desde el mismo objeto. No hay forma de setear una sección con la
+explicación de otra decisión, porque no hay dos campos que setear: hay uno. Se descartó a propósito
+la alternativa de comparar ambas al final — un chequeo posterior detecta el estado inválido, pero
+permite que exista.
+
+**Decisión de desempate: gana la IA, se lleva su propia explicación, y el desacuerdo se declara.**
+Cuando una regla determinista de Layer 4 contradice a la IA, se imputa lo que dice la IA, el texto
+mostrado es el de la IA (coherente con lo imputado), se agrega en el mismo texto que la regla de
+negocio apunta a otra sección, y el documento queda marcado para confirmación.
+
+Por qué la IA y no Layer 4: cuando se llega a ese punto, el `documentType` que se guarda **ya** es el
+de la IA, sin discusión, y Layer 4 corre sobre *ese* tipo. Quedarse con la sección de Layer 4
+mientras se le acepta el tipo a la IA mezcla dos lecturas del documento en un resultado que ninguna
+de las dos sostiene. Además, los dos casos medidos de este pisado —GA-05 y MULTI-01— los ganaba
+Layer 4 y en los dos Layer 4 estaba equivocada.
+
+Por qué se declara el desacuerdo en vez de resolverlo en silencio: la auditoría encontró que el
+escalamiento ya está mal repartido (4 de 6 revisiones son sobre documentos que el sistema clasificó
+bien), así que sumar revisiones tiene un costo real. Pero un desacuerdo entre una regla determinista
+y la IA es exactamente el caso donde la revisión **sí** vale: son las dos únicas fuentes que tiene el
+sistema y no coinciden.
+
+**Relación con CL-02.** CL-02 (rama `UNKNOWN` de `routePayroll`) sacó el disparador más frecuente de
+este pisado, porque era la rama que reportaba `requiresAI: false`. Esta corrección igual hace falta:
+el mecanismo de pisado es el peligro, no una rama en particular.
+
+**Sobre la verificación.** El documento GA-05 del corpus reconstruido **no reproduce** este bug (ver
+`corpus-clasificador/ground-truth.md`: la reconstrucción es una factura de proveedor por comisiones,
+que no dispara el ruteo de liquidación). Por eso la prueba de esta corrección es un test dirigido que
+**construye el desacuerdo explícitamente**, no la corrida del corpus.
+
+---
+
+## CL-09 — Condición frente al IVA: dos precedencias, la elige la empresa
+
+**El hueco.** No existía ningún campo de condición fiscal en `schema.prisma`. El único rastro del
+concepto en todo el backend era una línea del prompt de Groq (*"Asumí Responsable Inscripto por
+defecto"*) y un pedido de que la IA marcara los indicios de lo contrario en `qualityNote` — texto
+libre que nadie leía y que no cambiaba ninguna decisión de costeo.
+
+**La regla** (cátedra, Clase 4, línea 27): *"IVA: solo aplica si la empresa es responsable no
+inscripta o monotributista; si es responsable inscripta, el IVA no forma parte del costo de
+adquisición"*.
+
+**Decisión: no hay una precedencia universal, hay dos, y la elige la empresa.**
+
+- `RESPONSABLE_INSCRIPTO` → el IVA es crédito fiscal. Costo = **neto**:
+  `netAmount → (totalAmount − taxAmount) → totalAmount`. Es exactamente lo que dejó CL-01, sin
+  cambiar un byte.
+- `MONOTRIBUTO` / `EXENTO` → el IVA no se recupera, es un costo más. Costo = **total**:
+  `totalAmount → (netAmount + taxAmount) → netAmount`. Costear sobre el neto acá **subvalúa** el
+  costo real con la misma magnitud con la que costear sobre el total lo **sobrevalúa** para un RI.
+
+**Default para las empresas existentes: `RESPONSABLE_INSCRIPTO`.** No es el valor más frecuente ni el
+más conservador: es el **único que no revalúa datos vivos**. Todo lo que ya está calculado en la base
+se calculó bajo ese supuesto (el prompt lo asumía y `ledger-builder` costeaba sobre el neto sin
+preguntarle a nadie). Cualquier otro default haría que costos ya computados pasaran a estar regidos
+por una regla distinta de la que los produjo — una revaluación silenciosa. Con este default, la rama
+que corre para toda fila preexistente es byte por byte la misma que corría antes.
+
+**La condición real no se adivina, se señaliza.** `condicionIvaRevisar` levanta una bandera accionable
+en la empresa cuando la IA ve *"Factura C"*, *"Consumidor Final"*, *"Monotributista"* o *"Responsable
+No Inscripto"* en un comprobante, con la nota y la fecha. Así la `qualityNote` deja de perderse. Una
+empresa que en realidad no es RI queda mal costeada — pero **con un cartel encima**, hasta que un
+humano confirme, en vez de mal costeada en silencio.
+
+**Sobre el union local en `ledger-builder`.** El tipo `CondicionIva` está escrito a mano ahí en vez de
+importarse de `@prisma/client`, a propósito: ese módulo es una función pura sobre el JSON de la IA y
+no debe arrastrar el cliente de Prisma (lo testea un archivo que no levanta base). Un test verifica
+que los dos conjuntos de valores no se desincronicen.
+
+**Migración.** Aditiva e idempotente: el tipo se crea en un bloque que traga `duplicate_object`, las
+columnas usan `ADD COLUMN IF NOT EXISTS`, y **no hay ningún `UPDATE`** — el `DEFAULT` de Postgres
+completa las filas existentes sin reescribir ninguna otra columna. No agrega tablas, así que no toca
+`prisma/rls.sql`: `companies` ya tiene su política de inquilino.

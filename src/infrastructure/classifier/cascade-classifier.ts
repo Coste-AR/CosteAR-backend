@@ -5,6 +5,7 @@ import { runLayer1 }      from './layers/layer1-definitive-signals.js';
 import { runLayer2 }      from './layers/layer2-corroborating-signals.js';
 import { runLayer3 }      from './layers/layer3-numeric-validation.js';
 import { runLayer4 }      from './layers/layer4-business-routing.js';
+import type { Layer4Result } from './layers/layer4-business-routing.js';
 import { runLayer5 }      from './layers/layer5-ai-fallback.js';
 import { categorizeIndustry, getIndustryProfile } from './industry/industry-profile.js';
 import { getCorrectionExamples } from './memory/correction-memory.js';
@@ -23,17 +24,116 @@ const CONFIDENCE_THRESHOLD = 72;
  */
 const STRONG_COMPETITOR = 30;
 
+/** Nombre legible de cada sección, para poder citarla en una explicación. */
+const SECTION_LABEL: Record<CostSection, string> = {
+  MATERIA_PRIMA:          'Materia Prima',
+  MANO_DE_OBRA:           'Mano de Obra Directa',
+  COSTOS_INDIRECTOS:      'Costos Indirectos de Producción',
+  VENTAS:                 'Ventas',
+  GASTO_COMERCIALIZACION: 'Gasto de Comercialización',
+  GASTO_ADMINISTRACION:   'Gasto de Administración',
+  GASTO_FINANCIERO:       'Gasto Financiero',
+  MULTIPLE:               'varias secciones (documento mixto)',
+  DESCONOCIDO:            'sin determinar',
+};
+
 /**
- * Genera una explicación legible para el costista sobre por qué
- * el sistema clasificó el documento de determinada manera.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * DECISIÓN DE SECCIÓN — la sección y su justificación son UNA sola cosa (CL-03)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Antes, `costSection` y el texto que se le muestra al costista se elegían por
+ * separado: la sección salía de Layer 4 y el `reasoning` seguía saliendo de la
+ * IA. Cuando Layer 4 pisaba a la IA, el costista leía la justificación de una
+ * decisión que el sistema NO tomó (medido en GA-05: leía "…lo que indica un
+ * gasto de comercialización" mientras el sistema imputaba MANO_DE_OBRA).
+ *
+ * Un chequeo posterior que compare ambas no alcanza: lo que hace falta es que
+ * no exista el estado inválido. Por eso las dos viajan juntas en este tipo y
+ * `buildSectionAndExplanation` devuelve el par `{ costSection, explanation }`
+ * ya armado desde el mismo objeto — no hay forma de setear una sin la otra.
  */
-function buildExplanation(params: {
+export interface SectionDecision {
+  readonly section: CostSection;
+  /** El texto que justifica EXACTAMENTE a `section`. Nunca el de otra decisión. */
+  readonly reasoning: string;
+  readonly decidedBy: 'REGLAS' | 'IA';
+  /** true cuando una regla determinista de Layer 4 contradijo a la IA. */
+  readonly ruleDissent: boolean;
+}
+
+/** Decisión tomada por las reglas deterministas (Layer 4), sin IA de por medio. */
+function decisionFromRules(l4: Layer4Result): SectionDecision {
+  return {
+    section:     l4.costSection,
+    reasoning:   l4.reasoning,
+    decidedBy:   'REGLAS',
+    ruleDissent: false,
+  };
+}
+
+/**
+ * Resuelve la sección DESPUÉS de que la IA respondió, devolviendo sección y
+ * justificación como una sola unidad.
+ *
+ * REGLA DE DESEMPATE (ver DECISIONES.md — CL-03): **gana la IA y se lleva su
+ * propia explicación**, y el desacuerdo con una regla determinista de Layer 4
+ * manda el documento a revisión humana en vez de resolverse en silencio.
+ *
+ * Por qué la IA y no Layer 4: cuando llegamos acá el `documentType` que se
+ * guarda YA es el de la IA, sin discusión. Layer 4 corre sobre ESE tipo. Tomarle
+ * la sección a Layer 4 mientras se le acepta el tipo a la IA es incoherente: se
+ * mezclan dos lecturas del documento en un resultado que ninguna de las dos
+ * sostiene. Además, los dos casos medidos de este pisado (GA-05 y MULTI-01) los
+ * ganaba Layer 4 y en los dos Layer 4 estaba equivocada.
+ */
+export function resolveSectionAfterAI(
+  ai: { costSection: CostSection; reasoning: string },
+  l4AfterAI: Layer4Result,
+): SectionDecision {
+  // Layer 4 no tiene una regla determinista para este tipo, o coincide con la
+  // IA: no hay nada que desempatar.
+  if (l4AfterAI.requiresAI || l4AfterAI.costSection === ai.costSection) {
+    return {
+      section:     ai.costSection,
+      reasoning:   ai.reasoning,
+      decidedBy:   'IA',
+      ruleDissent: false,
+    };
+  }
+
+  // Desacuerdo real: una regla determinista dice otra cosa. Se guarda la
+  // lectura de la IA —la misma que se muestra— y se declara la discrepancia en
+  // el mismo texto, para que el costista pueda decidir con las dos a la vista.
+  return {
+    section:   ai.costSection,
+    reasoning:
+      `${ai.reasoning}. ⚠️ La regla de negocio para este tipo de documento apunta a ` +
+      `${SECTION_LABEL[l4AfterAI.costSection]} (${l4AfterAI.reasoning}), que NO coincide ` +
+      `con esta lectura. Se imputa ${SECTION_LABEL[ai.costSection]} —lo que dice esta misma ` +
+      'explicación— y el documento queda para tu confirmación',
+    decidedBy:   'IA',
+    ruleDissent: true,
+  };
+}
+
+/** Agrega una nota al final de la justificación sin desarmar la unidad. */
+function withNote(decision: SectionDecision, note: string | null): SectionDecision {
+  return note ? { ...decision, reasoning: `${decision.reasoning} (${note})` } : decision;
+}
+
+/**
+ * Genera la sección imputada Y la explicación legible para el costista como un
+ * único par. Se devuelven juntas a propósito: los call sites la esparcen con
+ * `...` en el resultado, así que es imposible guardar una sección con la
+ * explicación de otra decisión.
+ */
+function buildSectionAndExplanation(params: {
   intent: InputIntent;
   documentType: DocumentType;
-  costSection: CostSection;
+  decision: SectionDecision;
   confidence: number;
   definitiveSignal: string | null;
-  l4Reasoning: string;
   aiUsed: boolean;
   supplierFingerprintUsed: boolean;
   requiresReview: boolean;
@@ -41,16 +141,17 @@ function buildExplanation(params: {
   industryLabel: string;
   signalCount: number;
   wasteReviewRequired?: boolean;
-}): string {
-  // `documentType`, `costSection` y `aiUsed` siguen en el tipo de `params` —
-  // forman parte del contrato— pero esta función no los usa para armar el texto.
+}): { costSection: CostSection; explanation: string } {
+  // `documentType` y `aiUsed` siguen en el tipo de `params` —forman parte del
+  // contrato— pero esta función no los usa para armar el texto.
   const {
     intent, confidence,
-    definitiveSignal, l4Reasoning,
+    definitiveSignal, decision,
     supplierFingerprintUsed, requiresReview,
     industryCategory, industryLabel, signalCount,
     wasteReviewRequired,
   } = params;
+  const l4Reasoning = decision.reasoning;
 
   const parts: string[] = [];
 
@@ -97,10 +198,15 @@ function buildExplanation(params: {
   parts.push(`Confianza: ${confidence}%.`);
 
   if (requiresReview) {
-    parts.push('La confianza es baja → requiere tu revisión antes de aplicar.');
+    // Cuando la revisión viene de una regla que contradice a la IA, decir "la
+    // confianza es baja" sería mentira: la confianza puede ser 97. El motivo
+    // real ya quedó escrito arriba, dentro de la justificación de la decisión.
+    parts.push(decision.ruleDissent
+      ? 'Las reglas y la IA no coinciden → requiere tu revisión antes de aplicar.'
+      : 'La confianza es baja → requiere tu revisión antes de aplicar.');
   }
 
-  return parts.join(' ');
+  return { costSection: decision.section, explanation: parts.join(' ') };
 }
 
 /**
@@ -288,7 +394,6 @@ export async function classifyDocument(input: ClassifierInput & {
   if (!blocked && confidence >= EFFECTIVE_THRESHOLD && chosenType !== 'DESCONOCIDO') {
     return {
       documentType: chosenType,
-      costSection:  l4.costSection,
       confidence:   Math.min(confidence, 100),
       requiresReview: false,
       isDuplicate:  false,
@@ -300,10 +405,11 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
-      explanation: buildExplanation({
+      // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
+      ...buildSectionAndExplanation({
         intent, documentType: chosenType,
-        costSection: l4.costSection, confidence: Math.min(confidence, 100),
-        definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
+        decision: decisionFromRules(l4), confidence: Math.min(confidence, 100),
+        definitiveSignal: layer1?.label ?? null,
         aiUsed: false, supplierFingerprintUsed, requiresReview: false,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
       }),
@@ -348,22 +454,27 @@ export async function classifyDocument(input: ClassifierInput & {
 
   if (aiResult) {
     const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory, extractedRole);
-    const finalSection: CostSection = (!l4afterAI.requiresAI)
-      ? l4afterAI.costSection
-      : aiResult.costSection as CostSection;
+
+    // Una sola decisión: la sección que se guarda y el texto que se muestra
+    // salen de acá y no se vuelven a tocar por separado.
+    const decision = withNote(
+      resolveSectionAfterAI(aiResult, l4afterAI),
+      crossLayerConflict ? 'había señales contradictorias → confirmá' : null,
+    );
 
     const finalConf = confidenceCap !== null
       ? Math.min(aiResult.confidence, confidenceCap)
       : aiResult.confidence;
 
     // Garantía de cero errores silenciosos: si hubo conflicto duro entre capas,
-    // o una merma de naturaleza ambigua, la IA pre-llena su mejor hipótesis pero
-    // SIEMPRE pasa por revisión humana. Sin conflicto, vale el umbral normal.
-    const requiresReview = crossLayerConflict || wasteReviewRequired || finalConf < CONFIDENCE_THRESHOLD;
+    // una merma de naturaleza ambigua, o una regla determinista que contradice a
+    // la IA, la IA pre-llena su mejor hipótesis pero SIEMPRE pasa por revisión
+    // humana. Sin conflicto, vale el umbral normal.
+    const requiresReview = crossLayerConflict || wasteReviewRequired
+      || decision.ruleDissent || finalConf < CONFIDENCE_THRESHOLD;
 
     return {
       documentType: aiResult.documentType as DocumentType,
-      costSection:  finalSection,
       confidence:   finalConf,
       requiresReview,
       isDuplicate:  false,
@@ -375,11 +486,11 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
-      explanation: buildExplanation({
+      // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
+      ...buildSectionAndExplanation({
         intent, documentType: aiResult.documentType as DocumentType,
-        costSection: finalSection, confidence: finalConf,
+        decision, confidence: finalConf,
         definitiveSignal: layer1?.label ?? null,
-        l4Reasoning: crossLayerConflict ? `${aiResult.reasoning} (había señales contradictorias → confirmá)` : aiResult.reasoning,
         aiUsed: true, supplierFingerprintUsed, requiresReview,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
         wasteReviewRequired,
@@ -390,7 +501,6 @@ export async function classifyDocument(input: ClassifierInput & {
   // ── Layer 6: Escalamiento humano (IA no disponible o sin resolución) ────────
   return {
     documentType: chosenType,
-    costSection:  l4.costSection,
     confidence:   Math.min(confidence, 71),
     requiresReview: true,
     isDuplicate:  false,
@@ -402,10 +512,11 @@ export async function classifyDocument(input: ClassifierInput & {
     confidenceCap,
     intent,
     industryCategory,
-    explanation: buildExplanation({
+    // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
+    ...buildSectionAndExplanation({
       intent, documentType: chosenType,
-      costSection: l4.costSection, confidence: Math.min(confidence, 71),
-      definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
+      decision: decisionFromRules(l4), confidence: Math.min(confidence, 71),
+      definitiveSignal: layer1?.label ?? null,
       aiUsed: false, supplierFingerprintUsed, requiresReview: true,
       industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
       wasteReviewRequired,

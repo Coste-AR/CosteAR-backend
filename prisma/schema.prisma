@@ -173,6 +173,26 @@ model PasswordReset {
 // Cartera de clientes (PyMEs)
 // ---------------------------------------------------------------------------
 
+/// Condición de la empresa frente al IVA. Decide si el IVA de un comprobante
+/// es COSTO o es CRÉDITO FISCAL, y por lo tanto qué importe entra al costo.
+///
+/// Cátedra (Clase 4, "Materia prima — costo de adquisición, desperdicio y lote
+/// económico", línea 27): "IVA: solo aplica si la empresa es responsable no
+/// inscripta o monotributista; si es responsable inscripta, el IVA no forma
+/// parte del costo de adquisición".
+///
+/// - RESPONSABLE_INSCRIPTO: el IVA se recupera como crédito fiscal → el costo
+///   es el NETO.
+/// - MONOTRIBUTO: no discrimina IVA ni lo recupera → el IVA ES costo, el costo
+///   es el TOTAL.
+/// - EXENTO: tampoco lo recupera (incluye al "responsable no inscripto" que
+///   nombra la cátedra, figura hoy derogada) → el IVA ES costo.
+enum CondicionIva {
+  RESPONSABLE_INSCRIPTO
+  MONOTRIBUTO
+  EXENTO
+}
+
 model Company {
   id          String   @id @default(uuid()) @db.Uuid
   userId      String   @db.Uuid
@@ -189,6 +209,22 @@ model Company {
   // Modelo de períodos (problema C): el RITMO de costeo de la empresa. Se elige
   // una vez y el sistema arma los períodos solo. Por defecto, mensual.
   periodicity Periodicity @default(MONTHLY)
+
+  // Condición frente al IVA: decide si el IVA de cada comprobante entra o no al
+  // costo (ver enum `CondicionIva`). El default es RESPONSABLE_INSCRIPTO porque
+  // es exactamente el supuesto bajo el que se calculó TODO lo que ya está en la
+  // base: el prompt de la IA dice "Asumí Responsable Inscripto por defecto" y
+  // `ledger-builder` costeaba sobre el neto sin preguntar. Cualquier otro
+  // default revaluaría en silencio datos vivos. Ver DECISIONES.md (CL-09).
+  condicionIva CondicionIva @default(RESPONSABLE_INSCRIPTO)
+
+  // Señal de la IA: el comprobante mostró indicios ("Factura C", "Consumidor
+  // Final", "Monotributista", "Responsable No Inscripto") de que la condición
+  // declarada arriba no es la real. Antes esto moría como texto libre dentro de
+  // `qualityNote`; ahora queda como bandera accionable sobre la empresa.
+  condicionIvaRevisar     Boolean   @default(false)
+  condicionIvaRevisarNota String? // Qué se detectó y en qué documento.
+  condicionIvaRevisarAt   DateTime? // Cuándo se levantó la bandera.
 
   costStructures     CostStructure[]
   alerts             Alert[]
