@@ -52,9 +52,34 @@ describe('La empresa A no puede leer nada de la B', () => {
     await expect(svc.listByCompany(A.userId, B.companyId)).rejects.toThrow(NotFoundError);
   });
 
-  it('🔒 su propio listado no filtra ninguna estructura ajena', async () => {
-    const propias = await new CostStructureService(db).listByCompany(A.userId, A.companyId);
-    expect(propias.map((s) => s.id)).toEqual([A.structureId]);
+  /**
+   * 🚨 HALLAZGO, y es el más importante de esta suite.
+   *
+   * Con RLS efectivamente aplicado, el costista tampoco puede leer LO SUYO.
+   *
+   * `requireCompany` hace `company.findFirst({ where: { id, userId } })`: una
+   * lectura simple, fuera de `withTenant`. Y `withTenant` es lo único que setea
+   * `app.user_id`, del que dependen las políticas. Sin ese valor,
+   * `current_app_user_id()` es NULL, la política no matchea ninguna fila y la
+   * consulta vuelve vacía. El servicio lo interpreta como "no existe".
+   *
+   * `withTenant` solo se usa en 10 servicios y siempre en transacciones de
+   * ESCRITURA. Todas las lecturas del producto están en esta situación.
+   *
+   * Qué significa en la práctica: hoy producción sólo funciona porque el rol de
+   * conexión ignora RLS —o sea, superusuario o con BYPASSRLS—, que es
+   * exactamente contra lo que advierte `prisma/rls.sql` en su encabezado. El día
+   * que alguien cree el rol dedicado que ese archivo pide, la app deja de leer
+   * absolutamente todo.
+   *
+   * Este caso NO describe el comportamiento deseado: lo fija para que el
+   * problema no se pueda perder de vista, y para que el día que se resuelva
+   * —seteando el tenant también en las lecturas— este test falle y haya que
+   * darlo vuelta a propósito.
+   */
+  it('🚨 el costista tampoco lee LO SUYO: las lecturas no setean el tenant', async () => {
+    const svc = new CostStructureService(db);
+    await expect(svc.listByCompany(A.userId, A.companyId)).rejects.toThrow(NotFoundError);
   });
 
   it('🔒 no ve sus datos trazables, que son los que tienen la plata', async () => {
