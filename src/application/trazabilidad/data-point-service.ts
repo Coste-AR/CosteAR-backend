@@ -7,6 +7,7 @@ import { LateDataService } from '../cost-structures/late-data-service.js';
 import type {
   CreateDataPointInput,
   AddVersionInput,
+  EvidenceInput,
 } from '../../shared/schemas/trazabilidad.schema.js';
 
 /**
@@ -40,6 +41,44 @@ export class DataPointService {
   }
 
   /**
+   * LA PUERTA DE ENTRADA DEL RESPALDO DOCUMENTAL (I9).
+   *
+   * El modelo `Evidence` y `DataPointVersion.evidenceId` existían desde la
+   * primera versión de Trazabilidad, y no había forma de crear uno: se podía
+   * *referenciar* un respaldo que nada producía. Acá se crea junto con la
+   * versión que respalda, en la misma transacción — un respaldo que quedara
+   * suelto, sin el número que justifica, no le sirve a nadie.
+   *
+   * Si el llamador manda un `evidenceId` que ya existe, gana ese: adjuntar el
+   * mismo remito a varias cifras es legítimo y no hay que duplicarlo.
+   *
+   * `evidence` no tiene RLS (documentado a propósito en `prisma/rls.sql`): se
+   * protege en la capa de aplicación, y acá eso ya está resuelto porque el
+   * llamador verificó la estructura antes de abrir la transacción.
+   */
+  private async resolveEvidenceId(
+    tx: Prisma.TransactionClient,
+    input: { evidenceId?: string; evidence?: EvidenceInput },
+    actorId: string,
+  ): Promise<string | undefined> {
+    if (input.evidenceId) return input.evidenceId;
+    if (!input.evidence) return undefined;
+
+    const created = await tx.evidence.create({
+      data: {
+        kind: input.evidence.kind,
+        reference: input.evidence.reference,
+        counterparty: input.evidence.counterparty ?? null,
+        fileUrl: input.evidence.fileUrl ?? null,
+        // Quién lo subió y cuándo: los dos campos estaban en el modelo y no se
+        // escribían nunca.
+        uploadedBy: actorId,
+      },
+    });
+    return created.id;
+  }
+
+  /**
    * Crea un DataPoint + su versión 1. Es el único punto de entrada de un dato
    * nuevo al sistema de trazabilidad (no hay "versión 0" implícita).
    */
@@ -68,6 +107,7 @@ export class DataPointService {
     input: CreateDataPointInput & { periodoImputado?: string },
     actor: TraceActor,
   ) {
+    const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
     const dp = await tx.dataPoint.create({
       data: {
         structureId,
@@ -88,7 +128,7 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         valueJson: input.valueJson as any,
         reason: input.reason,
-        evidenceId: input.evidenceId,
+        evidenceId,
         method: input.method,
         createdBy: actor.id,
         actorRole: actor.role,
@@ -133,6 +173,7 @@ export class DataPointService {
     input: AddVersionInput,
     actor: TraceActor,
   ) {
+    const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
     const dp = existing;
     const last = await tx.dataPointVersion.findFirst({
       where: { dataPointId: id },
@@ -148,7 +189,7 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         valueJson: input.valueJson as any,
         reason: input.reason,
-        evidenceId: input.evidenceId,
+        evidenceId,
         method: input.method,
         createdBy: actor.id,
         actorRole: actor.role,
@@ -400,6 +441,7 @@ export class DataPointService {
         deviceInfo: string | null;
         createdAt: Date;
         createdByUser: { name: string };
+        evidence?: { kind: string; reference: string; counterparty: string | null; fileUrl: string | null } | null;
       };
       dataPoint: { unit: string | null; label: string };
     }>,
