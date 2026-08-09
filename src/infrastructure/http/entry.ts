@@ -6,7 +6,7 @@
  *   2. Corre migraciones Prisma de forma async (sin bloquear el event loop)
  *   3. Aplica RLS (no fatal)
  *   4. Cierra el mini-server
- *   5. Arranca Fastify en el mismo puerto
+ *   5. Arranca Fastify en el mismo puerto (que además siembra los Términos)
  *
  * Esto garantiza que /health responde con 200 desde el primer segundo,
  * sin importar cuánto tarden las migraciones.
@@ -116,22 +116,12 @@ if (rlsCode !== 0) {
   );
 }
 
-// ─── 3b. Términos y condiciones — sembrar v1 si no hay ninguna versión activa ─
-//
-// Sin esto, un ambiente nuevo (o resetado) no tiene NINGUNA TermsVersion, y
-// terms-service.ts tira error en requireCurrentVersion() — lo que bloquea
-// TODO registro y login, no solo lo relacionado a términos. No fatal por el
-// mismo motivo que RLS: preferible arrancar en modo degradado y que se vea
-// en los logs, a que un fallo transitorio tumbe todo el arranque.
-
-const termsCode = await runScript(join(ROOT, 'scripts', 'ensure-initial-terms.mjs'));
-if (termsCode !== 0) {
-  process.stderr.write(
-    `[entry] WARN: siembra de Términos y Condiciones salió con código ${termsCode} — el registro/login puede estar bloqueado hasta que se resuelva\n`,
-  );
-}
-
 // ─── 4. Cerrar pre-server y arrancar Fastify ────────────────────────────────
+//
+// La siembra de Términos y Condiciones ya NO va acá: la hace `server.ts` antes
+// de escuchar, así que corre igual en producción y en `npm run dev` — que
+// arranca ese archivo directo y salteaba este. Mismo momento (antes de aceptar
+// tráfico real), un solo lugar donde vive la lógica.
 
 process.stderr.write('[entry] Cerrando pre-server y arrancando Fastify...\n');
 await new Promise<void>((resolve) => pre.close(() => resolve()));

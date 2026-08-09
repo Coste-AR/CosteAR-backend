@@ -54,11 +54,19 @@ export class EmpresaPortalService {
 
   // ── Costista: invitar operador ─────────────────────────────────────────────
 
+  /**
+   * @param jobTitle EL PUESTO DECLARADO en esta empresa: "Jefe de Depósito",
+   * "Contador". No es el rol de login —ese solo dice qué puede hacer en el
+   * sistema— sino quién es la persona en la planta, que es la pregunta que se
+   * hace quien está mirando un costo raro. Opcional: si no se sabe, "no consta"
+   * es mejor que un puesto inventado.
+   */
   async inviteOperator(
     companyId: string,
     costistId: string,
     operatorName: string,
     operatorEmail: string,
+    jobTitle?: string | null,
   ): Promise<{
     email: string;
     tempPassword?: string;
@@ -107,6 +115,9 @@ export class EmpresaPortalService {
           inviteeId: existingUser.id,
           status: 'PENDING',
           expiresAt,
+          // El invitado ya tiene cuenta: su membresía recién se crea cuando
+          // acepte, así que el puesto viaja acá hasta entonces.
+          jobTitle: jobTitle ?? null,
         },
       });
 
@@ -148,7 +159,12 @@ export class EmpresaPortalService {
 
     // Membership activa inmediata (aceptó implícitamente)
     await this.db.operatorMembership.create({
-      data: { operatorId: newUser.id, connectionId: connection.id, isActive: true },
+      data: {
+        operatorId: newUser.id,
+        connectionId: connection.id,
+        isActive: true,
+        jobTitle: jobTitle ?? null,
+      },
     });
 
     // Invitación ya aceptada (registro histórico)
@@ -208,8 +224,16 @@ export class EmpresaPortalService {
     // Crear membership si no existe
     await this.db.operatorMembership.upsert({
       where: { operatorId_connectionId: { operatorId, connectionId: invite.connectionId } },
-      create: { operatorId, connectionId: invite.connectionId, isActive: true },
-      update: { isActive: true },
+      create: {
+        operatorId,
+        connectionId: invite.connectionId,
+        isActive: true,
+        jobTitle: invite.jobTitle,
+      },
+      // Al reactivar una membresía vieja se respeta el puesto que ya tenía si la
+      // invitación nueva no trae uno: el costista puede estar solo devolviéndole
+      // el acceso a alguien que ya trabajaba ahí, no redefiniendo su puesto.
+      update: { isActive: true, ...(invite.jobTitle ? { jobTitle: invite.jobTitle } : {}) },
     });
 
     await this.db.operatorInvite.update({
@@ -384,6 +408,12 @@ export class EmpresaPortalService {
         connectionId: membership.connectionId,
         costistId,
         companyId,
+        // QUIÉN lo mandó (I5a). Hasta acá el `operatorId` se usaba solo para
+        // averiguar a qué empresa pertenece y después se descartaba: el
+        // documento quedaba con "empresa X, costista Y" y nada más. Si tres
+        // personas de la misma planta mandaban facturas, el sistema no podía
+        // distinguirlas.
+        uploadedBy: operatorId,
         rawContent: input.rawContent,
         sourceType: input.sourceType,
         costStructureId,
@@ -428,6 +458,17 @@ export class EmpresaPortalService {
       where: {
         connectionId: { in: connectionIds },
         ...(costStructureId ? { costStructureId } : {}),
+        // "MIS envíos" ahora sí son míos (I5a).
+        //
+        // Filtraba por conexión, o sea por EMPRESA: el operario veía todo lo que
+        // hubiera mandado cualquiera de sus compañeros, en una pantalla que se
+        // llama "mis envíos". Además de mentir el título, le mostraba a cada
+        // persona los documentos del resto.
+        //
+        // `uploadedBy: null` incluye los anteriores a este campo: no se sabe
+        // quién los mandó, y esconderlos le haría desaparecer envíos propios de
+        // la pantalla. Viajan marcados como sin autor y la pantalla lo dice.
+        OR: [{ uploadedBy: operatorId }, { uploadedBy: null }],
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -444,6 +485,7 @@ export class EmpresaPortalService {
         fileMimeType: true,
         fileUrl: true,
         connectionId: true,
+        uploadedBy: true,
         connection: { select: { company: { select: { name: true } } } },
       },
     });

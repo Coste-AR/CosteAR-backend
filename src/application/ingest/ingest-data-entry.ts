@@ -21,6 +21,16 @@ export interface IngestInput {
   sourceType: IngestSourceType;
   /** Producto/estructura destino. Debe venir ya validado contra la empresa. */
   costStructureId?: string | null;
+  /**
+   * Qué PERSONA subió el documento (I5a). Lo manda el portal, que es el único
+   * canal donde hay alguien identificado del otro lado.
+   *
+   * Los otros dos caminos que llegan acá —`/datos/submit` por API key y el
+   * webhook de WhatsApp— no tienen una persona atrás, así que llega `undefined`
+   * y la columna queda en null. Eso es lo correcto: "no consta" es un dato, y es
+   * distinto de atribuirle el documento al dueño de la conexión.
+   */
+  uploadedBy?: string | null;
   fileName?: string | null;
   fileData?: string | null;
   fileMimeType?: string | null;
@@ -197,6 +207,9 @@ export async function ingestDataEntry(
       data: {
         connectionId: input.connectionId,
         costistId: input.costistId,
+        // La PERSONA que lo subió, cuando la hay. `costistId` es el dueño de la
+        // conexión, no quien mandó el papel.
+        uploadedBy: input.uploadedBy ?? null,
         costStructureId: input.costStructureId ?? null,
         rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
         sourceType: input.sourceType,

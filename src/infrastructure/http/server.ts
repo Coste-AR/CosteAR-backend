@@ -16,6 +16,7 @@ import { startDailyRunWorker } from '../workers/daily-run.worker.js';
 import { startNightlyLearningWorker } from '../workers/nightly-learning.worker.js';
 import { macroSyncQueue } from '../workers/queues.js';
 import { registerRepeatableJobs } from '../workers/repeatable-jobs.js';
+import { TermsService } from '../../application/legal/terms-service.js';
 
 /**
  * Punto de entrada del servidor HTTP.
@@ -30,6 +31,26 @@ async function main(): Promise<void> {
   console.log(`[startup] Entorno: ${env.NODE_ENV}, puerto: ${env.PORT}`);
 
   const app = await buildApp();
+
+  // --- Términos y Condiciones: sembrar v1 si no hay ninguna activa ---
+  //
+  // Va acá y no en entry.ts a propósito: entry.ts SOLO corre en producción
+  // (`npm start`), y `npm run dev` arranca este archivo directo. Sembrar allá
+  // dejaba cualquier base recién creada con `requireCurrentVersion()` tirando
+  // error y el registro bloqueado hasta que alguien corriera un script a mano.
+  //
+  // Antes de `listen()` para que ninguna request pueda llegar sin términos, y
+  // no fatal por el mismo motivo que RLS: preferible arrancar en modo degradado
+  // y que se vea en los logs, a que un fallo transitorio tumbe todo el arranque.
+  try {
+    const seeded = await new TermsService().ensureInitialVersion();
+    if (seeded) console.log(`[startup] Sembrada la versión inicial de Términos (v${seeded.version}).`);
+  } catch (err) {
+    console.warn(
+      '[startup] WARN: no se pudo sembrar los Términos y Condiciones — el registro puede estar bloqueado hasta que se resuelva:',
+      err,
+    );
+  }
 
   // --- Escuchar PRIMERO — el healthcheck debe responder cuanto antes ---
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
