@@ -206,6 +206,47 @@ export class CostStructureService {
   }
 
   /**
+   * Cambia la POLÍTICA DE DATOS ATRASADOS de una estructura: qué hacer cuando
+   * llega un dato cuya fecha cae en un período ya cerrado.
+   *
+   * La maquinaria que la respeta (`late-data-service.ts`) existe desde que se
+   * construyó la bandeja de atrasados; lo que faltaba era el interruptor. Sin
+   * él el campo quedaba siempre en `ASK` y cada factura atrasada interrumpía al
+   * costista, aunque ya hubiera resuelto veinte veces lo mismo.
+   *
+   * Se puede cambiar en cualquier momento y no toca nada de lo ya decidido: la
+   * política se copia como `policyAtDetection` en cada decisión al momento de
+   * detectarla, así que el historial sigue diciendo con qué regla se resolvió
+   * cada caso, no con la que rige hoy.
+   */
+  async updateLateDataPolicy(
+    userId: string,
+    id: string,
+    lateDataPolicy: 'ASK' | 'CURRENT_PERIOD' | 'REOPEN',
+    ctx: AuditContext,
+  ) {
+    const before = await this.requireStructure(userId, id);
+
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.costStructure.update({ where: { id }, data: { lateDataPolicy } });
+
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_structure.late_data_policy.update',
+          entityType: 'CostStructure',
+          entityId: id,
+          oldValue: { lateDataPolicy: before.lateDataPolicy },
+          newValue: { lateDataPolicy },
+        },
+        tx,
+      );
+      return updated;
+    });
+  }
+
+  /**
    * Resuelve el reparto en modo 'base' del PRIMARIO (conceptos) y del SECUNDARIO
    * (centros de servicio): lee las unidades vigentes de cada base de asignación
    * (allocation_base_values) y las vuelca a `distribution` / `toProductive`, para

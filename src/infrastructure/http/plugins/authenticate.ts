@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { verifyAccessToken } from '../../crypto/tokens.js';
 import { UnauthorizedError, ForbiddenError } from '../../../domain/errors/domain-error.js';
+import { prisma } from '../../database/prisma.js';
 
 /**
  * Contexto de autenticación adjuntado a cada request autenticada.
@@ -9,6 +10,16 @@ export interface AuthUser {
   id: string;
   tenantId: string;
   role: string;
+  /**
+   * EL PUESTO DECLARADO en la empresa ("Jefe de Depósito"), no el rol de login
+   * (I5b). Se resuelve acá, una vez por request, y viaja en el `TraceActor`
+   * hasta la versión del dato, que lo estampa.
+   *
+   * No sale del JWT a propósito: el costista puede corregir el puesto de un
+   * operario y el cambio tiene que valer desde el dato siguiente, no cuando a
+   * esa persona se le venza el token.
+   */
+  jobTitle?: string | null;
 }
 
 declare module 'fastify' {
@@ -40,6 +51,24 @@ export async function authenticate(
     };
   } catch {
     throw new UnauthorizedError('Token de acceso inválido o expirado');
+  }
+
+  // Solo los operarios de empresa tienen membresía y, por lo tanto, puesto: el
+  // costista es el dueño de la estructura y el admin es personal interno. Con
+  // la guarda, el 95% de las requests no paga ninguna consulta extra.
+  //
+  // Si la consulta falla no se cae la request: quedarse sin puesto degrada la
+  // trazabilidad de ese dato, tumbar el login la rompe entera.
+  if (request.authUser.role === 'EMPRESA_OPERATOR') {
+    try {
+      const membership = await prisma.operatorMembership.findFirst({
+        where: { operatorId: request.authUser.id, isActive: true, jobTitle: { not: null } },
+        select: { jobTitle: true },
+      });
+      request.authUser.jobTitle = membership?.jobTitle ?? null;
+    } catch {
+      request.authUser.jobTitle = null;
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { JointCostService } from '../../../application/cost-structures/process-costing/joint-cost-service.js';
 import { authenticate } from '../plugins/authenticate.js';
@@ -7,11 +7,11 @@ import { jointCostInputSchema } from '../../../shared/schemas/joint-cost.schema.
 /**
  * Reparto de costos conjuntos (Costeo por Procesos, B16). Solo aplica a
  * estructuras con `costingSystem = 'PROCESSES'`; el servicio devuelve un 422
- * accionable si se llama sobre una de Órdenes.
+ * accionable si se llama sobre una de Ã“rdenes.
  *
- * El path se scopea por estructura + período; el departamento (punto de
- * separación) viaja como query en el GET y en el body del PUT — ver DECISIONES.md
- * (B16). Un reparto es único por departamento + período.
+ * El path se scopea por estructura + perÃ­odo; el departamento (punto de
+ * separaciÃ³n) viaja como query en el GET y en el body del PUT â€” ver DECISIONES.md
+ * (B16). Un reparto es Ãºnico por departamento + perÃ­odo.
  */
 
 const routeParams = z.object({
@@ -21,14 +21,16 @@ const routeParams = z.object({
 
 const getQuery = z.object({ deptId: z.string().uuid() });
 
-/** Actor de trazabilidad: rol del JWT, área del body, dispositivo de la request. */
+/** Actor de trazabilidad: rol del JWT, Ã¡rea del body, dispositivo de la request. */
 function actorFrom(request: FastifyRequest, area: string) {
   const ua = request.headers['user-agent'] ?? 'desconocido';
   return {
     id: request.authUser!.id,
     role: request.authUser!.role,
+    // El puesto declarado, para estamparlo en la version del dato (I5c).
+    jobTitle: request.authUser!.jobTitle,
     area,
-    device: `${ua} · ${request.ip}`,
+    device: `${ua} Â· ${request.ip}`,
   };
 }
 
