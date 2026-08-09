@@ -346,6 +346,23 @@ export const createCostStructureSchema = z.object({
 });
 export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>;
 
+/**
+ * QUÉ HACER CON UN DATO QUE LLEGÓ TARDE (la factura de junio que aparece en
+ * agosto, con junio ya cerrado).
+ *
+ * `late-data-service.ts` respeta los tres modos desde que se construyó, pero el
+ * campo no se escribía en ningún lado: quedaba siempre en `ASK` y el costista
+ * no podía dejar la decisión tomada de antemano ni una sola vez.
+ *
+ * `REOPEN` es el único que cambia números ya dados por buenos —reabre el mes y
+ * repropaga hacia adelante—, así que la pantalla tiene que decirlo antes de que
+ * alguien lo elija, no después.
+ */
+export const updateLateDataPolicySchema = z.object({
+  lateDataPolicy: z.enum(['ASK', 'CURRENT_PERIOD', 'REOPEN']),
+});
+export type UpdateLateDataPolicyInput = z.infer<typeof updateLateDataPolicySchema>;
+
 export const updateSalesSchema = z.object({
   salesUnitPrice: nonNeg,
   /** Unidades VENDIDAS: facturación (precio × cantidad) y margen. */

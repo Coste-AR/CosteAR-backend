@@ -73,6 +73,9 @@ model User {
   costistConnections EmpresaConnection[]  @relation("costist_connections")
   // Para EMPRESA_OPERATOR: puede pertenecer a varias empresas
   memberships        OperatorMembership[]
+  // Los documentos que ESTA persona subió por el portal (I5a). Distinto de
+  // `EmpresaConnection.dataEntries`, que son los de toda la empresa.
+  uploadedDataEntries DataEntry[]         @relation("DataEntryUploader")
   sentInvites        OperatorInvite[]     @relation("invite_sender")
   receivedInvites    OperatorInvite[]     @relation("invite_receiver")
 
@@ -698,6 +701,23 @@ model OperatorMembership {
    */
   canReportWipCount Boolean @default(false)
 
+  /**
+   * EL PUESTO DECLARADO de esta persona en la empresa (I5b): "Jefe de Depósito",
+   * "Contador", "Ingeniero Industrial".
+   *
+   * NO es el rol de login. `User.role` responde "qué puede hacer en el sistema"
+   * y solo tiene tres valores, dos de los cuales son en la práctica la misma
+   * persona. Esto responde "quién es en la planta", que es la pregunta que se
+   * hace quien mira un costo raro.
+   *
+   * Vive en la membresía y no en `User` porque el puesto es POR EMPRESA: la
+   * misma persona puede ser jefe de depósito en una y asesor externo en otra.
+   *
+   * Nullable: los operarios invitados antes de este campo no lo tienen, y
+   * pedirlo retroactivamente sería inventarlo.
+   */
+  jobTitle String?
+
   @@unique([operatorId, connectionId])
   @@index([operatorId])
   @@index([connectionId])
@@ -715,6 +735,12 @@ model OperatorInvite {
   inviteeEmail String // email al que se invitó
   inviteeId    String?           @db.Uuid // se rellena cuando acepta
   invitee      User?             @relation("invite_receiver", fields: [inviteeId], references: [id], onDelete: SetNull)
+  /**
+   * El puesto con el que se lo invitó (I5b). Viaja acá porque cuando el invitado
+   * YA tiene cuenta, la membresía recién se crea al aceptar: sin esto el puesto
+   * que tipeó el costista se perdía entre la invitación y la aceptación.
+   */
+  jobTitle     String?
   status       InviteStatus      @default(PENDING)
   expiresAt    DateTime
   acceptedAt   DateTime?
@@ -756,6 +782,21 @@ model DataEntry {
   connectionId String            @db.Uuid
   connection   EmpresaConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   costistId    String            @db.Uuid // denormalizado para RLS y queries rápidas
+
+  /**
+   * QUIÉN SUBIÓ ESTE DOCUMENTO (I5a).
+   *
+   * `costistId` es el DUEÑO de la conexión, no quien mandó el papel: si tres
+   * personas de la misma planta mandan facturas, sin esto el sistema no puede
+   * distinguirlas. El portal recibía el `operatorId` y lo descartaba.
+   *
+   * Nullable porque las filas anteriores a este campo no tienen autor, y eso es
+   * un hecho: no se puede inventar. La pantalla las marca como tales.
+   * `SetNull` y no `Cascade` — si se borra el usuario, el documento y su
+   * historial de validación siguen valiendo.
+   */
+  uploadedBy     String? @db.Uuid
+  uploadedByUser User?   @relation("DataEntryUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
 
   rawContent String // texto libre / descripción del documento
   sourceType DataEntrySourceType @default(TEXT)
@@ -1047,6 +1088,22 @@ model DataPointVersion {
   createdBy     String        @db.Uuid
   createdByUser User          @relation(fields: [createdBy], references: [id])
   actorRole     String
+  /**
+   * EL PUESTO DECLARADO de quien cargó este valor, ESTAMPADO acá (I5c).
+   *
+   * Se copia de `OperatorMembership.jobTitle` al escribir la versión, y no se
+   * lee de la ficha de la persona al mostrarla. La gente cambia de puesto: un
+   * dato de marzo tiene que seguir diciendo el puesto que esa persona tenía EN
+   * MARZO. Leerlo al vuelo reescribiría la historia cada vez que alguien
+   * asciende, y esta tabla existe justamente para que eso no pase.
+   *
+   * Es el lugar correcto porque la fila ya es inmutable por trigger
+   * (`data_point_versions_append_only`).
+   *
+   * Nullable: el costista no tiene membresía —es el dueño, no un operario— y
+   * las versiones anteriores a este campo no lo tienen.
+   */
+  actorJobTitle String?
   actorArea     SourceArea
   deviceInfo    String?
   createdAt     DateTime      @default(now()) @db.Timestamptz

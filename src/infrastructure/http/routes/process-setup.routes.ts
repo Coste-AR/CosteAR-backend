@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ProcessSetupService } from '../../../application/cost-structures/process-costing/process-setup-service.js';
 import { authenticate } from '../plugins/authenticate.js';
@@ -8,8 +8,8 @@ import { authenticate } from '../plugins/authenticate.js';
  *
  * Tres endpoints, y el del medio es el que hace la diferencia: `preview` valida
  * SIN guardar, para que el wizard muestre los problemas y los avisos mientras el
- * costista arma su estructura. El "¿qué pasa si hago esto?" que pidió el equipo
- * tiene que llegar antes de apretar, no después.
+ * costista arma su estructura. El "Â¿quÃ© pasa si hago esto?" que pidiÃ³ el equipo
+ * tiene que llegar antes de apretar, no despuÃ©s.
  */
 
 const structureParams = z.object({ id: z.string().uuid() });
@@ -24,7 +24,7 @@ const setupSchema = z.object({
         conversionFromPrevious: z.number().positive().nullable().optional(),
       }),
     )
-    .min(1, 'Agregá al menos un departamento.'),
+    .min(1, 'AgregÃ¡ al menos un departamento.'),
   hasJointProducts: z.boolean().default(false),
   wipCountFrequencyDays: z.number().int().min(1).max(366).nullable().optional(),
   periodLengthDays: z.number().int().min(1).max(366).nullable().optional(),
@@ -36,8 +36,10 @@ function actorFrom(request: FastifyRequest, area: string) {
   return {
     id: request.authUser!.id,
     role: request.authUser!.role,
+    // El puesto declarado, para estamparlo en la version del dato (I5c).
+    jobTitle: request.authUser!.jobTitle,
     area,
-    device: `${ua} · ${request.ip}`,
+    device: `${ua} Â· ${request.ip}`,
   };
 }
 
@@ -45,15 +47,15 @@ export async function registerProcessSetupRoutes(app: FastifyInstance): Promise<
   const service = new ProcessSetupService();
 
   // Lo que el wizard necesita para armarse: estado, departamentos ya cargados y
-  // qué operarios pueden marcarse como oficina técnica.
+  // quÃ© operarios pueden marcarse como oficina tÃ©cnica.
   app.get('/structures/:id/process-setup', { preHandler: authenticate }, async (request) => {
     const { id } = structureParams.parse(request.params);
     return { data: await service.getSetup(request.authUser!.id, id) };
   });
 
   // Valida sin guardar. Devuelve `problemas` (bloquean) y `avisos` (no).
-  // La distinción es deliberada: bloquear lo que es una mala idea pero no un
-  // error deja al costista sin salida cuando su caso es legítimo.
+  // La distinciÃ³n es deliberada: bloquear lo que es una mala idea pero no un
+  // error deja al costista sin salida cuando su caso es legÃ­timo.
   app.post('/structures/:id/process-setup/preview', { preHandler: authenticate }, async (request) => {
     structureParams.parse(request.params);
     const input = setupSchema.parse(request.body);
