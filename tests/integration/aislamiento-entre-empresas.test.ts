@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { db, createTenant, destroyTenants, type Tenant } from './helpers/tenants.js';
+import { db, createTenant, disconnect, type Tenant } from './helpers/tenants.js';
 import { CostStructureService } from '@/application/cost-structures/cost-structure-service.js';
 import { AllocationBaseService } from '@/application/cost-structures/allocation-base-service.js';
 import { DataPointService } from '@/application/trazabilidad/data-point-service.js';
@@ -36,10 +36,8 @@ beforeAll(async () => {
   B = await createTenant('B');
 });
 
-afterAll(async () => {
-  await destroyTenants([A.userId, B.userId]);
-  await db.$disconnect();
-});
+// No se borra nada: la base de integración es desechable (ver el helper).
+afterAll(disconnect);
 
 describe('La empresa A no puede leer nada de la B', () => {
   it('🔒 no ve su estructura de costos', async () => {
