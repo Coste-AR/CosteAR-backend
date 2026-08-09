@@ -29,6 +29,21 @@ const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry
 const OPERARIO = 'op-1';
 const OTRO_OPERARIO = 'op-2';
 
+/**
+ * El servicio se arma con TODAS sus dependencias inyectadas, no solo la base.
+ *
+ * Los tres parámetros que siguen tienen `new EmailService()` / `new GroqService()`
+ * / `new SystemAlertService()` como valor por defecto, y esos constructores leen
+ * y validan variables de entorno. Dejarlos por defecto hacía que el test
+ * dependiera de que existiera un `.env`: pasaba en mi máquina y reventaba en CI
+ * con "Configuración de entorno inválida", que no tiene nada que ver con lo que
+ * se está probando.
+ *
+ * Ninguno se usa en estos casos: la ingesta está mockeada y no se manda email.
+ */
+const portalCon = (db: unknown) =>
+  new EmpresaPortalService(db as never, {} as never, {} as never, {} as never);
+
 beforeEach(() => vi.clearAllMocks());
 
 describe('a · el documento del portal registra quién lo subió', () => {
@@ -44,7 +59,7 @@ describe('a · el documento del portal registra quién lo subió', () => {
       },
     };
 
-    await new EmpresaPortalService(db as never).submitDocument(OPERARIO, {
+    await portalCon(db).submitDocument(OPERARIO, {
       rawContent: 'Factura de energía',
       sourceType: 'TEXT',
     });
@@ -58,7 +73,7 @@ describe('a · el documento del portal registra quién lo subió', () => {
       dataEntry: { findMany: vi.fn(async () => []) },
     };
 
-    await new EmpresaPortalService(db as never).listMySubmissions(OPERARIO);
+    await portalCon(db).listMySubmissions(OPERARIO);
 
     const where = db.dataEntry.findMany.mock.calls[0]![0].where;
     // Lo propio, más los anteriores al campo (sin autor conocido). Nunca lo de
