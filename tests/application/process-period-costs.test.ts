@@ -28,6 +28,10 @@ const mockTx = {
   dataPoint: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   dataPointVersion: { create: vi.fn(), findFirst: vi.fn() },
   traceAuditLog: { create: vi.fn() },
+  // El cuadro resuelve el NOMBRE de quien informó el recuento para devolverlo a
+  // la pantalla (D7): un uuid no le sirve a nadie. Estos casos no cargan
+  // recuento, así que devuelve null y el serializador dice "no consta".
+  user: { findUnique: vi.fn(async () => null) },
 };
 
 vi.mock('@/infrastructure/database/prisma.js', () => ({

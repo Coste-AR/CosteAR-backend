@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ProcessDepartmentService } from '../../../application/cost-structures/process-costing/process-department-service.js';
 import { authenticate } from '../plugins/authenticate.js';
@@ -12,20 +12,22 @@ import {
 /**
  * Departamentos de proceso (Costeo por Procesos, B14). Solo aplican a
  * estructuras con `costingSystem = 'PROCESSES'`; el servicio devuelve un 422
- * accionable si se llama sobre una de Órdenes.
+ * accionable si se llama sobre una de Ã“rdenes.
  */
 
 const structureParams = z.object({ id: z.string().uuid() });
 const departmentParams = z.object({ id: z.string().uuid(), deptId: z.string().uuid() });
 
-/** Actor de trazabilidad: rol del JWT, área del body, dispositivo de la request. */
+/** Actor de trazabilidad: rol del JWT, Ã¡rea del body, dispositivo de la request. */
 function actorFrom(request: FastifyRequest, area: string) {
   const ua = request.headers['user-agent'] ?? 'desconocido';
   return {
     id: request.authUser!.id,
     role: request.authUser!.role,
+    // El puesto declarado, para estamparlo en la version del dato (I5c).
+    jobTitle: request.authUser!.jobTitle,
     area,
-    device: `${ua} · ${request.ip}`,
+    device: `${ua} Â· ${request.ip}`,
   };
 }
 
@@ -77,7 +79,7 @@ export async function registerProcessDepartmentRoutes(app: FastifyInstance): Pro
   });
 
   // El reorden va sobre la cadena entera, no sobre un departamento: por eso
-  // cuelga de la colección y no de un id.
+  // cuelga de la colecciÃ³n y no de un id.
   app.put(`${base}/order`, { preHandler: authenticate }, async (request) => {
     const { id } = structureParams.parse(request.params);
     const body = processDepartmentReorderSchema.parse(request.body);

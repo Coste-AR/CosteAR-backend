@@ -11,6 +11,16 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 export interface TraceActor {
   id: string;
   role: string;
+  /**
+   * EL PUESTO DECLARADO de la persona en la empresa (I5b): "Jefe de Depósito",
+   * "Contador". Distinto de `role`, que es el permiso de login y solo tiene tres
+   * valores, dos de los cuales son en la práctica la misma persona.
+   *
+   * Lo resuelve el pre-handler de autenticación, una vez por request, y viaja
+   * hasta `DataPointVersion.actorJobTitle`, que lo ESTAMPA. `null`/ausente
+   * cuando la persona no tiene puesto declarado o no es operario de empresa.
+   */
+  jobTitle?: string | null;
   area: string; // SourceArea
   method?: string; // CaptureMethod
   device?: string;
