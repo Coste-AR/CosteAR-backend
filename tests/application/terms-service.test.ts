@@ -108,6 +108,30 @@ describe('TermsService.requireCurrentVersion', () => {
   });
 });
 
+describe('TermsService.ensureInitialVersion', () => {
+  it('siembra la v1 con el texto de prisma/initial-terms.md si no hay ninguna activa', async () => {
+    db.termsVersion.findFirst.mockResolvedValue(null);
+    db.termsVersion.create.mockResolvedValue({ id: 'v1', version: 1 });
+
+    const created = await service().ensureInitialVersion();
+
+    expect(created).toEqual({ id: 'v1', version: 1 });
+    const arg = db.termsVersion.create.mock.calls[0]![0] as { data: { version: number; content: string; isActive: boolean } };
+    expect(arg.data.version).toBe(1);
+    expect(arg.data.isActive).toBe(true);
+    // El contenido sale del archivo real del repo, no de un string inventado:
+    // si alguien lo borra o lo mueve, este test lo dice.
+    expect(arg.data.content.length).toBeGreaterThan(0);
+  });
+
+  it('es idempotente: con una versión activa no crea nada y devuelve null', async () => {
+    db.termsVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1 });
+
+    await expect(service().ensureInitialVersion()).resolves.toBeNull();
+    expect(db.termsVersion.create).not.toHaveBeenCalled();
+  });
+});
+
 describe('TermsService.publish', () => {
   it('incrementa la versión, desactiva la anterior y activa la nueva en una sola transacción', async () => {
     db.termsVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1 });
