@@ -92,6 +92,12 @@ export class DataPointService {
         method: input.method,
         createdBy: actor.id,
         actorRole: actor.role,
+        // El PUESTO, estampado acá y no leído después de la ficha de la persona:
+        // la gente cambia de puesto, y un dato de marzo tiene que seguir
+        // diciendo el puesto que tenía en marzo (I5c). Viene resuelto en el
+        // actor: acá adentro se escriben muchos datos por guardado, y buscarlo
+        // en cada uno sería una consulta por fila para el mismo dato.
+        actorJobTitle: actor.jobTitle ?? null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
@@ -152,6 +158,12 @@ export class DataPointService {
         method: input.method,
         createdBy: actor.id,
         actorRole: actor.role,
+        // El PUESTO, estampado acá y no leído después de la ficha de la persona:
+        // la gente cambia de puesto, y un dato de marzo tiene que seguir
+        // diciendo el puesto que tenía en marzo (I5c). Viene resuelto en el
+        // actor: acá adentro se escriben muchos datos por guardado, y buscarlo
+        // en cada uno sería una consulta por fila para el mismo dato.
+        actorJobTitle: actor.jobTitle ?? null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
@@ -385,6 +397,7 @@ export class DataPointService {
       valueJson: unknown;
       method: string;
       actorRole: string;
+      actorJobTitle?: string | null;
       actorArea: string;
       deviceInfo: string | null;
       createdAt: Date;
@@ -396,6 +409,7 @@ export class DataPointService {
         valueNum: unknown;
         method: string;
         actorRole: string;
+        actorJobTitle?: string | null;
         actorArea: string;
         deviceInfo: string | null;
         createdAt: Date;
@@ -422,7 +436,19 @@ export class DataPointService {
       key: selfRole,
       value: current.valueNum !== null && current.valueNum !== undefined ? Number(current.valueNum) : null,
       unit: dp.unit,
-      by: { name: current.createdByUser.name, role: current.actorRole, area: current.actorArea },
+      by: {
+        name: current.createdByUser.name,
+        // EL PUESTO GANA sobre el rol de login (I5c). El árbol de derivación ya
+        // imprime `nombre · rol · área`, así que con esto pasa de decir
+        // "Juan Pérez · EMPRESA_OPERATOR · deposito" —que parece preciso y no
+        // dice casi nada— a "Juan Pérez · Jefe de Depósito · deposito", sin
+        // tocar una línea de la pantalla.
+        //
+        // Se cae al rol cuando no hay puesto: el costista no tiene membresía, y
+        // las versiones anteriores a esta feature tampoco lo tienen.
+        role: current.actorJobTitle ?? current.actorRole,
+        area: current.actorArea,
+      },
       at: current.createdAt.toISOString(),
       method: current.method,
       device: current.deviceInfo,
@@ -433,7 +459,11 @@ export class DataPointService {
         key: sib.role ?? sib.dataPoint.label,
         value: sib.version.valueNum !== null && sib.version.valueNum !== undefined ? Number(sib.version.valueNum) : null,
         unit: sib.dataPoint.unit,
-        by: { name: sib.version.createdByUser.name, role: sib.version.actorRole, area: sib.version.actorArea },
+        by: {
+          name: sib.version.createdByUser.name,
+          role: sib.version.actorJobTitle ?? sib.version.actorRole,
+          area: sib.version.actorArea,
+        },
         at: sib.version.createdAt.toISOString(),
         method: sib.version.method,
         device: sib.version.deviceInfo,

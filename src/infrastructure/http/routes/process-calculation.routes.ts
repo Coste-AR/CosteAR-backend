@@ -1,12 +1,12 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ProcessCalculationService } from '../../../application/cost-structures/process-costing/process-calculation-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 
 /**
- * Cálculo de Costeo por Procesos (B17). Solo aplica a estructuras con
+ * CÃ¡lculo de Costeo por Procesos (B17). Solo aplica a estructuras con
  * `costingSystem = 'PROCESSES'`; el servicio devuelve un 422 accionable si se
- * llama sobre una de Órdenes o faltan datos. El cálculo es por PERÍODO: recorre
+ * llama sobre una de Ã“rdenes o faltan datos. El cÃ¡lculo es por PERÃODO: recorre
  * los departamentos en orden de secuencia y transfiere el costo de cada uno al
  * siguiente.
  */
@@ -22,8 +22,10 @@ function actorFrom(request: FastifyRequest) {
   return {
     id: request.authUser!.id,
     role: request.authUser!.role,
+    // El puesto declarado, para estamparlo en la version del dato (I5c).
+    jobTitle: request.authUser!.jobTitle,
     area: 'costista',
-    device: `${ua} · ${request.ip}`,
+    device: `${ua} Â· ${request.ip}`,
   };
 }
 
@@ -31,7 +33,7 @@ export async function registerProcessCalculationRoutes(app: FastifyInstance): Pr
   const service = new ProcessCalculationService();
   const base = '/structures/:id/process/periods/:periodId';
 
-  // Corre el motor de Procesos y PERSISTE la corrida + su árbol de derivación.
+  // Corre el motor de Procesos y PERSISTE la corrida + su Ã¡rbol de derivaciÃ³n.
   app.post(`${base}/calculate`, { preHandler: authenticate }, async (request) => {
     const { id, periodId } = calcParams.parse(request.params);
     const result = await service.calculate(request.authUser!.id, id, periodId, actorFrom(request));
@@ -49,7 +51,7 @@ export async function registerProcessCalculationRoutes(app: FastifyInstance): Pr
     };
   });
 
-  // Informe de costos de producción por departamento (para mostrar/exportar).
+  // Informe de costos de producciÃ³n por departamento (para mostrar/exportar).
   app.get(`${base}/production-report`, { preHandler: authenticate }, async (request) => {
     const { id, periodId } = calcParams.parse(request.params);
     const data = await service.getProductionReport(request.authUser!.id, id, periodId);
