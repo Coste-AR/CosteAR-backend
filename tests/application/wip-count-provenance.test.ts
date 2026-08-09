@@ -72,3 +72,60 @@ describe('Procedencia del grado de avance', () => {
     expect(where.canReportWipCount).toBe(true);
   });
 });
+
+/**
+ * La procedencia se guardaba bien y no la leía nadie: ningún endpoint la
+ * devolvía, así que la promesa que el asistente de setup le hace al cliente
+ * —"la diferencia se ve en la trazabilidad"— no se cumplía en ninguna pantalla.
+ */
+describe('La procedencia viaja hasta la pantalla', () => {
+  async function serviceWith(db: unknown) {
+    const { UnitMovementService } = await import(
+      '@/application/cost-structures/process-costing/unit-movement-service.js'
+    );
+    return new UnitMovementService(db as never);
+  }
+
+  const userDb = (name: string | null) =>
+    makeDb({ user: { findUnique: vi.fn(async () => (name === null ? null : { name })) } });
+
+  it('devuelve procedencia, fecha y nombre de quien informó el recuento', async () => {
+    const svc = await serviceWith(userDb('Juan Pérez'));
+    const countedAt = new Date('2026-08-06T12:00:00.000Z');
+
+    // @ts-expect-error — métodos privados: se prueba el contrato que ve el front.
+    const name = await svc.countedByName('op-tecnico');
+    // @ts-expect-error — idem.
+    const out = svc.serializeRow({ countSource: 'TECHNICAL_OFFICE', countedAt }, name);
+
+    expect(out.countSource).toBe('TECHNICAL_OFFICE');
+    expect(out.countedAt).toBe('2026-08-06T12:00:00.000Z');
+    expect(out.countedByName).toBe('Juan Pérez');
+  });
+
+  it('un mes recién abierto por el arrastre viaja como NOT_COUNTED, no como un hueco', async () => {
+    // Es la distinción que pedía el doc: sin esto, un mes cuya existencia final
+    // no contó nadie se ve igual que uno con recuento hecho.
+    const svc = await serviceWith(userDb(null));
+    // @ts-expect-error — método privado.
+    const out = svc.serializeRow({ countSource: 'NOT_COUNTED', countedAt: null }, null);
+
+    expect(out.countSource).toBe('NOT_COUNTED');
+    expect(out.countedAt).toBeNull();
+    expect(out.countedByName).toBeNull();
+  });
+
+  it('si el usuario que informó ya no existe, el nombre es null y no un uuid', async () => {
+    const svc = await serviceWith(userDb(null));
+    // @ts-expect-error — método privado.
+    expect(await svc.countedByName('borrado')).toBeNull();
+  });
+
+  it('sin nadie que haya informado, ni se consulta la tabla de usuarios', async () => {
+    const db = userDb('Juan Pérez');
+    const svc = await serviceWith(db);
+    // @ts-expect-error — método privado.
+    expect(await svc.countedByName(null)).toBeNull();
+    expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+});
