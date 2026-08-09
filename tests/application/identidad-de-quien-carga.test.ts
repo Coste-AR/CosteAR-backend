@@ -9,6 +9,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * de que el dato está identificado, que es peor que no decir nada.
  */
 
+/**
+ * El mock va al tope del archivo y no adentro de un test: `vi.mock` se iza y se
+ * aplica al módulo antes de cualquier import, siempre.
+ *
+ * La primera versión usaba `vi.doMock` + import dinámico. Pasaba corriendo este
+ * archivo solo, y falló en CI dentro de la suite completa: para cuando el test
+ * registraba el mock, el módulo ya estaba resuelto por otra vía. Un test que
+ * depende del orden en que corren los archivos no prueba nada.
+ */
+vi.mock('@/application/ingest/ingest-data-entry.js', () => ({
+  ingestDataEntry: vi.fn(async () => ({ isDuplicate: false })),
+}));
+
+const { EmpresaPortalService } = await import('@/application/empresa/empresa-portal-service.js');
+const { DataPointService } = await import('@/application/trazabilidad/data-point-service.js');
+const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry.js');
+
 const OPERARIO = 'op-1';
 const OTRO_OPERARIO = 'op-2';
 
@@ -16,10 +33,6 @@ beforeEach(() => vi.clearAllMocks());
 
 describe('a · el documento del portal registra quién lo subió', () => {
   it('🔑 submitDocument le pasa el operatorId a la ingesta (antes lo descartaba)', async () => {
-    const ingest = vi.fn(async () => ({ isDuplicate: false }));
-    vi.doMock('@/application/ingest/ingest-data-entry.js', () => ({ ingestDataEntry: ingest }));
-
-    const { EmpresaPortalService } = await import('@/application/empresa/empresa-portal-service.js');
     const db = {
       operatorMembership: {
         findMany: vi.fn(async () => [
@@ -36,12 +49,10 @@ describe('a · el documento del portal registra quién lo subió', () => {
       sourceType: 'TEXT',
     });
 
-    expect(ingest.mock.calls[0]![0]).toMatchObject({ uploadedBy: OPERARIO });
-    vi.doUnmock('@/application/ingest/ingest-data-entry.js');
+    expect(vi.mocked(ingestDataEntry).mock.calls[0]![0]).toMatchObject({ uploadedBy: OPERARIO });
   });
 
   it('🔑 "mis envíos" filtra por persona, no por empresa', async () => {
-    const { EmpresaPortalService } = await import('@/application/empresa/empresa-portal-service.js');
     const db = {
       operatorMembership: { findMany: vi.fn(async () => [{ connectionId: 'conn-1' }]) },
       dataEntry: { findMany: vi.fn(async () => []) },
@@ -66,7 +77,6 @@ describe('c · el puesto se ESTAMPA en la versión, no se lee después', () => {
    * acá conozca la tabla de membresías.
    */
   async function versionEscrita(jobTitle: string | null | undefined) {
-    const { DataPointService } = await import('@/application/trazabilidad/data-point-service.js');
     const create = vi.fn(async () => ({ id: 'ver-1' }));
     const tx = {
       dataPoint: { create: vi.fn(async () => ({ id: 'dp-1' })) },
@@ -104,7 +114,6 @@ describe('c · el puesto se ESTAMPA en la versión, no se lee después', () => {
     // Si volviera a hacerlo, rompería todas las transacciones que componen
     // escrituras con este método sin conocer esa tabla — que es exactamente lo
     // que pasó al escribir esto la primera vez.
-    const { DataPointService } = await import('@/application/trazabilidad/data-point-service.js');
     const tx = {
       dataPoint: { create: vi.fn(async () => ({ id: 'dp-1' })) },
       dataPointVersion: { create: vi.fn(async () => ({ id: 'v' })) },
