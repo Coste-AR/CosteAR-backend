@@ -121,6 +121,170 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
     fuelIsMP: true, // combustible de tractores = insumo de producción
   },
 
+  /**
+   * AVICULTURA DE POSTURA — el rubro del primer cliente pago (~200.000 ponedoras).
+   *
+   * POR QUÉ EXISTE (medido, no supuesto). Hasta CL-04 este cliente se atendía con
+   * el perfil AGRO, escrito para agricultura extensiva. Tres de los siete errores
+   * de alta confianza de la auditoría del 06/08/2026 salen de esa suplantación:
+   *   · `fuelIsMP: true` mandaba el gasoil del grupo electrógeno a MATERIA PRIMA
+   *     (regla escrita para tractores de cultivo).            → CIP-02, conf 97
+   *   · `'vacuna'` estaba en los mpKeywords de AGRO.          → CIP-04, conf 97
+   *   · la luz del galpón no matcheaba nada: AGRO solo tiene
+   *     'electricidad rural'.                                 → CIP-01, conf 97
+   * Medido además: el corpus bajo AGRO da PEOR accuracy que sin perfil (DEFAULT).
+   * Un perfil mal calibrado es peor que ninguno, así que este tiene que ganarle a
+   * los dos para justificar su existencia (ver corpus-clasificador/ground-truth.md).
+   *
+   * EL EJE QUE ORDENA TODAS LAS LISTAS es R-MP-DIRECTA (Clase 1, l. 58):
+   * "identificable con el objeto de costo". El objeto de costo acá es EL HUEVO.
+   * Lo que se convierte en huevo (alimento, calcio de la cáscara) es MP directa;
+   * lo que sostiene al plantel sin incorporarse al huevo (sanidad, energía,
+   * calefacción, mantenimiento) es CIP por R-MP-INDIRECTA y R-CIP (Clase 1, l. 64).
+   *
+   * ⚠️ LO QUE ESTE PERFIL NO RESUELVE — SUBPRODUCTOS. La gallina de descarte y el
+   * huevo roto son salidas reales y recurrentes de una explotación de postura, y
+   * la cátedra tiene reglas para ellas (Clase 43: subproducto Categoría 1 =
+   * reconocer al vender; Categoría 2 = deducir del costo del producto principal).
+   * NO se implementó ningún tratamiento acá porque el clasificador no tiene dónde
+   * expresarlo: `CostSection` no tiene una sección de "recupero / reducción del
+   * costo de producción", así que la Categoría 2 no es representable. Ver la
+   * pregunta abierta en ground-truth.md. Consecuencia deliberada: NO hay keywords
+   * de 'gallina de descarte' en ninguna lista — enviarla a lossKeywords sería
+   * declararla merma, que es exactamente lo que no es.
+   */
+  AVICULTURA: {
+    category: 'AVICULTURA',
+    label: 'Avicultura de postura',
+    mpKeywords: [
+      // Alimento: es LA materia prima de una postura (el grueso del costo). Se
+      // transforma en huevo → R-MP-DIRECTA.
+      // OJO: 'ración'/'racion' se probaron y se SACARON. El match de layer4 es por
+      // substring (`lower.includes`), y 'ración' está adentro de "repa-ración":
+      // le sumaba un punto de Materia Prima a cualquier factura de mantenimiento.
+      // Medido sobre CIP-MANT-GALPON, que trae "reparación de comederos".
+      // El alimento ya queda cubierto por 'balanceado' y 'alimento balanceado'.
+      'balanceado', 'alimento balanceado', 'alimento para ponedora',
+      'maíz', 'maiz', 'sorgo', 'soja', 'expeller',
+      'harina de soja', 'poroto de soja', 'afrechillo', 'salvado de trigo',
+      'aceite vegetal', 'grasa vegetal',
+      // Núcleos, premezclas y aminoácidos: entran a la ración, se incorporan al huevo.
+      'núcleo vitamínico', 'nucleo vitaminico', 'núcleo mineral', 'nucleo mineral',
+      'premezcla', 'corrector vitamínico', 'corrector vitaminico',
+      'metionina', 'lisina', 'aminoácido', 'aminoacido',
+      // Fuente de calcio: se convierte literalmente en la cáscara del huevo.
+      'carbonato de calcio', 'conchilla', 'cáscara de ostra', 'cascara de ostra',
+      'fosfato bicálcico', 'fosfato bicalcico', 'calcáreo', 'calcareo',
+      // Envase del producto terminado. ⚠️ PREGUNTA ABIERTA (ground-truth.md §1):
+      // por R-MP-DIRECTA el maple es identificable con el objeto de costo (uno cada
+      // 30 huevos) y por eso está acá; por R-MP-INDIRECTA podría defenderse que es
+      // de importe mínimo → material indirecto → CIP. La cátedra no zanja el caso.
+      // Se sigue el requisito de CL-04 y queda declarado, no decidido en silencio.
+      'maple', 'maples', 'huevera', 'estuche para huevo', 'caja para huevos',
+      //
+      // NO ESTÁN ACÁ, A PROPÓSITO:
+      //  · 'gasoil'/'combustible' → fuerza motriz y calefacción, no se incorporan
+      //    al huevo (es el defecto CIP-02 que este perfil viene a corregir).
+      //  · 'vacuna'/'antibiótico' → material indirecto (defecto CIP-04).
+      //  · 'gallina'/'ponedora'/'pollita' → el plantel es un ACTIVO amortizable, no
+      //    un insumo del período: comprarlo no es consumo de MP. Lo que sí es costo
+      //    del período es su amortización, que está en cipKeywords.
+    ],
+    cipKeywords: [
+      // Energía eléctrica y fuerza motriz — R-CIP (Clase 1, l. 64) y Clase 11,
+      // l. 211 ("energía eléctrica: iluminación y fuerza motriz").
+      'energía eléctrica', 'energia electrica', 'electricidad',
+      'luz eléctrica', 'luz electrica', 'kwh',
+      'suministro eléctrico', 'suministro electrico',
+      'grupo electrógeno', 'grupo electrogeno',
+      'generador eléctrico', 'generador electrico',
+      // Calefacción y ventilación del galpón — la cátedra nombra "calefacción"
+      // como componente de CIP en la misma línea que la energía.
+      'calefacción', 'calefaccion', 'calefactor', 'campana calefactora',
+      'ventilación', 'ventilacion', 'extractor', 'panel de enfriamiento',
+      'gas envasado', 'garrafa', 'gas natural',
+      // Sanidad del plantel: NO se incorpora al huevo → material indirecto, que es
+      // componente de CIP por R-MP-INDIRECTA y Clase 11, l. 206.
+      'vacuna', 'vacunación', 'vacunacion', 'antibiótico', 'antibiotico',
+      'antiparasitario', 'coccidiostato', 'desinfectante',
+      'desinfección', 'desinfeccion', 'sanidad', 'bioseguridad',
+      'producto veterinario', 'medicamento veterinario',
+      'honorarios veterinario', 'honorarios veterinaria',
+      'análisis de laboratorio', 'analisis de laboratorio', 'necropsia',
+      'control de plagas', 'desratización', 'desratizacion',
+      'fumigación', 'fumigacion',
+      // Estructura productiva: mantenimiento y equipamiento del galpón.
+      'mantenimiento de galpones', 'mantenimiento de galpón', 'mantenimiento de galpon',
+      'reparación de galpón', 'reparacion de galpon',
+      'comedero', 'bebedero', 'jaula', 'nidal',
+      'cinta de recolección', 'cinta de recoleccion',
+      'chapa de techo', 'chapas de techo',
+      'cama de galpón', 'cama de galpon', 'viruta', 'cascarilla de arroz',
+      // Agua de bebida del plantel.
+      'agua de bebida', 'perforación', 'perforacion', 'bomba de agua',
+      // Amortización del plantel: la gallina es un activo que se consume a lo largo
+      // del ciclo de postura. La amortización es CIP (Clase 1, l. 64; Clase 11).
+      'amortización del plantel', 'amortizacion del plantel',
+      'amortización de gallinas', 'amortizacion de gallinas',
+      // Servicios del establecimiento.
+      'alquiler de campo', 'arrendamiento', 'seguro del establecimiento',
+      'telefonía rural', 'telefonia rural', 'internet rural',
+    ],
+    modKeywords: [
+      // MOD = quien manipula el plantel y el huevo en el galpón — R-MOD (Clase 1,
+      // l. 59, "transforma la MP en producto final, identificable").
+      'operario de galpón', 'operario de galpon',
+      'operarios de galpón', 'operarios de galpon',
+      'personal de galpón', 'personal de galpon', 'galponero', 'galponeros',
+      'peón de galpón', 'peon de galpon',
+      'recolector de huevo', 'recolección de huevo', 'recoleccion de huevo',
+      'clasificador de huevo', 'clasificación de huevo', 'clasificacion de huevo',
+      'envasador de huevo', 'jornal de galpón', 'jornal de galpon',
+      'mano de obra de galpón', 'mano de obra de galpon',
+      //
+      // NO ESTÁN ACÁ, A PROPÓSITO: 'capataz', 'encargado', 'supervisor' y todo lo
+      // veterinario. No transforman la MP → son mano de obra INDIRECTA y por
+      // R-MOI (Clase 1, l. 60) son componente de CIP, no de MOD.
+    ],
+    eventKeywords: [
+      // Sanitarios: se nombran como BROTE, no por el patógeno suelto. "newcastle"
+      // a secas también aparece en una factura de vacunas, que es una compra
+      // rutinaria y no un evento de negocio.
+      'brote de newcastle', 'brote de influenza aviar', 'gripe aviar',
+      'brote sanitario', 'cuarentena sanitaria', 'despoblamiento',
+      'clausura sanitaria', 'senasa clausuró', 'senasa clausuro',
+      // Térmicos: la mortandad por calor es EL evento climático de una postura.
+      'ola de calor', 'golpe de calor', 'estrés térmico', 'estres termico',
+      // Corte de energía: sin ventilación forzada el galpón se muere en horas.
+      'corte de luz', 'corte de energía', 'corte de energia',
+      'se cortó la luz', 'se corto la luz',
+      'falló el grupo electrógeno', 'fallo el grupo electrogeno',
+      'se quedaron sin agua',
+      'caída de postura', 'caida de postura', 'bajó la postura', 'bajo la postura',
+    ],
+    lossKeywords: [
+      // OJO CON LA SEMÁNTICA: layer0a trata una lossKeyword sin naturaleza
+      // declarada como merma AMBIGUA → revisión humana obligatoria. Acá eso es lo
+      // correcto, no una omisión: la cátedra (Clase 21) define la pérdida NORMAL
+      // por un umbral de tolerancia "establecido por la empresa o el ingeniero
+      // (generalmente entre 1% y 10%)" — la absorben las unidades buenas — y la
+      // EXTRAORDINARIA como la que lo supera y va al estado de resultados. Ese
+      // umbral no está en el texto del comprobante, así que el sistema no puede
+      // decidir cuál de las dos es sin preguntar.
+      'mortandad', 'mortalidad del plantel', 'gallinas muertas', 'gallina muerta',
+      'huevo roto', 'huevos rotos', 'huevo quebrado', 'huevos quebrados',
+      'huevo fisurado', 'huevos fisurados', 'huevo sucio', 'huevos sucios',
+      'huevo descartado', 'huevos descartados', 'merma de postura',
+      //
+      // NO ESTÁ ACÁ, A PROPÓSITO: 'gallina de descarte'. No es una merma sino el
+      // fin planificado del ciclo productivo del plantel. Ver el comentario de
+      // cabecera y la pregunta abierta de ground-truth.md.
+    ],
+    energyIsMP: false, // la luz del galpón es CIP, nunca insumo del huevo
+    fuelIsMP: false,   // ⚠️ ESTE es el fix de CIP-02: el gasoil del grupo
+                       // electrógeno y de la calefacción es fuerza motriz, no MP
+  },
+
   GASTRONOMIA: {
     category: 'GASTRONOMIA',
     label: 'Gastronomía / Alimentos',
@@ -444,7 +608,19 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
 
 // ── Detección de categoría de industria ──────────────────────────────────────
 
-const AGRO_RE    = /agro|campo|cosech|ganad|tambo|avicultur|vitivin|soja|maíz|trigo|cereales|semiller|apicult|citrus|frutícol|cultivo/i;
+// AVICOLA_RE se evalúa ANTES que AGRO_RE a propósito. AGRO_RE matchea 'agro',
+// 'campo', 'ganad' y 'avicultur', así que casi cualquier forma de describir una
+// granja avícola caía en AGRO — que es exactamente el defecto que CL-04 corrige.
+// Si esta constante se evaluara después, el cliente seguiría cayendo en AGRO por
+// la palabra "agropecuaria" o "avicultura" y el perfil nuevo no se usaría nunca.
+const AVICOLA_RE = /av[íi]col|avicultur|ponedora|gallina|granja de huevos?|producci[óo]n de huevos?|postura de huevos?/i;
+// Contrapeso a AVICOLA_RE. "Avícola" también aparece en empresas que NO crían el
+// plantel: un frigorífico avícola es una planta de faena (su MP es el ave, no el
+// balanceado) y una distribuidora avícola revende. Mandarlas a AVICULTURA sería
+// repetir el error que este perfil corrige — atender un rubro con el perfil de
+// otro— solo que en la dirección contraria. Caen en MANUFACTURA / COMERCIO.
+const AVICOLA_NO_RE = /frigor[íi]f|matadero|faena|distribuidor|comercializadora|mayorista|minorista/i;
+const AGRO_RE    = /agro|campo|cosech|ganad|tambo|vitivin|soja|maíz|trigo|cereales|semiller|apicult|citrus|frutícol|cultivo/i;
 const GASTRO_RE  = /gastronom|restaurant|panadería|heladería|catering|aliment|cocina|bar\b|cafeter|confiter|rotisería|delivery comida/i;
 const MANUF_RE   = /manufactur|industri|fabrica|produccion|planta|metalurg|plastico|quimic|farmacéut|cervecera|frigorif|molino/i;
 const CONST_RE   = /construcc|inmobiliar|obra|arquitect|demolici|excavac|paviment|sanitari/i;
@@ -456,6 +632,7 @@ const TRANS_RE   = /transport|logístic|flete|flota|camión|empresa de viajes|re
 
 export function categorizeIndustry(industry: string | null | undefined): IndustryCategory {
   if (!industry) return 'DEFAULT';
+  if (AVICOLA_RE.test(industry) && !AVICOLA_NO_RE.test(industry)) return 'AVICULTURA';
   if (AGRO_RE.test(industry))   return 'AGRO';
   if (GASTRO_RE.test(industry)) return 'GASTRONOMIA';
   if (MANUF_RE.test(industry))  return 'MANUFACTURA';

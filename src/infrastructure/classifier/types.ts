@@ -74,6 +74,7 @@ export type WasteNature = 'NORMAL' | 'EXTRAORDINARY' | 'AMBIGUOUS';
  */
 export type IndustryCategory =
   | 'AGRO'           // cosecha, ganadería, tambo, vitivinicultura
+  | 'AVICULTURA'     // postura de huevo, granjas avícolas
   | 'GASTRONOMIA'    // restaurantes, panaderías, catering
   | 'MANUFACTURA'    // fábrica, producción industrial
   | 'CONSTRUCCION'   // obras civiles, arquitectura

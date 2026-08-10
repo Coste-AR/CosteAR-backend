@@ -93,24 +93,31 @@ export function loadCorpus(): Corpus {
 
 // ── Perfiles de rubro ────────────────────────────────────────────────────────
 //
-// El perfil se elige por el string `industry` que se le pasa al clasificador,
-// vía categorizeIndustry(). Estos tres strings son los que usa la comparación
-// de CL-04.
+// El perfil se elige por el string `industry` que se le pasa al clasificador, vía
+// categorizeIndustry(). Estos tres strings son los que usa la comparación de CL-04.
 //
-// OJO con AVICULTURA: hoy `industry-profile.ts:447` tiene `avicultur` en el
-// AGRO_RE pero NO `avícol`, así que "Establecimiento avícola de postura" resuelve
-// al perfil DEFAULT. Eso confirma el requisito de CL-04 de agregar `avícol`.
+// ⚠️ EL STRING SOLO ELIGE LA CATEGORÍA — NO VIAJA A LA IA.
+// Una versión anterior de este comentario (y de ground-truth.md) afirmaba que el
+// string de rubro influía en Layer 5 por su cuenta, porque "Establecimiento avícola
+// de postura" y no pasar rubro —que hasta CL-04 resolvían los dos a DEFAULT— daban
+// distinto en CIP-02. Se verificó en el código y es FALSO: `input.industry` se usa
+// en un solo lugar, `cascade-classifier.ts:230` (categorizeIndustry). Lo que llega
+// al prompt de Groq es `industryProfile.label` y la categoría, nunca el string
+// crudo (cascade-classifier.ts:448 → groq-classifier.ts:29-30). Dos strings que
+// resuelven a la misma categoría producen un prompt idéntico byte por byte.
+// Aquella diferencia en CIP-02 era ruido de muestreo (temperature 0,05, sin seed):
+// es justamente lo que motivó CORPUS_REPETICIONES.
 //
-// PERO — y esto se midió, no se supone — la fila AVICULTURA **no** da idéntica a
-// DEFAULT aunque compartan perfil: en CIP-02 (gasoil) DEFAULT acierta y AVICULTURA
-// no. La causa es que el string de rubro no solo elige el perfil: también viaja
-// como hint al prompt de la IA (Layer 5). O sea que describir la empresa cambia la
-// respuesta aunque el perfil de keywords sea el mismo.
+// Consecuencia práctica: cualquier string que resuelva a la categoría X mide el
+// perfil X. Por eso la fila AGRO puede usar un string genérico sin perder validez.
 //
-// Consecuencia para CL-04: no alcanza con medir el perfil nuevo: hay que medir el
-// par (perfil, string de rubro), porque el segundo influye por su cuenta.
+// AGRO: desde CL-04, "avicultura"/"avícola" resuelven a AVICULTURA (que es el
+// punto: el cliente no puede volver a caer en AGRO). Así que para seguir midiendo
+// el perfil AGRO —la vara contra la que el perfil nuevo tiene que ganar— hace falta
+// un string que lo seleccione. 'Productora agropecuaria' matchea `agro` y nada de
+// AVICOLA_RE. La medición es equivalente a la del 07/08/2026 por lo dicho arriba.
 export const PERFILES = {
-  AGRO: 'Productora agropecuaria de avicultura de postura',
+  AGRO: 'Productora agropecuaria',
   DEFAULT: undefined,
   AVICULTURA: 'Establecimiento avícola de postura',
 } as const;
@@ -118,18 +125,15 @@ export const PERFILES = {
 export type PerfilLabel = keyof typeof PERFILES;
 
 /**
- * El perfil con el que se atiende al cliente HOY, y por lo tanto el único bajo
- * el cual las métricas son comparables contra la auditoría del 06/08/2026.
+ * El perfil con el que se atiende al cliente, y por lo tanto bajo el cual se mide.
  *
- * Medido: bajo AGRO este corpus reproduce 7 de los 8 fallos documentados con la
- * sección y la confianza exactas. Bajo DEFAULT, cuatro de esos fallos NO
- * aparecen — que es precisamente el hallazgo incómodo de CL-04 ("un perfil mal
- * calibrado es peor que ninguno"). Medir bajo DEFAULT daría un número mejor y
- * falso.
- *
- * Cuando CL-04 cree el perfil AVICULTURA, esta constante pasa a 'AVICULTURA'.
+ * Fue 'AGRO' hasta CL-04. Pasó a 'AVICULTURA' porque el perfil nuevo le gana a los
+ * otros dos en la comparación de tres vías (ver ground-truth.md § La comparación de
+ * tres vías): accuracy 83,3 % vs. 72,2 % (DEFAULT) y 61,1 % (AGRO), con 0 errores de
+ * alta confianza contra 2 de AGRO. Medir bajo AGRO ahora sería medir un perfil que
+ * ya no se le aplica a nadie.
  */
-const PERFIL_BASE: PerfilLabel = 'AGRO';
+const PERFIL_BASE: PerfilLabel = 'AVICULTURA';
 
 // ── Métricas ─────────────────────────────────────────────────────────────────
 
@@ -317,9 +321,15 @@ const FALLOS_CONOCIDOS: Record<string, string> = {
   'MO-03':   'CL-02 — la rama UNKNOWN de routePayroll afirma MOD con confianza alta',
   'MO-04':   'CL-02 — recibo sin puesto: debe escalar, hoy afirma MOD con confianza alta',
   'MULTI-01':'CL-02 — Layer 4 pisa el MULTIPLE de la IA al reportar requiresAI:false',
-  'CIP-01':  'CL-05 — la factura de luz no matchea ninguna keyword de CIP',
-  'CIP-02':  'CL-04 — fuelIsMP:true en el perfil AGRO manda el gasoil a MP',
-  'CIP-04':  'CL-04 — "vacuna" está en los mpKeywords del perfil AGRO',
+  // CIP-01 salió de esta lista: CL-05 le dio keywords ('energía eléctrica',
+  // 'electricidad', 'kwh') y arregló el `\benergia\b` sin tilde, así que ahora
+  // lo resuelve Layer 4 sin llamar a la IA. Pasó a guarda de regresión en
+  // corpus.json.
+  // CIP-02 y CIP-04 salieron de esta lista: CL-04 creó el perfil AVICULTURA
+  // (fuelIsMP:false + 'grupo electrógeno'/'calefacción' en cipKeywords para el
+  // gasoil; 'vacuna' fuera de mpKeywords y dentro de cipKeywords). Los dos los
+  // resuelve ahora Layer 4 con requiresAI:false, o sea de forma determinista y
+  // sin que la IA pueda cambiarlos. Pasaron a guardas de regresión en corpus.json.
   'FLE-02':  'CL-06 — el flete sobre una compra de MP no sigue a esa MP',
 };
 

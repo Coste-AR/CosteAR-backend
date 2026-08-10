@@ -2870,3 +2870,107 @@ que los dos conjuntos de valores no se desincronicen.
 columnas usan `ADD COLUMN IF NOT EXISTS`, y **no hay ningún `UPDATE`** — el `DEFAULT` de Postgres
 completa las filas existentes sin reescribir ninguna otra columna. No agrega tablas, así que no toca
 `prisma/rls.sql`: `companies` ya tiene su política de inquilino.
+
+---
+
+## CL-04 — El rubro avícola existe: perfil `AVICULTURA`
+
+**El hueco.** El primer cliente pago es una explotación de postura de ~200.000 ponedoras en
+Tucumán, y su rubro no existía en `industry-profile.ts`. Se lo atendía con `AGRO`, escrito para
+agricultura extensiva. **Tres de los siete errores de alta confianza de la auditoría del
+06/08/2026 salen de esa suplantación**, y los tres son la misma clase de defecto — una regla
+correcta para otro rubro, afirmada con confianza alta sobre este:
+
+| Caso | Documento | Daba | Por qué |
+|---|---|---|---|
+| `CIP-02` | Gasoil de grupo electrógeno y calefacción | `MATERIA_PRIMA` conf 97 | `fuelIsMP: true`, regla escrita para tractores de cultivo |
+| `CIP-04` | Vacunas del plantel | `MATERIA_PRIMA` conf 97 | `'vacuna'` en los `mpKeywords` de AGRO |
+| `CIP-01` | Luz de los galpones | `GASTO_ADMINISTRACION` conf 97 | AGRO solo tiene `'electricidad rural'` (lo cerró CL-05) |
+
+**El eje que ordena el perfil entero.** R-MP-DIRECTA (Clase 1, l. 58): *"identificable con el
+objeto de costo"*. El objeto de costo acá es **el huevo**. Lo que se convierte en huevo —alimento
+balanceado, maíz, núcleo vitamínico, carbonato de calcio que literalmente forma la cáscara— es MP
+directa. Lo que sostiene al plantel sin incorporarse al huevo —sanidad, energía, calefacción,
+mantenimiento de galpones— es CIP, por R-MP-INDIRECTA (*"pasa automáticamente a CIP"*) y por
+R-CIP (Clase 1, l. 64: *"energía eléctrica, fuerza motriz, calefacción, mantenimiento"*).
+El mismo eje explica las tres exclusiones deliberadas del perfil, que están comentadas en el
+código: el gasoil del generador **no** es MP (es fuerza motriz), la vacuna **no** es MP (es
+material indirecto) y la gallina **no** es MP (es un activo amortizable; lo que sí es costo del
+período es su amortización, que está en `cipKeywords`).
+
+**La detección de rubro se arregló con más alcance que el pedido.** Agregar `avícol` no
+alcanzaba: `AGRO_RE` también matchea `agro`, `campo`, `ganad` y `avicultur`, así que un cliente
+que se describiera *"establecimiento agropecuario avícola"* seguía cayendo en AGRO — el defecto
+que había que sacar de circulación. Quedó `AVICOLA_RE` evaluada **antes** que `AGRO_RE`, con
+`avicultur` movido de una a la otra. Y con un contrapeso, `AVICOLA_NO_RE`: un *"frigorífico
+avícola"* es una planta de faena (su MP es el ave, no el balanceado) y una *"distribuidora
+avícola"* revende. Mandarlas a `AVICULTURA` sería repetir este mismo error en la dirección
+contraria, así que caen en `MANUFACTURA` y `COMERCIO`.
+
+**Medición — un perfil sin medir es un pasivo.** Comparación de tres vías sobre el corpus
+(detalle y advertencias en `corpus-clasificador/ground-truth.md`):
+
+| Perfil | Accuracy | Precisión ≥90 | Errores de alta confianza |
+|---|---|---|---|
+| `AGRO` | 61,1 % | 81,8 % (9/11) | **2** |
+| `DEFAULT` | 72,2 % | 100 % (11/11) | 0 |
+| **`AVICULTURA`** | **83,3 %** | **100 % (13/13)** | **0** |
+
+Le gana a los dos. En precisión empata con `DEFAULT` en 100 %, pero **con más denominador**
+(13/13 vs. 11/11): `CIP-02` y `CIP-04` dejan de ser un escalamiento —o un error de alta
+confianza bajo AGRO— y pasan a ser una respuesta correcta afirmada por regla, con
+`requiresAI: false`. O sea que la IA ni siquiera los ve. Por eso salieron de `FALLOS_CONOCIDOS`
+y pasaron a guardas de regresión, y por eso `PERFIL_BASE` del harness pasó a `'AVICULTURA'`.
+
+**⚠️ La medición se hizo SIN la IA, y eso hay que decirlo.** El 09/08/2026 la cuota compartida
+de Groq estaba agotada: el rate-limiter reportaba pedidos de espera de 475 s, 344 s y 228 s
+recortados a 60 s. La corrida de tres perfiles × 18 casos × 3 repeticiones no terminaba y
+bloqueaba al resto, así que se cortó. La tabla de arriba sale de correr los tres perfiles con
+`GROQ_API_KEY` vacío: Layer 5 devuelve `null` y decide la cascada por reglas. **A cambio es
+determinista** (0 casos inestables, 1,8 s) y mide exactamente lo que CL-04 tocó, que es el ruteo
+por keywords de Layer 4. Queda pendiente rehacerla con la IA cuando la cuota se recupere; no se
+espera que mueva el veredicto, porque bajo `AVICULTURA` los casos que deciden se resuelven antes
+de llegar a Layer 5.
+
+**Un hallazgo que retracta al ground-truth anterior: el string de rubro NO viaja a la IA.**
+Estaba escrito que describir la empresa cambiaba la respuesta de Layer 5 aunque el perfil de
+keywords fuera el mismo. Es falso: `input.industry` se usa en un solo lugar de todo el backend
+(`cascade-classifier.ts:230`, `categorizeIndustry`); lo que llega al prompt es
+`industryProfile.label` y la categoría, nunca el string crudo. Dos strings que resuelven a la
+misma categoría producen un prompt idéntico byte por byte. Aquella diferencia medida era ruido
+de muestreo (`temperature: 0.05` sin `seed`, una sola repetición) — el hallazgo que el propio
+documento advertía y que igual se cometió. Consecuencia práctica: cualquier string que resuelva
+a la categoría X sirve para medir el perfil X, que es lo que permite que la fila `AGRO` del
+harness siga midiendo AGRO con `'Productora agropecuaria'` ahora que ningún string avícola
+resuelve ahí.
+
+**Lo que NO se hizo, y por qué no se inventó.** Los subproductos de una postura (gallina de
+descarte, huevo roto) se analizaron contra la cátedra y quedaron a medias, documentado en
+`ground-truth.md`:
+
+- **Sí se implementó el eje de merma.** El vocabulario de merma avícola entró en `lossKeywords`,
+  que `layer0a` trata como merma de naturaleza ambigua → revisión humana. Es lo correcto y no una
+  omisión: Clase 21 define la pérdida normal por un *"umbral de tolerancia establecido por la
+  empresa o el ingeniero"* que **no está en el comprobante**, así que el sistema no puede elegir
+  entre absorber la merma en el costo y mandarla al estado de resultados sin preguntar.
+- **No se implementó el recupero.** Clase 43 ofrece Categoría 1 (reconocer al vender) y
+  Categoría 2 (deducir del costo del producto principal). **`CostSection` no tiene ninguna
+  sección de recupero**, así que hoy el sistema solo sabe hacer Categoría 1 — no por elección
+  sino por falta de vocabulario. Y elegir entre las dos depende de si el ingreso es
+  *"significativo"*, que es un juicio del costista sobre el negocio, no un dato del papel.
+  Encima la gallina de descarte no encaja limpio en la definición de subproducto (se vende sin
+  proceso adicional) ni en la de desperdicio (tiene valor de venta relevante).
+  **Es un hueco de modelo, no de keywords: agregar palabras no lo cierra.**
+- **`'gallina de descarte'` quedó deliberadamente fuera de `lossKeywords`**: es el fin
+  planificado del ciclo, no una pérdida. Meterla ahí habría hecho escalar una venta normal como
+  si fuera un siniestro.
+
+**El maple sigue abierto.** Se siguió el requisito (`'maple'` en `mpKeywords`) pero la cátedra no
+zanja el caso: R-MP-INDIRECTA da un criterio doble —*"no identificable en cantidad exacta **o** de
+importe mínimo"*— y el maple cumple el primero pero podría cumplir el segundo. Si la cátedra
+responde lo contrario, el cambio es chico y está localizado.
+
+**Nota de método que se pagó en carne propia.** El matcheo de Layer 4 es `lower.includes(kw)`,
+sin límite de palabra. La primera versión de este perfil tenía `'ración'` en `mpKeywords` y le
+sumaba un punto de Materia Prima a toda factura que dijera **repa-ración**. Se detectó midiendo
+`CIP-MANT-GALPON`, no leyendo. Está comentado en el código para que no vuelva.

@@ -54,7 +54,10 @@ export function routeFacturaCompra(
   }
 
   const hasFuel    = /\bgasoil\b|\bcombustible\b|\bnafta\b|\bGNC\b/.test(lower);
-  const hasEnergy  = /\belectricidad\b|\bluz el[eé]ctrica\b|\bgas natural\b|\benergia\b/.test(lower);
+  // `energ[íi]a` y no `energia`: el texto llega en minúsculas pero SIN plegar
+  // acentos, así que la forma acentuada —la ortográficamente correcta y la que
+  // imprime la mayoría de las facturas— no matcheaba.
+  const hasEnergy  = /\belectricidad\b|\bluz el[eé]ctrica\b|\bgas natural\b|\benerg[íi]a\b/.test(lower);
 
   if (hasFuel && profile.fuelIsMP) {
     return {

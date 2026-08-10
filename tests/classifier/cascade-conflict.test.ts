@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { classifyDocument } from '../../src/infrastructure/classifier/cascade-classifier.js';
+
+// `classifyDocument` llega a la API de Groq y una llamada normal tarda ~4,9s,
+// justo en el borde del timeout por defecto de 5000ms. Cuando la cuota del free
+// tier aprieta, estos tests fallan por TIEMPO y no por comportamiento. Ver la
+// nota extendida en waste-intent.test.ts.
+vi.setConfig({ testTimeout: 30_000 });
 
 const BASE = { costistId: 'c-001', companyId: 'co-001', dataEntryId: 'de-001' };
 
