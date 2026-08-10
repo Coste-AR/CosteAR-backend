@@ -105,9 +105,28 @@ export const directLaborConfigSchema = z.object({
       z.object({
         name: z.string().min(1).max(120),
         basicRemuneration: nonNeg,
-        // OJO: `hoursWorked` es histórico; conceptualmente son HORAS
-        // PRESUPUESTADAS (capacidad normal) con las que se calcula la tarifa.
+        // HORAS PAGADAS — «presencia en fábrica» (cátedra, Clase 10): las horas
+        // por las que se paga, trabaje o no el operario. Es la base sobre la que
+        // se reparte el costo total de MOD. Se sigue llamando `hoursWorked` por
+        // historia (es el único campo de horas de las estructuras ya cargadas);
+        // renombrarlo obligaría a migrar el JSONB de todas ellas.
         hoursWorked: nonNeg,
+        // HORAS NETAS PRODUCTIVAS (cátedra, Clase 10) = presencia en fábrica −
+        // tiempos perdidos informados. Son las únicas horas imputables a las
+        // órdenes: la tarifa se divide por ESTAS. La diferencia contra
+        // `hoursWorked` es la CAPACIDAD OCIOSA, cuyo costo se aísla en su propia
+        // línea y nunca se suma en silencio a las órdenes.
+        //
+        // OPCIONAL A PROPÓSITO — retrocompatibilidad sin migración: las
+        // estructuras ya guardadas solo tienen `hoursWorked`, y sin este campo el
+        // motor asume que toda la presencia fue productiva (horas ociosas = 0) y
+        // calcula EXACTAMENTE igual que antes.
+        //
+        // NO confundir con el ausentismo pago del IAP/ITCS: ese cubre AUSENCIAS
+        // PAGAS (vacaciones, enfermedad, feriados), donde el operario no está en
+        // planta. Acá el operario está presente y cobra, pero no hay trabajo que
+        // asignarle. Los dos modelos conviven.
+        productiveHours: nonNeg.optional(),
         // Dato REAL de fin de mes (horas efectivamente trabajadas). Opcional y
         // NO usado por el motor: es solo para comparar real vs presupuestado
         // (Parte 3.2, criterio C). No afecta la tarifa ni el costo.

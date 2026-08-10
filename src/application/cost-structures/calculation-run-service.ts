@@ -208,7 +208,13 @@ export class CalculationRunService {
 
     const walk = (nodes: TreeNode[]) => {
       for (const node of nodes) {
-        const dpId = byLabel.get(node.label);
+        // `traceFieldKey` primero: es DETERMINÍSTICA (la arma el motor, que sí
+        // sabe de qué departamento o centro es la hoja) y desempata las
+        // etiquetas que se repiten — "Remuneración básica" existe una vez por
+        // departamento y "CIP real" una vez por centro. El matcheo por etiqueta
+        // queda de respaldo para todo lo demás (movimientos de MP, venta).
+        const dpId = (node.traceFieldKey ? byFieldKey.get(node.traceFieldKey) : undefined)
+          ?? byLabel.get(node.label);
         if (dpId) node.sourceDataPointId = dpId;
         if (node.children.length > 0) walk(node.children);
       }

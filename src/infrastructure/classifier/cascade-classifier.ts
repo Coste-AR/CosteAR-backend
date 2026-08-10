@@ -7,6 +7,7 @@ import { runLayer3 }      from './layers/layer3-numeric-validation.js';
 import { runLayer4 }      from './layers/layer4-business-routing.js';
 import type { Layer4Result } from './layers/layer4-business-routing.js';
 import { runLayer5 }      from './layers/layer5-ai-fallback.js';
+import { detectAcquisitionCostLink } from './layers/layer4-acquisition-link.js';
 import { categorizeIndustry, getIndustryProfile } from './industry/industry-profile.js';
 import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
@@ -236,6 +237,13 @@ export async function classifyDocument(input: ClassifierInput & {
     ? input.enrichedText
     : input.text;
 
+  // ── Vínculo de costo de adquisición declarado por el documento ─────────────
+  // Se detecta acá y no dentro del ruteo porque NO depende del tipo de documento
+  // ni de la sección: es un hecho del texto que la capa de aplicación necesita
+  // igual, incluso cuando la IA termina eligiendo otra sección. La misma función
+  // pura la usa layer4-invoice-routing para decidir la sección.
+  const acquisitionLink = detectAcquisitionCostLink(text.toLowerCase());
+
   // ── Layer 0A: Detección de intención ──────────────────────────────────────
   const intentResult = detectIntent(text, sourceType, industryProfile);
   const intent: InputIntent = intentResult.intent;
@@ -405,6 +413,7 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
+      acquisitionLink,
       // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
       ...buildSectionAndExplanation({
         intent, documentType: chosenType,
@@ -486,6 +495,7 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
+      acquisitionLink,
       // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
       ...buildSectionAndExplanation({
         intent, documentType: aiResult.documentType as DocumentType,

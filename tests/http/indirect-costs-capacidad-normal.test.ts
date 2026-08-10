@@ -20,6 +20,15 @@ const db = vi.hoisted(() => ({
   costPeriod: { findFirst: vi.fn(), update: vi.fn() },
   costConfigVersion: { findFirst: vi.fn(), create: vi.fn() },
   costCalculation: { create: vi.fn() },
+  // Guardar una sección reconcilia sus data points en la misma transacción
+  // (T-01). Sin nada previo, se crean todos.
+  dataPoint: {
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async () => ({ id: 'dp-1' })),
+    update: vi.fn(async () => ({ id: 'dp-1' })),
+  },
+  dataPointVersion: { findFirst: vi.fn(async () => null), create: vi.fn(async () => ({ id: 'v-1' })) },
+  traceAuditLog: { create: vi.fn(async () => ({})) },
   $transaction: vi.fn(),
 }));
 

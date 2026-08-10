@@ -155,9 +155,10 @@
       "origen": "medido",
       "correccion": "CL-06",
       "expected": "MATERIA_PRIMA",
+      "esGuardaDeRegresion": true,
       "referenciaComprobante": "0003-00001902",
       "baseline": { "costSection": "COSTOS_INDIRECTOS", "confidence": 97, "ok": false, "nota": "Error de ALTA CONFIANZA. Agravante: el hint de rubro que se le manda a la IA dice literalmente 'flete de granos es COSTOS_INDIRECTOS', así que la IA obedece una instrucción equivocada." },
-      "nota": "Flete facturado por separado que referencia explícitamente el comprobante de la compra de MP que transportó.",
+      "nota": "Flete facturado por separado que referencia explícitamente el comprobante de la compra de MP que transportó. RESUELTO por CL-06 el 10/08/2026: Layer 4 lee la declaración 'flete por la compra de …' y el número del comprobante referenciado, e imputa MATERIA_PRIMA con requiresAI:false — o sea que la IA ya no lo ve. Pasa de fallo conocido a guarda de regresión. Evidencia determinista en tests/classifier/layer4-flete-adquisicion.test.ts.",
       "regla": "Clase 4, líneas 15-18 — el costo de adquisición acumula el flete hasta destino ('Costo de nacionalización + flete carretero hasta destino (ej. Tucumán) = costo de adquisición total'). El flete SOBRE LA COMPRA de un material es parte del costo de ese material.",
       "text": "FACTURA A\nCAE Nº: 75200000000401\nCUIT: 30-66889900-3\nPUNTO DE VENTA 0005\nProveedor: Transportes Rivadavia SRL\nCondición frente al IVA: Responsable Inscripto\nFecha: 22/06/2026\n\nFlete por la compra de 38 toneladas de maíz - Factura 0003-00001902\nOrigen: Granos del Norte SRL — Destino: establecimiento Tucumán"
     },

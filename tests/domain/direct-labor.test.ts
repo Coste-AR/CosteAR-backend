@@ -3,8 +3,11 @@ import {
   calcWorkingDays,
   calcITCS,
   calcDirectLabor,
+  calcDepartmentMod,
+  DESTINO_COSTO_CAPACIDAD_OCIOSA,
   type DirectLaborConfig,
 } from '@/domain/calculations/direct-labor.js';
+import { Percentage } from '@/domain/value-objects/percentage.js';
 
 /**
  * Ground truth: hoja "2-MOD Ejemplo" del Excel v3.0.
@@ -162,6 +165,159 @@ describe('Hoja 2 — Mano de Obra Directa', () => {
     it('expone el detalle de días e ITCS', () => {
       expect(r.workingDays.effectiveWorkDays.toNumber()).toBe(221);
       expect(r.itcs.itcs.toPercent()).toBeCloseTo(79.99, 1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E) Capacidad ociosa — presencia en fábrica vs horas netas productivas
+// ---------------------------------------------------------------------------
+
+/**
+ * Caso de la auditoría: un departamento con $942.500 de costo total de MOD,
+ * 180 horas PAGADAS (presencia en fábrica) y 160 horas NETAS PRODUCTIVAS.
+ *
+ * ITCS cero para que el costo total sea exactamente la remuneración cargada y
+ * los números del caso se lean sin ruido: lo que se verifica acá es la
+ * separación de horas, no el índice de cargas sociales (que ya tiene sus tests).
+ */
+const AUDITORIA = { name: 'Armado', basicRemuneration: 942500, hoursWorked: 180 };
+
+describe('Hoja 2 — Capacidad ociosa (Clase 10)', () => {
+  describe('Caso auditoría — 180 hs pagadas, 160 hs netas productivas', () => {
+    const r = calcDepartmentMod({ ...AUDITORIA, productiveHours: 160 }, Percentage.zero());
+
+    it('horas ociosas = presencia 180 − netas productivas 160 = 20 hs', () => {
+      expect(r.idleCapacity.paidHours.toNumber()).toBe(180);
+      expect(r.idleCapacity.productiveHours.toNumber()).toBe(160);
+      expect(r.idleCapacity.idleHours.toNumber()).toBe(20);
+      expect(r.idleCapacity.hasIdleCapacity).toBe(true);
+    });
+
+    it('la tarifa aplicada a las órdenes divide por las HORAS PRODUCTIVAS = $5.236,11/h', () => {
+      // 837.777,78 (MOD imputable) ÷ 160 hs netas productivas.
+      expect(r.hourlyRate.toNumber()).toBeCloseTo(5236.11, 2);
+    });
+
+    it('el costo de las 20 hs ociosas queda AISLADO en $104.722,22', () => {
+      expect(r.idleCapacity.idleCost.toNumber()).toBeCloseTo(104722.22, 2);
+    });
+
+    it('MOD imputable a órdenes = $837.777,78 — las horas ociosas no entran', () => {
+      expect(r.idleCapacity.applicableMod.toNumber()).toBeCloseTo(837777.78, 2);
+    });
+
+    it('nada se pierde ni se duplica: imputable + ocioso = costo total MOD', () => {
+      const suma = r.idleCapacity.applicableMod.add(r.idleCapacity.idleCost);
+      expect(suma.toNumber()).toBe(r.totalMod.toNumber());
+      expect(r.totalMod.toNumber()).toBe(942500);
+    });
+
+    it('la tarifa × horas productivas reconstruye el MOD imputable', () => {
+      const reconstruido = r.hourlyRate.multiply(r.idleCapacity.productiveHours);
+      expect(reconstruido.toNumber()).toBeCloseTo(837777.78, 2);
+    });
+  });
+
+  describe('RETROCOMPATIBILIDAD — una estructura sin `productiveHours` calcula igual que siempre', () => {
+    // Exactamente el mismo departamento, con y sin el campo nuevo en su forma
+    // "no hay ociosidad". Ninguna de las dos puede moverse respecto del histórico.
+    const legado = calcDepartmentMod(AUDITORIA, Percentage.zero());
+    const explicito = calcDepartmentMod(
+      { ...AUDITORIA, productiveHours: 180 },
+      Percentage.zero(),
+    );
+
+    it('sin el campo: tarifa = costo total ÷ horas pagadas (fórmula histórica)', () => {
+      expect(legado.hourlyRate.toNumber()).toBeCloseTo(5236.11, 2);
+      expect(legado.totalMod.toNumber()).toBe(942500);
+    });
+
+    it('sin el campo NO hay horas ociosas ni costo ocioso', () => {
+      expect(legado.idleCapacity.idleHours.toNumber()).toBe(0);
+      expect(legado.idleCapacity.idleCost.isZero()).toBe(true);
+      expect(legado.idleCapacity.hasIdleCapacity).toBe(false);
+    });
+
+    it('sin el campo, el MOD imputable es el costo total: nada sale del producto', () => {
+      expect(legado.idleCapacity.applicableMod.toNumber()).toBe(legado.totalMod.toNumber());
+    });
+
+    it('declarar todas las horas como productivas da lo mismo que no declararlas', () => {
+      expect(explicito.hourlyRate.toNumber()).toBe(legado.hourlyRate.toNumber());
+      expect(explicito.idleCapacity.idleCost.toNumber()).toBe(0);
+    });
+
+    it('la tarifa del ejemplo de la cátedra no se movió (674,97 con 12.000 HH)', () => {
+      const r = calcDirectLabor(example);
+      expect(r.departments[0]!.hourlyRate.toNumber()).toBeCloseTo(674.97, 0);
+      expect(r.totalMod.toNumber()).toBeCloseTo(18898986.03, 1);
+      expect(r.idleCapacity.hasIdleCapacity).toBe(false);
+      expect(r.idleCapacity.idleCost.isZero()).toBe(true);
+    });
+  });
+
+  describe('Bordes', () => {
+    it('horas productivas > horas pagadas se recortan: no existen horas ociosas negativas', () => {
+      const r = calcDepartmentMod(
+        { ...AUDITORIA, productiveHours: 500 },
+        Percentage.zero(),
+      );
+      expect(r.idleCapacity.productiveHours.toNumber()).toBe(180);
+      expect(r.idleCapacity.idleHours.toNumber()).toBe(0);
+      expect(r.idleCapacity.idleCost.isZero()).toBe(true);
+    });
+
+    it('cero horas pagadas: tarifa cero y sin costo ocioso (no divide por cero)', () => {
+      const r = calcDepartmentMod(
+        { name: 'Vacío', basicRemuneration: 100000, hoursWorked: 0 },
+        Percentage.zero(),
+      );
+      expect(r.hourlyRate.isZero()).toBe(true);
+      expect(r.idleCapacity.idleCost.isZero()).toBe(true);
+    });
+
+    it('cero horas productivas: TODA la presencia es ociosa y no se imputa nada', () => {
+      const r = calcDepartmentMod({ ...AUDITORIA, productiveHours: 0 }, Percentage.zero());
+      expect(r.idleCapacity.idleHours.toNumber()).toBe(180);
+      expect(r.idleCapacity.idleCost.toNumber()).toBe(942500);
+      expect(r.idleCapacity.applicableMod.isZero()).toBe(true);
+      expect(r.hourlyRate.isZero()).toBe(true);
+    });
+  });
+
+  describe('Consolidado de la hoja + punto de decisión del destino contable', () => {
+    const config: DirectLaborConfig = {
+      ...example,
+      departments: [
+        { name: 'Corte', basicRemuneration: 942500, hoursWorked: 180, productiveHours: 160 },
+        { name: 'Acabado', basicRemuneration: 500000, hoursWorked: 100 },
+      ],
+    };
+    const r = calcDirectLabor({ ...config, itcs: { ...config.itcs, derivationBase: 0, fixedArt: 0, sacFraction: 0, uncertainRemunerative: [], uncertainNonRemunerative: [] }, workingDays: { ...config.workingDays, paidAbsence: { holidays: 0, vacations: 0, sickness: 0, specialLeaves: 0, workAccidents: 0 } } });
+
+    it('suma horas y costos ociosos de todos los departamentos', () => {
+      expect(r.idleCapacity.paidHours.toNumber()).toBe(280);
+      expect(r.idleCapacity.productiveHours.toNumber()).toBe(260);
+      expect(r.idleCapacity.idleHours.toNumber()).toBe(20);
+      expect(r.idleCapacity.hasIdleCapacity).toBe(true);
+    });
+
+    it('costo completo = imputable + ocioso (la hoja cierra)', () => {
+      expect(r.idleCapacity.fullMod.toNumber()).toBe(1442500);
+      expect(
+        r.idleCapacity.applicableMod.add(r.idleCapacity.idleCost).toNumber(),
+      ).toBe(1442500);
+      expect(r.idleCapacity.idleCost.toNumber()).toBeCloseTo(104722.22, 2);
+    });
+
+    it('el destino contable vigente deja el estado de costos como hoy: totalMod = costo completo', () => {
+      // Mientras la decisión de producto no esté tomada, `totalMod` (lo que entra
+      // al estado de costos) NO se mueve. El costo ocioso está aislado y visible,
+      // pero no cambia todavía el costo del producto ni el margen.
+      expect(r.idleCapacity.destination).toBe('absorbido-en-el-producto');
+      expect(DESTINO_COSTO_CAPACIDAD_OCIOSA).toBe('absorbido-en-el-producto');
+      expect(r.totalMod.toNumber()).toBe(r.idleCapacity.fullMod.toNumber());
     });
   });
 });

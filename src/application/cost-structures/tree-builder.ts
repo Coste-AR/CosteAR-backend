@@ -1,4 +1,8 @@
 import type { CalculationInput, CalculationOutput } from '../../domain/calculations/calculate.js';
+import {
+  cipCenterActualCipKey,
+  modDeptRemunerationKey,
+} from '../trazabilidad/orders-input-points.js';
 
 /**
  * Arma el árbol de derivación {label, formula, value, unit, children[]} a
@@ -137,7 +141,17 @@ function buildDirectLaborNode(output: CalculationOutput): TreeNode {
         value: d.totalMod.toNumber(),
         unit: '$',
         children: [
-          { label: 'Remuneración básica', value: d.basicRemuneration.toNumber(), unit: '$', children: [] },
+          // `traceFieldKey`: "Remuneración básica" se repite bajo CADA
+          // departamento, así que el enlace por etiqueta no puede distinguirlas
+          // (elegiría siempre el mismo dato). La clave nombra el departamento y
+          // resuelve sin ambigüedad. Aditivo: no cambia ningún valor.
+          {
+            label: 'Remuneración básica',
+            traceFieldKey: modDeptRemunerationKey(d.name),
+            value: d.basicRemuneration.toNumber(),
+            unit: '$',
+            children: [],
+          },
           { label: 'Costo de cargas sociales', value: d.socialChargesCost.toNumber(), unit: '$', children: [] },
           { label: 'Tarifa horaria integral', formula: 'costo total / HH', value: d.hourlyRate.toNumber(), unit: '$/hs', children: [] },
         ],
@@ -161,7 +175,14 @@ function buildIndirectCostsNode(output: CalculationOutput): TreeNode {
       children: [
         { label: 'Cuota fija', value: d.quota.fixedQuota.toNumber(), unit: '$', children: [] },
         { label: 'Cuota variable', value: d.quota.variableQuota.toNumber(), unit: '$', children: [] },
-        { label: 'CIP real', value: d.actualCip.toNumber(), unit: '$', children: [] },
+        // Mismo caso que "Remuneración básica": "CIP real" se repite por centro.
+        {
+          label: 'CIP real',
+          traceFieldKey: cipCenterActualCipKey(centerId),
+          value: d.actualCip.toNumber(),
+          unit: '$',
+          children: [],
+        },
         {
           label: 'Variación presupuesto',
           formula: 'CIP real − presupuesto ajustado al nivel real',

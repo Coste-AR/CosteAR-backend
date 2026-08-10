@@ -25,6 +25,15 @@ export const captureMethodSchema = z.enum([
 
 export const costElementSchema = z.enum(['MP', 'MOD', 'CIP', 'VENTA']);
 
+/**
+ * Tipos de los tres enums de trazabilidad. Se exportan para que los servicios
+ * que arman DataPoints "a mano" (el reconciliador de Órdenes) usen exactamente
+ * el mismo vocabulario que la API, sin redeclararlo.
+ */
+export type SourceArea = z.infer<typeof sourceAreaSchema>;
+export type CaptureMethod = z.infer<typeof captureMethodSchema>;
+export type CostElement = z.infer<typeof costElementSchema>;
+
 export const createDataPointSchema = z.object({
   element: costElementSchema,
   fieldKey: z.string().min(1).max(200),

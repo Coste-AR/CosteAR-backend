@@ -8,6 +8,7 @@ import type {
   CreateDataPointInput,
   AddVersionInput,
 } from '../../shared/schemas/trazabilidad.schema.js';
+import { MP_MOVEMENT_FIELD_KEYS } from './orders-input-points.js';
 
 /**
  * Servicio de Trazabilidad Total v1 (spec secciones A y C).
@@ -45,7 +46,73 @@ export class DataPointService {
    */
   async create(userId: string, structureId: string, input: CreateDataPointInput, actor: TraceActor) {
     await this.requireStructureOwned(userId, structureId);
+
+    // IDEMPOTENCIA DE LOS MOVIMIENTOS DE MP.
+    //
+    // Desde que el guardado de la sección reconcilia sus propios data points
+    // (`datapoint-reconciler`), el formulario de MP llega SEGUNDO: guarda la
+    // sección y recién después postea los movimientos nuevos para encolar su
+    // imputación. Sin esto, cada movimiento nacería dos veces —una por el
+    // backend y otra por el formulario— y la ficha PPP mostraría el doble de
+    // compras que la planilla.
+    //
+    // Se devuelve el dato que ya existe (mismo movimiento: misma etiqueta,
+    // misma fecha, mismo rol), así el formulario sigue recibiendo un id con el
+    // que imputar y la UX de imputación queda intacta.
+    const yaExiste = await this.findMpMovementPoint(structureId, input);
+    if (yaExiste) return yaExiste;
+
     return withTenant(userId, (tx) => this.createInTx(tx, structureId, input, actor));
+  }
+
+  /**
+   * Data point de un movimiento de MP ya registrado, si lo hay. Identidad del
+   * movimiento = (fieldKey, etiqueta, fecha del hecho, rol) — la misma tripleta
+   * (tipo, detalle, fecha) que usa el formulario para reconocer un movimiento
+   * guardado, más el rol que distingue cantidad de precio.
+   */
+  private async findMpMovementPoint(structureId: string, input: CreateDataPointInput) {
+    if (!MP_MOVEMENT_FIELD_KEYS.includes(input.fieldKey)) return null;
+    const role =
+      (input.valueJson as Record<string, unknown> | undefined)?.role ??
+      (input.fieldKey.endsWith('.precio') ? 'precio' : 'cantidad');
+
+    const candidates = await this.db.dataPoint.findMany({
+      where: {
+        structureId,
+        fieldKey: input.fieldKey,
+        label: input.label,
+        fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
+        voidedAt: null,
+      },
+      include: { versions: { orderBy: { versionN: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return (
+      candidates.find((dp) => {
+        const json = dp.versions[0]?.valueJson as Record<string, unknown> | null;
+        const dpRole = json?.role ?? (dp.fieldKey.endsWith('.precio') ? 'precio' : 'cantidad');
+        return dpRole === role;
+      }) ?? null
+    );
+  }
+
+  /**
+   * Anulado lógico dentro de una transacción YA abierta (misma semántica que
+   * `void`: nunca DELETE, R1). Lo usa el reconciliador cuando un insumo
+   * desaparece de la sección guardada.
+   */
+  async voidInTx(tx: Prisma.TransactionClient, id: string, actor: TraceActor, comment: string) {
+    const updated = await tx.dataPoint.update({
+      where: { id },
+      data: { voidedAt: new Date(), status: 'anulado' },
+    });
+    await recordTraceAudit(
+      { entityType: 'DataPoint', entityId: id, action: 'anular', actor, comment },
+      tx,
+    );
+    return updated;
   }
 
   /**

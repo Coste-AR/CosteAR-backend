@@ -330,7 +330,12 @@ const FALLOS_CONOCIDOS: Record<string, string> = {
   // gasoil; 'vacuna' fuera de mpKeywords y dentro de cipKeywords). Los dos los
   // resuelve ahora Layer 4 con requiresAI:false, o sea de forma determinista y
   // sin que la IA pueda cambiarlos. Pasaron a guardas de regresión en corpus.json.
-  'FLE-02':  'CL-06 — el flete sobre una compra de MP no sigue a esa MP',
+  // FLE-02 salió de esta lista: CL-06 le enseñó a Layer 4 a leer la declaración
+  // "flete por la compra de …" y el número del comprobante referenciado
+  // (layer4-acquisition-link.ts), así que el flete facturado aparte sigue a la MP
+  // que transportó con requiresAI:false. Pasó a guarda de regresión en
+  // corpus.json. La evidencia es determinista y no depende de la cuota de Groq:
+  // tests/classifier/layer4-flete-adquisicion.test.ts.
 };
 
 /**
