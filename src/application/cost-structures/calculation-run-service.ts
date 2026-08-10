@@ -11,6 +11,10 @@ import {
 } from '../../shared/schemas/cost.schema.js';
 import { type CalculationInput } from '../../domain/calculations/calculate.js';
 import { type TreeNode } from './tree-builder.js';
+import {
+  MP_MOVEMENT_FIELD_KEYS,
+  movementIdentity,
+} from '../trazabilidad/orders-input-points.js';
 import { selectCostingEngine } from './costing-engine.js';
 import { persistCalculationRun, type RunTrigger } from './calculation-run-persistence.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
@@ -53,6 +57,103 @@ export function buildIncompletitud(pending: { id: string; label: string }[]): In
       'antes de dar el costo por bueno.',
   ];
   return { incompleto: true, motivos, datosPendientes };
+}
+
+/**
+ * Bloques migrados por `scripts/backfill-trazabilidad.mjs`: un DataPoint por
+ * sección entera. Son el origen de las CUATRO RAÍCES del árbol, en el mismo
+ * orden en que `buildCalculationTree` las devuelve (MP, MOD, CIP, VENTA).
+ */
+const ROOT_FIELD_KEYS = ['mp.config', 'mod.config', 'cip.config', 'venta.config'];
+
+/** Lo mínimo que hace falta de un DataPoint para enlazarlo a un nodo. */
+export interface DataPointLinkSource {
+  id: string;
+  label: string;
+  fieldKey: string;
+  fechaHecho?: Date | null;
+}
+
+/** Lleva la cuenta de repeticiones de una misma identidad base. */
+function nextOccurrence(counter: Map<string, number>, base: string): number {
+  const n = counter.get(base) ?? 0;
+  counter.set(base, n + 1);
+  return n;
+}
+
+/**
+ * ENLACE ENTRE EL ÁRBOL DE DERIVACIÓN Y LOS DATOS QUE LO ORIGINAN.
+ *
+ * Pura (no toca la base) para poder probarse al centavo: el servicio hace UNA
+ * query y le pasa las filas. Anota `sourceDataPointId` en cada nodo que tenga
+ * un dato detrás; no toca ningún valor calculado.
+ *
+ * Resuelve en este orden, y el primero que acierta gana:
+ *
+ *   a. `traceFieldKey` — DETERMINÍSTICO. Es la clave que emite el motor con la
+ *      MISMA convención que el lado de escritura (`orders-input-points.ts`):
+ *      la `fieldKey` textual del dato, salvo en los movimientos de MP, donde
+ *      todos comparten una `fieldKey` legada y lo que identifica al dato es la
+ *      `identity` de `movementIdentity()`.
+ *   b. `fieldKey` fija de las 4 raíces (`mp.config`, ...). Las raíces son
+ *      totales de sección: no tienen un insumo propio, las respalda el bloque
+ *      migrado de la sección entera.
+ *   c. `label` — FALLBACK, y SOLO para datos anteriores a T-01. Compara textos:
+ *      basta con renombrar una etiqueta en el árbol o en el formulario para que
+ *      el drill-down se desconecte ENTERO, en silencio, sin error ni test en
+ *      rojo. Y no puede desempatar dos datos con la misma etiqueta (dos compras
+ *      al mismo proveedor en el mismo mes): el índice se queda con el último y
+ *      el primero apunta al dato equivocado. No se puede confiar en esto para
+ *      datos nuevos — todo lo que se carga desde T-01 tiene `fieldKey` estable
+ *      y resuelve por (a). Se conserva únicamente para no dejar ciegas las
+ *      estructuras migradas antes de esa corrección.
+ */
+export function resolveDataPointLinks(tree: TreeNode[], existing: DataPointLinkSource[]): void {
+  const byFieldKey = new Map<string, string>();
+  const byLabel = new Map<string, string>();
+  // Índice de los movimientos de MP por IDENTIDAD, replicando exactamente el
+  // conteo de `datapoint-reconciler.ts`: (fieldKey, label, fecha, rol) + número
+  // de repetición en orden de creación. Las identidades llevan '|', que ninguna
+  // `fieldKey` usa, así que los dos índices no se pisan.
+  const byMovementIdentity = new Map<string, string>();
+  const counter = new Map<string, number>();
+
+  for (const dp of existing) {
+    byFieldKey.set(dp.fieldKey, dp.id);
+    byLabel.set(dp.label, dp.id);
+
+    if (!MP_MOVEMENT_FIELD_KEYS.includes(dp.fieldKey)) continue;
+    // El rol sale del sufijo de la `fieldKey`. `roleOf()` del reconciliador
+    // prefiere `valueJson.role`, pero el lado de escritura siempre los emite de
+    // acuerdo (`.precio` → 'precio', `.cantidad` → 'cantidad'), así que leer las
+    // versiones acá sería una segunda query para el mismo resultado.
+    const role = dp.fieldKey.endsWith('.precio') ? 'precio' : 'cantidad';
+    const iso = dp.fechaHecho ? dp.fechaHecho.toISOString().slice(0, 10) : null;
+    const occ = nextOccurrence(counter, `${dp.fieldKey}|${dp.label}|${iso ?? ''}|${role}`);
+    byMovementIdentity.set(movementIdentity(dp.fieldKey, dp.label, iso, role, occ), dp.id);
+  }
+
+  const linkFor = (node: TreeNode, rootIndex?: number): string | undefined => {
+    if (node.traceFieldKey) {
+      const byKey = byFieldKey.get(node.traceFieldKey) ?? byMovementIdentity.get(node.traceFieldKey);
+      if (byKey) return byKey;
+    }
+    if (rootIndex !== undefined) {
+      const rootKey = ROOT_FIELD_KEYS[rootIndex];
+      const byRoot = rootKey ? byFieldKey.get(rootKey) : undefined;
+      if (byRoot) return byRoot;
+    }
+    return byLabel.get(node.label);
+  };
+
+  const walk = (nodes: TreeNode[], roots: boolean) => {
+    nodes.forEach((node, i) => {
+      const dpId = linkFor(node, roots ? i : undefined);
+      if (dpId) node.sourceDataPointId = dpId;
+      if (node.children.length > 0) walk(node.children, false);
+    });
+  };
+  walk(tree, true);
 }
 
 /**
@@ -146,12 +247,9 @@ export class CalculationRunService {
 
     // Enriquecimiento de trazabilidad (D.1/D.2): no toca ningún valor
     // calculado, solo anota qué DataPoint respalda cada nodo, para que el
-    // frontend pueda ofrecer "click en la hoja → ficha del dato". Matchea
-    // por fieldKey en las 4 raíces (mp.config/mod.config/cip.config/
-    // venta.config, los bloques que crea `db:backfill-trazabilidad`) y por
-    // label exacto en el resto del árbol (cubre p.ej. los movimientos de MP
-    // "Compra — X" / "Consumo — X" creados vía POST /data-points cuando
-    // tienen el mismo label que ya arma `tree-builder.ts`).
+    // frontend pueda ofrecer "click en la hoja → ficha del dato". Ver
+    // `resolveDataPointLinks`: clave determinística primero, `fieldKey` fija en
+    // las 4 raíces, y la etiqueta solo como respaldo de datos migrados.
     await this.attachDataPointSources(structureId, tree);
 
     // La marca de incompletitud viaja DENTRO de `results` (persistida con la
@@ -188,38 +286,20 @@ export class CalculationRunService {
     });
   }
 
-  private static readonly ROOT_FIELD_KEYS = ['mp.config', 'mod.config', 'cip.config', 'venta.config'];
-
   private async attachDataPointSources(structureId: string, tree: TreeNode[]): Promise<void> {
+    // UNA sola query para todo el árbol (nunca una por nodo). El orden por
+    // `createdAt` NO es cosmético: es el mismo que usa el reconciliador
+    // (`datapoint-reconciler.ts`) para numerar las repeticiones de un
+    // movimiento de MP, y es lo que hace que la ocurrencia N de este lado sea
+    // la ocurrencia N del otro.
     const existing = await this.db.dataPoint.findMany({
       where: { structureId, voidedAt: null },
-      select: { id: true, label: true, fieldKey: true },
+      select: { id: true, label: true, fieldKey: true, fechaHecho: true },
+      orderBy: { createdAt: 'asc' },
     });
     if (existing.length === 0) return;
 
-    const byFieldKey = new Map(existing.map((d) => [d.fieldKey, d.id]));
-    const byLabel = new Map(existing.map((d) => [d.label, d.id]));
-
-    tree.forEach((root, i) => {
-      const fieldKey = CalculationRunService.ROOT_FIELD_KEYS[i];
-      const dpId = fieldKey ? byFieldKey.get(fieldKey) : undefined;
-      if (dpId) root.sourceDataPointId = dpId;
-    });
-
-    const walk = (nodes: TreeNode[]) => {
-      for (const node of nodes) {
-        // `traceFieldKey` primero: es DETERMINÍSTICA (la arma el motor, que sí
-        // sabe de qué departamento o centro es la hoja) y desempata las
-        // etiquetas que se repiten — "Remuneración básica" existe una vez por
-        // departamento y "CIP real" una vez por centro. El matcheo por etiqueta
-        // queda de respaldo para todo lo demás (movimientos de MP, venta).
-        const dpId = (node.traceFieldKey ? byFieldKey.get(node.traceFieldKey) : undefined)
-          ?? byLabel.get(node.label);
-        if (dpId) node.sourceDataPointId = dpId;
-        if (node.children.length > 0) walk(node.children);
-      }
-    };
-    walk(tree);
+    resolveDataPointLinks(tree, existing);
   }
 
   async getTree(userId: string, runId: string) {

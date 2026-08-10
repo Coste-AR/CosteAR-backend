@@ -2,6 +2,9 @@ import type { CalculationInput, CalculationOutput } from '../../domain/calculati
 import {
   cipCenterActualCipKey,
   modDeptRemunerationKey,
+  movementIdentity,
+  movementLabel,
+  toIsoDate,
 } from '../trazabilidad/orders-input-points.js';
 
 /**
@@ -28,23 +31,53 @@ export interface TreeNode {
    */
   sourceDataPointId?: string;
   /**
-   * Clave estable del DataPoint que respalda este nodo (p. ej. la `fieldKey`
-   * del cuadro de movimiento en Costeo por Procesos). La arma el motor —que sí
-   * conoce el (departamento, período)— y el servicio la resuelve a un
-   * `sourceDataPointId` con UNA query. Es una alternativa DETERMINÍSTICA al
-   * matcheo por `label` (el motor de Órdenes usa label; el de Procesos, esta
-   * clave). Aditiva: un árbol sin ella se comporta igual que antes.
+   * Clave estable del DataPoint que respalda este nodo. Es la MISMA convención
+   * que usa el lado de ESCRITURA (`trazabilidad/orders-input-points.ts`): para
+   * casi todo, la `fieldKey` textual del dato; para los movimientos de materia
+   * prima —que comparten una `fieldKey` legada entre todos— la `identity` que
+   * arma `movementIdentity()`, que es lo único que distingue dos movimientos.
+   *
+   * La arma el motor —que sí conoce el (materia prima, departamento, centro,
+   * período)— y el servicio la resuelve a un `sourceDataPointId` con UNA query.
+   * Es la alternativa DETERMINÍSTICA al matcheo por `label`, que se rompe en
+   * silencio ante cualquier renombre y no puede desempatar etiquetas repetidas.
+   * Aditiva: un árbol sin ella se comporta igual que antes.
    */
   traceFieldKey?: string;
 }
+
+/**
+ * `fieldKey` de la sección VENTA que el árbol necesita nombrar. Los literales
+ * son los que emite `salesPoints()` en `orders-input-points.ts` (única fuente de
+ * verdad del lado de escritura): si cambian allá, cambian acá.
+ */
+const VENTA_PRECIO_UNITARIO_KEY = 'venta.precio_unitario';
+const VENTA_CANTIDAD_VENDIDA_KEY = 'venta.cantidad_vendida';
+
+/**
+ * `fieldKey` legadas y COMPARTIDAS de los movimientos de MP (ver
+ * `MP_MOVEMENT_FIELD_KEYS`). Solo se nombra la del dato de CANTIDAD: es el que
+ * existe tanto en compras como en consumos, y su `valueJson.movementId` hermana
+ * la cantidad con el precio, así que abrir la ficha desde ahí muestra el
+ * movimiento entero.
+ */
+const MP_COMPRA_CANTIDAD_KEY = 'mp.compra.cantidad';
+const MP_CONSUMO_CANTIDAD_KEY = 'mp.consumo.cantidad';
 
 export function buildCalculationTree(input: CalculationInput, output: CalculationOutput): TreeNode[] {
   return [
     buildRawMaterialNode(output),
     buildDirectLaborNode(output),
-    buildIndirectCostsNode(output),
+    buildIndirectCostsNode(input, output),
     buildSalesNode(input, output),
   ];
+}
+
+/** Lleva la cuenta de repeticiones de una misma identidad base. */
+function nextOccurrence(counter: Map<string, number>, base: string): number {
+  const n = counter.get(base) ?? 0;
+  counter.set(base, n + 1);
+  return n;
 }
 
 function buildRawMaterialNode(output: CalculationOutput): TreeNode {
@@ -54,17 +87,40 @@ function buildRawMaterialNode(output: CalculationOutput): TreeNode {
   // que antes). Con varias, se agrupa un sub-nodo por materia prima.
   const single = materials.length === 1;
 
+  // Contador de repeticiones COMPARTIDO entre todas las materias primas, en el
+  // mismo orden en que las recorre `rawMaterialPoints()` del lado de escritura
+  // (materias primas en orden, movimientos en orden). Es lo que hace que dos
+  // compras con el mismo detalle y la misma fecha resuelvan cada una a SU dato:
+  // la primera es la ocurrencia 0 y la segunda la 1, de los dos lados.
+  const counter = new Map<string, number>();
+
   const movementChildren = (ledger: (typeof materials)[number]['ledger']): TreeNode[] =>
-    ledger.rows.map((row) => ({
-      label: `${row.type === 'purchase' ? 'Compra' : 'Consumo'} — ${row.detail}`,
-      formula:
-        row.type === 'purchase'
-          ? `${row.quantity.toNumber()} u × $ ${row.movementUnitCost.toNumber()}`
-          : `${row.quantity.toNumber()} u × PPP $ ${row.movementUnitCost.toNumber()}`,
-      value: row.movementTotal.toNumber(),
-      unit: '$',
-      children: [],
-    }));
+    ledger.rows.map((row) => {
+      const label = movementLabel(row.type, row.detail);
+      const iso = toIsoDate(row.date);
+      const fieldKey = row.type === 'purchase' ? MP_COMPRA_CANTIDAD_KEY : MP_CONSUMO_CANTIDAD_KEY;
+      const occurrence = nextOccurrence(counter, `${fieldKey}|${label}|${iso ?? ''}|cantidad`);
+      return {
+        label,
+        // La identidad sale de `movementLabel()` + `movementIdentity()`, los
+        // MISMOS helpers que usa el lado de escritura: los dos lados derivan de
+        // una sola definición y no pueden divergir por un renombre de copy en
+        // este archivo. Lo que desempata dos movimientos con el mismo detalle
+        // es (fecha, ocurrencia), nunca el texto libre.
+        //
+        // (Si alguna vez cambia `movementLabel` en sí, los DataPoint ya
+        // guardados conservan la etiqueta vieja hasta el siguiente guardado de
+        // la sección, que los reconcilia — no queda nada roto en firme.)
+        traceFieldKey: movementIdentity(fieldKey, label, iso, 'cantidad', occurrence),
+        formula:
+          row.type === 'purchase'
+            ? `${row.quantity.toNumber()} u × $ ${row.movementUnitCost.toNumber()}`
+            : `${row.quantity.toNumber()} u × PPP $ ${row.movementUnitCost.toNumber()}`,
+        value: row.movementTotal.toNumber(),
+        unit: '$',
+        children: [],
+      };
+    });
 
   const materialNode = (m: (typeof materials)[number]): TreeNode => ({
     label: m.config.name ? `${m.config.code ? m.config.code + ' · ' : ''}${m.config.name}` : 'Materia prima',
@@ -160,15 +216,28 @@ function buildDirectLaborNode(output: CalculationOutput): TreeNode {
   };
 }
 
-function buildIndirectCostsNode(output: CalculationOutput): TreeNode {
+function buildIndirectCostsNode(input: CalculationInput, output: CalculationOutput): TreeNode {
   const { indirectPerDepartment } = output.raw;
+
+  // `indirectPerDepartment` está indexado por el ID INTERNO del centro ('prod1',
+  // 'mec'), que no significa nada para el costista: el nodo se rotula con el
+  // NOMBRE configurado en `indirectCosts.centers[]`, igual que ya hacía MOD con
+  // `d.name`. Fallback al id SOLO si el centro no aparece en `centers[]` —
+  // config vieja o centro borrado de la lista sin borrar su `productiveSetting`:
+  // mostrar el id crudo es feo, pero es preferible a un nodo sin nombre.
+  //
+  // Los `calculation_nodes` YA PERSISTIDOS no se reescriben: una corrida vieja
+  // conserva la etiqueta con la que se guardó (append-only, R1). Quien mira la
+  // corrida #3 tiene que ver lo que decía la corrida #3.
+  const centerNameById = new Map(input.indirectCosts.centers.map((c) => [c.id, c.name?.trim()]));
+
   return {
     label: 'Costos Indirectos de Producción Aplicados',
     formula: 'Σ (cuota total × actividad real) por centro productivo',
     value: output.indirectCostsApplied,
     unit: '$',
     children: Object.entries(indirectPerDepartment).map(([centerId, d]) => ({
-      label: centerId,
+      label: centerNameById.get(centerId) || centerId,
       formula: 'cuota total × actividad real',
       value: d.variance.cipApplied.toNumber(),
       unit: '$',
@@ -216,8 +285,23 @@ function buildSalesNode(input: CalculationInput, output: CalculationOutput): Tre
         value: margin.salesRevenue.toNumber(),
         unit: '$',
         children: [
-          { label: 'Precio unitario', value: input.sales.unitPrice, unit: '$', children: [] },
-          { label: 'Cantidad', value: input.sales.quantity, unit: 'u', children: [] },
+          // Estas dos hojas SÍ son datos cargados a mano. Hasta acá resolvían por
+          // etiqueta —`salesPoints()` las rotula igual a propósito—, lo que las
+          // dejaba a merced de cualquier renombre. La clave las ata a su dato.
+          {
+            label: 'Precio unitario',
+            traceFieldKey: VENTA_PRECIO_UNITARIO_KEY,
+            value: input.sales.unitPrice,
+            unit: '$',
+            children: [],
+          },
+          {
+            label: 'Cantidad',
+            traceFieldKey: VENTA_CANTIDAD_VENDIDA_KEY,
+            value: input.sales.quantity,
+            unit: 'u',
+            children: [],
+          },
         ],
       },
       {

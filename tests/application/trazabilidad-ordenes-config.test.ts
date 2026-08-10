@@ -195,8 +195,10 @@ suite('T-01 — un caso completo cargado por los endpoints de config deja trazab
     expect(corte!.origen[0]).not.toBe(armado!.origen[0]);
 
     // CIP: "CIP real" existe una vez por centro. Mismo criterio.
-    const cip1 = buscar('prod1', 'CIP real');
-    const cip2 = buscar('prod2', 'CIP real');
+    // T-09: el nodo del centro se rotula con su NOMBRE ('Corte'/'Armado'), no
+    // con su id interno ('prod1'/'prod2'), que no le dice nada al costista.
+    const cip1 = buscar('Corte', 'CIP real');
+    const cip2 = buscar('Armado', 'CIP real');
     expect(cip1!.origen.length).toBeGreaterThan(0);
     expect(cip2!.origen.length).toBeGreaterThan(0);
     expect(cip1!.origen[0]).not.toBe(cip2!.origen[0]);
