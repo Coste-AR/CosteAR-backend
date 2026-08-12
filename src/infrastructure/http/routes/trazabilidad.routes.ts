@@ -56,6 +56,11 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
       data: {
         runId: result.run.id,
         runN: result.run.runN,
+        // T-07 — la fila legada nace de ESTA misma corrida. Se devuelve su id
+        // para que quede explícito que el número que se muestra y el árbol que
+        // lo explica salen del mismo cálculo, y no de dos ejecuciones distintas
+        // que casualmente coincidieron.
+        calculationId: result.calculation.id,
         results: result.results, // incluye `results.incompletitud`
         // Atajo en el nivel superior (F04): el front decide con esto si pinta
         // una advertencia en vez de un margen "sano".

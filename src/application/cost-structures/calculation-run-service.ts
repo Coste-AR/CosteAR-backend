@@ -282,7 +282,41 @@ export class CalculationRunService {
         audit: { actor, after: { grossMargin: output.grossMargin, grossMarginPct: output.grossMarginPct } },
       });
 
-      return { run, results, tree, incompletitud };
+      // T-07 — UNA corrida del motor, DOS persistencias.
+      //
+      // Antes, apretar "Calcular" disparaba el motor dos veces: el camino legado
+      // (`/cost-structures/:id/calculate`) pintaba los números y este armaba el
+      // árbol. Que coincidieran era una propiedad emergente, no una garantía:
+      // eran dos ejecuciones contra dos lecturas de configuración hechas en dos
+      // momentos. Si un dato cambiaba en el medio, o si una fallaba y la otra no,
+      // el árbol explicaba un número distinto del que estaba en pantalla y nada
+      // lo detectaba.
+      //
+      // El manual (§1.4) pide lo contrario: "el motor lo emite y persiste al
+      // calcular. Así el número mostrado y su explicación son, por construcción,
+      // el mismo cálculo."
+      //
+      // Se escribe la fila legada acá, con el MISMO `output` que alimentó el
+      // árbol, para que los consumidores que la leen sigan funcionando sin
+      // cambios: `/calculations/latest` y `/calculations` (Historial y
+      // Comparación de períodos), y `empresa-portal-service` para el panel del
+      // operador de empresa. Ninguno de ellos sabe que ahora nace de acá.
+      const calculation = await tx.costCalculation.create({
+        data: {
+          costStructureId: structureId,
+          userId,
+          rawMaterialConsumed: output.rawMaterialConsumed,
+          directLaborTotal: output.directLaborTotal,
+          indirectCostsApplied: output.indirectCostsApplied,
+          productionCost: output.productionCost,
+          costOfGoodsSold: output.costOfGoodsSold,
+          grossMargin: output.grossMargin,
+          grossMarginPct: output.grossMarginPct,
+          detail: output.detail as object,
+        },
+      });
+
+      return { run, results, tree, incompletitud, calculation };
     });
   }
 
