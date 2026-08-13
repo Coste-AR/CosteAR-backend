@@ -1,5 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { prisma } from '@/infrastructure/database/prisma.js';
+import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 
 /**
  * Armado de DOS INQUILINOS COMPLETOS para probar aislamiento.
@@ -11,7 +12,15 @@ import { randomUUID } from 'node:crypto';
  * trazable con plata adentro.
  */
 
-export const db = new PrismaClient();
+/**
+ * EL CLIENTE DE LA APP, no uno nuevo.
+ *
+ * Antes esto creaba su propio `new PrismaClient()`, y eso hacía que la suite se
+ * salteara la extensión que setea el inquilino en cada consulta — o sea, probaba
+ * un camino que la aplicación real no usa. Con el cliente de verdad, lo que se
+ * prueba es lo que corre en producción.
+ */
+export const db = prisma;
 
 export interface Tenant {
   userId: string;
@@ -25,15 +34,18 @@ export interface Tenant {
 /**
  * Un costista con una empresa, una estructura, un período y un dato con plata.
  *
- * Todo lo que cae bajo RLS se escribe dentro de una transacción con
- * `app.user_id` seteado. NO es un detalle de estilo: con las políticas
- * efectivamente activas, un INSERT sin ese `set_config` viola el `WITH CHECK` y
- * Postgres devuelve 42501.
+ * Todo lo que cae bajo RLS se escribe dentro del contexto de inquilino. NO es un
+ * detalle de estilo: con las políticas activas, un INSERT sin `app.user_id`
+ * viola el `WITH CHECK` y Postgres devuelve 42501.
  *
  * La primera versión de este helper insertaba con el cliente pelado y andaba.
  * Andaba porque el rol de la corrida era superusuario y RLS se ignoraba entero.
  * Que ahora falle si uno se olvida es justamente la señal de que las políticas
  * están puestas y se aplican.
+ *
+ * Ya no abre la transacción a mano: la extensión de Prisma setea el inquilino en
+ * cada consulta, igual que en una request real. Armar los datos por el mismo
+ * camino que usa la app es parte de lo que esta suite tiene que probar.
  */
 export async function createTenant(label: string): Promise<Tenant> {
   // `users` no tiene RLS: es la tabla desde la que se resuelve el inquilino.
@@ -47,10 +59,8 @@ export async function createTenant(label: string): Promise<Tenant> {
     },
   });
 
-  const { company, structure, period, dataPoint } = await db.$transaction(async (tx) => {
-    // El mismo mecanismo que usa la app en producción (`withTenant`): sin esto,
-    // las políticas rechazan cada INSERT con 42501.
-    await tx.$executeRaw`SELECT set_config('app.user_id', ${user.id}, true)`;
+  const { company, structure, period, dataPoint } = await withTenantContext(user.id, async () => {
+    const tx = db;
 
     const company = await tx.company.create({
       data: { userId: user.id, name: `Empresa ${label}`, periodicity: 'MONTHLY' },

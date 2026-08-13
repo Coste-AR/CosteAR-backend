@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db, createTenant, disconnect, type Tenant } from './helpers/tenants.js';
+import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { CostStructureService } from '@/application/cost-structures/cost-structure-service.js';
 import { AllocationBaseService } from '@/application/cost-structures/allocation-base-service.js';
 import { DataPointService } from '@/application/trazabilidad/data-point-service.js';
@@ -76,10 +77,25 @@ describe('La empresa A no puede leer nada de la B', () => {
    * problema no se pueda perder de vista, y para que el día que se resuelva
    * —seteando el tenant también en las lecturas— este test falle y haya que
    * darlo vuelta a propósito.
+   *
+   * ── DADO VUELTA el 09/08/2026 ──────────────────────────────────────────────
+   * Ese día llegó. Las lecturas ahora setean el inquilino vía la extensión de
+   * Prisma (`infrastructure/database/prisma.ts`), así que lo propio se lee. Los
+   * dos casos de abajo prueban las dos mitades: que lo suyo aparece, y que
+   * setear el inquilino no se convirtió en una llave maestra.
    */
-  it('🚨 el costista tampoco lee LO SUYO: las lecturas no setean el tenant', async () => {
+  it('🔑 el costista SÍ lee lo suyo, con las políticas aplicadas', async () => {
+    const propias = await withTenantContext(A.userId, () =>
+      new CostStructureService(db).listByCompany(A.userId, A.companyId),
+    );
+    expect(propias.map((s) => s.id)).toEqual([A.structureId]);
+  });
+
+  it('🔒 con su inquilino seteado, sigue sin ver la empresa de B', async () => {
     const svc = new CostStructureService(db);
-    await expect(svc.listByCompany(A.userId, A.companyId)).rejects.toThrow(NotFoundError);
+    await expect(
+      withTenantContext(A.userId, () => svc.listByCompany(A.userId, B.companyId)),
+    ).rejects.toThrow(NotFoundError);
   });
 
   it('🔒 no ve sus datos trazables, que son los que tienen la plata', async () => {

@@ -204,8 +204,13 @@ export function consumedQuantitiesOf(rawMaterialConfig: unknown): Map<string, De
  * El código de mercado es lo más estable (es el que usa el proveedor); si no hay,
  * el nombre. La posición en la lista es el último recurso: si el costista reordena
  * las MP entre meses, comparar por posición compararía la chapa contra el aluminio.
+ *
+ * Se exporta porque la detección de anomalías (F7) empareja las mismas materias
+ * primas a lo largo de N períodos y tiene que usar EXACTAMENTE este criterio: dos
+ * módulos que emparejan distinto terminan contando dos historias distintas del
+ * mismo insumo.
  */
-function materialKey(m: { code?: string; name?: string; id?: string }, index: number): string {
+export function materialKey(m: { code?: string; name?: string; id?: string }, index: number): string {
   return m.code ?? m.name ?? m.id ?? `#${index}`;
 }
 

@@ -2,6 +2,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { verifyAccessToken } from '../../crypto/tokens.js';
 import { UnauthorizedError, ForbiddenError } from '../../../domain/errors/domain-error.js';
 import { prisma } from '../../database/prisma.js';
+import { enterTenantScope, enterSystemScope } from '../../database/tenant-context.js';
 
 /**
  * Contexto de autenticación adjuntado a cada request autenticada.
@@ -51,6 +52,20 @@ export async function authenticate(
     };
   } catch {
     throw new UnauthorizedError('Token de acceso inválido o expirado');
+  }
+
+  // A partir de acá, TODA consulta de esta request viaja con el inquilino
+  // seteado, así las políticas RLS también se aplican a las lecturas. Antes eso
+  // solo pasaba dentro de `withTenant`, o sea únicamente en las escrituras.
+  //
+  // El ADMIN es la excepción y va sin acotar: es personal interno, no tiene
+  // datos propios, y el panel mira todas las empresas a propósito. Acotarlo a su
+  // propio id le devolvería cero filas en todas las pantallas. Lo que lo protege
+  // es `requireRole('ADMIN')`, no el inquilino.
+  if (request.authUser.role === 'ADMIN') {
+    enterSystemScope('panel de administración: mira todas las empresas');
+  } else {
+    enterTenantScope(request.authUser.id);
   }
 
   // Solo los operarios de empresa tienen membresía y, por lo tanto, puesto: el
