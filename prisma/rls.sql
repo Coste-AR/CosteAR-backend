@@ -61,10 +61,10 @@ CREATE POLICY tenant_isolation ON alert_settings
 -- ---------------------------------------------------------------------------
 -- Trazabilidad Total v1 — aislamiento vía join a cost_structures.userId
 -- (estas tablas no tienen userId propio; el tenant se define por la
--- estructura de costos a la que pertenecen). evidence y trace_audit_log no
--- llevan RLS directo porque su vínculo con el tenant es indirecto/opcional;
--- el filtro de pertenencia se hace en la capa de aplicación (mismo patrón que
--- el resto del código: requireStructure/requireDataPoint por userId).
+-- estructura de costos a la que pertenecen). trace_audit_log no lleva RLS
+-- directo porque sus entidades son de tipos heterogéneos (entityType/entityId
+-- genéricos) y no hay una sola columna que resuelva el dueño; el filtro se
+-- hace en la capa de aplicación.
 -- ---------------------------------------------------------------------------
 
 -- data_points
@@ -90,6 +90,27 @@ CREATE POLICY tenant_isolation ON data_point_versions
     JOIN cost_structures cs ON cs.id = dp."structureId"
     WHERE cs."userId" = current_app_user_id()
   ));
+
+-- evidence (T-04)
+--
+-- Hasta agosto de 2026 esta tabla estaba EXENTA de RLS, y el motivo escrito era
+-- honesto: "su vínculo con el tenant es indirecto y opcional (puede no tener
+-- dueño)". Era cierto porque NADIE creaba filas — la tabla tenía 0 registros y
+-- ningún productor en todo el backend. Una tabla vacía se puede dejar afuera
+-- sin consecuencias; una tabla donde ahora se guardan las facturas de los
+-- clientes, no.
+--
+-- Desde que existe el alta (POST /api/v1/evidence) todo comprobante nace con
+-- `uploadedBy` = el costista que lo subió, así que el dueño es directo y la
+-- política es la de siempre. Las filas con `uploadedBy` NULL (heredadas o
+-- huérfanas por baja de usuario, la FK es ON DELETE SET NULL) quedan invisibles
+-- desde la app a propósito: un comprobante sin dueño no es de nadie.
+ALTER TABLE evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evidence FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON evidence;
+CREATE POLICY tenant_isolation ON evidence
+  USING ("uploadedBy" = current_app_user_id())
+  WITH CHECK ("uploadedBy" = current_app_user_id());
 
 -- calculation_runs
 ALTER TABLE calculation_runs ENABLE ROW LEVEL SECURITY;

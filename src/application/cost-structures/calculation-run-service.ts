@@ -365,6 +365,11 @@ export class CalculationRunService {
           value: n.valueNum !== null ? Number(n.valueNum) : null,
           unit: n.unit,
           sourceDpVersionIds: n.sourceDpVersionIds,
+          // T-11 — la clave con la que el motor nombró este nodo. Las pantallas
+          // ubican por acá el nodo de cada número que muestran; sin ella solo
+          // les queda comparar etiquetas, que se rompe al renombrar un título.
+          // `null` en las corridas anteriores a la columna: se leen igual.
+          traceFieldKey: n.traceFieldKey,
           children: toTree(n.id),
         }));
     }

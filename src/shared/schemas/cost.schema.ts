@@ -127,6 +127,24 @@ export const directLaborConfigSchema = z.object({
         // planta. Acá el operario está presente y cobra, pero no hay trabajo que
         // asignarle. Los dos modelos conviven.
         productiveHours: nonNeg.optional(),
+        // TIEMPO ESTÁNDAR DE PRODUCCIÓN (cátedra, Clase 10): las horas que,
+        // según la oficina técnica, debería haber llevado producir lo que se
+        // produjo (horas estándar por unidad × unidades terminadas). Habilita el
+        // segundo tipo de improductividad:
+        //     horas netas productivas − tiempo estándar = IMPRODUCTIVIDAD OCULTA
+        // Opcional: sin el dato la improductividad oculta es cero y el cálculo
+        // queda idéntico al histórico.
+        standardHours: nonNeg.optional(),
+        // Detalle POR MOTIVO de los tiempos perdidos informados (corte de
+        // energía, rotura de máquina, falta de materia prima, mantenimiento
+        // programado, descanso/refrigerio…). Es DESCRIPTIVO: la fuente de verdad
+        // de cuántas horas se perdieron sigue siendo `hoursWorked −
+        // productiveHours`; el motor recorta lo que se pase y completa lo que
+        // falte con un renglón «Sin discriminar».
+        informedLostTime: z
+          .array(z.object({ reason: z.string().min(1).max(120), hours: nonNeg }))
+          .max(50)
+          .optional(),
         // Dato REAL de fin de mes (horas efectivamente trabajadas). Opcional y
         // NO usado por el motor: es solo para comparar real vs presupuestado
         // (Parte 3.2, criterio C). No afecta la tarifa ni el costo.

@@ -78,19 +78,48 @@ export interface IndustryProfile {
 // ── Definición de perfiles por rubro ─────────────────────────────────────────
 
 const PROFILES: Record<IndustryCategory, IndustryProfile> = {
+  /**
+   * AGRO — agricultura extensiva, ganadería y tambo.
+   *
+   * QUÉ SE CORRIGIÓ Y POR QUÉ. Este perfil quedó escrito pensando solo en el
+   * cultivo, y arrastraba los dos mismos defectos que CL-04 ya había medido y
+   * corregido en AVICULTURA (ver el comentario de ese perfil):
+   *
+   *   · `fuelIsMP: true` + 'gasoil'/'combustible' en mpKeywords. El gasoil del
+   *     tractor NO se incorpora al grano: es FUERZA MOTRIZ, que la cátedra lista
+   *     como componente de CIP (Clase 1, l. 64; Clase 11, l. 211). El eje es
+   *     R-MP-DIRECTA (Clase 1, l. 58): materia prima es lo identificable CON el
+   *     objeto de costo, y el combustible mueve la máquina, no se vuelve soja.
+   *     Medido en avicultura como el error CIP-02 (confianza 97).
+   *   · 'vacuna' / 'veterinaria' / 'antiparasitario' en mpKeywords. La sanidad
+   *     del rodeo sostiene al animal, no se incorpora al litro de leche ni al
+   *     kilo de carne → material indirecto, CIP por R-MP-INDIRECTA. Es el error
+   *     CIP-04, también con confianza 97.
+   *
+   * Bajo el perfil viejo, un tambo o un establecimiento de ganadería —el tipo de
+   * cliente que sigue cayendo acá, porque AGRO_RE matchea 'tambo' y 'ganad'—
+   * mandaba a MATERIA PRIMA cada factura de gasoil y cada factura del
+   * veterinario, con confianza 88 y sin que la IA las viera.
+   *
+   * Lo que SÍ es materia prima en ganadería/tambo (el alimento: forraje,
+   * balanceado, pellet) se mantiene: eso sí se convierte en leche y en carne.
+   */
   AGRO: {
     category: 'AGRO',
     label: 'Agropecuario',
     mpKeywords: [
       'semilla', 'simiente', 'agroquímico', 'agroquimico', 'herbicida', 'fungicida',
       'insecticida', 'fertilizante', 'abono', 'inoculante', 'fosfato',
-      'gasoil', 'combustible', 'nafta', 'lubricante',
       'forraje', 'alimento balanceado', 'pellet', 'silo',
-      'veterinaria', 'vacuna', 'antiparasitario', 'medicamento animal',
       'bolsa', 'bolsón', 'arpillera', 'envase agrícola',
       'riego', 'goteo', 'aspersor',
       'soja', 'maíz', 'trigo', 'girasol', 'sorgo', 'algodón',
       'vid', 'uva', 'mosto', 'sulfato de cobre',
+      //
+      // NO ESTÁN ACÁ, A PROPÓSITO (están en cipKeywords):
+      //  · 'gasoil'/'combustible'/'nafta'/'lubricante' → fuerza motriz.
+      //  · 'vacuna'/'veterinaria'/'antiparasitario' → sanidad del rodeo.
+      // Ver el comentario de cabecera de este perfil.
     ],
     cipKeywords: [
       'alquiler campo', 'arrendamiento', 'flete', 'transporte grano',
@@ -100,6 +129,13 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
       'honorarios agrónomo', 'análisis suelo',
       'mantenimiento maquinaria', 'reparacion tractor', 'repuesto agrícola',
       'telefonía rural', 'internet rural', 'electricidad rural',
+      // Fuerza motriz de la maquinaria — mueve el tractor, no se vuelve grano.
+      'gasoil', 'combustible', 'nafta', 'lubricante',
+      // Sanidad del rodeo — material indirecto (no se incorpora al producto).
+      'veterinaria', 'veterinario', 'producto veterinario', 'medicamento veterinario',
+      'honorarios veterinario', 'vacuna', 'vacunación', 'vacunacion',
+      'antiparasitario', 'medicamento animal', 'sanidad animal', 'desparasitación',
+      'desparasitacion',
     ],
     modKeywords: [
       'jornada', 'peón rural', 'cosechador', 'tractorista',
@@ -118,7 +154,12 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
       'grano húmedo', 'grano brotado', 'aflatoxina',
     ],
     energyIsMP: false,
-    fuelIsMP: true, // combustible de tractores = insumo de producción
+    // ⚠️ Era `true` ("combustible de tractores = insumo de producción"). Es el
+    // mismo defecto que CL-04 corrigió en AVICULTURA: el gasoil es fuerza motriz
+    // (CIP), no materia prima. Con `true`, CUALQUIER factura de combustible de un
+    // campo, un tambo o un establecimiento ganadero se imputaba a MATERIA PRIMA
+    // con confianza 88 y sin pasar por la IA.
+    fuelIsMP: false,
   },
 
   /**
@@ -159,11 +200,15 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
     mpKeywords: [
       // Alimento: es LA materia prima de una postura (el grueso del costo). Se
       // transforma en huevo → R-MP-DIRECTA.
-      // OJO: 'ración'/'racion' se probaron y se SACARON. El match de layer4 es por
-      // substring (`lower.includes`), y 'ración' está adentro de "repa-ración":
-      // le sumaba un punto de Materia Prima a cualquier factura de mantenimiento.
-      // Medido sobre CIP-MANT-GALPON, que trae "reparación de comederos".
-      // El alimento ya queda cubierto por 'balanceado' y 'alimento balanceado'.
+      // OJO: 'ración'/'racion' se probaron y se SACARON porque el match de layer4
+      // era por substring (`lower.includes`) y 'ración' está adentro de
+      // "repa-ración": le sumaba un punto de Materia Prima a cualquier factura de
+      // mantenimiento. Medido sobre CIP-MANT-GALPON ("reparación de comederos").
+      // ESA CAUSA YA NO EXISTE: el matcheo ahora respeta el límite de palabra
+      // (utils/keyword-match.ts), así que 'ración' no matchearía "reparación".
+      // Se las deja afuera igual porque el alimento ya queda cubierto por
+      // 'balanceado' y 'alimento balanceado', y agregar keywords redundantes
+      // infla el score de MP sin aportar cobertura.
       'balanceado', 'alimento balanceado', 'alimento para ponedora',
       'maíz', 'maiz', 'sorgo', 'soja', 'expeller',
       'harina de soja', 'poroto de soja', 'afrechillo', 'salvado de trigo',
@@ -555,6 +600,24 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
     fuelIsMP: false,
   },
 
+  /**
+   * TRANSPORTE — el objeto de costo es EL VIAJE (el servicio prestado).
+   *
+   * QUÉ SE CORRIGIÓ. Este perfil tenía `energyIsMP: true` SIN NINGUNA CONDICIÓN.
+   * En layer4-invoice-routing esa bandera se evalúa contra un regex que matchea
+   * 'electricidad', 'luz eléctrica', 'gas natural' y 'energía' sueltos, así que
+   * la factura de LUZ de un transportista —el galpón, la cochera, la oficina—
+   * se imputaba a MATERIA PRIMA con confianza 85 y `requiresAI: false`: la IA no
+   * llegaba ni a verla. Nada de la energía eléctrica de un depósito se incorpora
+   * al viaje; es el ejemplo de manual de un costo indirecto (Clase 1, l. 64).
+   *
+   * Lo que sí es insumo directo del servicio es EL COMBUSTIBLE QUE QUEMA EL
+   * CAMIÓN, y eso lo cubre `fuelIsMP: true` — que se mantiene, con su regex
+   * propio (gasoil/combustible/nafta) — más las keywords de MP de abajo, donde
+   * el GNC entra por nombre. O sea: el caso legítimo que la bandera de energía
+   * pretendía cubrir ya estaba cubierto por la de combustible, y lo único que
+   * agregaba `energyIsMP: true` era el falso positivo.
+   */
   TRANSPORTE: {
     category: 'TRANSPORTE',
     label: 'Transporte / Logística',
@@ -569,6 +632,14 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
       'patente', 'registro', 'habilitación transporte',
       'alquiler cochera', 'garaje',
       'rastreo GPS', 'monitoreo flota',
+      // Energía del depósito/cochera/oficina: es lo que `energyIsMP: true`
+      // mandaba a Materia Prima. Se nombra explícito acá además de estar en
+      // UNIVERSAL_CIP_KEYWORDS, para que el motivo quede a la vista en el perfil.
+      'energía eléctrica', 'energia electrica', 'electricidad', 'luz del depósito',
+      // El gas del depósito/oficina. No pisa al GNC: 'gas natural comprimido' es
+      // combustible y lo resuelve el regex `hasFuel` de layer4-invoice-routing,
+      // que corre ANTES del conteo de keywords.
+      'gas natural',
     ],
     modKeywords: [
       'sueldo chofer', 'viático', 'horas chofer',
@@ -580,8 +651,11 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
     lossKeywords: [
       'carga robada', 'carga dañada', 'derrame',
     ],
-    energyIsMP: true,  // combustible es MP en transporte
-    fuelIsMP: true,
+    // ⚠️ Era `true` con el comentario "combustible es MP en transporte", pero la
+    // bandera que habla del combustible es la de abajo: ésta gobierna la
+    // ELECTRICIDAD y el gas. Ver el comentario de cabecera de este perfil.
+    energyIsMP: false,
+    fuelIsMP: true, // el gasoil del camión sí es insumo directo del viaje
   },
 
   DEFAULT: {

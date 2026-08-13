@@ -178,20 +178,20 @@ const UMBRAL_ALTA_CONFIANZA = 90;
 /**
  * Cuántas veces se clasifica cada documento antes de quedarse con la mayoría.
  *
- * POR QUÉ HACE FALTA: `groq-classifier.ts:92` usa `temperature: 0.05` y no manda
- * `seed`, así que la Layer 5 NO es determinista. Medido: dos corridas idénticas
+ * POR QUÉ HIZO FALTA: el clasificador usaba `temperature: 0.05` y no mandaba
+ * `seed`, así que la Layer 5 NO era determinista. Medido: dos corridas idénticas
  * del mismo corpus, sin tocar una línea de código, dieron 61,1 % y 66,7 % de
  * accuracy (6 y 5 errores de alta confianza). Con una sola pasada, "medí antes y
- * después" no distingue una mejora real del ruido del muestreo.
+ * después" no distinguía una mejora real del ruido del muestreo.
  *
- * 3 repeticiones sobre 18 casos son 54 llamadas (~USD 0,03 por corrida completa),
- * costo despreciable frente a mergear una corrección creyendo que mejoró algo.
- *
- * ⚠️ Esto MITIGA el ruido, no lo elimina. La solución de fondo es que el
- * clasificador sea reproducible (`temperature: 0` + `seed` fijo), que además es
- * lo correcto de cara al cliente: subir dos veces el mismo comprobante debería
- * dar el mismo resultado. Está fuera del alcance de las 9 correcciones CL-*, así
- * que se deja anotado y no se toca acá.
+ * ✅ LA CAUSA DE FONDO YA ESTÁ CORREGIDA: todos los call sites de Groq salen con
+ * `temperature: 0` y un `seed` fijo (DETERMINISTIC_SEED en groq-client.ts; guarda
+ * de regresión en tests/ai/groq-determinism.test.ts). El campo de la mayoría se
+ * mantiene igual, por dos razones: `seed` es best-effort del lado del proveedor
+ * (puede cambiar si Groq cambia el backend del modelo — de ahí el
+ * `system_fingerprint`), y `estable: false` en un resultado sigue siendo un
+ * hallazgo por derecho propio. Con el default de 1 repetición no cuesta nada;
+ * subirlo a 3 sobre 18 casos son 54 llamadas (~USD 0,03).
  */
 const REPETICIONES = Number(process.env.CORPUS_REPETICIONES ?? 1);
 

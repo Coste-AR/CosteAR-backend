@@ -201,11 +201,69 @@ export const costitaChatResponseSchema = z.object({
 }).passthrough();
 
 /**
+ * CLAMP de `confidence` (0-100).
+ *
+ * El esquema RECHAZA un valor fuera de rango; esto es lo que lo convierte en un
+ * valor usable en vez de tirar la respuesta entera. Un `confidence: 999` no
+ * invalida el consejo que el chat acaba de dar: invalida el número que lo
+ * acompaña, y para ese número hay una respuesta correcta y evidente (el borde
+ * del rango). Lo que NO se hace es inventar: si no es un número finito, es 0.
+ */
+function clampConfidence(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 0;
+  return Math.min(100, Math.max(0, v));
+}
+
+/**
+ * Salvataje de la respuesta del chat, análogo a `salvageClassifyResponse`.
+ *
+ * POR QUÉ EXISTE. Sin esto, el único camino ante una respuesta inválida era el
+ * fallback genérico ("Por el momento no puedo interpretar eso"), o sea que un
+ * `confidence: 120` en una respuesta por lo demás perfecta le borraba al costista
+ * una explicación correcta y útil. Eso es tirar una respuesta usable por un campo
+ * accesorio — justo lo que el salvataje del clasificador ya evitaba del otro lado.
+ *
+ * SOLO SE SALVA `confidence`, Y ES DELIBERADO. Es el único campo accesorio: es
+ * un adorno del `reply`, no lo que el `reply` dice. Los otros NO se neutralizan
+ * aunque técnicamente se podría, porque están ACOPLADOS AL TEXTO:
+ *  · un `actionType` inventado bajado a 'INFO_ONLY' dejaría un `reply` que le
+ *    anuncia al costista una acción ("te propongo registrar…") que ya no viene
+ *    con la tarjeta para confirmarla;
+ *  · descartar un `proposedEntry`/`proposedAlert` inválido tiene el mismo
+ *    problema, y dejarlo con su `actionType` es peor todavía: `confirmAction`
+ *    tira un Error si la acción no trae payload, o sea una tarjeta que explota
+ *    al confirmarla.
+ * En esos casos el texto ya no se sostiene solo, así que la respuesta entera va
+ * al fallback. Lo mismo si lo que falla es `reply`, que ES la respuesta.
+ *
+ * A diferencia del clasificador, acá NO hay reintento guiado: ver la nota de
+ * `fallbackCostitaChatResponse`. El salvataje sí corresponde porque no cuesta un
+ * segundo round-trip — es aritmética sobre la respuesta que ya llegó.
+ */
+export function salvageCostitaChatResponse(
+  raw: unknown,
+  issues: z.ZodIssue[],
+): CostitaChatResponse | null {
+  if (raw == null || typeof raw !== 'object') return null;
+  const clone = { ...(raw as Record<string, unknown>) };
+
+  for (const iss of issues) {
+    if (iss.path.length !== 1 || iss.path[0] !== 'confidence') return null;
+    clone.confidence = clampConfidence(clone.confidence);
+  }
+
+  const re = costitaChatResponseSchema.safeParse(clone);
+  if (!re.success) return null;
+  return re.data as CostitaChatResponse;
+}
+
+/**
  * Resultado seguro cuando la respuesta del chat no valida — la misma forma que
  * ya usa costista-chat-service.ts cuando la IA no está disponible, así el
  * costista ve un mensaje conocido en vez de un dato sin validar.
  *
- * A diferencia del clasificador, acá NO hay reintento guiado ni salvataje:
+ * Es el último recurso: primero se intenta `salvageCostitaChatResponse`. A
+ * diferencia del clasificador, acá NO hay reintento guiado:
  *  - El chat es interactivo y sincrónico; un segundo round-trip duplica la
  *    latencia de la respuesta justo en el camino que ya salió mal.
  *  - Es el call site de Groq de mayor volumen (uno por mensaje), y la cuota se

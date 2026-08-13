@@ -1,5 +1,6 @@
 import type { GastoSubtype } from '../types.js';
 import { TRANSVERSAL_GASTO_KEYWORDS } from '../industry/industry-profile.js';
+import { matchKeywords } from '../utils/keyword-match.js';
 
 export const SECTION_MARGIN = 2;
 
@@ -30,8 +31,8 @@ export const UNCONDITIONAL_CIP_KEYWORDS = [
  * frases específicas: honorarios, papelería, sueldos administrativos…). Ver
  * DECISIONES.md § CL-05.
  *
- * Cada término va con y sin tilde porque el matcheo es `includes` sobre el texto
- * en minúsculas, sin plegado de acentos (ver DECISIONES.md § CL-05).
+ * Cada término va con y sin tilde porque el matcheo compara en minúsculas pero
+ * SIN plegar acentos (ver DECISIONES.md § CL-05 y `utils/keyword-match.ts`).
  */
 export const ELECTRICITY_CIP_KEYWORDS = [
   'energía eléctrica', 'energia electrica',
@@ -72,7 +73,7 @@ export function scoreGasto(lower: string): { subtype: GastoSubtype; score: numbe
     matched: [],
   };
   for (const subtype of Object.keys(TRANSVERSAL_GASTO_KEYWORDS) as GastoSubtype[]) {
-    const matched = TRANSVERSAL_GASTO_KEYWORDS[subtype].filter((kw) => lower.includes(kw.toLowerCase()));
+    const matched = matchKeywords(lower, TRANSVERSAL_GASTO_KEYWORDS[subtype]);
     if (matched.length > best.score) best = { subtype, score: matched.length, matched };
   }
   return best;

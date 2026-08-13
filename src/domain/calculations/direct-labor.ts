@@ -201,6 +201,86 @@ export interface DepartmentLaborConfig {
    * capacidad ociosa separa horas dentro de la presencia ya pagada.
    */
   productiveHours?: Decimal.Value;
+  /**
+   * TIEMPO ESTÁNDAR DE PRODUCCIÓN (Clase 10) — las horas que, según la oficina
+   * técnica, DEBERÍA haber llevado producir lo que efectivamente se produjo
+   * (horas estándar por unidad × unidades terminadas).
+   *
+   * Es el dato que habilita el segundo tipo de improductividad de la cátedra:
+   *   horas netas productivas − tiempo estándar = IMPRODUCTIVIDAD OCULTA.
+   *
+   * OPCIONAL Y RETROCOMPATIBLE: sin este dato la improductividad oculta es cero
+   * y el cálculo queda idéntico. Si el estándar es MAYOR que las horas netas
+   * productivas se trabajó por encima del estándar: no hay improductividad
+   * oculta (se recorta a cero), no se inventa una ganancia.
+   */
+  standardHours?: Decimal.Value;
+  /**
+   * Detalle POR MOTIVO de los tiempos perdidos informados (Clase 10: corte de
+   * energía, rotura de máquina, falta de materia prima, mantenimiento
+   * programado, descanso/refrigerio, gestiones personales…).
+   *
+   * Es DESCRIPTIVO, no normativo: la fuente de verdad de cuántas horas se
+   * perdieron sigue siendo `hoursWorked − productiveHours`. Si los motivos
+   * declarados no llegan a cubrir esa diferencia, el motor agrega por su cuenta
+   * un renglón «Sin discriminar» con el resto; si se pasan, se recortan. Así el
+   * desglose siempre cierra contra el total y nunca lo contradice.
+   */
+  informedLostTime?: NamedHours[];
+}
+
+/** Un motivo de tiempo perdido informado, con sus horas. */
+export interface NamedHours {
+  /** Motivo, en los términos de la cátedra. Texto libre del costista. */
+  reason: string;
+  hours: Decimal.Value;
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * TIPOS DE IMPRODUCTIVIDAD — terminología de la cátedra (Clase 10)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * La Clase 10 parte de que «las horas de presencia pueden ser productivas o
+ * improductivas» y clasifica las improductivas en DOS tipos, y solo dos:
+ *
+ *   · INFORMADA («tiempos perdidos informados»): la empresa conoce la causa con
+ *     anterioridad o la registra formalmente en la planilla de producción
+ *     —corte de luz, rotura de máquina, paro de transporte, falta de material,
+ *     corte de rutas, mantenimiento programado, media hora de comida—.
+ *
+ *   · OCULTA («improductividad oculta»): no se informa; surge del análisis del
+ *     contador de costos comparando el tiempo real con el tiempo estándar.
+ *
+ * Y la cadena de cálculo de la clase es exactamente:
+ *
+ *     Presencia en fábrica
+ *   − Tiempos perdidos informados
+ *   = Horas netas productivas
+ *   − Tiempo estándar de producción
+ *   = Improductividad oculta
+ *
+ * NO hay un tercer tipo. Las «capacidades ociosas anticipada / operativa» de la
+ * misma clase son otra cosa: se miden entre niveles de capacidad (normal,
+ * operativa, real) y se valorizan con la CUOTA PRESUPUESTADA FIJA, o sea que
+ * pertenecen a la hoja de costos indirectos, no a la de mano de obra. Acá la
+ * unidad son horas hombre de presencia, así que el desglose que corresponde es
+ * informada / oculta.
+ */
+export type TipoImproductividad = 'tiempos-perdidos-informados' | 'improductividad-oculta';
+
+/** Un tipo de improductividad, valorizado. */
+export interface IdleCapacityBucket {
+  tipo: TipoImproductividad;
+  /** Etiqueta de la cátedra, lista para pantalla. */
+  label: string;
+  hours: Decimal;
+  cost: Money;
+  /**
+   * Motivos declarados dentro del tipo (solo aplica a los tiempos perdidos
+   * informados). Vacío si el costista no discriminó.
+   */
+  reasons: Array<{ reason: string; hours: Decimal; cost: Money }>;
 }
 
 /**
@@ -213,16 +293,69 @@ export interface DepartmentLaborConfig {
 export interface DepartmentIdleCapacityResult {
   /** Horas pagadas — presencia en fábrica. */
   paidHours: Decimal;
-  /** Horas netas productivas — las únicas imputables a las órdenes. */
+  /** Horas netas productivas = presencia − tiempos perdidos informados. */
   productiveHours: Decimal;
-  /** Horas ociosas = presencia − netas productivas. Nunca negativa. */
+  /** Tiempo estándar de producción declarado, o `null` si no se cargó. */
+  standardHours: Decimal | null;
+  /** Horas imputables a las órdenes = netas productivas − improductividad oculta. */
+  chargeableHours: Decimal;
+  /** Horas ociosas TOTALES = informadas + ocultas. Nunca negativa. */
   idleHours: Decimal;
-  /** Costo de la capacidad ociosa = horas ociosas × tarifa horaria. AISLADO. */
+  /** Costo de la capacidad ociosa = horas ociosas × costo horario. AISLADO. */
   idleCost: Money;
   /** Costo de MOD imputable a las órdenes = costo total MOD − costo ocioso. */
   applicableMod: Money;
-  /** `true` solo si el departamento declaró horas productivas < horas pagadas. */
+  /** `true` solo si el departamento tiene horas ociosas de algún tipo. */
   hasIdleCapacity: boolean;
+  /** El costo ocioso abierto por TIPO de improductividad (cátedra, Clase 10). */
+  breakdown: IdleCapacityBucket[];
+}
+
+const LABEL_IMPRODUCTIVIDAD: Record<TipoImproductividad, string> = {
+  'tiempos-perdidos-informados': 'Tiempos perdidos informados',
+  'improductividad-oculta': 'Improductividad oculta',
+};
+
+/** Renglón que el motor agrega cuando el costista no discriminó todo el tiempo perdido. */
+const MOTIVO_SIN_DISCRIMINAR = 'Sin discriminar';
+
+/**
+ * Reparte las horas declaradas por motivo dentro del total de tiempo perdido
+ * informado, sin poder contradecirlo: se recorta lo que se pasa y se agrega un
+ * renglón «Sin discriminar» con lo que falta.
+ */
+function splitLostTimeReasons(
+  declared: NamedHours[] | undefined,
+  totalHours: Decimal,
+  costPerHour: Decimal,
+): Array<{ reason: string; hours: Decimal; cost: Money }> {
+  if (totalHours.lessThanOrEqualTo(0)) return [];
+
+  const rows: Array<{ reason: string; hours: Decimal; cost: Money }> = [];
+  let remaining = totalHours;
+  for (const item of declared ?? []) {
+    if (remaining.lessThanOrEqualTo(0)) break;
+    const raw = new Decimal(item.hours);
+    if (!raw.isFinite() || raw.lessThanOrEqualTo(0)) continue;
+    const hours = Decimal.min(raw, remaining);
+    remaining = remaining.minus(hours);
+    rows.push({
+      reason: item.reason?.trim() || MOTIVO_SIN_DISCRIMINAR,
+      hours,
+      cost: Money.of(hours.times(costPerHour)),
+    });
+  }
+
+  // Nada declarado → un único renglón sin discriminar sería ruido: se devuelve
+  // vacío y la pantalla muestra solo el total del tipo.
+  if (rows.length > 0 && remaining.greaterThan(0)) {
+    rows.push({
+      reason: MOTIVO_SIN_DISCRIMINAR,
+      hours: remaining,
+      cost: Money.of(remaining.times(costPerHour)),
+    });
+  }
+  return rows;
 }
 
 export interface DepartmentLaborResult {
@@ -237,12 +370,17 @@ export interface DepartmentLaborResult {
   /**
    * Tarifa horaria integral aplicada a las ÓRDENES.
    *
-   *   tarifa = MOD imputable a órdenes ÷ HORAS NETAS PRODUCTIVAS
+   *   tarifa = MOD imputable a órdenes ÷ HORAS IMPUTABLES
    *
-   * El divisor son SOLO las horas productivas: las horas ociosas no diluyen la
-   * tarifa ni se cuelan en el costo de las órdenes. Sin horas ociosas declaradas
-   * el numerador es el MOD total y el divisor la presencia, o sea exactamente la
-   * fórmula histórica.
+   * El divisor son SOLO las horas imputables (netas productivas menos la
+   * improductividad oculta): las horas ociosas no diluyen la tarifa ni se cuelan
+   * en el costo de las órdenes. Sin horas ociosas declaradas el numerador es el
+   * MOD total y el divisor la presencia, o sea exactamente la fórmula histórica.
+   *
+   * Nota: como el costo ocioso se separa EN PROPORCIÓN a las horas, la tarifa da
+   * siempre `MOD total ÷ presencia en fábrica`, haya o no ociosidad. Declarar
+   * ociosidad no cambia cuánto cuesta la hora; cambia cuántas horas se le
+   * cobran al producto.
    */
   hourlyRate: Money;
   /** La capacidad ociosa del departamento, aislada. */
@@ -267,20 +405,65 @@ export function calcDepartmentMod(
     declared === undefined || declared === null
       ? paidHours
       : Decimal.min(new Decimal(declared), paidHours);
-  const idleHours = paidHours.minus(productiveHours);
+
+  // TIPO 1 — tiempos perdidos informados = presencia − horas netas productivas.
+  const informedHours = paidHours.minus(productiveHours);
+
+  // TIPO 2 — improductividad oculta = horas netas productivas − tiempo estándar.
+  // Sin estándar declarado no se puede deducir: queda en cero (retrocompat). Si
+  // el estándar supera a las netas productivas se trabajó por encima del
+  // estándar: se recorta a cero, no se inventa una ganancia.
+  const declaredStandard = dept.standardHours;
+  const standardHours =
+    declaredStandard === undefined || declaredStandard === null
+      ? null
+      : Decimal.max(Decimal.min(new Decimal(declaredStandard), productiveHours), 0);
+  const hiddenHours = standardHours === null ? new Decimal(0) : productiveHours.minus(standardHours);
+
+  const idleHours = informedHours.plus(hiddenHours);
+  const chargeableHours = paidHours.minus(idleHours);
 
   // Costo de la capacidad ociosa: la porción del costo total que corresponde a
   // las horas ociosas sobre la presencia pagada. Con `idleHours` = 0 el factor
   // es 0 exacto, `idleCost` es cero exacto y `applicableMod` queda idéntico a
   // `totalMod` — de ahí sale la retrocompatibilidad al centavo.
-  const idleCost = paidHours.greaterThan(0)
-    ? totalMod.multiply(idleHours.dividedBy(paidHours))
-    : Money.zero();
+  const share = (h: Decimal) =>
+    paidHours.greaterThan(0) ? totalMod.multiply(h.dividedBy(paidHours)) : Money.zero();
+  const idleCost = share(idleHours);
+  const informedCost = share(informedHours);
+  // La oculta se saca por diferencia para que los dos tipos sumen EXACTAMENTE el
+  // costo ocioso, sin residuos de división.
+  const hiddenCost = idleCost.subtract(informedCost);
   const applicableMod = totalMod.subtract(idleCost);
 
-  const hourlyRate = productiveHours.greaterThan(0)
-    ? applicableMod.divide(productiveHours)
+  const hourlyRate = chargeableHours.greaterThan(0)
+    ? applicableMod.divide(chargeableHours)
     : Money.zero();
+
+  // Costo de la hora de presencia: con él se valorizan los motivos declarados.
+  const costPerHour = paidHours.greaterThan(0)
+    ? totalMod.toDecimal().dividedBy(paidHours)
+    : new Decimal(0);
+
+  const breakdown: IdleCapacityBucket[] = [];
+  if (informedHours.greaterThan(0)) {
+    breakdown.push({
+      tipo: 'tiempos-perdidos-informados',
+      label: LABEL_IMPRODUCTIVIDAD['tiempos-perdidos-informados'],
+      hours: informedHours,
+      cost: informedCost,
+      reasons: splitLostTimeReasons(dept.informedLostTime, informedHours, costPerHour),
+    });
+  }
+  if (hiddenHours.greaterThan(0)) {
+    breakdown.push({
+      tipo: 'improductividad-oculta',
+      label: LABEL_IMPRODUCTIVIDAD['improductividad-oculta'],
+      hours: hiddenHours,
+      cost: hiddenCost,
+      reasons: [],
+    });
+  }
 
   return {
     name: dept.name,
@@ -292,10 +475,13 @@ export function calcDepartmentMod(
     idleCapacity: {
       paidHours,
       productiveHours,
+      standardHours,
+      chargeableHours,
       idleHours,
       idleCost,
       applicableMod,
       hasIdleCapacity: idleHours.greaterThan(0),
+      breakdown,
     },
   };
 }
@@ -312,34 +498,65 @@ export interface DirectLaborConfig {
 
 /**
  * ╔══════════════════════════════════════════════════════════════════════════╗
- * ║  ÚNICO PUNTO DE DECISIÓN — DESTINO CONTABLE DEL COSTO DE CAPACIDAD OCIOSA ║
+ * ║  DESTINO CONTABLE DEL COSTO DE CAPACIDAD OCIOSA — DECISIÓN TOMADA        ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  *
- * La SEPARACIÓN ya está hecha y no se discute: el costo de las horas ociosas se
- * calcula y se expone en su propia línea (`DirectLaborResult.idleCapacity`).
- * Lo que todavía NO está decidido —es una decisión de PRODUCTO, no técnica— es
- * a dónde va ese importe en el estado de costos. Las dos opciones:
+ * La SEPARACIÓN ya estaba hecha: el costo de las horas ociosas se calcula y se
+ * expone en su propia línea (`DirectLaborResult.idleCapacity`). Lo que faltaba
+ * era el destino de ese importe en el estado de costos. Ya está resuelto:
  *
- *   'absorbido-en-el-producto'  → `totalMod` sigue siendo el costo COMPLETO de
- *       MOD. El estado de costos no cambia en un peso respecto de hoy; el costo
- *       ocioso queda visible como línea informativa pero el producto lo absorbe.
- *       Es el valor VIGENTE, elegido únicamente porque preserva el resultado
- *       actual mientras la decisión no esté tomada. NO es una postura contable.
+ *   'perdida-del-periodo'  ← VIGENTE. `totalMod` es el MOD IMPUTABLE a las
+ *       órdenes; el costo ocioso sale del costo del producto y va al estado de
+ *       resultados como otro egreso (pérdida). Es lo que manda la cátedra
+ *       (Clase 10: «Es una pérdida de la empresa, no un costo del producto. El
+ *       cliente no tiene culpa de la ineficiencia interna; no se le puede cargar
+ *       ese costo. Va directamente al estado de resultados como otro egreso»).
  *
- *   'perdida-del-periodo'       → `totalMod` pasa a ser el MOD imputable a las
- *       órdenes y el costo ocioso sale del costo del producto para irse al
- *       estado de resultados como otro egreso (pérdida). Es lo que manda la
- *       cátedra (Clase 10: «es una pérdida de la empresa, no un costo del
- *       producto»), y CAMBIA el costo de producción y el margen de toda
- *       estructura que tenga horas ociosas cargadas.
+ *   'absorbido-en-el-producto'  → el valor anterior. `totalMod` era el costo
+ *       COMPLETO de MOD y el producto absorbía la ociosidad. Nunca fue una
+ *       postura contable: era el placeholder elegido para no mover resultados
+ *       mientras la decisión estaba abierta. Se conserva en el tipo porque es lo
+ *       que documenta qué cambió y permite reproducir el criterio viejo.
  *
- * Para cambiar el destino se toca UNA línea: la constante de abajo. Nada más
- * del motor depende de esta decisión.
+ * QUÉ SE MUEVE AL CAMBIARLO
+ * -------------------------
+ *   · Una estructura SIN horas ociosas declaradas (todas las cargadas hasta hoy,
+ *     que solo tienen `hoursWorked`) no se mueve un centavo: `idleCost` es cero
+ *     exacto, `applicableMod` === `fullMod`, `totalMod` da lo mismo que antes.
+ *   · Una estructura CON ociosidad declarada baja su MOD, su costo de
+ *     producción, su costo de ventas y su costo unitario, y sube su margen
+ *     bruto; abajo del margen aparece la pérdida por capacidad ociosa. La tarifa
+ *     horaria NO se mueve (se reparte en proporción a las horas).
+ *
+ * Nada más del motor depende de esta constante.
  */
 export type DestinoCostoCapacidadOciosa = 'absorbido-en-el-producto' | 'perdida-del-periodo';
 
 export const DESTINO_COSTO_CAPACIDAD_OCIOSA: DestinoCostoCapacidadOciosa =
-  'absorbido-en-el-producto';
+  'perdida-del-periodo';
+
+/**
+ * CARTEL de capacidad ociosa. La cátedra no la trata como un renglón más del
+ * estado de resultados: es una PÉRDIDA que hay que ver. Por eso el motor no se
+ * limita a devolver el número, devuelve el aviso ya redactado para que la
+ * pantalla lo muestre como cartel y no como una línea perdida entre otras.
+ *
+ * Es `null` cuando no hay ociosidad: sin pérdida no hay nada que avisar.
+ */
+export interface IdleCapacityAlert {
+  /** Severidad de la que depende el color del cartel en pantalla. */
+  level: 'advertencia' | 'critico';
+  title: string;
+  /** Texto ya armado, en términos de la cátedra y sin ids internos. */
+  message: string;
+  /** Importe de la pérdida. */
+  cost: Money;
+  /** Peso de las horas ociosas sobre la presencia pagada, en porcentaje. */
+  sharePercent: Decimal;
+}
+
+/** A partir de acá el cartel pasa de advertencia a crítico. */
+const UMBRAL_OCIOSIDAD_CRITICA = 20;
 
 /** Capacidad ociosa consolidada de la hoja MOD (Σ de todos los departamentos). */
 export interface DirectLaborIdleCapacityResult {
@@ -347,7 +564,9 @@ export interface DirectLaborIdleCapacityResult {
   paidHours: Decimal;
   /** Σ horas netas productivas. */
   productiveHours: Decimal;
-  /** Σ horas ociosas. */
+  /** Σ horas imputables a las órdenes (netas productivas − improductividad oculta). */
+  chargeableHours: Decimal;
+  /** Σ horas ociosas (informadas + ocultas). */
   idleHours: Decimal;
   /** Costo COMPLETO de MOD (remuneraciones + cargas), sin separar nada. */
   fullMod: Money;
@@ -359,6 +578,93 @@ export interface DirectLaborIdleCapacityResult {
   hasIdleCapacity: boolean;
   /** Destino contable vigente del costo ocioso (ver punto de decisión arriba). */
   destination: DestinoCostoCapacidadOciosa;
+  /**
+   * La pérdida abierta POR TIPO DE IMPRODUCTIVIDAD (cátedra, Clase 10), sumando
+   * todos los departamentos. Nunca se muestra la ociosidad como un número solo.
+   */
+  breakdown: IdleCapacityBucket[];
+  /** Cartel para la pantalla. `null` si no hay ociosidad. */
+  alert: IdleCapacityAlert | null;
+}
+
+/** Consolida los desgloses por tipo de todos los departamentos en uno solo. */
+function mergeBreakdown(departments: DepartmentLaborResult[]): IdleCapacityBucket[] {
+  const orden: TipoImproductividad[] = ['tiempos-perdidos-informados', 'improductividad-oculta'];
+  const out: IdleCapacityBucket[] = [];
+
+  for (const tipo of orden) {
+    const buckets = departments
+      .map((d) => d.idleCapacity.breakdown.find((b) => b.tipo === tipo))
+      .filter((b): b is IdleCapacityBucket => b !== undefined);
+    if (buckets.length === 0) continue;
+
+    // Los motivos se suman por nombre, respetando el orden de aparición.
+    const porMotivo = new Map<string, { reason: string; hours: Decimal; cost: Money }>();
+    for (const b of buckets) {
+      for (const r of b.reasons) {
+        const prev = porMotivo.get(r.reason);
+        porMotivo.set(
+          r.reason,
+          prev
+            ? { reason: r.reason, hours: prev.hours.plus(r.hours), cost: prev.cost.add(r.cost) }
+            : { ...r },
+        );
+      }
+    }
+
+    out.push({
+      tipo,
+      label: LABEL_IMPRODUCTIVIDAD[tipo],
+      hours: buckets.reduce((acc, b) => acc.plus(b.hours), new Decimal(0)),
+      cost: Money.sum(buckets.map((b) => b.cost)),
+      reasons: [...porMotivo.values()],
+    });
+  }
+
+  return out;
+}
+
+/** Arma el cartel a partir de la ociosidad ya consolidada. */
+function buildIdleCapacityAlert(
+  idle: Omit<DirectLaborIdleCapacityResult, 'alert'>,
+): IdleCapacityAlert | null {
+  if (!idle.hasIdleCapacity || idle.idleCost.isZero()) return null;
+
+  const sharePercent = idle.paidHours.greaterThan(0)
+    ? idle.idleHours.dividedBy(idle.paidHours).times(100)
+    : new Decimal(0);
+
+  const importe = idle.idleCost.toNumber().toLocaleString('es-AR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const horas = idle.idleHours.toDecimalPlaces(2).toNumber().toLocaleString('es-AR');
+  const porcentaje = sharePercent.toDecimalPlaces(2).toNumber().toLocaleString('es-AR');
+
+  const detalle = idle.breakdown
+    .map(
+      (b) =>
+        `${b.label}: ${b.hours.toDecimalPlaces(2).toNumber().toLocaleString('es-AR')} hs ` +
+        `($ ${b.cost.toNumber().toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`,
+    )
+    .join(' · ');
+
+  const enElProducto = idle.destination === 'absorbido-en-el-producto';
+
+  return {
+    level: sharePercent.greaterThanOrEqualTo(UMBRAL_OCIOSIDAD_CRITICA) ? 'critico' : 'advertencia',
+    title: 'Pérdida por capacidad ociosa',
+    message:
+      `Se pagaron ${horas} hs que no se le pueden cobrar al producto (${porcentaje} % de la ` +
+      `presencia en fábrica), por $ ${importe}. ` +
+      (enElProducto
+        ? 'Hoy el producto las está absorbiendo.'
+        : 'No integran el costo de producción: van al estado de resultados como otro egreso ' +
+          '(pérdida del período). El cliente no tiene culpa de la ineficiencia interna.') +
+      (detalle ? ` Desglose — ${detalle}.` : ''),
+    cost: idle.idleCost,
+    sharePercent,
+  };
 }
 
 export interface DirectLaborResult {
@@ -366,9 +672,10 @@ export interface DirectLaborResult {
   itcs: ItcsResult;
   departments: DepartmentLaborResult[];
   /**
-   * Costo de MOD que ENTRA AL ESTADO DE COSTOS. Depende del punto de decisión
-   * `DESTINO_COSTO_CAPACIDAD_OCIOSA`: hoy es el costo completo (Σ de cada
-   * departamento), igual que antes de que existiera la capacidad ociosa.
+   * Costo de MOD que ENTRA AL ESTADO DE COSTOS. Depende de
+   * `DESTINO_COSTO_CAPACIDAD_OCIOSA`: hoy es el MOD IMPUTABLE a las órdenes, o
+   * sea el costo completo menos la pérdida por capacidad ociosa. Sin ociosidad
+   * declarada coincide exactamente con el costo completo.
    */
   totalMod: Money;
   /** La capacidad ociosa, aislada y siempre disponible, decida lo que se decida. */
@@ -386,15 +693,22 @@ export function calcDirectLabor(config: DirectLaborConfig): DirectLaborResult {
   const sumHours = (pick: (d: DepartmentLaborResult) => Decimal) =>
     departments.reduce((acc, d) => acc.plus(pick(d)), new Decimal(0));
 
-  const idleCapacity: DirectLaborIdleCapacityResult = {
+  const sinCartel: Omit<DirectLaborIdleCapacityResult, 'alert'> = {
     paidHours: sumHours((d) => d.idleCapacity.paidHours),
     productiveHours: sumHours((d) => d.idleCapacity.productiveHours),
+    chargeableHours: sumHours((d) => d.idleCapacity.chargeableHours),
     idleHours: sumHours((d) => d.idleCapacity.idleHours),
     fullMod,
     idleCost,
     applicableMod,
     hasIdleCapacity: departments.some((d) => d.idleCapacity.hasIdleCapacity),
     destination: DESTINO_COSTO_CAPACIDAD_OCIOSA,
+    breakdown: mergeBreakdown(departments),
+  };
+
+  const idleCapacity: DirectLaborIdleCapacityResult = {
+    ...sinCartel,
+    alert: buildIdleCapacityAlert(sinCartel),
   };
 
   // ↓ El único consumo de la decisión en todo el motor.

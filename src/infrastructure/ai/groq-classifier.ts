@@ -1,4 +1,4 @@
-import { GroqClient, tryParseJson, buildRetryHint, TEXT_MODEL } from './groq-client.js';
+import { GroqClient, tryParseJson, buildRetryHint, TEXT_MODEL, DETERMINISTIC_SAMPLING } from './groq-client.js';
 import {
   classifyResponseSchema,
   salvageClassifyResponse,
@@ -50,13 +50,18 @@ export class GroqClassifier {
     // El flete depende de SU DESTINO, no del rubro, así que la regla vive una
     // sola vez en REGLA_COSTO_ADQUISICION (abajo) y aplica a todos los rubros.
     const industryHints: Record<string, string> = {
-      AGRO:        'En agroindustria: combustible (gasoil) es MATERIA_PRIMA (insumo de tractores/maquinaria), semillas/agroquímicos son MATERIA_PRIMA.',
+      // El hint de AGRO decía que "combustible (gasoil) es MATERIA_PRIMA". Era la
+      // misma regla equivocada que el perfil AGRO tenía en `fuelIsMP: true` y que
+      // CL-04 ya había corregido para avicultura: el gasoil mueve el tractor, no
+      // se convierte en grano ni en leche. Dejarlo acá habría hecho que la IA
+      // contradijera al ruteo determinista sobre el mismo comprobante.
+      AGRO:        'En agroindustria: semillas, agroquímicos y fertilizantes son MATERIA_PRIMA; en ganadería y tambo el alimento (forraje, balanceado) también. El combustible (gasoil de tractores y maquinaria) es fuerza motriz → COSTOS_INDIRECTOS, y la sanidad del rodeo (vacunas, veterinario) es material indirecto → COSTOS_INDIRECTOS.',
       GASTRONOMIA: 'En gastronomía: ingredientes (carne, verdura, lácteos, bebidas) y gas de cocina son MATERIA_PRIMA. Alquiler del local, luz, agua son COSTOS_INDIRECTOS.',
       MANUFACTURA: 'En manufactura: materias primas del proceso productivo son MATERIA_PRIMA. Energía eléctrica suele ser COSTOS_INDIRECTOS salvo que sea insumo directo del proceso.',
       CONSTRUCCION:'En construcción: materiales (cemento, hierro, madera) son MATERIA_PRIMA. Alquiler de equipos y movimientos internos de obra son COSTOS_INDIRECTOS.',
       TEXTIL:      'En textil: telas, hilos, botones, cierres son MATERIA_PRIMA. Electricidad del taller es COSTOS_INDIRECTOS.',
       SALUD:       'En salud: medicamentos, insumos médicos, reactivos son MATERIA_PRIMA. Equipos y habilitaciones son COSTOS_INDIRECTOS.',
-      TRANSPORTE:  'En transporte: combustible, neumáticos, repuestos son MATERIA_PRIMA (insumos directos del servicio). Seguro y peaje son COSTOS_INDIRECTOS.',
+      TRANSPORTE:  'En transporte: combustible, neumáticos, repuestos son MATERIA_PRIMA (insumos directos del servicio). Seguro y peaje son COSTOS_INDIRECTOS. La energía eléctrica y el gas del depósito, la cochera o la oficina NO son combustible del viaje → COSTOS_INDIRECTOS.',
       COMERCIO:    'En comercio: mercadería para reventa es MATERIA_PRIMA (costo del producto). La logística interna del depósito y el alquiler son COSTOS_INDIRECTOS.',
       SERVICIOS:   'En servicios profesionales: casi no hay MATERIA_PRIMA. Honorarios de personal son MANO_DE_OBRA. Oficina, internet, software son COSTOS_INDIRECTOS.',
     };
@@ -117,7 +122,14 @@ Respondé SOLO con JSON:
     const baseBody = {
       model: TEXT_MODEL,
       max_tokens: 200,
-      temperature: 0.05,
+      // ⚠️ NO SUBAS ESTA TEMPERATURA NI SAQUES EL SEED.
+      // Con `temperature: 0.05` y sin seed, dos corridas del mismo corpus sin un
+      // solo cambio de código dieron 61,1% y 66,7% de accuracy: ninguna medición
+      // de mejora del clasificador era confiable, porque la diferencia entre dos
+      // versiones quedaba tapada por el ruido del muestreo. Y para el cliente, el
+      // mismo comprobante tenía que dar SIEMPRE el mismo resultado — un costista
+      // no puede defender ante su cliente una imputación que cambia sola.
+      ...DETERMINISTIC_SAMPLING,
       response_format: { type: 'json_object' as const },
     };
 

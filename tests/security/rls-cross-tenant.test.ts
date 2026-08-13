@@ -53,6 +53,10 @@ const TABLAS_PROTEGIDAS = [
   'alert_settings',
   'data_points',
   'data_point_versions',
+  // T-04: desde que los comprobantes tienen alta y dueño (`uploadedBy`), esta
+  // tabla dejó de estar exenta. Guarda las facturas de los clientes: es la
+  // última tabla que uno querría sin aislamiento.
+  'evidence',
   'calculation_runs',
   'calculation_nodes',
   'process_departments',
@@ -112,6 +116,7 @@ function ids(tag: 'a' | 'b'): Record<Tabla | 'user' | 'dataEntry', string> {
     validation_history: u(28),
     audit_logs: u(29),
     dataEntry: u(30),
+    evidence: u(31),
   };
 }
 
@@ -141,6 +146,7 @@ const ORDEN_BORRADO: string[] = [
   'calculation_nodes',
   'calculation_runs',
   'data_point_versions',
+  'evidence', // después de las versiones: son las que la referencian
   'data_points',
   'cost_calculations',
   'alert_settings',
@@ -175,8 +181,10 @@ async function sembrar(db: PrismaClient, t: ReturnType<typeof ids>, tag: string)
       VALUES ('${t.alert_settings}', '${t.user}', now());
     INSERT INTO data_points (id, "structureId", element, "fieldKey", label, "sourceArea")
       VALUES ('${t.data_points}', '${t.cost_structures}', 'MP', 'mp.compra.precio', 'Compra ${tag}', 'costista');
-    INSERT INTO data_point_versions (id, "dataPointId", "versionN", method, "createdBy", "actorRole", "actorArea")
-      VALUES ('${t.data_point_versions}', '${t.data_points}', 1, 'manual', '${t.user}', 'COSTISTA', 'costista');
+    INSERT INTO evidence (id, kind, reference, counterparty, "uploadedBy")
+      VALUES ('${t.evidence}', 'factura', 'Factura A 0001-0000000${tag === 'a' ? 1 : 2}', 'Proveedor ${tag}', '${t.user}');
+    INSERT INTO data_point_versions (id, "dataPointId", "versionN", method, "createdBy", "actorRole", "actorArea", "evidenceId")
+      VALUES ('${t.data_point_versions}', '${t.data_points}', 1, 'manual', '${t.user}', 'COSTISTA', 'costista', '${t.evidence}');
     INSERT INTO calculation_runs (id, "structureId", "runN", "engineVersion", "executedBy", "inputsSnapshot", results)
       VALUES ('${t.calculation_runs}', '${t.cost_structures}', 1, 'test', '${t.user}', '{}'::jsonb, '{}'::jsonb);
     INSERT INTO calculation_nodes (id, "runId", ord, label)

@@ -50,9 +50,10 @@ const EXENTAS: Record<string, string> = {
   terms_versions: 'El texto de los T&C es el mismo para todos.',
 
   // --- Trazabilidad heredada (ya documentado en rls.sql desde Trazabilidad v1) ---
-  evidence:
-    'Su vínculo con el tenant es indirecto y opcional (puede no tener dueño). ' +
-    'El filtro de pertenencia se hace en la capa de aplicación.',
+  //
+  // `evidence` YA NO está acá: estuvo exenta mientras no tuvo un solo productor
+  // (0 filas, ningún camino de alta), y desde T-04 los comprobantes nacen con
+  // dueño (`uploadedBy`). Tiene política propia en rls.sql.
   trace_audit_log:
     'Bitácora append-only de trazabilidad, con entidades de tipos heterogéneos ' +
     '(entityType/entityId genéricos): no hay una sola columna que resuelva el dueño.',

@@ -125,28 +125,57 @@ describe('GroqCostitaChat — validación de la respuesta', () => {
     expect(groqFetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('RECHAZA confidence fuera de rango (999) → fallback seguro, no un 999 a la UI', async () => {
+  // ── confidence: se CLAMPEA, no se descarta la respuesta ───────────────────
+  //
+  // Cambió el contrato respecto de la primera versión del esquema, que mandaba
+  // al fallback cualquier respuesta con confidence fuera de rango. Un
+  // `confidence: 999` no invalida la explicación que el chat acaba de dar:
+  // invalida el número que la acompaña, y para ese número hay una respuesta
+  // correcta y obvia (el borde del rango). Descartar todo le borraba al costista
+  // una respuesta útil por un campo accesorio.
+  //
+  // Lo que NO cambió, y está probado abajo: el 999 no llega jamás al frontend.
+
+  it('CLAMPEA confidence fuera de rango (999 → 100) y conserva la respuesta útil', async () => {
     groqFetchMock.mockResolvedValueOnce(ok({ ...VALID_CHAT, confidence: 999 }));
 
     const chat = new GroqCostitaChat();
     const res = await chat.interpret('¿Cómo doy de alta una empresa?', PORTFOLIO);
 
-    expect(res?.confidence).toBe(0);
+    expect(res?.confidence).toBe(100);
     expect(res?.confidence).not.toBe(999);
     expect(res?.actionType).toBe('INFO_ONLY');
-    expect(res?.reply).toBe(FALLBACK_REPLY);
-    // Sin reintento: el chat es sincrónico, el fallback alcanza.
+    expect(res?.reply).toBe(VALID_CHAT.reply);
+    // Sin reintento: el chat es sincrónico y el clamp no cuesta un round-trip.
     expect(groqFetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('RECHAZA confidence negativa y no numérica', async () => {
+  it('CLAMPEA la confidence negativa a 0 y la no numérica a 0', async () => {
     groqFetchMock
       .mockResolvedValueOnce(ok({ ...VALID_CHAT, confidence: -20 }))
       .mockResolvedValueOnce(ok({ ...VALID_CHAT, confidence: 'alta' }));
 
-    const chat = new GroqCostitaChat();
-    expect((await chat.interpret('a', PORTFOLIO))?.reply).toBe(FALLBACK_REPLY);
-    expect((await chat.interpret('b', PORTFOLIO))?.reply).toBe(FALLBACK_REPLY);
+    const negativa = await new GroqCostitaChat().interpret('a', PORTFOLIO);
+    expect(negativa?.confidence).toBe(0);
+    expect(negativa?.reply).toBe(VALID_CHAT.reply);
+
+    // 'alta' no es un número: no se adivina un valor, se informa 0.
+    const noNumerica = await new GroqCostitaChat().interpret('b', PORTFOLIO);
+    expect(noNumerica?.confidence).toBe(0);
+    expect(noNumerica?.reply).toBe(VALID_CHAT.reply);
+  });
+
+  it('pero si además del confidence falla otra cosa, NO se salva nada', async () => {
+    // El salvataje es solo para el campo accesorio. Un actionType inventado
+    // dejaría un `reply` que anuncia una acción que ya no existe.
+    groqFetchMock.mockResolvedValueOnce(
+      ok({ ...VALID_CHAT, confidence: 999, actionType: 'DELETE_EVERYTHING' }),
+    );
+
+    const res = await new GroqCostitaChat().interpret('borrá todo', PORTFOLIO);
+
+    expect(res?.reply).toBe(FALLBACK_REPLY);
+    expect(res?.confidence).toBe(0);
   });
 
   it('RECHAZA un actionType desconocido (no lo reenvía al frontend tal cual)', async () => {
@@ -268,13 +297,28 @@ describe('GroqCostitaChat — caché de Redis', () => {
   it('solo se cachea una respuesta ya validada (el fallback nunca se persiste)', async () => {
     redisMock.status = 'ready';
     redisMock.get.mockResolvedValueOnce(null);
-    groqFetchMock.mockResolvedValueOnce(ok({ ...VALID_CHAT, confidence: 999 }));
+    // Una respuesta que el salvataje NO puede normalizar: va al fallback.
+    groqFetchMock.mockResolvedValueOnce(ok({ ...VALID_CHAT, actionType: 'DELETE_EVERYTHING' }));
 
     const chat = new GroqCostitaChat();
     const res = await chat.interpret('¿Cómo doy de alta una empresa?', PORTFOLIO);
 
     expect(res?.confidence).toBe(0);
     expect(redisMock.setex).not.toHaveBeenCalled();
+  });
+
+  it('lo que sí se cachea de una respuesta salvada es el valor YA clampeado', async () => {
+    // Si se persistiera el 999 crudo, la caché sería la puerta de atrás por
+    // donde el valor inválido vuelve a entrar durante 24 horas.
+    redisMock.status = 'ready';
+    redisMock.get.mockResolvedValueOnce(null);
+    groqFetchMock.mockResolvedValueOnce(ok({ ...VALID_CHAT, confidence: 999 }));
+
+    await new GroqCostitaChat().interpret('¿Cómo doy de alta una empresa?', PORTFOLIO);
+
+    expect(redisMock.setex).toHaveBeenCalledTimes(1);
+    const persistido = JSON.parse(redisMock.setex.mock.calls[0][2] as string) as { confidence: number };
+    expect(persistido.confidence).toBe(100);
   });
 });
 

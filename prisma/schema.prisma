@@ -987,11 +987,27 @@ model CostLedgerEntry {
   aiUsed         Boolean @default(false)
   wasCorrected   Boolean @default(false) // el costista corrigió antes de aprobar
 
+  // CL-01 — CON QUÉ CRITERIO SE RESOLVIÓ `amount` FRENTE AL IVA.
+  //   NETO_SIN_IVA             el importe es el neto (IVA fuera del costo)
+  //   TOTAL_CON_IVA            el IVA es costo (monotributo/exento) o el
+  //                            comprobante no lo discrimina: el total es el costo
+  //   ANTERIOR_A_LA_CORRECCION línea creada con el criterio viejo: tomó el total
+  //                            con IVA habiendo neto. PUEDE ESTAR SOBREVALUADA
+  //   SIN_EVIDENCIA            no verificable (sin documento de origen legible)
+  //   CARGA_MANUAL             la tipeó el costista
+  // Es una BANDERA, no un recálculo: ningún importe se reescribe (Opción B).
+  criterioImporteIva String?
+  // Cuánto IVA quedó adentro del importe, cuando se pudo medir contra el
+  // comprobante. Es la magnitud de la posible sobrevaluación, no un importe
+  // corregido: nada lo consume para costear.
+  ivaIncluidoEstimado Decimal? @db.Decimal(18, 4)
+
   createdAt DateTime @default(now())
 
   @@index([companyId, period, costSection])
   @@index([costistId, period])
   @@index([dataEntryId])
+  @@index([companyId, criterioImporteIva])
   @@map("cost_ledger_entries")
 }
 
@@ -1104,6 +1120,9 @@ model Evidence {
 
   versions DataPointVersion[]
 
+  // Dueño del comprobante: predicado de la política RLS de la tabla (T-04) y
+  // criterio de listado por costista.
+  @@index([uploadedBy])
   @@map("evidence")
 }
 
@@ -1211,6 +1230,10 @@ model CalculationNode {
   valueNum           Decimal?          @db.Decimal(18, 4)
   unit               String?
   sourceDpVersionIds String[]          @default([])
+  // Clave determinística del motor (T-11). Es la que enlaza el nodo con el dato
+  // que lo origina —cuando lo hay— y, sobre todo, la que le permite a una
+  // pantalla encontrar EL nodo de un número sin casar por etiqueta.
+  traceFieldKey      String?
 
   @@index([runId, parentId, ord])
   @@map("calculation_nodes")

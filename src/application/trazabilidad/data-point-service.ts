@@ -430,8 +430,16 @@ export class DataPointService {
         captacion: dp.fechaCaptacion.toISOString(),
         imputado: dp.periodoImputado,
       },
+      // El final de la cadena, cuando existe: el papel. `counterparty` viaja
+      // porque "Factura A 0001-00012345" sin decir de quién no le sirve a nadie
+      // que audite (T-04).
       evidence: current?.evidence
-        ? { kind: current.evidence.kind, reference: current.evidence.reference, fileUrl: current.evidence.fileUrl }
+        ? {
+            kind: current.evidence.kind,
+            reference: current.evidence.reference,
+            counterparty: current.evidence.counterparty,
+            fileUrl: current.evidence.fileUrl,
+          }
         : null,
       versions: versions.map((v) => ({
         n: v.versionN,

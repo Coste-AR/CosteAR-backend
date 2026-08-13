@@ -124,6 +124,43 @@ export interface CalculationOutput {
         budgetedHours: number;
         realHours?: number;
       }>;
+      /**
+       * CAPACIDAD OCIOSA (cátedra, Clase 10) — la pérdida por horas pagadas que
+       * no se le pueden cobrar al producto, abierta POR TIPO DE
+       * IMPRODUCTIVIDAD, más el cartel ya redactado para la pantalla.
+       *
+       * OPCIONAL: los cálculos guardados antes de que esto existiera no lo
+       * tienen. Ausente ≠ "no hay ociosidad": la pantalla no muestra el bloque.
+       */
+      idleCapacity?: {
+        paidHours: number;
+        productiveHours: number;
+        chargeableHours: number;
+        idleHours: number;
+        /** Costo COMPLETO de MOD, con la ociosidad adentro. */
+        fullMod: number;
+        /** La pérdida por capacidad ociosa, aislada. */
+        idleCost: number;
+        /** MOD imputable a las órdenes = `fullMod` − `idleCost`. */
+        applicableMod: number;
+        hasIdleCapacity: boolean;
+        /** Destino contable con el que se calculó ESTE resultado. */
+        destination: 'absorbido-en-el-producto' | 'perdida-del-periodo';
+        breakdown: Array<{
+          tipo: 'tiempos-perdidos-informados' | 'improductividad-oculta';
+          label: string;
+          hours: number;
+          cost: number;
+          reasons: Array<{ reason: string; hours: number; cost: number }>;
+        }>;
+        alert: {
+          level: 'advertencia' | 'critico';
+          title: string;
+          message: string;
+          cost: number;
+          sharePercent: number;
+        } | null;
+      };
     };
     indirectCosts: {
       perDepartment: Record<
@@ -611,6 +648,37 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
           budgetedHours: d.hoursWorked.toNumber(),
           realHours: input.directLabor.departments[i]?.realHours,
         })),
+        idleCapacity: {
+          paidHours: labor.idleCapacity.paidHours.toNumber(),
+          productiveHours: labor.idleCapacity.productiveHours.toNumber(),
+          chargeableHours: labor.idleCapacity.chargeableHours.toNumber(),
+          idleHours: labor.idleCapacity.idleHours.toNumber(),
+          fullMod: labor.idleCapacity.fullMod.toNumber(),
+          idleCost: labor.idleCapacity.idleCost.toNumber(),
+          applicableMod: labor.idleCapacity.applicableMod.toNumber(),
+          hasIdleCapacity: labor.idleCapacity.hasIdleCapacity,
+          destination: labor.idleCapacity.destination,
+          breakdown: labor.idleCapacity.breakdown.map((b) => ({
+            tipo: b.tipo,
+            label: b.label,
+            hours: b.hours.toNumber(),
+            cost: b.cost.toNumber(),
+            reasons: b.reasons.map((r) => ({
+              reason: r.reason,
+              hours: r.hours.toNumber(),
+              cost: r.cost.toNumber(),
+            })),
+          })),
+          alert: labor.idleCapacity.alert
+            ? {
+                level: labor.idleCapacity.alert.level,
+                title: labor.idleCapacity.alert.title,
+                message: labor.idleCapacity.alert.message,
+                cost: labor.idleCapacity.alert.cost.toNumber(),
+                sharePercent: labor.idleCapacity.alert.sharePercent.toNumber(),
+              }
+            : null,
+        },
       },
       indirectCosts: { perDepartment },
       unitCost: { unitsProduced, unitProductionCost, unitCostOfGoodsSold },

@@ -8,6 +8,7 @@ import {
   type DirectLaborConfig,
 } from '@/domain/calculations/direct-labor.js';
 import { Percentage } from '@/domain/value-objects/percentage.js';
+import { Money } from '@/domain/value-objects/money.js';
 
 /**
  * Ground truth: hoja "2-MOD Ejemplo" del Excel v3.0.
@@ -311,13 +312,248 @@ describe('Hoja 2 — Capacidad ociosa (Clase 10)', () => {
       expect(r.idleCapacity.idleCost.toNumber()).toBeCloseTo(104722.22, 2);
     });
 
-    it('el destino contable vigente deja el estado de costos como hoy: totalMod = costo completo', () => {
-      // Mientras la decisión de producto no esté tomada, `totalMod` (lo que entra
-      // al estado de costos) NO se mueve. El costo ocioso está aislado y visible,
-      // pero no cambia todavía el costo del producto ni el margen.
-      expect(r.idleCapacity.destination).toBe('absorbido-en-el-producto');
-      expect(DESTINO_COSTO_CAPACIDAD_OCIOSA).toBe('absorbido-en-el-producto');
-      expect(r.totalMod.toNumber()).toBe(r.idleCapacity.fullMod.toNumber());
+    it('la ociosidad es PÉRDIDA DEL PERÍODO: totalMod = MOD imputable, no el completo', () => {
+      // Decisión tomada (Clase 10): «Es una pérdida de la empresa, no un costo
+      // del producto». Lo que entra al estado de costos es el MOD imputable; el
+      // costo ocioso se va al estado de resultados como otro egreso.
+      expect(r.idleCapacity.destination).toBe('perdida-del-periodo');
+      expect(DESTINO_COSTO_CAPACIDAD_OCIOSA).toBe('perdida-del-periodo');
+      expect(r.totalMod.toNumber()).toBe(r.idleCapacity.applicableMod.toNumber());
+      expect(r.totalMod.toNumber()).toBeCloseTo(1337777.78, 2);
+      // Y lo que sale del producto es exactamente la pérdida, ni un peso más.
+      expect(r.idleCapacity.fullMod.subtract(r.totalMod).toNumber()).toBeCloseTo(104722.22, 2);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// F) Desglose por TIPO DE IMPRODUCTIVIDAD (Clase 10) y cartel
+// ---------------------------------------------------------------------------
+
+/**
+ * Los dos tipos salen de la Clase 10, que clasifica las horas improductivas en
+ * INFORMADAS («la empresa conoce la causa con anterioridad o la registra
+ * formalmente») y OCULTAS («no se informan; surgen del análisis del contador de
+ * costos», comparando el tiempo real con el tiempo estándar). No hay un tercero.
+ *
+ * El caso replica el Práctico 8 «El Descanso SA», departamento Corte:
+ *   presencia 880 hs − tiempos perdidos 90 hs = 790 hs netas productivas
+ *   790 hs − 750 hs de tiempo estándar        =  40 hs de improductividad oculta
+ */
+describe('Hoja 2 — Tipos de improductividad (Clase 10, Práctico 8 «El Descanso SA»)', () => {
+  // Costo total elegido para que la hora de presencia valga $195 exactos, que es
+  // el costo unitario del práctico (jornal $100 + cargas 95 %).
+  const CORTE = {
+    name: 'Corte',
+    basicRemuneration: 880 * 195,
+    hoursWorked: 880,
+    productiveHours: 790,
+    standardHours: 750,
+  };
+  const r = calcDepartmentMod(CORTE, Percentage.zero());
+
+  it('separa los dos tipos: 90 hs informadas y 40 hs ocultas', () => {
+    expect(r.idleCapacity.breakdown).toHaveLength(2);
+    const [informadas, ocultas] = r.idleCapacity.breakdown;
+    expect(informadas!.tipo).toBe('tiempos-perdidos-informados');
+    expect(informadas!.hours.toNumber()).toBe(90);
+    expect(ocultas!.tipo).toBe('improductividad-oculta');
+    expect(ocultas!.hours.toNumber()).toBe(40);
+  });
+
+  it('valoriza como el práctico: informados $17.550 y ocultas $7.800', () => {
+    expect(r.idleCapacity.breakdown[0]!.cost.toNumber()).toBeCloseTo(17550, 2);
+    expect(r.idleCapacity.breakdown[1]!.cost.toNumber()).toBeCloseTo(7800, 2);
+  });
+
+  it('los tipos suman EXACTAMENTE el costo ocioso: no hay residuo de redondeo', () => {
+    const suma = Money.sum(r.idleCapacity.breakdown.map((b) => b.cost));
+    expect(suma.toNumber()).toBe(r.idleCapacity.idleCost.toNumber());
+    expect(r.idleCapacity.idleCost.toNumber()).toBeCloseTo(25350, 2);
+  });
+
+  it('las horas imputables al producto son el tiempo estándar (750 hs)', () => {
+    expect(r.idleCapacity.chargeableHours.toNumber()).toBe(750);
+    expect(r.idleCapacity.standardHours!.toNumber()).toBe(750);
+    expect(r.idleCapacity.idleHours.toNumber()).toBe(130);
+  });
+
+  it('la tarifa horaria no se mueve: sigue siendo el costo de la hora de presencia', () => {
+    expect(r.hourlyRate.toNumber()).toBeCloseTo(195, 2);
+  });
+
+  it('sin tiempo estándar declarado no hay improductividad oculta (retrocompat)', () => {
+    const sinEstandar = calcDepartmentMod(
+      { name: 'Corte', basicRemuneration: 880 * 195, hoursWorked: 880, productiveHours: 790 },
+      Percentage.zero(),
+    );
+    expect(sinEstandar.idleCapacity.standardHours).toBeNull();
+    expect(sinEstandar.idleCapacity.breakdown).toHaveLength(1);
+    expect(sinEstandar.idleCapacity.breakdown[0]!.tipo).toBe('tiempos-perdidos-informados');
+    expect(sinEstandar.idleCapacity.chargeableHours.toNumber()).toBe(790);
+  });
+
+  it('trabajar POR ENCIMA del estándar no genera improductividad oculta negativa', () => {
+    const mejorQueElEstandar = calcDepartmentMod(
+      { ...CORTE, standardHours: 900 },
+      Percentage.zero(),
+    );
+    expect(mejorQueElEstandar.idleCapacity.breakdown).toHaveLength(1);
+    expect(mejorQueElEstandar.idleCapacity.chargeableHours.toNumber()).toBe(790);
+  });
+
+  describe('motivos de los tiempos perdidos informados', () => {
+    // Los motivos del Práctico 8 para Corte: 25 + 5 + 5 + 55 = 90 hs.
+    const conMotivos = calcDepartmentMod(
+      {
+        ...CORTE,
+        informedLostTime: [
+          { reason: 'Falta de material', hours: 25 },
+          { reason: 'Gestiones personales', hours: 5 },
+          { reason: 'Corte de energía', hours: 5 },
+          { reason: 'Descanso (desayuno/merienda)', hours: 55 },
+        ],
+      },
+      Percentage.zero(),
+    );
+    const motivos = conMotivos.idleCapacity.breakdown[0]!.reasons;
+
+    it('discrimina los cuatro motivos del práctico', () => {
+      expect(motivos.map((m) => m.reason)).toEqual([
+        'Falta de material',
+        'Gestiones personales',
+        'Corte de energía',
+        'Descanso (desayuno/merienda)',
+      ]);
+      expect(motivos.map((m) => m.hours.toNumber())).toEqual([25, 5, 5, 55]);
+    });
+
+    it('los motivos suman las 90 hs y los $17.550 del tipo', () => {
+      const horas = motivos.reduce((a, m) => a + m.hours.toNumber(), 0);
+      expect(horas).toBe(90);
+      expect(Money.sum(motivos.map((m) => m.cost)).toNumber()).toBeCloseTo(17550, 2);
+    });
+
+    it('si los motivos no cubren el total, el resto va a «Sin discriminar»', () => {
+      const parcial = calcDepartmentMod(
+        { ...CORTE, informedLostTime: [{ reason: 'Falta de material', hours: 25 }] },
+        Percentage.zero(),
+      );
+      const rs = parcial.idleCapacity.breakdown[0]!.reasons;
+      expect(rs.map((m) => m.reason)).toEqual(['Falta de material', 'Sin discriminar']);
+      expect(rs[1]!.hours.toNumber()).toBe(65);
+    });
+
+    it('si los motivos se pasan del total, se recortan: el desglose nunca contradice al total', () => {
+      const excedido = calcDepartmentMod(
+        { ...CORTE, informedLostTime: [{ reason: 'Falta de material', hours: 999 }] },
+        Percentage.zero(),
+      );
+      const rs = excedido.idleCapacity.breakdown[0]!.reasons;
+      expect(rs).toHaveLength(1);
+      expect(rs[0]!.hours.toNumber()).toBe(90);
+    });
+  });
+
+  describe('cartel de capacidad ociosa', () => {
+    const hoja = calcDirectLabor({
+      ...example,
+      itcs: { derivationBase: 0, fixedArt: 0, sacFraction: 0, uncertainRemunerative: [], uncertainNonRemunerative: [] },
+      workingDays: {
+        ...example.workingDays,
+        paidAbsence: { holidays: 0, vacations: 0, sickness: 0, specialLeaves: 0, workAccidents: 0 },
+      },
+      departments: [CORTE],
+    });
+
+    it('levanta cartel cuando hay ociosidad, con el importe y el desglose adentro', () => {
+      const alerta = hoja.idleCapacity.alert!;
+      expect(alerta).not.toBeNull();
+      expect(alerta.title).toBe('Pérdida por capacidad ociosa');
+      expect(alerta.cost.toNumber()).toBeCloseTo(25350, 2);
+      expect(alerta.message).toContain('Tiempos perdidos informados');
+      expect(alerta.message).toContain('Improductividad oculta');
+      expect(alerta.message).toContain('estado de resultados');
+    });
+
+    it('130 hs sobre 880 de presencia ≈ 14,77 % → advertencia, no crítico', () => {
+      expect(hoja.idleCapacity.alert!.sharePercent.toNumber()).toBeCloseTo(14.77, 2);
+      expect(hoja.idleCapacity.alert!.level).toBe('advertencia');
+    });
+
+    it('a partir del 20 % de la presencia el cartel pasa a crítico', () => {
+      const grave = calcDirectLabor({
+        ...example,
+        itcs: { derivationBase: 0, fixedArt: 0, sacFraction: 0, uncertainRemunerative: [], uncertainNonRemunerative: [] },
+        workingDays: {
+          ...example.workingDays,
+          paidAbsence: { holidays: 0, vacations: 0, sickness: 0, specialLeaves: 0, workAccidents: 0 },
+        },
+        departments: [{ name: 'Corte', basicRemuneration: 100000, hoursWorked: 100, productiveHours: 70 }],
+      });
+      expect(grave.idleCapacity.alert!.level).toBe('critico');
+    });
+
+    it('sin ociosidad NO hay cartel: no se molesta al costista con una pérdida de cero', () => {
+      expect(calcDirectLabor(example).idleCapacity.alert).toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G) REGRESIÓN CERO — el cambio de destino no mueve una estructura sin ociosidad
+// ---------------------------------------------------------------------------
+
+describe('Hoja 2 — una estructura SIN ociosidad declarada no se movió un centavo', () => {
+  // Reproduce el criterio anterior ('absorbido-en-el-producto') a mano: costo
+  // COMPLETO de MOD. Si `applicableMod` coincide con él, cambiar el destino no
+  // pudo haber movido nada, cualquiera sea la constante.
+  const casos: Array<[string, DirectLaborConfig]> = [
+    ['ejemplo de cátedra (12.000 HH, ITCS 79,99 %)', example],
+    [
+      'dos departamentos, solo horas pagadas',
+      {
+        ...example,
+        departments: [
+          { name: 'Mecanizado', basicRemuneration: 1500000, hoursWorked: 400 },
+          { name: 'Terminado', basicRemuneration: 1200000, hoursWorked: 350 },
+        ],
+      },
+    ],
+    [
+      'horas productivas declaradas IGUALES a las pagadas',
+      {
+        ...example,
+        departments: [{ name: 'Armado', basicRemuneration: 942500, hoursWorked: 180, productiveHours: 180 }],
+      },
+    ],
+  ];
+
+  for (const [nombre, config] of casos) {
+    describe(nombre, () => {
+      const r = calcDirectLabor(config);
+      const costoCompletoCriterioViejo = Money.sum(r.departments.map((d) => d.totalMod));
+
+      it('la pérdida por capacidad ociosa es CERO exacto', () => {
+        expect(r.idleCapacity.idleCost.toNumber()).toBe(0);
+        expect(r.idleCapacity.hasIdleCapacity).toBe(false);
+        expect(r.idleCapacity.breakdown).toHaveLength(0);
+        expect(r.idleCapacity.alert).toBeNull();
+      });
+
+      it('el MOD que entra al estado de costos es idéntico al del criterio anterior', () => {
+        expect(r.totalMod.toNumber()).toBe(costoCompletoCriterioViejo.toNumber());
+        expect(r.totalMod.toNumber()).toBe(r.idleCapacity.fullMod.toNumber());
+      });
+
+      it('la tarifa horaria de cada departamento sigue siendo costo total ÷ horas pagadas', () => {
+        for (const d of r.departments) {
+          const historica = d.hoursWorked.greaterThan(0)
+            ? d.totalMod.divide(d.hoursWorked).toNumber()
+            : 0;
+          expect(d.hourlyRate.toNumber()).toBe(historica);
+        }
+      });
+    });
+  }
 });

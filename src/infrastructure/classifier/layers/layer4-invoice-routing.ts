@@ -10,6 +10,7 @@ import {
   GASTO_LABELS,
   scoreGasto,
 } from './layer4-keywords.js';
+import { matchKeywords, countKeywords } from '../utils/keyword-match.js';
 
 export const NOTA_VENTA_CONTEXT =
   /\bfactura\s+[abc]?\s*de\s+venta\b|\bventa\s+a\s+cliente\b|\bvendimos\b|\bnota\s+de\s+venta\b|\bpor\s+(la\s+)?venta\b|\bdevoluci[oó]n\s+de\s+(mercader[ií]a\s+)?vendida\b|\bdevoluci[oó]n\s+del?\s+cliente\b|\bel\s+cliente\s+(nos\s+)?devolvi[oó]\b|\bnota\s+de\s+cr[eé]dito\s+a\s+cliente\b/i;
@@ -44,7 +45,7 @@ export function routeFacturaCompra(
   _industryCategory: IndustryCategory,
 ): Layer4Result {
 
-  const unconditionalCip = UNCONDITIONAL_CIP_KEYWORDS.filter((kw) => lower.includes(kw));
+  const unconditionalCip = matchKeywords(lower, UNCONDITIONAL_CIP_KEYWORDS);
   if (unconditionalCip.length > 0) {
     return {
       costSection: 'COSTOS_INDIRECTOS',
@@ -54,7 +55,14 @@ export function routeFacturaCompra(
     };
   }
 
-  const hasFuel    = /\bgasoil\b|\bcombustible\b|\bnafta\b|\bGNC\b/.test(lower);
+  // Dos arreglos, los dos necesarios ahora que TRANSPORTE dejó de tener
+  // `energyIsMP: true` (que era lo que rescataba al GNC de rebote):
+  //  · el flag `i`: `lower` ya viene en minúsculas, así que la rama `\bGNC\b`
+  //    —escrita en mayúsculas— no matcheaba NUNCA;
+  //  · 'gas natural comprimido': es combustible de vehículo, no la energía del
+  //    depósito. Sin nombrarlo acá empataría con la keyword 'gas natural' de los
+  //    costos indirectos y una carga de GNC escrita en largo caería a la IA.
+  const hasFuel    = /\bgasoil\b|\bcombustible\b|\bnafta\b|\bGNC\b|\bgas natural comprimido\b/i.test(lower);
   // `energ[íi]a` y no `energia`: el texto llega en minúsculas pero SIN plegar
   // acentos, así que la forma acentuada —la ortográficamente correcta y la que
   // imprime la mayoría de las facturas— no matcheaba.
@@ -78,9 +86,9 @@ export function routeFacturaCompra(
   }
 
   const cipKw = [...new Set([...profile.cipKeywords, ...UNIVERSAL_CIP_KEYWORDS])];
-  const mpScore  = profile.mpKeywords.filter((kw)  => lower.includes(kw.toLowerCase())).length;
-  const cipScore = cipKw.filter((kw) => lower.includes(kw.toLowerCase())).length;
-  const modScore = profile.modKeywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
+  const mpScore  = countKeywords(lower, profile.mpKeywords);
+  const cipScore = countKeywords(lower, cipKw);
+  const modScore = countKeywords(lower, profile.modKeywords);
 
   const gasto = scoreGasto(lower);
   if (gasto.score >= 1) {
@@ -114,10 +122,10 @@ export function routeFacturaCompra(
   // `cipCore` = los Costos Indirectos del documento SIN contar el flete/seguro,
   // que es justamente el concepto en disputa. Se usa en los dos caminos de
   // adquisición de abajo (flete facturado aparte y flete en la misma factura).
-  const cipCoreScoreOf = () => cipKw
-    .filter((kw) => !ACQUISITION_INHERENT_KEYWORDS.includes(kw.toLowerCase()))
-    .filter((kw) => lower.includes(kw.toLowerCase()))
-    .length;
+  const cipCoreScoreOf = () => countKeywords(
+    lower,
+    cipKw.filter((kw) => !ACQUISITION_INHERENT_KEYWORDS.includes(kw.toLowerCase())),
+  );
 
   // ── (a) FLETE FACTURADO APARTE que declara ser SOBRE UNA COMPRA (CL-06) ─────
   //
@@ -142,7 +150,7 @@ export function routeFacturaCompra(
       : 'esa compra';
 
     if (mpScore > cipCoreScore) {
-      const matchedMp = profile.mpKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+      const matchedMp = matchKeywords(lower, profile.mpKeywords).slice(0, 3);
       return {
         costSection: 'MATERIA_PRIMA',
         confidence: 92,
@@ -156,7 +164,7 @@ export function routeFacturaCompra(
     }
 
     if (cipCoreScore > mpScore) {
-      const matchedCip = cipKw.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+      const matchedCip = matchKeywords(lower, cipKw).slice(0, 3);
       return {
         costSection: 'COSTOS_INDIRECTOS',
         confidence: 88,
@@ -183,13 +191,13 @@ export function routeFacturaCompra(
   }
 
   // ── (b) Flete/seguro en la MISMA factura que la Materia Prima ───────────────
-  const freightInsuranceMatched = ACQUISITION_INHERENT_KEYWORDS.filter((kw) => lower.includes(kw));
+  const freightInsuranceMatched = matchKeywords(lower, ACQUISITION_INHERENT_KEYWORDS);
   if (freightInsuranceMatched.length > 0 && mpScore >= 1) {
     const cipCoreScore = cipCoreScoreOf();
 
     if (mpScore - cipCoreScore >= SECTION_MARGIN) {
       const conf = 82 + Math.min(mpScore * 3, 13);
-      const matchedMp = profile.mpKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+      const matchedMp = matchKeywords(lower, profile.mpKeywords).slice(0, 3);
       return {
         costSection: 'MATERIA_PRIMA',
         confidence: conf,
@@ -218,7 +226,7 @@ export function routeFacturaCompra(
 
   if (mpScore > cipScore && mpScore >= 1) {
     const conf = 82 + Math.min(mpScore * 3, 15);
-    const matched = profile.mpKeywords.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+    const matched = matchKeywords(lower, profile.mpKeywords).slice(0, 3);
     return {
       costSection: 'MATERIA_PRIMA',
       confidence: conf,
@@ -229,7 +237,7 @@ export function routeFacturaCompra(
 
   if (cipScore > mpScore && cipScore >= 1) {
     const conf = 82 + Math.min(cipScore * 3, 15);
-    const matched = cipKw.filter((kw) => lower.includes(kw.toLowerCase())).slice(0, 3);
+    const matched = matchKeywords(lower, cipKw).slice(0, 3);
     return {
       costSection: 'COSTOS_INDIRECTOS',
       confidence: conf,

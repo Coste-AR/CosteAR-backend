@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DataPointService } from '../../../application/trazabilidad/data-point-service.js';
+import { EvidenceService } from '../../../application/trazabilidad/evidence-service.js';
 import { CalculationRunService } from '../../../application/cost-structures/calculation-run-service.js';
 import { LateDataService } from '../../../application/cost-structures/late-data-service.js';
 import { authenticate } from '../plugins/authenticate.js';
@@ -10,6 +11,8 @@ import {
   validateDataPointSchema,
   requestRevisionSchema,
   imputacionSchema,
+  evidenceSchema,
+  attachEvidenceSchema,
 } from '../../../shared/schemas/trazabilidad.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -46,6 +49,7 @@ function actorFrom(request: FastifyRequest, area: string) {
 
 export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<void> {
   const service = new DataPointService();
+  const evidenceService = new EvidenceService();
   const runService = new CalculationRunService();
   const lateDataService = new LateDataService();
 
@@ -170,6 +174,38 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
       actorFrom(request, input.sourceArea),
     );
     return { data: result };
+  });
+
+  // ---------------------------------------------------------------------------
+  // Comprobantes (T-04). Hasta acá, "hasta el comprobante" era una promesa sin
+  // ninguna ruta que la cumpliera: nada en el sistema creaba una fila de
+  // `evidence`.
+  // ---------------------------------------------------------------------------
+
+  // Alta de un comprobante. `file` es opcional: sin almacenamiento configurado
+  // se registra igual como referencia (fileUrl NULL) y la respuesta lo avisa.
+  app.post('/evidence', { preHandler: authenticate }, async (request, reply) => {
+    const input = evidenceSchema.parse(request.body);
+    const ev = await evidenceService.create(
+      request.authUser!.id,
+      input,
+      actorFrom(request, 'costista'),
+    );
+    return reply.status(201).send({ data: ev });
+  });
+
+  // Adjuntar un comprobante a un dato ya cargado. Crea una VERSIÓN NUEVA del
+  // dato con el comprobante; jamás pisa la vigente (R1).
+  app.post('/data-points/:id/evidence', { preHandler: authenticate }, async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    const input = attachEvidenceSchema.parse(request.body);
+    const result = await evidenceService.attach(
+      request.authUser!.id,
+      id,
+      input,
+      actorFrom(request, input.sourceArea),
+    );
+    return reply.status(201).send({ data: result });
   });
 
   app.post('/data-points/:id/validate', { preHandler: authenticate }, async (request) => {

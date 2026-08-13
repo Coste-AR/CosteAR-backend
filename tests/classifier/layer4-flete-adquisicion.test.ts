@@ -18,9 +18,10 @@
  * POR QUÉ ESTOS TESTS SON DETERMINISTAS Y NO EL HARNESS DEL CORPUS. Corren sobre
  * `runLayer4`, sin tocar Groq ni la base. Esa es exactamente la propiedad que se
  * buscaba: el documento NO tiene que necesitar la IA para clasificarse bien. El
- * harness del corpus (`corpus-avicola.harness.test.ts`) no es determinista —
- * `temperature: 0.05` sin `seed`— así que una sola pasada suya no distingue una
- * mejora real del ruido del muestreo. Esta es la evidencia fuerte.
+ * harness del corpus (`corpus-avicola.harness.test.ts`) depende de la respuesta
+ * de un proveedor externo: desde el fix de determinismo pide `temperature: 0` y
+ * un `seed` fijo, pero `seed` es best-effort y la cuota se agota. Esta sigue
+ * siendo la evidencia fuerte.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';

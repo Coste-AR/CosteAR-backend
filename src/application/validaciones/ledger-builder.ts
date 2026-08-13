@@ -85,6 +85,12 @@ export interface LedgerDraft {
   docDate: Date | null;
   /** Con qué condición frente al IVA se resolvió `amount`. Queda para trazar. */
   condicionIva: CondicionIva;
+  /**
+   * Bandera CL-01: con qué criterio quedó `amount` frente al IVA. Se persiste en
+   * la línea para que el costista pueda distinguir de un vistazo las que se
+   * calcularon con el criterio corregido de las que vienen de antes.
+   */
+  criterioImporteIva: CriterioImporteIva;
 }
 
 /** "YYYY-MM" del mes actual. */
@@ -176,6 +182,66 @@ function pickCostAmount(ed: ExtractedData | null, condicion: CondicionIva): numb
     : pickCostAmountResponsableInscripto(ed);
 }
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * CL-01 — CON QUÉ CRITERIO QUEDÓ EL IMPORTE DE LA LÍNEA
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * La corrección CL-01 arregló las líneas NUEVAS, pero las que se crearon antes
+ * siguen cargando el total con IVA. La decisión de producto fue MARCAR, no
+ * reescribir: ningún importe se recalcula ni se pisa, se hace visible cuáles
+ * pueden estar sobrevaluados.
+ *
+ * Para que esa marca signifique lo mismo en las filas viejas y en las nuevas,
+ * la nomenclatura es una sola: la migración `20260813120000_add_criterio_
+ * importe_iva` estampa las filas existentes leyendo el comprobante guardado, y
+ * esta función estampa cada línea nueva en el momento de crearla.
+ *
+ * `ANTERIOR_A_LA_CORRECCION` NO sale nunca de acá: es imposible de producir con
+ * el código corregido. Solo lo escribe la migración, sobre filas que ya estaban.
+ */
+export type CriterioImporteIva =
+  /** El importe es el neto: el IVA quedó fuera del costo (Responsable Inscripto). */
+  | 'NETO_SIN_IVA'
+  /** El total ES el costo: el IVA no se recupera, o el comprobante no lo discrimina. */
+  | 'TOTAL_CON_IVA'
+  /** Línea creada con el criterio viejo: puede estar sobrevaluada por el IVA. */
+  | 'ANTERIOR_A_LA_CORRECCION'
+  /** No verificable contra el comprobante. */
+  | 'SIN_EVIDENCIA'
+  /** La tipeó el costista a mano. */
+  | 'CARGA_MANUAL';
+
+/**
+ * Clasifica el importe YA elegido. No decide el monto ni toca la precedencia:
+ * la lee. Por eso `pickCostAmountResponsableInscripto` —que está congelada y
+ * comparada contra un oráculo— queda intacta.
+ */
+function criterioDelImporte(
+  ed: ExtractedData | null,
+  condicion: CondicionIva,
+  amount: number,
+): CriterioImporteIva {
+  // Monotributo / exento: el IVA no se recupera, es costo. El total es correcto.
+  if (ivaEsCosto(condicion)) return 'TOTAL_CON_IVA';
+
+  const net = usableNumber(ed?.netAmount);
+  const total = usableNumber(ed?.totalAmount);
+  const tax = usableNumber(ed?.taxAmount);
+
+  // El neto según la precedencia de CL-01: netAmount, y si no, total − IVA.
+  const neto =
+    net != null
+      ? net
+      : total != null && tax != null && tax > 0 && tax < total
+        ? a4Decimales(total - tax)
+        : null;
+
+  // Sin neto y sin IVA discriminado (Factura C, ticket) el total ES el costo.
+  if (neto == null) return total != null && amount === total ? 'TOTAL_CON_IVA' : 'SIN_EVIDENCIA';
+  return amount === neto ? 'NETO_SIN_IVA' : 'SIN_EVIDENCIA';
+}
+
 /** Parsea una fecha "YYYY-MM-DD" (u otros formatos comunes) a Date o null. */
 function parseDocDate(raw?: string | null): Date | null {
   if (!raw) return null;
@@ -245,5 +311,6 @@ export function buildLedgerDraft(params: {
     currency: ed?.currency?.trim() || 'ARS',
     docDate,
     condicionIva,
+    criterioImporteIva: criterioDelImporte(ed, condicionIva, amount),
   };
 }

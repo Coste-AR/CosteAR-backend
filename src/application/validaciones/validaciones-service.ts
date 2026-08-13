@@ -202,6 +202,7 @@ export class ValidacionesService {
       supplier: string | null; description: string; amount: number;
       currency: string; docDate: Date | null; sourceImageUrl: string | null;
       confidence: number | null; aiUsed: boolean; wasCorrected: boolean;
+      criterioImporteIva: string;
     } | null = null;
 
     const updated = await this.db.$transaction(async (tx) => {
@@ -306,6 +307,10 @@ export class ValidacionesService {
                 confidence:     audit.confidence,
                 aiUsed:         audit.aiUsed,
                 wasCorrected:   overrode,
+                // Bandera CL-01: con qué criterio quedó el importe frente al
+                // IVA. Se estampa acá para que las líneas nuevas nazcan con la
+                // misma marca que la migración puso en las viejas.
+                criterioImporteIva: draft.criterioImporteIva,
               };
             }
           }

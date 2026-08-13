@@ -5,6 +5,34 @@ export const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 export const TEXT_MODEL   = 'llama-3.3-70b-versatile';
 
+/**
+ * Muestreo determinista para TODAS las llamadas de análisis a Groq.
+ *
+ * POR QUÉ (medido). El clasificador corría con `temperature: 0.05` y sin `seed`.
+ * Dos corridas del MISMO corpus, sin tocar una línea de código, dieron 61,1% y
+ * 66,7% de accuracy. Con esa varianza ninguna medición de mejora es confiable:
+ * un cambio que suba 3 puntos es indistinguible del ruido del muestreo, así que
+ * no se puede saber si una corrección corrige algo. Y para el cliente es peor
+ * todavía: el MISMO comprobante, mandado dos veces, podía terminar en dos
+ * secciones de costo distintas.
+ *
+ * `temperature: 0` sola no alcanza: sigue habiendo desempates no determinísticos
+ * entre tokens de igual probabilidad, y la propia doc de Groq/OpenAI trata a
+ * `seed` como el pedido explícito de reproducibilidad (best-effort: puede
+ * cambiar si el proveedor cambia el backend del modelo; por eso `system_fingerprint`).
+ * Van juntas, y por eso viven acá y no copiadas en cada call site.
+ *
+ * El valor concreto es arbitrario; lo que importa es que NO cambie. Cambiarlo
+ * invalida cualquier comparación contra mediciones anteriores del corpus.
+ */
+export const DETERMINISTIC_SEED = 20260813;
+
+/** Cuerpo base compartido por todos los call sites que piden JSON analítico. */
+export const DETERMINISTIC_SAMPLING = {
+  temperature: 0,
+  seed: DETERMINISTIC_SEED,
+} as const;
+
 export interface GroqResponse {
   choices: { message: { content: string } }[];
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
@@ -76,7 +104,11 @@ export class GroqClient {
             { role: 'user', content: userPrompt },
           ],
           max_tokens: 500,
-          temperature: 0.2,
+          // Mismo criterio que el clasificador: los tres consumidores de este
+          // helper (advisor, nightly-learning, vault-query) producen JSON
+          // analítico que se le muestra al costista o se persiste, no prosa
+          // creativa. Ver DETERMINISTIC_SEED arriba.
+          ...DETERMINISTIC_SAMPLING,
           response_format: { type: 'json_object' },
         }),
       });

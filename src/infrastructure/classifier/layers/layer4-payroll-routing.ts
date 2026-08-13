@@ -1,4 +1,5 @@
 import type { Layer4Result } from './layer4-business-routing.js';
+import { firstKeywordMatch } from '../utils/keyword-match.js';
 
 export const MOD_ROLE_KEYWORDS = [
   'jornalero', 'jornalera', 'jornal', 'operario', 'operaria', 'operarios',
@@ -33,9 +34,12 @@ export const ADMIN_ROLE_KEYWORDS = [
 
 type PayrollRoleBucket = 'MOD' | 'CIP' | 'ADMIN' | 'UNKNOWN';
 
+// Con `includes` a secas, 'gerente' matcheaba adentro de cualquier palabra que
+// lo contuviera y —más grave para estas listas— un puesto como "director" caía
+// también sobre "directorio". El matcheo con límite de palabra distingue los dos
+// y sigue tolerando el plural ("operarios", "gerentes"). Ver utils/keyword-match.ts.
 function matchAnyKeyword(haystack: string, keywords: string[]): string | null {
-  for (const kw of keywords) if (haystack.includes(kw)) return kw;
-  return null;
+  return firstKeywordMatch(haystack, keywords);
 }
 
 export function extractRoleFromText(text: string): string | null {
