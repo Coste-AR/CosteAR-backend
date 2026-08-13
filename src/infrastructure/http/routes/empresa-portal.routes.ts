@@ -6,6 +6,12 @@ import { authenticate } from '../plugins/authenticate.js';
 const inviteOperatorSchema = z.object({
   operatorName: z.string().min(2).max(120).trim(),
   operatorEmail: z.string().email().toLowerCase().trim(),
+  /**
+   * El PUESTO en la empresa ("Jefe de Depósito", "Contador"), no el rol de
+   * login. Opcional: si el costista no lo sabe, "no consta" es más honesto que
+   * un puesto inventado.
+   */
+  jobTitle: z.string().min(2).max(120).trim().optional(),
 });
 
 const submitDocSchema = z.object({
@@ -30,8 +36,14 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
     { preHandler: authenticate },
     async (request, reply) => {
       const { companyId } = request.params as { companyId: string };
-      const { operatorName, operatorEmail } = inviteOperatorSchema.parse(request.body);
-      const result = await svc.inviteOperator(companyId, request.authUser!.id, operatorName, operatorEmail);
+      const { operatorName, operatorEmail, jobTitle } = inviteOperatorSchema.parse(request.body);
+      const result = await svc.inviteOperator(
+        companyId,
+        request.authUser!.id,
+        operatorName,
+        operatorEmail,
+        jobTitle,
+      );
       return reply.status(201).send({ data: result });
     },
   );

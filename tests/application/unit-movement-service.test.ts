@@ -13,6 +13,9 @@ const mockTx = {
   costPeriod: { findFirst: vi.fn() },
   unitMovementSchedule: { findUnique: vi.fn(), upsert: vi.fn() },
   dataPoint: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  // El cuadro resuelve el NOMBRE de quien informó el recuento para mostrarlo en
+  // la procedencia, en vez del id crudo. Llegó con `feat/procedencia-del-recuento-visible`.
+  user: { findUnique: vi.fn(async () => ({ name: 'Operario de planta' })) },
   dataPointVersion: { create: vi.fn(), findFirst: vi.fn() },
   traceAuditLog: { create: vi.fn() },
 };

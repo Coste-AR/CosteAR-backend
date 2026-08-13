@@ -7,6 +7,7 @@ import { LateDataService } from '../cost-structures/late-data-service.js';
 import type {
   CreateDataPointInput,
   AddVersionInput,
+  EvidenceInput,
 } from '../../shared/schemas/trazabilidad.schema.js';
 import { MP_MOVEMENT_FIELD_KEYS } from './orders-input-points.js';
 
@@ -38,6 +39,44 @@ export class DataPointService {
     const s = await this.db.costStructure.findFirst({ where: { id: structureId, userId } });
     if (!s) throw new NotFoundError('Estructura de costos no encontrada');
     return s;
+  }
+
+  /**
+   * LA PUERTA DE ENTRADA DEL RESPALDO DOCUMENTAL (I9).
+   *
+   * El modelo `Evidence` y `DataPointVersion.evidenceId` existían desde la
+   * primera versión de Trazabilidad, y no había forma de crear uno: se podía
+   * *referenciar* un respaldo que nada producía. Acá se crea junto con la
+   * versión que respalda, en la misma transacción — un respaldo que quedara
+   * suelto, sin el número que justifica, no le sirve a nadie.
+   *
+   * Si el llamador manda un `evidenceId` que ya existe, gana ese: adjuntar el
+   * mismo remito a varias cifras es legítimo y no hay que duplicarlo.
+   *
+   * `evidence` no tiene RLS (documentado a propósito en `prisma/rls.sql`): se
+   * protege en la capa de aplicación, y acá eso ya está resuelto porque el
+   * llamador verificó la estructura antes de abrir la transacción.
+   */
+  private async resolveEvidenceId(
+    tx: Prisma.TransactionClient,
+    input: { evidenceId?: string; evidence?: EvidenceInput },
+    actorId: string,
+  ): Promise<string | undefined> {
+    if (input.evidenceId) return input.evidenceId;
+    if (!input.evidence) return undefined;
+
+    const created = await tx.evidence.create({
+      data: {
+        kind: input.evidence.kind,
+        reference: input.evidence.reference,
+        counterparty: input.evidence.counterparty ?? null,
+        fileUrl: input.evidence.fileUrl ?? null,
+        // Quién lo subió y cuándo: los dos campos estaban en el modelo y no se
+        // escribían nunca.
+        uploadedBy: actorId,
+      },
+    });
+    return created.id;
   }
 
   /**
@@ -135,6 +174,7 @@ export class DataPointService {
     input: CreateDataPointInput & { periodoImputado?: string },
     actor: TraceActor,
   ) {
+    const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
     const dp = await tx.dataPoint.create({
       data: {
         structureId,
@@ -155,10 +195,16 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         valueJson: input.valueJson as any,
         reason: input.reason,
-        evidenceId: input.evidenceId,
+        evidenceId,
         method: input.method,
         createdBy: actor.id,
         actorRole: actor.role,
+        // El PUESTO, estampado acá y no leído después de la ficha de la persona:
+        // la gente cambia de puesto, y un dato de marzo tiene que seguir
+        // diciendo el puesto que tenía en marzo (I5c). Viene resuelto en el
+        // actor: acá adentro se escriben muchos datos por guardado, y buscarlo
+        // en cada uno sería una consulta por fila para el mismo dato.
+        actorJobTitle: actor.jobTitle ?? null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
@@ -200,6 +246,7 @@ export class DataPointService {
     input: AddVersionInput,
     actor: TraceActor,
   ) {
+    const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
     const dp = existing;
     const last = await tx.dataPointVersion.findFirst({
       where: { dataPointId: id },
@@ -215,10 +262,16 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         valueJson: input.valueJson as any,
         reason: input.reason,
-        evidenceId: input.evidenceId,
+        evidenceId,
         method: input.method,
         createdBy: actor.id,
         actorRole: actor.role,
+        // El PUESTO, estampado acá y no leído después de la ficha de la persona:
+        // la gente cambia de puesto, y un dato de marzo tiene que seguir
+        // diciendo el puesto que tenía en marzo (I5c). Viene resuelto en el
+        // actor: acá adentro se escriben muchos datos por guardado, y buscarlo
+        // en cada uno sería una consulta por fila para el mismo dato.
+        actorJobTitle: actor.jobTitle ?? null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
@@ -460,6 +513,7 @@ export class DataPointService {
       valueJson: unknown;
       method: string;
       actorRole: string;
+      actorJobTitle?: string | null;
       actorArea: string;
       deviceInfo: string | null;
       createdAt: Date;
@@ -471,10 +525,12 @@ export class DataPointService {
         valueNum: unknown;
         method: string;
         actorRole: string;
+        actorJobTitle?: string | null;
         actorArea: string;
         deviceInfo: string | null;
         createdAt: Date;
         createdByUser: { name: string };
+        evidence?: { kind: string; reference: string; counterparty: string | null; fileUrl: string | null } | null;
       };
       dataPoint: { unit: string | null; label: string };
     }>,
@@ -497,7 +553,19 @@ export class DataPointService {
       key: selfRole,
       value: current.valueNum !== null && current.valueNum !== undefined ? Number(current.valueNum) : null,
       unit: dp.unit,
-      by: { name: current.createdByUser.name, role: current.actorRole, area: current.actorArea },
+      by: {
+        name: current.createdByUser.name,
+        // EL PUESTO GANA sobre el rol de login (I5c). El árbol de derivación ya
+        // imprime `nombre · rol · área`, así que con esto pasa de decir
+        // "Juan Pérez · EMPRESA_OPERATOR · deposito" —que parece preciso y no
+        // dice casi nada— a "Juan Pérez · Jefe de Depósito · deposito", sin
+        // tocar una línea de la pantalla.
+        //
+        // Se cae al rol cuando no hay puesto: el costista no tiene membresía, y
+        // las versiones anteriores a esta feature tampoco lo tienen.
+        role: current.actorJobTitle ?? current.actorRole,
+        area: current.actorArea,
+      },
       at: current.createdAt.toISOString(),
       method: current.method,
       device: current.deviceInfo,
@@ -508,7 +576,11 @@ export class DataPointService {
         key: sib.role ?? sib.dataPoint.label,
         value: sib.version.valueNum !== null && sib.version.valueNum !== undefined ? Number(sib.version.valueNum) : null,
         unit: sib.dataPoint.unit,
-        by: { name: sib.version.createdByUser.name, role: sib.version.actorRole, area: sib.version.actorArea },
+        by: {
+          name: sib.version.createdByUser.name,
+          role: sib.version.actorJobTitle ?? sib.version.actorRole,
+          area: sib.version.actorArea,
+        },
         at: sib.version.createdAt.toISOString(),
         method: sib.version.method,
         device: sib.version.deviceInfo,

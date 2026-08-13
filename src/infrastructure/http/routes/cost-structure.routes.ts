@@ -9,6 +9,7 @@ import { ValidationError } from '../../../domain/errors/domain-error.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
 import {
   createCostStructureSchema,
+  updateLateDataPolicySchema,
   updateSalesSchema,
 } from '../../../shared/schemas/cost.schema.js';
 import { captureMethodSchema } from '../../../shared/schemas/trazabilidad.schema.js';
@@ -85,6 +86,21 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
       request.authUser!.id,
       id,
       costingSystem,
+      auditContext(request),
+    );
+    return { data: updated };
+  });
+
+  // Qué hacer con un dato que llega tarde (período destino ya cerrado). El
+  // motor respeta las tres políticas desde que se construyó la bandeja de
+  // atrasados; esta ruta es el interruptor que faltaba para poder elegirla.
+  app.patch('/cost-structures/:id/late-data-policy', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const { lateDataPolicy } = updateLateDataPolicySchema.parse(request.body);
+    const updated = await service.updateLateDataPolicy(
+      request.authUser!.id,
+      id,
+      lateDataPolicy,
       auditContext(request),
     );
     return { data: updated };

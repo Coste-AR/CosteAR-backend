@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DataPointService } from '../../../application/trazabilidad/data-point-service.js';
 import { EvidenceService } from '../../../application/trazabilidad/evidence-service.js';
@@ -18,12 +18,12 @@ import {
 const idParam = z.object({ id: z.string().uuid() });
 const resolveLateDataSchema = z.object({
   choice: z.enum(['CURRENT_PERIOD', 'REOPEN', 'DISCARD']),
-  // El motivo es obligatorio y largo a propósito: esta decisión mueve plata de
-  // un mes a otro, y dentro de seis meses alguien va a preguntar por qué.
+  // El motivo es obligatorio y largo a propÃ³sito: esta decisiÃ³n mueve plata de
+  // un mes a otro, y dentro de seis meses alguien va a preguntar por quÃ©.
   reason: z
     .string()
     .trim()
-    .min(10, 'Explicá por qué tomaste esta decisión (al menos 10 caracteres). Queda registrado.'),
+    .min(10, 'ExplicÃ¡ por quÃ© tomaste esta decisiÃ³n (al menos 10 caracteres). Queda registrado.'),
 });
 const runsQuery = z.object({
   soloValidadas: z
@@ -36,14 +36,16 @@ const paginationQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
 
-/** Actor de trazabilidad: rol del JWT, área del body, dispositivo de la request. */
+/** Actor de trazabilidad: rol del JWT, Ã¡rea del body, dispositivo de la request. */
 function actorFrom(request: FastifyRequest, area: string) {
   const ua = request.headers['user-agent'] ?? 'desconocido';
   return {
     id: request.authUser!.id,
     role: request.authUser!.role,
+    // El puesto declarado, para estamparlo en la version del dato (I5c).
+    jobTitle: request.authUser!.jobTitle,
     area,
-    device: `${ua} · ${request.ip}`,
+    device: `${ua} Â· ${request.ip}`,
   };
 }
 
@@ -81,9 +83,9 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
   });
 
   // Historial completo de corridas. Por defecto vienen TODAS, incluidas las
-  // automáticas sin validar: esta es la vista de trazabilidad y su razón de ser
+  // automÃ¡ticas sin validar: esta es la vista de trazabilidad y su razÃ³n de ser
   // es no esconder nada. `?soloValidadas=true` para las pantallas que quieren
-  // únicamente lo que un humano firmó.
+  // Ãºnicamente lo que un humano firmÃ³.
   app.get('/structures/:id/runs', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
     const { soloValidadas } = runsQuery.parse(request.query);
@@ -91,17 +93,17 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     return { data: runs };
   });
 
-  // El resultado que vale hoy. Si nadie validó todavía, devuelve la última
-  // corrida automática con `provisorio: true` y el motivo en castellano — no
-  // vacío, que le escondería al costista que el sistema viene calculando.
+  // El resultado que vale hoy. Si nadie validÃ³ todavÃ­a, devuelve la Ãºltima
+  // corrida automÃ¡tica con `provisorio: true` y el motivo en castellano â€” no
+  // vacÃ­o, que le esconderÃ­a al costista que el sistema viene calculando.
   app.get('/structures/:id/resultado-vigente', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
     return { data: await runService.currentResult(request.authUser!.id, id) };
   });
 
-  // Un humano da por buena una corrida automática. No existe el inverso:
-  // validar es un hecho con fecha y autor, y borrarlo dejaría el historial
-  // diciendo que nadie miró algo que sí se miró.
+  // Un humano da por buena una corrida automÃ¡tica. No existe el inverso:
+  // validar es un hecho con fecha y autor, y borrarlo dejarÃ­a el historial
+  // diciendo que nadie mirÃ³ algo que sÃ­ se mirÃ³.
   app.post('/calculation-runs/:id/validate', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
     const result = await runService.validateRun(
@@ -113,11 +115,11 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
   });
 
   // ---------------------------------------------------------------------------
-  // Datos atrasados: los que llegaron para un período ya cerrado.
+  // Datos atrasados: los que llegaron para un perÃ­odo ya cerrado.
   // ---------------------------------------------------------------------------
 
-  // La bandeja del costista. Cada ítem trae las opciones con su CONSECUENCIA
-  // escrita: "¿qué pasa si hago esto?" antes de apretar, no después.
+  // La bandeja del costista. Cada Ã­tem trae las opciones con su CONSECUENCIA
+  // escrita: "Â¿quÃ© pasa si hago esto?" antes de apretar, no despuÃ©s.
   app.get('/late-data-decisions', { preHandler: authenticate }, async (request) => {
     return { data: await lateDataService.listPending(request.authUser!.id) };
   });
@@ -135,8 +137,8 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     return { data: result };
   });
 
-  // Crear un data point (bootstrap de un dato nuevo — la spec no numera este
-  // endpoint explícitamente, pero sin él /versions no tiene sobre qué
+  // Crear un data point (bootstrap de un dato nuevo â€” la spec no numera este
+  // endpoint explÃ­citamente, pero sin Ã©l /versions no tiene sobre quÃ©
   // corregir; ver DECISIONES.md).
   app.post('/structures/:id/data-points', { preHandler: authenticate }, async (request, reply) => {
     const { id: structureId } = idParam.parse(request.params);
@@ -150,7 +152,7 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     return reply.status(201).send({ data: dp });
   });
 
-  // F06 — movimientos de MP con su estado de imputación (incluye los pendientes),
+  // F06 â€” movimientos de MP con su estado de imputaciÃ³n (incluye los pendientes),
   // para que la ficha PPP los muestre y los haga accionables sin ocultar ninguno.
   app.get('/structures/:id/mp-movements', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);

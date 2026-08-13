@@ -1,6 +1,15 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import type { PrismaClient, TermsVersion } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
+
+// Sube tres niveles hasta la raíz del proyecto. Da lo mismo desde `src/` que
+// desde `dist/`: las dos viven a la misma profundidad, y el Dockerfile copia
+// `prisma/` a la imagen de runtime.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const INITIAL_TERMS_PATH = join(ROOT, 'prisma', 'initial-terms.md');
 
 /**
  * TÉRMINOS Y CONDICIONES — versionado explícito.
@@ -28,12 +37,27 @@ export class TermsService {
     const current = await this.getCurrentVersion();
     if (!current) {
       // No debería pasar nunca en un ambiente correctamente booteado — lo
-      // siembra scripts/ensure-initial-terms.mjs antes de aceptar tráfico.
+      // siembra `ensureInitialVersion()` antes de aceptar tráfico.
       // Si pasa, es mejor un 500 ruidoso que dejar registrar gente sin
       // términos vigentes.
       throw new ValidationError('No hay una versión vigente de los Términos y Condiciones. Contactá a soporte.');
     }
     return current;
+  }
+
+  /**
+   * Siembra la versión 1 si no hay ninguna activa. Idempotente: corre en cada
+   * boot (mismo patrón que apply-rls) porque es la única forma de garantizar,
+   * sin que nadie ejecute nada a mano, que un ambiente nuevo o resetado no
+   * quede con `requireCurrentVersion()` tirando error y el registro bloqueado.
+   *
+   * Devuelve la versión creada, o `null` si ya había una y no hizo falta.
+   */
+  async ensureInitialVersion(): Promise<TermsVersion | null> {
+    if (await this.getCurrentVersion()) return null;
+
+    const content = await readFile(INITIAL_TERMS_PATH, 'utf8');
+    return this.db.termsVersion.create({ data: { version: 1, content, isActive: true } });
   }
 
   /**

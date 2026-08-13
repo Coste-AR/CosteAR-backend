@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { UnitMovementService } from '../../../application/cost-structures/process-costing/unit-movement-service.js';
 import { authenticate } from '../plugins/authenticate.js';
@@ -7,7 +7,7 @@ import { unitMovementInputSchema } from '../../../shared/schemas/unit-movement.s
 /**
  * Cuadro de movimiento de unidades (Costeo por Procesos, B15). Solo aplica a
  * estructuras con `costingSystem = 'PROCESSES'`; el servicio devuelve un 422
- * accionable si se llama sobre una de Órdenes.
+ * accionable si se llama sobre una de Ã“rdenes.
  */
 
 const movementParams = z.object({
@@ -16,14 +16,16 @@ const movementParams = z.object({
   periodId: z.string().uuid(),
 });
 
-/** Actor de trazabilidad: rol del JWT, área del body, dispositivo de la request. */
+/** Actor de trazabilidad: rol del JWT, Ã¡rea del body, dispositivo de la request. */
 function actorFrom(request: FastifyRequest, area: string) {
   const ua = request.headers['user-agent'] ?? 'desconocido';
   return {
     id: request.authUser!.id,
     role: request.authUser!.role,
+    // El puesto declarado, para estamparlo en la version del dato (I5c).
+    jobTitle: request.authUser!.jobTitle,
     area,
-    device: `${ua} · ${request.ip}`,
+    device: `${ua} Â· ${request.ip}`,
   };
 }
 

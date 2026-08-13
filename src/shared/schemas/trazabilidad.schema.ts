@@ -34,48 +34,6 @@ export type SourceArea = z.infer<typeof sourceAreaSchema>;
 export type CaptureMethod = z.infer<typeof captureMethodSchema>;
 export type CostElement = z.infer<typeof costElementSchema>;
 
-export const createDataPointSchema = z.object({
-  element: costElementSchema,
-  fieldKey: z.string().min(1).max(200),
-  label: z.string().min(1).max(300),
-  unit: z.string().max(20).optional(),
-  sourceArea: sourceAreaSchema,
-  method: captureMethodSchema.default('manual'),
-  valueNum: z.number().finite().optional(),
-  valueJson: z.unknown().optional(),
-  reason: z.string().min(1).max(500).optional(),
-  evidenceId: z.string().uuid().optional(),
-  fechaHecho: z.string().date().optional(),
-  deviceInfo: z.string().max(300).optional(),
-});
-export type CreateDataPointInput = z.infer<typeof createDataPointSchema>;
-
-export const addVersionSchema = z.object({
-  sourceArea: sourceAreaSchema,
-  method: captureMethodSchema.default('manual'),
-  valueNum: z.number().finite().optional(),
-  valueJson: z.unknown().optional(),
-  reason: z.string().min(1).max(500), // obligatorio: toda corrección declara el porqué
-  evidenceId: z.string().uuid().optional(),
-  fechaHecho: z.string().date().optional(),
-  deviceInfo: z.string().max(300).optional(),
-});
-export type AddVersionInput = z.infer<typeof addVersionSchema>;
-
-export const validateDataPointSchema = z.object({
-  sourceArea: sourceAreaSchema,
-});
-
-export const requestRevisionSchema = z.object({
-  sourceArea: sourceAreaSchema,
-  comment: z.string().min(1).max(1000),
-});
-
-export const imputacionSchema = z.object({
-  sourceArea: sourceAreaSchema,
-  periodo: z.string().regex(/^\d{4}-\d{2}$/, 'Formato de período: YYYY-MM'),
-});
-
 /**
  * Los seis tipos de comprobante del manual. Enum cerrado a propósito: el tipo
  * es lo primero que mira quien audita ("¿esto es una factura o un acta?"), y
@@ -97,13 +55,27 @@ export const evidenceKindSchema = z.enum([
 export type EvidenceKind = z.infer<typeof evidenceKindSchema>;
 
 /**
- * Alta de un comprobante.
+ * EL RESPALDO DOCUMENTAL de un número: la factura, el remito, el papel que
+ * prueba que ese costo existió.
+ *
+ * Estaba escrito desde la primera versión de Trazabilidad y no lo importaba
+ * nadie: el modelo `Evidence` existía, `DataPointVersion.evidenceId` existía, y
+ * no había ninguna forma de CREAR uno. Lo único posible era referenciar un
+ * respaldo que nada producía.
+ *
+ * Hay DOS caminos para crear uno, y son complementarios:
+ *   · junto con el dato — este esquema, embebido en `createDataPointSchema` /
+ *     `addVersionSchema`. Es el caso normal: llega la factura y se carga el dato.
+ *   · sobre un dato YA cargado — `POST /evidence` + `POST /data-points/:id/evidence`
+ *     (ver `evidence-service.ts`). Es el caso de T-04: el número ya estaba y el
+ *     comprobante aparece después. Ese camino agrega una VERSIÓN nueva del dato,
+ *     nunca pisa la vigente.
  *
  * `file` es OPCIONAL y lo es de verdad: el manual admite explícitamente un
- * comprobante "NULL si es referencia sin archivo". Un comprobante que existe
- * en el mundo (factura A 0001-00012345 de Proveedor SA) y del que no tenemos
- * el PDF sigue siendo infinitamente más auditable que no tener nada — así que
- * el alta no depende de que haya almacenamiento configurado.
+ * comprobante "NULL si es referencia sin archivo". Un comprobante que existe en
+ * el mundo (factura A 0001-00012345 de Proveedor SA) y del que no tenemos el PDF
+ * sigue siendo infinitamente más auditable que no tener nada — así que el alta
+ * no depende de que haya almacenamiento configurado.
  */
 export const evidenceSchema = z.object({
   kind: evidenceKindSchema,
@@ -130,6 +102,62 @@ export const evidenceSchema = z.object({
     .optional(),
 });
 export type EvidenceInput = z.infer<typeof evidenceSchema>;
+
+export const createDataPointSchema = z.object({
+  element: costElementSchema,
+  fieldKey: z.string().min(1).max(200),
+  label: z.string().min(1).max(300),
+  unit: z.string().max(20).optional(),
+  sourceArea: sourceAreaSchema,
+  method: captureMethodSchema.default('manual'),
+  valueNum: z.number().finite().optional(),
+  valueJson: z.unknown().optional(),
+  reason: z.string().min(1).max(500).optional(),
+  /** Un respaldo que YA existe. Para adjuntar uno nuevo, usar `evidence`. */
+  evidenceId: z.string().uuid().optional(),
+  /**
+   * El respaldo documental de este valor, para crearlo junto con el dato. Es la
+   * puerta de entrada que faltaba: `evidenceId` solo servía para referenciar un
+   * `Evidence` que nada producía.
+   */
+  evidence: evidenceSchema.optional(),
+  fechaHecho: z.string().date().optional(),
+  deviceInfo: z.string().max(300).optional(),
+});
+export type CreateDataPointInput = z.infer<typeof createDataPointSchema>;
+
+export const addVersionSchema = z.object({
+  sourceArea: sourceAreaSchema,
+  method: captureMethodSchema.default('manual'),
+  valueNum: z.number().finite().optional(),
+  valueJson: z.unknown().optional(),
+  reason: z.string().min(1).max(500), // obligatorio: toda corrección declara el porqué
+  /** Un respaldo que YA existe. Para adjuntar uno nuevo, usar `evidence`. */
+  evidenceId: z.string().uuid().optional(),
+  /**
+   * El respaldo documental de este valor, para crearlo junto con el dato. Es la
+   * puerta de entrada que faltaba: `evidenceId` solo servía para referenciar un
+   * `Evidence` que nada producía.
+   */
+  evidence: evidenceSchema.optional(),
+  fechaHecho: z.string().date().optional(),
+  deviceInfo: z.string().max(300).optional(),
+});
+export type AddVersionInput = z.infer<typeof addVersionSchema>;
+
+export const validateDataPointSchema = z.object({
+  sourceArea: sourceAreaSchema,
+});
+
+export const requestRevisionSchema = z.object({
+  sourceArea: sourceAreaSchema,
+  comment: z.string().min(1).max(1000),
+});
+
+export const imputacionSchema = z.object({
+  sourceArea: sourceAreaSchema,
+  periodo: z.string().regex(/^\d{4}-\d{2}$/, 'Formato de período: YYYY-MM'),
+});
 
 /**
  * Adjuntar un comprobante YA creado a un dato existente. Nunca pisa la versión
