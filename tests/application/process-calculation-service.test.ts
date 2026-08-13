@@ -197,4 +197,38 @@ describe('ProcessCalculationService', () => {
     expect(report.departments[0]!.report.costoUnitarioTotalAcumulado).toBe(2);
     expect(mockTx.calculationRun.create).not.toHaveBeenCalled();
   });
+
+  /**
+   * H12 — el factor de conversión declarado en el setup tiene que LLEGAR al
+   * motor. La matemática está en `unidades-entre-departamentos-motor.test.ts`;
+   * lo que se prueba acá es la cañería: si el servicio no lo pasa, el motor
+   * calcula con factor 1 y el costo sale multiplicado por el factor sin avisar.
+   */
+  it('le pasa al motor el factor de conversión del departamento (H12)', async () => {
+    const { ProcessCalculationService } = await import(
+      '@/application/cost-structures/process-costing/process-calculation-service.js'
+    );
+    primeHappyPath();
+
+    // Extracción mide en toneladas, Concentración en litros: 1 t → 500 l.
+    mockTx.processDepartment.findMany.mockResolvedValue([
+      { id: 'dept-1', name: 'Extracción', sequence: 1, defaultConversionAvanceEqualsMO: true, conversionFromPrevious: null },
+      { id: 'dept-2', name: 'Concentración', sequence: 2, defaultConversionAvanceEqualsMO: true, conversionFromPrevious: 500 },
+    ]);
+    mockTx.unitMovementSchedule.findUnique.mockImplementation(({ where }: never) =>
+      Promise.resolve(
+        where.departmentId_periodId.departmentId === 'dept-1'
+          ? // 8.500 toneladas por $425.000.000 = $50.000 la tonelada.
+            { ...scheduleRow, startedInProduction: 8500, transferredOut: 8500, periodCostMp: 340000000, periodCostMo: 85000000 }
+          : // Recibe 8.500 × 500 = 4.250.000 litros y no agrega costo propio.
+            { ...scheduleRow, startedInProduction: 0, receivedFromPrevious: 4250000, transferredOut: 4250000, periodCostMp: 0, periodCostMo: 0, initialWipCostPrevDept: 0 },
+      ),
+    );
+
+    const service = new ProcessCalculationService(mockTx as never);
+    const report = await service.getProductionReport('user-1', 'st-1', PERIOD);
+
+    // $50.000 la tonelada ÷ 500 = $100 el litro. Sin el factor daría $50.000.
+    expect(report.finalUnitCost).toBe(100);
+  });
 });
