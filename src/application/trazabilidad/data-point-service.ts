@@ -10,6 +10,7 @@ import type {
   EvidenceInput,
 } from '../../shared/schemas/trazabilidad.schema.js';
 import { MP_MOVEMENT_FIELD_KEYS } from './orders-input-points.js';
+import { buildAiProvenance, type AiProvenance } from './ai-provenance.js';
 
 /**
  * Servicio de Trazabilidad Total v1 (spec secciones A y C).
@@ -170,8 +171,14 @@ export class DataPointService {
      * pertenece el dato en el momento de crearlo. Un comprobante que entra por
      * ingesta no lo sabe —de ahí toda la maquinaria de imputación—, pero un
      * valor del cuadro de movimiento sí: se carga PARA un período concreto.
+     *
+     * `dataEntryId` NO está en `createDataPointSchema` a propósito: es interno.
+     * Lo pone el populador de la ingesta (T-06) para que la ficha pueda llegar
+     * hasta el comprobante y su clasificación. Si viajara en el body de la API
+     * cualquier cliente podría atribuirle un documento a un dato que cargó a
+     * mano, que es exactamente la mentira que este campo existe para evitar.
      */
-    input: CreateDataPointInput & { periodoImputado?: string },
+    input: CreateDataPointInput & { periodoImputado?: string; dataEntryId?: string },
     actor: TraceActor,
   ) {
     const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
@@ -208,6 +215,9 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
+        // El documento del que salió el número (T-06). `null` cuando lo cargó
+        // una persona: la ficha lee esa ausencia como "sin sello de IA".
+        dataEntryId: input.dataEntryId ?? null,
       },
     });
     await recordTraceAudit(
@@ -243,7 +253,8 @@ export class DataPointService {
     tx: Prisma.TransactionClient,
     id: string,
     existing: { fechaHecho: Date | null },
-    input: AddVersionInput,
+    /** `dataEntryId`: ver la nota en `createInTx` — interno, nunca del body. */
+    input: AddVersionInput & { dataEntryId?: string },
     actor: TraceActor,
   ) {
     const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
@@ -275,6 +286,10 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
+        // Documento de origen de ESTA versión (T-06). Se estampa por versión,
+        // no por dato: una compra que entró por factura y después la corrigió
+        // el costista a mano tiene que dejar de mostrar el sello de IA.
+        dataEntryId: input.dataEntryId ?? null,
       },
     });
     // Una corrección invalida cualquier firma previa: vuelve a 'borrador'
@@ -471,12 +486,20 @@ export class DataPointService {
       }
     }
 
+    // PROCEDENCIA IA (T-06). OPCIONAL a propósito: la clave solo aparece cuando
+    // la versión vigente entró por la ingesta de comprobantes. Todo consumidor
+    // que ya existía sigue recibiendo exactamente el mismo objeto que antes, y
+    // un dato cargado a mano no trae la clave — la ficha lee esa ausencia como
+    // "acá no intervino ninguna IA" y no dibuja sello.
+    const aiProvenance: AiProvenance | null = await buildAiProvenance(this.db, current);
+
     return {
       id: dp.id,
       label: dp.label,
       display,
       status: dp.status,
       signedBy,
+      ...(aiProvenance ? { aiProvenance } : {}),
       fields,
       periods: {
         hecho: dp.fechaHecho ? dp.fechaHecho.toISOString().slice(0, 10) : null,

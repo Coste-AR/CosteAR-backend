@@ -876,6 +876,9 @@ model DataEntry {
 
   history              ValidationHistory[]
   classificationAudits ClassificationAudit[]
+  // Datos trazables que nacieron de este documento (T-06). Es el puente que
+  // permite ir del número de la ficha a la clasificación que lo produjo.
+  dataPointVersions    DataPointVersion[]
 
   @@index([connectionId])
   @@index([costistId, status])
@@ -1158,10 +1161,36 @@ model DataPointVersion {
   actorJobTitle String?
   actorArea     SourceArea
   deviceInfo    String?
-  createdAt     DateTime      @default(now()) @db.Timestamptz
+
+  /**
+   * EL DOCUMENTO DEL QUE SALIÓ ESTE VALOR, cuando salió de uno (T-06).
+   *
+   * `method` ya decía CÓMO entró el dato ('ia_sugerido'), pero no de DÓNDE: no
+   * había forma de ir de un número de la ficha a la factura que lo originó ni,
+   * a través de ella, a la `ClassificationAudit` que explica por qué la IA lo
+   * mandó a esa sección. La ficha podía decir "lo sugirió la IA" y nada más —
+   * que es justamente la mitad que no sirve para auditar.
+   *
+   * Nullable y así se queda: la enorme mayoría de los datos se cargan a mano,
+   * y para esos la ausencia de documento es un hecho, no un faltante. La ficha
+   * lo lee así: sin `dataEntryId` no se dibuja ningún sello de IA.
+   *
+   * `NoAction` y no `SetNull`/`Cascade`, a diferencia del resto del esquema:
+   * esta tabla es append-only POR TRIGGER (`data_point_versions_append_only`,
+   * que rechaza todo UPDATE sin excepción). Un `SET NULL` en cascada es un
+   * UPDATE, así que borrar el documento fallaría igual, pero con un error de
+   * append-only que no explica nada. `NoAction` dice la verdad: no se borra un
+   * documento del que cuelgan números costeados; primero se purgan sus
+   * versiones, que es exactamente lo que ya hace `cost-structure-deletion-service`.
+   */
+  dataEntryId String?    @db.Uuid
+  dataEntry   DataEntry? @relation(fields: [dataEntryId], references: [id], onDelete: NoAction)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
 
   @@unique([dataPointId, versionN])
   @@index([dataPointId])
+  @@index([dataEntryId])
   @@map("data_point_versions")
 }
 

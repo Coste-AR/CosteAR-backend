@@ -4,7 +4,12 @@ import type {
   DirectLaborConfig,
   IndirectCostConfig,
 } from '../../shared/schemas/cost.schema.js';
-import { nombreDeCentro } from '../../shared/schemas/cost.schema.js';
+import {
+  nombreDeCentro,
+  rawMaterialSectionSchema,
+  directLaborConfigSchema,
+  indirectCostConfigSchema,
+} from '../../shared/schemas/cost.schema.js';
 import type {
   CaptureMethod,
   CostElement,
@@ -183,6 +188,48 @@ export function modDeptHoursKey(deptName: string): string {
 /** CIP real de un centro productivo. */
 export function cipCenterActualCipKey(centerId: string): string {
   return `cip.centro.${centerId}.cipReal`;
+}
+
+// ---------------------------------------------------------------------------
+// Config guardada → insumos trazables
+// ---------------------------------------------------------------------------
+
+/** Forma que guarda la sección de venta (no tiene schema propio de config). */
+export interface SalesSnapshot {
+  unitPrice: number;
+  quantity: number;
+  productionQuantity: number | null;
+}
+
+/**
+ * Insumos trazables que declara el JSON YA GUARDADO de una sección.
+ *
+ * Devuelve `null` —no `[]`— cuando la config no parsea. La diferencia es
+ * crítica y por eso no se puede colapsar: el reconciliador ANULA todo insumo
+ * que esté guardado y no aparezca en `desired`, así que una lista vacía por
+ * error de parseo borraría la traza de la sección entera. `null` significa "no
+ * sé qué declara esta config" y el llamador tiene que abstenerse de reconciliar.
+ */
+export function sectionPointsFrom(
+  section: OrdersSection,
+  config: unknown,
+  period: string,
+): DesiredPoint[] | null {
+  if (config === null || config === undefined) return [];
+  try {
+    switch (section) {
+      case 'rawMaterial':
+        return rawMaterialPoints(rawMaterialSectionSchema.parse(config), period);
+      case 'directLabor':
+        return directLaborPoints(directLaborConfigSchema.parse(config), period);
+      case 'indirectCosts':
+        return indirectCostPoints(indirectCostConfigSchema.parse(config), period);
+      case 'sales':
+        return salesPoints(config as SalesSnapshot, period);
+    }
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

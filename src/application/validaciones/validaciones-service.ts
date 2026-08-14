@@ -474,6 +474,9 @@ export class ValidacionesService {
             costStructureId:     entry.costStructureId,
             amount:              lp?.amount ?? null,
             processDepartmentId: input.processDepartmentId ?? null,
+            // T-06: el documento de origen viaja para que los datos que produce
+            // esta población queden atados a él (y, por él, a su clasificación).
+            dataEntryId:         entryId,
           }, this.alerts);
           populationWarning = result.skippedReason;
         }
@@ -812,6 +815,7 @@ export class ValidacionesService {
       costStructureId:     entry.costStructureId,
       amount:              Number(ledger.amount),
       processDepartmentId,
+      dataEntryId:         entryId,
     }, this.alerts);
 
     return { populationWarning: result.skippedReason };

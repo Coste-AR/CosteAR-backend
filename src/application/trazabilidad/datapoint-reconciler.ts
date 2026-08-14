@@ -100,6 +100,15 @@ export async function reconcileSectionDataPoints(
     method: CaptureMethod;
     /** Motivo de la versión nueva cuando el valor cambió. */
     reason: string;
+    /**
+     * DOCUMENTO DEL QUE SALIÓ ESTE GUARDADO (T-06), cuando salió de uno.
+     *
+     * Lo manda la ingesta de comprobantes y nadie más: un guardado del
+     * formulario no tiene documento y no debe estampar ninguno. Se aplica a lo
+     * que este guardado CREA o VERSIONA — nunca a las reparaciones de huérfanos,
+     * que por definición son datos que ya estaban antes de que llegara el papel.
+     */
+    dataEntryId?: string;
     dataPoints?: DataPointService;
   },
 ): Promise<ReconcileResult> {
@@ -146,6 +155,16 @@ export async function reconcileSectionDataPoints(
   // el mismo valor: no lo cargó quien está guardando ahora.
   const previousValues = new Map(params.previous.map((d) => [d.identity, d.valueNum]));
 
+  /**
+   * ¿Este insumo se estampa con el documento de origen? Solo si el guardado
+   * traía uno Y el insumo no declara método propio: un `DesiredPoint` con
+   * `method` propio (el presupuesto por centro, que es 'calculado') lo derivó el
+   * sistema del prorrateo, no lo leyó del papel. Atarlo a la factura diría que
+   * ese número salió de ahí, y no salió de ahí.
+   */
+  const stampFor = (want: DesiredPoint): { dataEntryId?: string } =>
+    params.dataEntryId && !want.method ? { dataEntryId: params.dataEntryId } : {};
+
   for (const want of params.desired) {
     const found = byIdentity.get(want.identity);
     byIdentity.delete(want.identity); // lo que sobre al final se anula
@@ -167,6 +186,7 @@ export async function reconcileSectionDataPoints(
           valueJson: valueJsonFor(want, movementIdByGroup),
           reason: params.reason,
           ...(want.fechaHecho ? { fechaHecho: want.fechaHecho } : {}),
+          ...stampFor(want),
         },
         params.actor,
       );
@@ -190,6 +210,9 @@ export async function reconcileSectionDataPoints(
         reason: esReparacion ? MIGRATION_REASON : params.reason,
         ...(want.fechaHecho ? { fechaHecho: want.fechaHecho } : {}),
         ...(want.periodoImputado ? { periodoImputado: want.periodoImputado } : {}),
+        // Una REPARACIÓN es un dato que ya estaba antes de que llegara el
+        // documento: se lo atribuye a la migración, no al papel.
+        ...(esReparacion ? {} : stampFor(want)),
       },
       esReparacion ? { ...params.actor, role: MIGRATED_ACTOR_ROLE } : params.actor,
     );
