@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { RLS_MODELS } from '@/infrastructure/database/prisma.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -193,5 +194,80 @@ describe('cobertura de RLS: ninguna tabla de tenant se queda sin política', () 
 
     // daily_signals es la única exenta de las 12 (ver DECISIONES.md).
     expect(auditadas.filter((t) => EXENTAS[t])).toEqual(['daily_signals']);
+  });
+});
+
+/**
+ * Mapa tabla → modelo de Prisma, leído del schema. Se necesita porque `rls.sql`
+ * habla de TABLAS (`cost_periods`) y la extensión de Prisma de MODELOS
+ * (`CostPeriod`), y ese salto de vocabulario es justo donde se cuelan los errores.
+ */
+function modeloPorTabla(): Map<string, string> {
+  const mapa = new Map<string, string>();
+  for (const m of leerSchema().matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\n\}/g)) {
+    const tabla = m[2].match(/@@map\("([^"]+)"\)/)?.[1];
+    if (tabla) mapa.set(tabla, m[1]);
+  }
+  return mapa;
+}
+
+/**
+ * LA OTRA MITAD DEL AISLAMIENTO, y la que se había roto.
+ *
+ * Tener la política en `rls.sql` no alcanza: las consultas tienen que llegar con
+ * `app.user_id` seteado, y eso lo hace la extensión de `prisma.ts` SOLO para los
+ * modelos de `RLS_MODELS`. Si una tabla tiene política y su modelo no está en esa
+ * lista, la política la rechaza: un INSERT falla con "new row violates row-level
+ * security policy" y un SELECT devuelve cero filas EN SILENCIO.
+ *
+ * Pasó de verdad: C-01 llevó el RLS de 13 a 30 tablas y `RLS_MODELS` quedó con
+ * las 13 viejas. No lo detectó ningún test unitario —el rol local saltea el RLS—
+ * sino el job de integración de CI, que corre con un rol sin BYPASSRLS, al
+ * insertar en `cost_periods`.
+ *
+ * Y destapó un error más viejo: la lista decía 'JointCostByProductLine', que es
+ * el nombre de la TABLA. El modelo se llama `ByProductLine`, así que esa entrada
+ * nunca protegió nada desde el día que se escribió.
+ */
+describe('RLS_MODELS está sincronizado con rls.sql', () => {
+  it('toda tabla con política tiene su modelo en RLS_MODELS', () => {
+    const rls = estadoEnRls();
+    const porTabla = modeloPorTabla();
+
+    const faltantes = [...rls.entries()]
+      .filter(([, e]) => e.policies.length > 0)
+      .map(([tabla]) => ({ tabla, modelo: porTabla.get(tabla) }))
+      .filter((x) => x.modelo && !RLS_MODELS.has(x.modelo));
+
+    expect(
+      faltantes,
+      'Tablas con política cuyo modelo NO está en RLS_MODELS (src/infrastructure/database/prisma.ts).\n' +
+        'Sus consultas nunca reciben el set_config, así que la política las rechaza:\n' +
+        faltantes.map((f) => `  ${f.tabla} → ${f.modelo}`).join('\n'),
+    ).toEqual([]);
+  });
+
+  it('todo modelo de RLS_MODELS existe y su tabla tiene política', () => {
+    // El sentido inverso: una entrada que ya no corresponde a ningún modelo es
+    // un nombre mal escrito que no protege nada y nadie nota, como pasó con
+    // 'JointCostByProductLine'.
+    const rls = estadoEnRls();
+    const porTabla = modeloPorTabla();
+    const modelosConTabla = new Set(porTabla.values());
+    const tablaDeModelo = new Map([...porTabla].map(([t, m]) => [m, t]));
+
+    const fantasmas = [...RLS_MODELS].filter((m) => !modelosConTabla.has(m));
+    expect(fantasmas, `Modelos en RLS_MODELS que no existen en el schema: ${fantasmas.join(', ')}`)
+      .toEqual([]);
+
+    const sinPolitica = [...RLS_MODELS].filter((m) => {
+      const tabla = tablaDeModelo.get(m);
+      return tabla && (rls.get(tabla)?.policies.length ?? 0) === 0;
+    });
+    expect(
+      sinPolitica,
+      `Modelos en RLS_MODELS cuya tabla no tiene política en rls.sql: ${sinPolitica.join(', ')}. ` +
+        'Pagan una transacción por consulta sin recibir protección a cambio.',
+    ).toEqual([]);
   });
 });
