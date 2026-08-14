@@ -738,6 +738,53 @@ export class DataPointService {
   }
 
   /**
+   * T-05 — EL ÍNDICE DE INSUMOS TRAZABLES DE UNA ESTRUCTURA (`fieldKey` → dato).
+   *
+   * Las pantallas de CARGA (Materia Prima, Venta) muestran números que alguien
+   * tipeó: son datos con ficha, y para marcarlos hay que saber a qué `DataPoint`
+   * corresponde cada campo del formulario. El árbol de derivación no sirve para
+   * esto: solo nombra las hojas que participan del cálculo (los movimientos de
+   * MP, el precio y la cantidad vendida) y deja afuera todo lo demás —los cuatro
+   * insumos de Wilson, la existencia inicial, la cantidad producida—, además de
+   * no existir hasta que alguien calcula.
+   *
+   * Devuelve la `fieldKey` tal como la escribe `orders-input-points.ts`, que es
+   * la ÚNICA convención de nombres del sistema: las pantallas arman la misma
+   * clave y buscan por ella. No devuelve valores: el número que se muestra sale
+   * de la config guardada, acá solo viaja el vínculo con la ficha.
+   *
+   * Ámbito de inquilino igual que el resto de la ruta (`requireStructureOwned`);
+   * `DataPoint` además está en `RLS_MODELS`, así que la política de la base
+   * vuelve a filtrar por usuario aunque este chequeo se cayera.
+   */
+  async listDataPoints(userId: string, structureId: string) {
+    await this.requireStructureOwned(userId, structureId);
+
+    const points = await this.db.dataPoint.findMany({
+      where: { structureId, voidedAt: null, status: { not: 'anulado' } },
+      select: {
+        id: true,
+        element: true,
+        fieldKey: true,
+        label: true,
+        unit: true,
+        periodoImputado: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return points.map((dp) => ({
+      id: dp.id,
+      element: dp.element,
+      fieldKey: dp.fieldKey,
+      label: dp.label,
+      unit: dp.unit,
+      periodoImputado: dp.periodoImputado,
+      pending: dp.periodoImputado === null,
+    }));
+  }
+
+  /**
    * F06 — Movimientos de MP (compras/consumos) tal como viven en el store de
    * trazabilidad, agrupados por `movementId`, INCLUYENDO los que todavía no
    * tienen decisión de imputación (`periodoImputado = null`).

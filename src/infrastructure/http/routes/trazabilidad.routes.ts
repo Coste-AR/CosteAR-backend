@@ -160,6 +160,15 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
     return { data: movements };
   });
 
+  // T-05 — índice `fieldKey` → dato de la estructura. Lo usan las pantallas de
+  // CARGA (Materia Prima, Venta) para saber qué ficha abre cada campo que
+  // muestran; el árbol de derivación no alcanza (no nombra los insumos que no
+  // participan del cálculo, y no existe hasta que alguien calcula).
+  app.get('/structures/:id/data-points', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    return { data: await service.listDataPoints(request.authUser!.id, id) };
+  });
+
   app.get('/data-points/:id/trace', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
     const trace = await service.getTrace(request.authUser!.id, id);
