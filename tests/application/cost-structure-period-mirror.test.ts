@@ -64,6 +64,18 @@ function makeDb(periods: Record<string, unknown>[]) {
       findFirst: vi.fn(async () => null),
       create: vi.fn(async () => ({})),
     },
+    // Trazabilidad (T-01): guardar una sección reconcilia sus data points en la
+    // MISMA transacción. Sin data points previos, todo lo de la config se crea.
+    dataPoint: {
+      findMany: vi.fn(async () => []),
+      create: vi.fn(async () => ({ id: 'dp-1' })),
+      update: vi.fn(async () => ({ id: 'dp-1' })),
+    },
+    dataPointVersion: {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async () => ({ id: 'v-1' })),
+    },
+    traceAuditLog: { create: vi.fn(async () => ({})) },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   return db as {

@@ -1,6 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { CostStructureService } from '../../../application/cost-structures/cost-structure-service.js';
+import {
+  CostStructureService,
+  type SaveTrace,
+} from '../../../application/cost-structures/cost-structure-service.js';
 import { CostStructureDeletionService } from '../../../application/cost-structures/cost-structure-deletion-service.js';
 import { ValidationError } from '../../../domain/errors/domain-error.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
@@ -9,9 +12,33 @@ import {
   updateLateDataPolicySchema,
   updateSalesSchema,
 } from '../../../shared/schemas/cost.schema.js';
+import { captureMethodSchema } from '../../../shared/schemas/trazabilidad.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const companyIdParam = z.object({ companyId: z.string().uuid() });
+
+/**
+ * De dónde salieron los números que se están guardando. Por defecto 'manual'
+ * (alguien los tipeó). El importador de Excel manda `?metodo=excel_import` para
+ * que la ficha de cada dato diga que vino de una planilla y no que lo escribió
+ * una persona — la diferencia importa cuando después hay que auditar de dónde
+ * salió un costo.
+ */
+const metodoQuery = z.object({ metodo: captureMethodSchema.default('manual') });
+
+/** Actor de trazabilidad del guardado: id y rol del JWT, dispositivo del request. */
+function saveTrace(request: FastifyRequest): SaveTrace {
+  const { metodo } = metodoQuery.parse(request.query);
+  return {
+    actor: {
+      id: request.authUser!.id,
+      role: request.authUser!.role,
+      area: 'costista',
+      device: `${request.headers['user-agent'] ?? 'desconocido'} · ${request.ip}`,
+    },
+    method: metodo,
+  };
+}
 
 export async function registerCostStructureRoutes(app: FastifyInstance): Promise<void> {
   const service = new CostStructureService();
@@ -163,6 +190,7 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
           key,
           request.body,
           auditContext(request),
+          saveTrace(request),
         );
         return { data: updated };
       },
@@ -179,6 +207,7 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
       salesQuantity,
       auditContext(request),
       productionQuantity,
+      saveTrace(request),
     );
     return { data: updated };
   });

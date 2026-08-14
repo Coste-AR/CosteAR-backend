@@ -6,9 +6,9 @@ function note(extractedData: Record<string, unknown>): string {
 }
 
 describe('buildLedgerDraft', () => {
-  it('usa el total y deriva el período de la fecha del comprobante', () => {
+  it('usa el neto y deriva el período de la fecha del comprobante', () => {
     const d = buildLedgerDraft({
-      aiReviewNote: note({ totalAmount: 12500.5, date: '2026-03-15', supplier: 'Aceros SRL', invoiceNumber: '0001-12' }),
+      aiReviewNote: note({ netAmount: 12500.5, totalAmount: 15125.61, taxAmount: 2625.11, date: '2026-03-15', supplier: 'Aceros SRL', invoiceNumber: '0001-12' }),
       documentType: 'FACTURA_COMPRA',
       fallbackDescription: 'fallback',
     });
@@ -19,8 +19,8 @@ describe('buildLedgerDraft', () => {
     expect(d!.description).toContain('Aceros SRL');
   });
 
-  it('cae al neto cuando no hay total', () => {
-    const d = buildLedgerDraft({ aiReviewNote: note({ netAmount: 999 }), documentType: 'FACTURA_COMPRA', fallbackDescription: 'x' });
+  it('cae al total solo cuando no hay neto ni IVA discriminado (Factura C / ticket)', () => {
+    const d = buildLedgerDraft({ aiReviewNote: note({ totalAmount: 999 }), documentType: 'FACTURA_COMPRA', fallbackDescription: 'x' });
     expect(d!.amount).toBe(999);
   });
 

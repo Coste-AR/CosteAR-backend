@@ -152,10 +152,63 @@ describe('B17 — ProcessCostingEngine · FX-P1 end to end (Azur Alcoholes, abri
     const key = allLeaves.find((l) => l.traceFieldKey === `proceso.cuadro.${PERIOD}.dept-destilado.transferredOut`);
     expect(key).toBeDefined();
     expect(key!.value).toBe(30000);
-    // Toda hoja con traceFieldKey usa el prefijo estable del cuadro de Procesos.
+    // Toda clave del árbol usa uno de los DOS prefijos estables de Procesos:
+    // `proceso.cuadro.` para los datos que alguien cargó (resuelven contra un
+    // DataPoint) y `proceso.informe.` para las cifras calculadas (no resuelven
+    // contra nada: la clave existe para poder ubicar el nodo de un número sin
+    // casar por etiqueta — T-11). Lo que no puede haber es una clave suelta con
+    // otra convención: ahí se rompe el enlace en silencio.
     const keyed = allLeaves.filter((l) => l.traceFieldKey);
     expect(keyed.length).toBeGreaterThan(0);
-    expect(keyed.every((l) => l.traceFieldKey!.startsWith('proceso.cuadro.'))).toBe(true);
+    expect(
+      keyed.every(
+        (l) =>
+          l.traceFieldKey!.startsWith('proceso.cuadro.') ||
+          l.traceFieldKey!.startsWith('proceso.informe.'),
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * T-11 — el informe de costos de producción es la pantalla donde el costista
+   * LEE el resultado, y hasta esta corrección no tenía un solo valor con origen.
+   * No alcanzaba con que el árbol existiera: sus nodos calculados no llevaban
+   * clave, así que la pantalla no tenía forma de decir "este nodo es el costo
+   * unitario acumulado de Purificado" salvo comparando etiquetas.
+   */
+  it('las cifras del informe llevan su clave determinística (período, departamento, campo)', () => {
+    const { tree, results } = engine.run(input);
+    const purificado = tree[1]!;
+    const raiz = `proceso.informe.${PERIOD}.dept-purificado`;
+
+    expect(purificado.traceFieldKey).toBe(`${raiz}.costoUnitarioAcumulado`);
+    expect(purificado.value).toBe(results.departments[1]!.report.costoUnitarioTotalAcumulado);
+
+    const porClave = (campo: string) =>
+      findNode([purificado], (n) => n.traceFieldKey === `${raiz}.${campo}`);
+
+    // Las cifras que el informe muestra y que antes no se podían abrir.
+    expect(porClave('deptoAnterior.costoUnitario')!.value).toBe(
+      results.departments[1]!.report.previousDepartment!.costoUnitarioTransferido,
+    );
+    expect(porClave('acumuladoAJustificar')!.value).toBe(
+      results.departments[1]!.report.costoAcumuladoAJustificar,
+    );
+    expect(porClave('totalJustificado')!.value).toBe(results.departments[1]!.report.totalJustificado);
+    expect(porClave('existenciaFinal')!.value).toBe(
+      results.departments[1]!.report.costoExistenciaFinalPorDiferencia,
+    );
+    expect(porClave('costoModificado')).toBeDefined();
+    expect(porClave('caup')).toBeDefined();
+
+    // Y cada elemento del costo, por elemento y no por su etiqueta de pantalla.
+    for (const e of results.departments[1]!.report.elements) {
+      expect(porClave(`elemento.${e.element}.costoUnitario`)!.value).toBe(e.costoUnitario);
+      expect(porClave(`elemento.${e.element}.costoTotal`)!.value).toBe(e.costoTotal);
+      expect(porClave(`elemento.${e.element}.produccionEquivalente`)!.value).toBe(
+        e.produccionProcesada,
+      );
+    }
   });
 });
 

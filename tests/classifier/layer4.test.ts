@@ -2,15 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { runLayer4 } from '@/infrastructure/classifier/layers/layer4-business-routing.js';
 
 describe('runLayer4', () => {
-  it('routes LIQUIDACION_MOD to MANO_DE_OBRA at 99', () => {
-    const result = runLayer4('LIQUIDACION_MOD', '');
+  it('routes LIQUIDACION_MOD to MANO_DE_OBRA at 99 when the role is a production one', () => {
+    const result = runLayer4('LIQUIDACION_MOD', 'Recibo de sueldo\nPuesto: operario de producción');
     expect(result.costSection).toBe('MANO_DE_OBRA');
     expect(result.confidence).toBe(99);
     expect(result.requiresAI).toBe(false);
   });
 
-  it('routes PLANILLA_HORAS to MANO_DE_OBRA at 99', () => {
-    const result = runLayer4('PLANILLA_HORAS', '');
+  // CL-02: sin puesto NO se afirma mano de obra directa. Antes este mismo caso
+  // (texto vacío → sin rol) devolvía MANO_DE_OBRA / 99 / requiresAI false.
+  it('does not assert MANO_DE_OBRA for a LIQUIDACION_MOD with no role at all', () => {
+    const result = runLayer4('LIQUIDACION_MOD', '');
+    expect(result.requiresAI).toBe(true);
+    expect(result.confidence).toBeLessThan(90);
+  });
+
+  it('routes PLANILLA_HORAS to MANO_DE_OBRA at 99 when the role is a production one', () => {
+    const result = runLayer4('PLANILLA_HORAS', 'Planilla de horas\nPuesto: operario de línea');
     expect(result.costSection).toBe('MANO_DE_OBRA');
     expect(result.confidence).toBe(99);
   });
@@ -310,18 +318,27 @@ describe('runLayer4', () => {
     // (d) Sin puesto extraído → cae al default MOD actual.
     // LIMITACIÓN CONOCIDA: sin señal de rol no se puede distinguir MOD de MOI;
     // se mantiene el comportamiento histórico (MOD) y se documenta en el reasoning.
-    it('falls back to MANO_DE_OBRA when no role is available (known limitation)', () => {
+    // CL-02 — estos dos tests afirmaban la conducta defectuosa que la corrección
+    // elimina. El primero incluso exigía el texto "LIMITACIÓN CONOCIDA", que es
+    // el comentario que el propio código dejaba mientras devolvía confianza 99.
+    //
+    // Regla de la cátedra (Clase 1, l. 59): MOD es quien "transforma la MP en
+    // producto final". Sin el puesto eso no se puede determinar → escalar.
+    it('escalates instead of asserting MOD when no role is available', () => {
       const result = runLayer4('LIQUIDACION_MOD', '', 'DEFAULT', null);
-      expect(result.costSection).toBe('MANO_DE_OBRA');
-      expect(result.confidence).toBe(99);
-      expect(result.requiresAI).toBe(false);
-      expect(result.reasoning).toMatch(/LIMITACIÓN CONOCIDA/);
+      expect(result.requiresAI).toBe(true);
+      expect(result.confidence).toBeLessThan(90);
+      // Ya no puede prometer mano de obra directa cuando no sabe de qué puesto habla.
+      expect(result.reasoning).not.toMatch(/se asume MOD/i);
     });
 
-    it('keeps MOD default for an unrecognized role (does not contradict direct labor)', () => {
+    it('escalates for an unrecognized role instead of defaulting to MOD silently', () => {
       const result = runLayer4('LIQUIDACION_MOD', '', 'DEFAULT', 'coordinador de logística externa');
+      // MANO_DE_OBRA sigue siendo la hipótesis principal —una lista de keywords
+      // nunca es exhaustiva— pero sin confirmar y sin confianza alta.
       expect(result.costSection).toBe('MANO_DE_OBRA');
-      expect(result.requiresAI).toBe(false);
+      expect(result.requiresAI).toBe(true);
+      expect(result.confidence).toBeLessThan(90);
     });
 
     // Fallback por texto: el enrichedText trae "Puesto/Cargo: X".

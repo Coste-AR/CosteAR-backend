@@ -176,6 +176,26 @@ model PasswordReset {
 // Cartera de clientes (PyMEs)
 // ---------------------------------------------------------------------------
 
+/// Condición de la empresa frente al IVA. Decide si el IVA de un comprobante
+/// es COSTO o es CRÉDITO FISCAL, y por lo tanto qué importe entra al costo.
+///
+/// Cátedra (Clase 4, "Materia prima — costo de adquisición, desperdicio y lote
+/// económico", línea 27): "IVA: solo aplica si la empresa es responsable no
+/// inscripta o monotributista; si es responsable inscripta, el IVA no forma
+/// parte del costo de adquisición".
+///
+/// - RESPONSABLE_INSCRIPTO: el IVA se recupera como crédito fiscal → el costo
+///   es el NETO.
+/// - MONOTRIBUTO: no discrimina IVA ni lo recupera → el IVA ES costo, el costo
+///   es el TOTAL.
+/// - EXENTO: tampoco lo recupera (incluye al "responsable no inscripto" que
+///   nombra la cátedra, figura hoy derogada) → el IVA ES costo.
+enum CondicionIva {
+  RESPONSABLE_INSCRIPTO
+  MONOTRIBUTO
+  EXENTO
+}
+
 model Company {
   id          String   @id @default(uuid()) @db.Uuid
   userId      String   @db.Uuid
@@ -192,6 +212,22 @@ model Company {
   // Modelo de períodos (problema C): el RITMO de costeo de la empresa. Se elige
   // una vez y el sistema arma los períodos solo. Por defecto, mensual.
   periodicity Periodicity @default(MONTHLY)
+
+  // Condición frente al IVA: decide si el IVA de cada comprobante entra o no al
+  // costo (ver enum `CondicionIva`). El default es RESPONSABLE_INSCRIPTO porque
+  // es exactamente el supuesto bajo el que se calculó TODO lo que ya está en la
+  // base: el prompt de la IA dice "Asumí Responsable Inscripto por defecto" y
+  // `ledger-builder` costeaba sobre el neto sin preguntar. Cualquier otro
+  // default revaluaría en silencio datos vivos. Ver DECISIONES.md (CL-09).
+  condicionIva CondicionIva @default(RESPONSABLE_INSCRIPTO)
+
+  // Señal de la IA: el comprobante mostró indicios ("Factura C", "Consumidor
+  // Final", "Monotributista", "Responsable No Inscripto") de que la condición
+  // declarada arriba no es la real. Antes esto moría como texto libre dentro de
+  // `qualityNote`; ahora queda como bandera accionable sobre la empresa.
+  condicionIvaRevisar     Boolean   @default(false)
+  condicionIvaRevisarNota String? // Qué se detectó y en qué documento.
+  condicionIvaRevisarAt   DateTime? // Cuándo se levantó la bandera.
 
   costStructures     CostStructure[]
   alerts             Alert[]
@@ -840,6 +876,9 @@ model DataEntry {
 
   history              ValidationHistory[]
   classificationAudits ClassificationAudit[]
+  // Datos trazables que nacieron de este documento (T-06). Es el puente que
+  // permite ir del número de la ficha a la clasificación que lo produjo.
+  dataPointVersions    DataPointVersion[]
 
   @@index([connectionId])
   @@index([costistId, status])
@@ -992,11 +1031,27 @@ model CostLedgerEntry {
   aiUsed         Boolean @default(false)
   wasCorrected   Boolean @default(false) // el costista corrigió antes de aprobar
 
+  // CL-01 — CON QUÉ CRITERIO SE RESOLVIÓ `amount` FRENTE AL IVA.
+  //   NETO_SIN_IVA             el importe es el neto (IVA fuera del costo)
+  //   TOTAL_CON_IVA            el IVA es costo (monotributo/exento) o el
+  //                            comprobante no lo discrimina: el total es el costo
+  //   ANTERIOR_A_LA_CORRECCION línea creada con el criterio viejo: tomó el total
+  //                            con IVA habiendo neto. PUEDE ESTAR SOBREVALUADA
+  //   SIN_EVIDENCIA            no verificable (sin documento de origen legible)
+  //   CARGA_MANUAL             la tipeó el costista
+  // Es una BANDERA, no un recálculo: ningún importe se reescribe (Opción B).
+  criterioImporteIva String?
+  // Cuánto IVA quedó adentro del importe, cuando se pudo medir contra el
+  // comprobante. Es la magnitud de la posible sobrevaluación, no un importe
+  // corregido: nada lo consume para costear.
+  ivaIncluidoEstimado Decimal? @db.Decimal(18, 4)
+
   createdAt DateTime @default(now())
 
   @@index([companyId, period, costSection])
   @@index([costistId, period])
   @@index([dataEntryId])
+  @@index([companyId, criterioImporteIva])
   @@map("cost_ledger_entries")
 }
 
@@ -1106,10 +1161,36 @@ model DataPointVersion {
   actorJobTitle String?
   actorArea     SourceArea
   deviceInfo    String?
-  createdAt     DateTime      @default(now()) @db.Timestamptz
+
+  /**
+   * EL DOCUMENTO DEL QUE SALIÓ ESTE VALOR, cuando salió de uno (T-06).
+   *
+   * `method` ya decía CÓMO entró el dato ('ia_sugerido'), pero no de DÓNDE: no
+   * había forma de ir de un número de la ficha a la factura que lo originó ni,
+   * a través de ella, a la `ClassificationAudit` que explica por qué la IA lo
+   * mandó a esa sección. La ficha podía decir "lo sugirió la IA" y nada más —
+   * que es justamente la mitad que no sirve para auditar.
+   *
+   * Nullable y así se queda: la enorme mayoría de los datos se cargan a mano,
+   * y para esos la ausencia de documento es un hecho, no un faltante. La ficha
+   * lo lee así: sin `dataEntryId` no se dibuja ningún sello de IA.
+   *
+   * `NoAction` y no `SetNull`/`Cascade`, a diferencia del resto del esquema:
+   * esta tabla es append-only POR TRIGGER (`data_point_versions_append_only`,
+   * que rechaza todo UPDATE sin excepción). Un `SET NULL` en cascada es un
+   * UPDATE, así que borrar el documento fallaría igual, pero con un error de
+   * append-only que no explica nada. `NoAction` dice la verdad: no se borra un
+   * documento del que cuelgan números costeados; primero se purgan sus
+   * versiones, que es exactamente lo que ya hace `cost-structure-deletion-service`.
+   */
+  dataEntryId String?    @db.Uuid
+  dataEntry   DataEntry? @relation(fields: [dataEntryId], references: [id], onDelete: NoAction)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
 
   @@unique([dataPointId, versionN])
   @@index([dataPointId])
+  @@index([dataEntryId])
   @@map("data_point_versions")
 }
 
@@ -1125,6 +1206,9 @@ model Evidence {
 
   versions DataPointVersion[]
 
+  // Dueño del comprobante: predicado de la política RLS de la tabla (T-04) y
+  // criterio de listado por costista.
+  @@index([uploadedBy])
   @@map("evidence")
 }
 
@@ -1232,6 +1316,10 @@ model CalculationNode {
   valueNum           Decimal?          @db.Decimal(18, 4)
   unit               String?
   sourceDpVersionIds String[]          @default([])
+  // Clave determinística del motor (T-11). Es la que enlaza el nodo con el dato
+  // que lo origina —cuando lo hay— y, sobre todo, la que le permite a una
+  // pantalla encontrar EL nodo de un número sin casar por etiqueta.
+  traceFieldKey      String?
 
   @@index([runId, parentId, ord])
   @@map("calculation_nodes")

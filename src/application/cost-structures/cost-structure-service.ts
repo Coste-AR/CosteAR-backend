@@ -17,11 +17,23 @@ import {
   applySecondaryAllocationBases,
   type CalculationInput,
 } from '../../domain/calculations/calculate.js';
+import { parseIndirectCostConfigInput } from './validate-inputs.js';
 import { AllocationBaseService } from './allocation-base-service.js';
 import { requireWritablePeriod, type PeriodMirrorData } from './period-sync.js';
 import { codeFromDate } from '../../domain/periods/period-calendar.js';
 import { companyRhythm } from '../../domain/periods/effective-rhythm.js';
 import type { IndirectCostConfig } from '../../shared/schemas/cost.schema.js';
+import type { TraceActor } from '../audit/trace-audit.js';
+import type { CaptureMethod } from '../../shared/schemas/trazabilidad.schema.js';
+import { reconcileSectionDataPoints } from '../trazabilidad/datapoint-reconciler.js';
+import {
+  rawMaterialPoints,
+  directLaborPoints,
+  indirectCostPoints,
+  salesPoints,
+  type DesiredPoint,
+  type OrdersSection,
+} from '../trazabilidad/orders-input-points.js';
 
 /**
  * Gestión de estructuras de costos y ejecución de cálculos.
@@ -30,8 +42,69 @@ import type { IndirectCostConfig } from '../../shared/schemas/cost.schema.js';
  * trazabilidad histórica. La estructura referencia siempre al userId dueño de
  * la empresa (defensa en profundidad + RLS).
  */
+/**
+ * Quién guarda y CÓMO entró el dato. Viaja aparte de `AuditContext` porque la
+ * trazabilidad necesita dos cosas que la auditoría legada no lleva: el ROL del
+ * actor (para firmar la versión del dato) y el MÉTODO de captación ('manual',
+ * 'excel_import', ...). Es opcional en toda la API: si no viene, se asume una
+ * carga manual del costista dueño de la estructura.
+ */
+export interface SaveTrace {
+  actor: TraceActor;
+  method: CaptureMethod;
+}
+
+/** Motivo que queda escrito en la versión del dato, por sección. */
+const SECTION_REASON: Record<OrdersSection, string> = {
+  rawMaterial: 'Carga de la sección Materia Prima',
+  directLabor: 'Carga de la sección Mano de Obra Directa',
+  indirectCosts: 'Carga de la sección Costos Indirectos de Producción',
+  sales: 'Carga de los datos de venta',
+};
+
 export class CostStructureService {
   constructor(private readonly db: PrismaClient = prisma) {}
+
+  /** Actor + método por defecto cuando quien llama no los declara. */
+  private traceFrom(userId: string, ctx: AuditContext, trace?: SaveTrace): SaveTrace {
+    if (trace) return trace;
+    return {
+      actor: {
+        id: userId,
+        role: 'COSTISTA',
+        area: 'costista',
+        ...(ctx.userAgent ? { device: ctx.userAgent } : {}),
+      },
+      method: 'manual',
+    };
+  }
+
+  /**
+   * Insumos trazables que declara una sección. Tolerante a propósito: si el JSON
+   * guardado es de una forma vieja que ya no parsea, devuelve una lista vacía y
+   * el guardado sigue. Perder la traza de una sección es malo; impedir que el
+   * costista guarde su trabajo es peor.
+   */
+  private sectionPoints(section: OrdersSection, config: unknown, period: string): DesiredPoint[] {
+    if (config === null || config === undefined) return [];
+    try {
+      switch (section) {
+        case 'rawMaterial':
+          return rawMaterialPoints(rawMaterialSectionSchema.parse(config), period);
+        case 'directLabor':
+          return directLaborPoints(directLaborConfigSchema.parse(config), period);
+        case 'indirectCosts':
+          return indirectCostPoints(indirectCostConfigSchema.parse(config), period);
+        case 'sales':
+          return salesPoints(
+            config as { unitPrice: number; quantity: number; productionQuantity: number | null },
+            period,
+          );
+      }
+    } catch {
+      return [];
+    }
+  }
 
   private async requireCompany(userId: string, companyId: string) {
     const company = await this.db.company.findFirst({ where: { id: companyId, userId } });
@@ -319,8 +392,10 @@ export class CostStructureService {
     section: 'rawMaterial' | 'directLabor' | 'indirectCosts',
     rawConfig: unknown,
     ctx: AuditContext,
+    trace?: SaveTrace,
   ) {
     const before = await this.requireStructure(userId, id);
+    const saveTrace = this.traceFrom(userId, ctx, trace);
 
     const data: Prisma.CostStructureUpdateInput = {};
     // Valor anterior de la sección (para la auditoría) y valor nuevo (para el
@@ -338,7 +413,10 @@ export class CostStructureService {
       data.directLaborConfig = newValue;
     } else {
       oldValue = before.indirectCostConfig;
-      const parsed = indirectCostConfigSchema.parse(rawConfig);
+      // Schema de ENTRADA: además de la forma, rechaza capacidad normal en 0
+      // con un 422 accionable que nombra el centro. Un bp = 0 guardado deja el
+      // producto costeado sin CIF y hace explotar las variaciones al calcular.
+      const parsed = parseIndirectCostConfigInput(rawConfig);
       // Reparto en modo 'base' (primario y secundario): "bajar" las unidades de
       // la base de asignación a números concretos (`distribution`/`toProductive`)
       // para que el motor derive los % (trazable, nunca la IA). No-op si ningún
@@ -369,6 +447,21 @@ export class CostStructureService {
 
       await this.appendConfigVersion(tx, id, section, newValue, userId);
       const updated = await tx.costStructure.update({ where: { id }, data });
+
+      // TRAZABILIDAD (T-01): el JSON de la sección ya no es el único lugar donde
+      // vive un insumo. Acá —misma transacción— cada número de la sección queda
+      // como `DataPoint` con su versión, su autor y su motivo, se repara lo que
+      // haya entrado por Excel/API/ingesta sin traza, y se anula lo que el
+      // costista borró. No toca ningún valor calculado.
+      await reconcileSectionDataPoints(tx, {
+        structureId: id,
+        section,
+        desired: this.sectionPoints(section, newValue, before.period),
+        previous: this.sectionPoints(section, oldValue, before.period),
+        actor: saveTrace.actor,
+        method: saveTrace.method,
+        reason: SECTION_REASON[section],
+      });
 
       if (period) {
         await tx.costPeriod.update({
@@ -446,9 +539,11 @@ export class CostStructureService {
     quantity: number,
     ctx: AuditContext,
     productionQuantity?: number | null,
+    trace?: SaveTrace,
   ) {
     const before = await this.requireStructure(userId, id);
     const produced = productionQuantity ?? null;
+    const saveTrace = this.traceFrom(userId, ctx, trace);
 
     return this.db.$transaction(async (tx) => {
       const period = await requireWritablePeriod(tx, id);
@@ -463,6 +558,34 @@ export class CostStructureService {
       const updated = await tx.costStructure.update({
         where: { id },
         data: { salesUnitPrice: unitPrice, salesQuantity: quantity, productionQuantity: produced },
+      });
+
+      // Trazabilidad de VENTA: precio unitario, cantidad vendida y cantidad
+      // producida son tres datos con autores distintos (comercial y planta), no
+      // tres columnas de una fila.
+      await reconcileSectionDataPoints(tx, {
+        structureId: id,
+        section: 'sales',
+        desired: this.sectionPoints(
+          'sales',
+          { unitPrice, quantity, productionQuantity: produced },
+          before.period,
+        ),
+        previous: this.sectionPoints(
+          'sales',
+          before.salesUnitPrice === null && before.salesQuantity === null
+            ? null
+            : {
+                unitPrice: before.salesUnitPrice === null ? 0 : Number(before.salesUnitPrice),
+                quantity: before.salesQuantity === null ? 0 : Number(before.salesQuantity),
+                productionQuantity:
+                  before.productionQuantity === null ? null : Number(before.productionQuantity),
+              },
+          before.period,
+        ),
+        actor: saveTrace.actor,
+        method: saveTrace.method,
+        reason: SECTION_REASON.sales,
       });
 
       if (period) {

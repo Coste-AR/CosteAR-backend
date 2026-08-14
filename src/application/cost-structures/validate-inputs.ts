@@ -1,5 +1,33 @@
 import { MissingInputError } from '../../domain/errors/calculation-errors.js';
 import type { CalculationInput } from '../../domain/calculations/calculate.js';
+import {
+  indirectCostConfigInputSchema,
+  mensajeCapacidadNormalEnCero,
+  nombreDeCentro,
+  type IndirectCostConfig,
+} from '../../shared/schemas/cost.schema.js';
+
+/**
+ * Parsea la config de Costos Indirectos que llega del `PUT` con el schema de
+ * ENTRADA (el que rechaza capacidad normal en 0) y traduce ese rechazo a un
+ * **422 accionable**, no al 400 genérico "Datos de entrada inválidos" que el
+ * handler central le da a cualquier `ZodError`.
+ *
+ * Cualquier otro problema de forma sigue saliendo como `ZodError` → 400, igual
+ * que antes.
+ */
+export function parseIndirectCostConfigInput(rawConfig: unknown): IndirectCostConfig {
+  const parsed = indirectCostConfigInputSchema.safeParse(rawConfig);
+  if (parsed.success) return parsed.data;
+
+  const capacidad = parsed.error.issues.find(
+    (i) => i.code === 'custom' && i.path.at(-1) === 'normalCapacity',
+  );
+  if (capacidad) {
+    throw new MissingInputError(`indirectCosts.${capacidad.path.join('.')}`, capacidad.message);
+  }
+  throw parsed.error;
+}
 
 /**
  * Chequeos de "¿hay insumos suficientes para calcular?" ANTES de correr el
@@ -32,9 +60,11 @@ export function validateCalculationInputs(input: CalculationInput): void {
       );
     }
     if (setting.normalCapacity === 0) {
+      // Mismo mensaje que al guardar y que el del motor: el costista lee una
+      // sola frase, con el NOMBRE del centro y nunca su id interno (F09-4).
       throw new MissingInputError(
         `indirectCosts.productiveSettings.${setting.centerId}.normalCapacity`,
-        `El centro "${setting.centerId}" no tiene capacidad normal cargada (bp = 0) — cargá el presupuesto de actividad normal antes de calcular.`,
+        mensajeCapacidadNormalEnCero(nombreDeCentro(input.indirectCosts.centers, setting.centerId)),
       );
     }
   }

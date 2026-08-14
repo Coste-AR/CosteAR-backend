@@ -1,9 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   classifyWaste,
   detectIntent,
 } from '@/infrastructure/classifier/layers/layer0a-intent-detection.js';
 import { classifyDocument } from '@/infrastructure/classifier/cascade-classifier.js';
+
+// Los tests de `classifyDocument` de este archivo llegan a la API de Groq. El
+// timeout por defecto de vitest son 5000ms y una llamada normal tarda ~4,9s:
+// quedan justo en el borde, y cuando la cuota del free tier aprieta —o cuando
+// otra corrida está midiendo en paralelo— fallan por TIEMPO y no por
+// comportamiento. Medido tres veces entre el 07 y el 09/08/2026.
+// Un test que se pone rojo por el estado de una cuota externa enseña a ignorar
+// el rojo, que es peor que no tenerlo. `vault-accuracy.harness.test.ts` ya
+// declaraba 30s por exactamente esta razón.
+vi.setConfig({ testTimeout: 30_000 });
 
 const BASE_INPUT = { costistId: 'c-001', companyId: 'co-001', dataEntryId: 'de-001' };
 

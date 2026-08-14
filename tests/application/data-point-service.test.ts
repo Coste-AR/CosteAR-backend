@@ -19,7 +19,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 const mockTx = {
-  dataPoint: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
+  // `findMany` sobre data points devuelve [] por defecto: `create()` lo consulta
+  // para no duplicar un movimiento de MP que el guardado de la sección ya
+  // registró (idempotencia del POST /data-points).
+  dataPoint: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(async () => []) },
   dataPointVersion: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
   traceAuditLog: { create: vi.fn(), findFirst: vi.fn(), count: vi.fn(), findMany: vi.fn() },
   costStructure: { findFirst: vi.fn() },

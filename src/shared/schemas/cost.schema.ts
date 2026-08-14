@@ -105,9 +105,46 @@ export const directLaborConfigSchema = z.object({
       z.object({
         name: z.string().min(1).max(120),
         basicRemuneration: nonNeg,
-        // OJO: `hoursWorked` es histórico; conceptualmente son HORAS
-        // PRESUPUESTADAS (capacidad normal) con las que se calcula la tarifa.
+        // HORAS PAGADAS — «presencia en fábrica» (cátedra, Clase 10): las horas
+        // por las que se paga, trabaje o no el operario. Es la base sobre la que
+        // se reparte el costo total de MOD. Se sigue llamando `hoursWorked` por
+        // historia (es el único campo de horas de las estructuras ya cargadas);
+        // renombrarlo obligaría a migrar el JSONB de todas ellas.
         hoursWorked: nonNeg,
+        // HORAS NETAS PRODUCTIVAS (cátedra, Clase 10) = presencia en fábrica −
+        // tiempos perdidos informados. Son las únicas horas imputables a las
+        // órdenes: la tarifa se divide por ESTAS. La diferencia contra
+        // `hoursWorked` es la CAPACIDAD OCIOSA, cuyo costo se aísla en su propia
+        // línea y nunca se suma en silencio a las órdenes.
+        //
+        // OPCIONAL A PROPÓSITO — retrocompatibilidad sin migración: las
+        // estructuras ya guardadas solo tienen `hoursWorked`, y sin este campo el
+        // motor asume que toda la presencia fue productiva (horas ociosas = 0) y
+        // calcula EXACTAMENTE igual que antes.
+        //
+        // NO confundir con el ausentismo pago del IAP/ITCS: ese cubre AUSENCIAS
+        // PAGAS (vacaciones, enfermedad, feriados), donde el operario no está en
+        // planta. Acá el operario está presente y cobra, pero no hay trabajo que
+        // asignarle. Los dos modelos conviven.
+        productiveHours: nonNeg.optional(),
+        // TIEMPO ESTÁNDAR DE PRODUCCIÓN (cátedra, Clase 10): las horas que,
+        // según la oficina técnica, debería haber llevado producir lo que se
+        // produjo (horas estándar por unidad × unidades terminadas). Habilita el
+        // segundo tipo de improductividad:
+        //     horas netas productivas − tiempo estándar = IMPRODUCTIVIDAD OCULTA
+        // Opcional: sin el dato la improductividad oculta es cero y el cálculo
+        // queda idéntico al histórico.
+        standardHours: nonNeg.optional(),
+        // Detalle POR MOTIVO de los tiempos perdidos informados (corte de
+        // energía, rotura de máquina, falta de materia prima, mantenimiento
+        // programado, descanso/refrigerio…). Es DESCRIPTIVO: la fuente de verdad
+        // de cuántas horas se perdieron sigue siendo `hoursWorked −
+        // productiveHours`; el motor recorta lo que se pase y completa lo que
+        // falte con un renglón «Sin discriminar».
+        informedLostTime: z
+          .array(z.object({ reason: z.string().min(1).max(120), hours: nonNeg }))
+          .max(50)
+          .optional(),
         // Dato REAL de fin de mes (horas efectivamente trabajadas). Opcional y
         // NO usado por el motor: es solo para comparar real vs presupuestado
         // (Parte 3.2, criterio C). No afecta la tarifa ni el costo.
@@ -313,6 +350,13 @@ export const indirectCostConfigSchema = z.object({
       z.object({
         centerId: z.string().min(1),
         budget: fixedVariableSchema.optional().default({ fixed: 0, variable: 0 }),
+        // bp — capacidad normal. Sigue siendo `nonNeg` (acepta 0) A PROPÓSITO:
+        // este schema NO es solo el de entrada, también es el que RE-PARSEA el
+        // JSONB ya persistido en cada cálculo, export y comparación de períodos.
+        // Hay estructuras guardadas con bp = 0 (el poblador automático de
+        // documentos las crea así, escribiendo directo en Prisma), y volverlas
+        // impersables convertiría un dato viejo en un 500 al leer.
+        // El 0 se rechaza AL GUARDAR, en `indirectCostConfigInputSchema`.
         normalCapacity: nonNeg,
         actualActivity: nonNeg,
         actualCip: nonNeg,
@@ -321,6 +365,56 @@ export const indirectCostConfigSchema = z.object({
     .max(100),
 });
 export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
+
+/**
+ * Capacidad normal (bp) en 0 — mensaje ÚNICO.
+ *
+ * La misma frase sale por los tres caminos posibles (al guardar Costos
+ * Indirectos, al validar los insumos antes de calcular y desde el propio motor
+ * si la estructura ya venía con 0 de antes), para que el costista lea siempre
+ * lo mismo y sepa exactamente qué cargar. Nombra el CENTRO por su nombre
+ * humano — nunca su id interno (F09-4).
+ */
+export function mensajeCapacidadNormalEnCero(centro: string): string {
+  return (
+    `El centro «${centro}» tiene la capacidad normal en 0. Sin capacidad normal no hay cuota de CIF ` +
+    'ni análisis de variaciones: el costo del producto saldría sin carga fabril. Cargá la actividad ' +
+    `normal esperada de «${centro}» (horas máquina, horas hombre o unidades) en Costos Indirectos y ` +
+    'volvé a guardar.'
+  );
+}
+
+/** Nombre humano de un centro por su id. Fallback genérico: nunca se filtra el id. */
+export function nombreDeCentro(
+  centers: { id: string; name: string }[],
+  centerId: string,
+): string {
+  return centers.find((c) => c.id === centerId)?.name?.trim() || 'un centro productivo';
+}
+
+/**
+ * Config de Costos Indirectos tal como llega del `PUT` — el schema de ENTRADA.
+ *
+ * Es `indirectCostConfigSchema` + la regla que el schema de lectura no puede
+ * tener: **capacidad normal en 0 no se guarda**. Un bp = 0 persistido deja la
+ * cuota predeterminada en cero (el producto se costea sin CIF) y hace explotar
+ * el análisis de variaciones por división por cero. Se corta en la puerta.
+ *
+ * El issue viaja con `path = ['productiveSettings', <centerId>, 'normalCapacity']`
+ * para que `parseIndirectCostConfigInput` lo convierta en un 422 accionable con
+ * el mismo `field` que ya usaba `validateCalculationInputs`.
+ */
+export const indirectCostConfigInputSchema = indirectCostConfigSchema.superRefine((cfg, ctx) => {
+  for (const setting of cfg.productiveSettings) {
+    if (setting.normalCapacity === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['productiveSettings', setting.centerId, 'normalCapacity'],
+        message: mensajeCapacidadNormalEnCero(nombreDeCentro(cfg.centers, setting.centerId)),
+      });
+    }
+  }
+});
 
 // --- Estructura de costos (crear / actualizar) ---
 
