@@ -185,10 +185,14 @@ function buildDirectLaborNode(output: CalculationOutput): TreeNode {
         value: labor.itcs.itcs.toPercent(),
         unit: '%',
         children: [
-          { label: 'Cargas Sociales Ciertas (CSC)', value: labor.itcs.certainCharges.toPercent(), unit: '%', children: [] },
-          { label: 'Inciertas remunerativas (B40)', value: labor.itcs.uncertainRemunerativeCoefs.toPercent(), unit: '%', children: [] },
-          { label: 'Cargas derivadas (F40)', value: labor.itcs.derivedCharges.toPercent(), unit: '%', children: [] },
-          { label: 'Inciertas no remunerativas (B47)', value: labor.itcs.uncertainNonRemunerative.toPercent(), unit: '%', children: [] },
+          // Las cuatro llevan fórmula a propósito: sin ella, el fin de cadena
+          // (T-03) no puede distinguir un número CALCULADO de un dato al que le
+          // falta el origen, y los reportaba como defecto. Son las fórmulas de
+          // `calcITCS` en direct-labor.ts, no una reinterpretación.
+          { label: 'Cargas Sociales Ciertas (CSC)', formula: 'Base de derivación + ART fija + SAC + (base × SAC)', value: labor.itcs.certainCharges.toPercent(), unit: '%', children: [] },
+          { label: 'Inciertas remunerativas (B40)', formula: 'Σ coeficientes inciertos remunerativos (IAP + los cargados)', value: labor.itcs.uncertainRemunerativeCoefs.toPercent(), unit: '%', children: [] },
+          { label: 'Cargas derivadas (F40)', formula: 'Σ (coeficiente × (base + SAC + base × SAC))', value: labor.itcs.derivedCharges.toPercent(), unit: '%', children: [] },
+          { label: 'Inciertas no remunerativas (B47)', formula: 'Σ coeficientes inciertos no remunerativos', value: labor.itcs.uncertainNonRemunerative.toPercent(), unit: '%', children: [] },
         ],
       },
       ...labor.departments.map((d) => ({
@@ -208,7 +212,7 @@ function buildDirectLaborNode(output: CalculationOutput): TreeNode {
             unit: '$',
             children: [],
           },
-          { label: 'Costo de cargas sociales', value: d.socialChargesCost.toNumber(), unit: '$', children: [] },
+          { label: 'Costo de cargas sociales', formula: 'Remuneración básica × ITCS', value: d.socialChargesCost.toNumber(), unit: '$', children: [] },
           { label: 'Tarifa horaria integral', formula: 'costo total / HH', value: d.hourlyRate.toNumber(), unit: '$/hs', children: [] },
         ],
       })),
@@ -242,8 +246,8 @@ function buildIndirectCostsNode(input: CalculationInput, output: CalculationOutp
       value: d.variance.cipApplied.toNumber(),
       unit: '$',
       children: [
-        { label: 'Cuota fija', value: d.quota.fixedQuota.toNumber(), unit: '$', children: [] },
-        { label: 'Cuota variable', value: d.quota.variableQuota.toNumber(), unit: '$', children: [] },
+        { label: 'Cuota fija', formula: 'Presupuesto fijo ÷ capacidad normal', value: d.quota.fixedQuota.toNumber(), unit: '$', children: [] },
+        { label: 'Cuota variable', formula: 'Presupuesto variable ÷ capacidad normal', value: d.quota.variableQuota.toNumber(), unit: '$', children: [] },
         // Mismo caso que "Remuneración básica": "CIP real" se repite por centro.
         {
           label: 'CIP real',
@@ -311,7 +315,7 @@ function buildSalesNode(input: CalculationInput, output: CalculationOutput): Tre
         unit: '$',
         children: [],
       },
-      { label: 'Costo de los Productos Vendidos (COGS)', value: output.costOfGoodsSold, unit: '$', children: [] },
+      { label: 'Costo de los Productos Vendidos (COGS)', formula: 'Productos terminados + existencia inicial PT − existencia final PT', value: output.costOfGoodsSold, unit: '$', children: [] },
       { label: 'Margen %', formula: 'margen / ingreso', value: output.grossMarginPct, unit: '%', children: [] },
     ],
   };
