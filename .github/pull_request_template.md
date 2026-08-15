@@ -40,6 +40,8 @@ Closes #
 
 - [ ] Issue vinculado
 - [ ] Commits convencionales y atómicos
+- [ ] **Review**: se lo pedí a alguien, o decidí conscientemente mergear sin review.
+      *GitHub no lo bloquea. Pedilo igual si toca el motor de cálculo, migraciones, plata del cliente o va a `main`.*
 - [ ] Tests escritos o actualizados
 - [ ] `.env.example` actualizado si agregué variables
 - [ ] Migraciones **aditivas** (nada de `DROP` sobre tablas con datos)
