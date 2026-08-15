@@ -15,6 +15,13 @@
 
 import { getEnv } from '../config/env.js';
 import { groqFetch } from './groq-rate-limiter.js';
+import { tryParseJson, DETERMINISTIC_SAMPLING } from './groq-client.js';
+import {
+  costitaChatResponseSchema,
+  salvageCostitaChatResponse,
+  fallbackCostitaChatResponse,
+  describeZodIssues,
+} from './groq-schemas.js';
 import { getRedisClient } from '../redis/client.js';
 import { createHash } from 'node:crypto';
 
@@ -149,10 +156,19 @@ Variables macro actuales: ${macroSummary}`;
       if (redis.status === 'ready') {
         const cached = await redis.get(cacheKey);
         if (cached) {
-          const parsed = JSON.parse(cached) as CostitaChatResponse;
-          // Anotar en un log (stdout por ahora) que se usó caché
-          console.log(`[groq-costista-chat] Cache hit para key ${cacheKey}`);
-          return parsed;
+          // La caché se valida igual que la respuesta fresca: una entrada
+          // escrita por una versión anterior (o envenenada) no puede saltearse
+          // el esquema solo por venir de Redis.
+          const validated = costitaChatResponseSchema.safeParse(tryParseJson(cached));
+          if (validated.success) {
+            // Anotar en un log (stdout por ahora) que se usó caché
+            console.log(`[groq-costista-chat] Cache hit para key ${cacheKey}`);
+            return validated.data;
+          }
+          // Entrada inválida: se descarta y se sigue al pedido fresco, que es
+          // mejor respuesta para el costista que el fallback genérico.
+          console.warn(`[groq-costista-chat] Entrada de caché inválida en ${cacheKey}; se descarta y se reconsulta.`);
+          await redis.del(cacheKey);
         }
       }
     } catch (e) {
@@ -170,7 +186,16 @@ Variables macro actuales: ${macroSummary}`;
           model: TEXT_MODEL,
           messages,
           max_tokens: 500,
-          temperature: 0.2,
+          // Se podría defender que un chat "quiere" ser variado, pero acá no:
+          // este call site YA es determinista por otro lado — la respuesta se
+          // cachea 24h en Redis con una clave que es el hash de `messages`, así
+          // que el primer sorteo del muestreo quedaba congelado un día entero
+          // para todos los que preguntaran lo mismo. Con `temperature: 0.2` eso
+          // significaba que la calidad de la respuesta que veía el costista
+          // dependía del azar del primer request, y que dos costistas con la
+          // misma duda recibían instrucciones distintas sobre la MISMA pantalla.
+          // Ver DETERMINISTIC_SEED en groq-client.ts.
+          ...DETERMINISTIC_SAMPLING,
           response_format: { type: 'json_object' },
         }),
       });
@@ -182,7 +207,39 @@ Variables macro actuales: ${macroSummary}`;
 
       const data = await res.json() as { choices: { message: { content: string } }[] };
       const raw  = data.choices[0]?.message.content ?? '';
-      const parsed = JSON.parse(raw) as CostitaChatResponse;
+
+      // `response_format: json_object` garantiza JSON sintáctico, no que
+      // actionType/severity/costSection estén en rango ni que confidence sea un
+      // 0-100. Sin esto, un actionType inventado o un confidence: 999 llegaban
+      // al frontend tal cual (costista-chat-service.ts devuelve el resultado
+      // derecho y la ruta lo serializa).
+      const validated = costitaChatResponseSchema.safeParse(tryParseJson(raw));
+      let parsed: CostitaChatResponse;
+      if (validated.success) {
+        parsed = validated.data;
+      } else {
+        // Antes de tirar la respuesta entera se intenta salvarla: un
+        // `confidence: 120` se clampea a 100 y no le borra al costista una
+        // explicación correcta por un campo accesorio. Si lo que falló es el
+        // `actionType`, un payload propuesto o el `reply` mismo, no se salva
+        // nada — ver salvageCostitaChatResponse — y se cae al fallback.
+        const salvaged = salvageCostitaChatResponse(tryParseJson(raw), validated.error.issues);
+        if (salvaged) {
+          console.warn(
+            `[groq-costista-chat] Respuesta con campos inválidos; se normalizaron y se devuelve igual:\n${describeZodIssues(validated.error.issues)}`,
+          );
+          parsed = salvaged;
+        } else {
+          // Se devuelve el fallback seguro (no `null`): el costista ve el mismo
+          // mensaje que cuando la IA no está disponible, y nunca un dato sin
+          // validar. Contrapartida asumida: al no ser `null`, el servicio no
+          // registra la señal ASSISTANT_MISS — el diagnóstico queda en este log.
+          console.error(
+            `[groq-costista-chat] Respuesta inválida de la IA; se usa el fallback seguro:\n${describeZodIssues(validated.error.issues)}`,
+          );
+          return fallbackCostitaChatResponse();
+        }
+      }
 
       // Sanitize: si propone una empresa que no está en el portfolio, rechazar
       if (parsed.proposedEntry?.companyId) {

@@ -26,6 +26,21 @@ export const cuitSchema = z
  */
 export const periodicitySchema = z.enum(['MONTHLY', 'BIWEEKLY', 'QUARTERLY']);
 
+/**
+ * La CONDICIÓN FRENTE AL IVA de la empresa. No es un dato administrativo: decide
+ * qué importe de cada comprobante entra al costo.
+ *
+ * Cátedra, Clase 4 ("Materia prima — costo de adquisición, desperdicio y lote
+ * económico"), línea 27: "IVA: solo aplica si la empresa es responsable no
+ * inscripta o monotributista; si es responsable inscripta, el IVA no forma
+ * parte del costo de adquisición".
+ *
+ * Responsable Inscripto → el IVA es crédito fiscal, se costea sobre el NETO.
+ * Monotributo / Exento  → el IVA no se recupera, es costo: se costea sobre el TOTAL.
+ */
+export const condicionIvaSchema = z.enum(['RESPONSABLE_INSCRIPTO', 'MONOTRIBUTO', 'EXENTO']);
+export type CondicionIvaInput = z.infer<typeof condicionIvaSchema>;
+
 export const PREDEFINED_INDUSTRIES = [
   'Gastronomía',
   'Comercio Minorista (Retail)',
@@ -43,6 +58,9 @@ export const createCompanySchema = z.object({
   cuit: cuitSchema.optional(),
   description: z.string().max(5000).trim().optional(),
   periodicity: periodicitySchema.optional(),
+  // Opcional en el contrato: omitirla deja el default de la DB
+  // (RESPONSABLE_INSCRIPTO), que es lo que asume el resto del sistema.
+  condicionIva: condicionIvaSchema.optional(),
 });
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
 

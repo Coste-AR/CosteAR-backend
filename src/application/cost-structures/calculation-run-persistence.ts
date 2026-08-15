@@ -168,6 +168,9 @@ export async function persistTree(
         valueNum: node.value,
         unit: node.unit,
         sourceDpVersionIds: node.sourceDataPointId ? [node.sourceDataPointId] : [],
+        // La clave determinística del motor viaja con el nodo (T-11): es lo que
+        // después permite ubicar un nodo por lo que ES y no por cómo se llama.
+        traceFieldKey: node.traceFieldKey ?? null,
       },
     });
     if (node.children.length > 0) {

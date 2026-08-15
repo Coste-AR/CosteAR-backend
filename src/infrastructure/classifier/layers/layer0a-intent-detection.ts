@@ -1,6 +1,7 @@
 // src/infrastructure/classifier/layers/layer0a-intent-detection.ts
 import type { InputIntent, WasteNature } from '../types.js';
 import type { IndustryProfile } from '../industry/industry-profile.js';
+import { countKeywords } from '../utils/keyword-match.js';
 
 export interface IntentResult {
   intent: InputIntent;
@@ -259,10 +260,10 @@ export function detectIntent(
 
   // Señales de industria en el texto de evento (si tenemos perfil)
   const industryEventPts = profile
-    ? profile.eventKeywords.filter((kw) => text.toLowerCase().includes(kw.toLowerCase())).length * 15
+    ? countKeywords(text, profile.eventKeywords) * 15
     : 0;
   const industryLossPts = profile
-    ? profile.lossKeywords.filter((kw) => text.toLowerCase().includes(kw.toLowerCase())).length * 20
+    ? countKeywords(text, profile.lossKeywords) * 20
     : 0;
 
   for (const { pattern, signal } of FORMAL_DOC_SIGNALS) {

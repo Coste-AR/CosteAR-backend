@@ -1,6 +1,8 @@
 import { Decimal } from 'decimal.js';
 import { Money } from '../value-objects/money.js';
 import { CalcError } from '../errors/domain-error.js';
+import { MissingInputError } from '../errors/calculation-errors.js';
+import { mensajeCapacidadNormalEnCero } from '../../shared/schemas/cost.schema.js';
 
 /**
  * HOJA 3 · COSTOS INDIRECTOS DE PRODUCCIÓN (CIP)
@@ -466,6 +468,7 @@ export interface VarianceAnalysis {
  * @param normalCapacity bp — capacidad normal.
  * @param actualActivity Actividad real del período.
  * @param actualCip CIP real incurrido en el período.
+ * @param centerName Nombre humano del centro, para el mensaje si bp = 0.
  */
 export function calcVarianceAnalysis(
   quota: PredeterminedQuota,
@@ -473,9 +476,31 @@ export function calcVarianceAnalysis(
   normalCapacity: Decimal.Value,
   actualActivity: Decimal.Value,
   actualCip: Money,
+  centerName?: string,
 ): VarianceAnalysis {
   const bp = new Decimal(normalCapacity);
   const real = new Decimal(actualActivity);
+
+  // bp = 0 → el presupuesto ajustado al nivel real divide por cero y `Money`
+  // tira un Error crudo ("División por cero en cálculo monetario") que sale
+  // como 500. Se corta ACÁ, en el motor, y no solo en la validación previa:
+  // `POST /cost-structures/:id/calculate` llama a `runCalculation` derecho, sin
+  // pasar por `validateCalculationInputs`, y el poblador automático de
+  // documentos escribe bp = 0 directo en Prisma. O sea: hay estructuras ya
+  // guardadas con 0 que llegan hasta acá.
+  //
+  // LANZA en vez de devolver variaciones en cero. Con bp = 0 la cuota
+  // predeterminada ya es 0 (ver `calcPredeterminedQuota`), así que "variaciones
+  // en cero" significaría informar que el CIF se aplicó perfecto cuando en
+  // realidad no se aplicó NADA: el producto sale sin carga fabril y con un
+  // margen que parece sano. Un 422 accionable es la única salida honesta.
+  // Ver DECISIONES.md.
+  if (bp.isZero()) {
+    throw new MissingInputError(
+      'indirectCosts.productiveSettings.normalCapacity',
+      mensajeCapacidadNormalEnCero(centerName?.trim() || 'un centro productivo'),
+    );
+  }
 
   // CIP aplicado = cuota total × actividad real.
   const cipApplied = quota.totalQuota.multiply(real);

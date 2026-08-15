@@ -1,4 +1,4 @@
-import { GroqClient, tryParseJson, buildRetryHint, VISION_MODEL, TEXT_MODEL } from './groq-client.js';
+import { GroqClient, tryParseJson, buildRetryHint, VISION_MODEL, TEXT_MODEL, DETERMINISTIC_SAMPLING } from './groq-client.js';
 import {
   documentAnalysisSchema,
   salvageDocumentAnalysis,
@@ -181,7 +181,12 @@ export class GroqDocumentAnalyzer {
       const baseBody = {
         model,
         max_tokens: 2500,
-        temperature: 0.1,
+        // Mismo problema de clase que el clasificador (ver DETERMINISTIC_SEED en
+        // groq-client.ts): esto EXTRAE importes y secciones de un comprobante y
+        // los persiste. Es el call site donde menos se puede tolerar que el mismo
+        // documento dé dos resultados distintos — acá no es solo la sección, son
+        // los números.
+        ...DETERMINISTIC_SAMPLING,
         response_format: { type: 'json_object' as const },
       };
 

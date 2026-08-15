@@ -23,6 +23,8 @@ import {
   type PeriodMirrorData,
 } from '../cost-structures/period-sync.js';
 import { SystemAlertService } from '../system/system-alert-service.js';
+import { reconcileSectionDataPoints } from '../trazabilidad/datapoint-reconciler.js';
+import { sectionPointsFrom, type OrdersSection } from '../trazabilidad/orders-input-points.js';
 
 // ─── Tipos internos de CostStructure ─────────────────────────────────────────
 
@@ -489,7 +491,7 @@ async function accumulateProcessCost(
   if (amount == null || !Number.isFinite(amount) || amount <= 0) {
     return {
       applied: false,
-      skippedReason: `El documento de ${label} no trae un monto total reconocible — cargalo a mano en el departamento asignado.`,
+      skippedReason: `El documento de ${label} no trae un monto neto reconocible — cargalo a mano en el departamento asignado.`,
     };
   }
 
@@ -519,6 +521,142 @@ async function accumulateProcessCost(
   return { applied: true, skippedReason: '' };
 }
 
+// ─── Trazabilidad de la ingesta (T-06) ────────────────────────────────────────
+
+/**
+ * QUÉ SECCIÓN DE TRAZABILIDAD TOCA CADA CAMPO QUE ESCRIBE EL POPULADOR.
+ *
+ * Los campos de venta son dos y caen en la misma sección, de ahí el mapa y no
+ * un simple `keyof`.
+ */
+const FIELD_TO_SECTION: Record<string, OrdersSection> = {
+  rawMaterialConfig: 'rawMaterial',
+  directLaborConfig: 'directLabor',
+  indirectCostConfig: 'indirectCosts',
+  salesUnitPrice: 'sales',
+  salesQuantity: 'sales',
+};
+
+/** Motivo que queda escrito en la versión del dato que aporta un documento. */
+export const INTAKE_REASON = 'dato tomado de un documento clasificado por la IA';
+
+interface SalesSnapshot {
+  unitPrice: number;
+  quantity: number;
+  productionQuantity: number | null;
+}
+
+/** Foto de venta tal como quedó (o estaba) guardada, para derivar sus insumos. */
+function salesSnapshot(
+  source: Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+): SalesSnapshot | null {
+  const num = (v: unknown): number | null =>
+    v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+  const unitPrice = num(overrides['salesUnitPrice'] ?? source['salesUnitPrice']);
+  const quantity = num(overrides['salesQuantity'] ?? source['salesQuantity']);
+  // Sin ninguno de los dos no hay sección de venta guardada todavía.
+  if (unitPrice === null && quantity === null) return null;
+  return {
+    unitPrice: unitPrice ?? 0,
+    quantity: quantity ?? 0,
+    productionQuantity: num(source['productionQuantity']),
+  };
+}
+
+/**
+ * LA INGESTA TAMBIÉN PRODUCE DATOS TRAZABLES (T-06).
+ *
+ * T-01 hizo que guardar una sección desde el formulario, el Excel o la API
+ * dejara un `DataPoint` por cada número, pasando por `datapoint-reconciler`. La
+ * ingesta de comprobantes se quedó afuera: este módulo escribía el JSON de
+ * config directo contra `CostStructure`, así que un número que la IA leyó de una
+ * factura entraba al costo sin quedar registrado como dato — no se podía abrir,
+ * no tenía autor y no tenía documento. Es el MISMO bug que T-01 arregló para las
+ * otras entradas, sobreviviendo acá.
+ *
+ * Se reusa el reconciliador tal cual (no hay un segundo camino que mantener):
+ * lo único propio de la ingesta es el método —'ia_sugerido'— y el documento del
+ * que salió el número, que es lo que después deja armar el bloque de procedencia
+ * de la ficha.
+ *
+ * NO cambia ningún valor calculado ni toca la clasificación: lee la config que
+ * el populador acaba de guardar y la refleja como datos.
+ */
+async function reconcileIntakeDataPoints(
+  db: PrismaClient,
+  args: {
+    structure: { id: string; period: string } & Record<string, unknown>;
+    /** Lo que el populador escribió recién en la estructura. */
+    updateData: Record<string, unknown>;
+    costistId: string;
+    dataEntryId: string;
+  },
+): Promise<void> {
+  const { structure, updateData, costistId, dataEntryId } = args;
+
+  const sections = [
+    ...new Set(
+      Object.keys(updateData)
+        .map((field) => FIELD_TO_SECTION[field])
+        .filter((s): s is OrdersSection => !!s),
+    ),
+  ];
+  if (sections.length === 0) return;
+
+  const actor = { id: costistId, role: 'COSTISTA', area: 'costista' };
+
+  await db.$transaction(async (tx) => {
+    for (const section of sections) {
+      const desired =
+        section === 'sales'
+          ? sectionPointsFrom('sales', salesSnapshot(structure, updateData), structure.period)
+          : sectionPointsFrom(section, updateData[sectionField(section)], structure.period);
+      const previous =
+        section === 'sales'
+          ? sectionPointsFrom('sales', salesSnapshot(structure), structure.period)
+          : sectionPointsFrom(section, structure[sectionField(section)], structure.period);
+
+      // `null` = la config no parsea. Abstenerse: el reconciliador ANULA todo lo
+      // que esté guardado y no figure en `desired`, así que seguir con una lista
+      // vacía borraría la traza de una sección entera por un error de forma.
+      if (desired === null || previous === null) {
+        console.warn(
+          `[populator] Trazabilidad: la sección ${section} no tiene una forma reconocible — se guarda el dato, no se reconcilia su traza.`,
+        );
+        continue;
+      }
+
+      await reconcileSectionDataPoints(tx, {
+        structureId: structure.id,
+        section,
+        desired,
+        previous,
+        actor,
+        // Es lo que es: lo sugirió la IA leyendo un comprobante. El costista lo
+        // confirmó al aprobar el documento, y eso se lee del audit, no de acá.
+        method: 'ia_sugerido',
+        reason: INTAKE_REASON,
+        dataEntryId,
+      });
+    }
+  });
+}
+
+/** Campo de `CostStructure` que guarda el JSON de cada sección. */
+function sectionField(section: OrdersSection): string {
+  switch (section) {
+    case 'rawMaterial':
+      return 'rawMaterialConfig';
+    case 'directLabor':
+      return 'directLaborConfig';
+    case 'indirectCosts':
+      return 'indirectCostConfig';
+    case 'sales':
+      return 'sales';
+  }
+}
+
 export async function populateCostStructureFromApproval(
   db: PrismaClient,
   params: {
@@ -530,13 +668,23 @@ export async function populateCostStructureFromApproval(
     /** Producto destino elegido por el cargador. Si viene, la población va
      *  EXACTAMENTE a esa estructura (aislamiento por producto). */
     costStructureId?: string | null;
-    /** Monto total del documento (el mismo importe que la línea del libro
-     *  mayor). Solo se usa para Costeo por Procesos — el resto sigue
-     *  parseando reviewNote como siempre. */
+    /** Monto NETO del documento (sin IVA — el mismo importe que la línea del
+     *  libro mayor, ver `ledger-builder.ts`). Solo se usa para Costeo por
+     *  Procesos — el resto sigue parseando reviewNote como siempre. */
     amount?: number | null;
     /** Departamento de Costeo por Procesos elegido por el costista. Decisión
      *  siempre humana; si falta, el documento queda en la cola de pendientes. */
     processDepartmentId?: string | null;
+    /**
+     * EL DOCUMENTO QUE ORIGINÓ ESTA POBLACIÓN (T-06).
+     *
+     * Sin él los números que entran por la ingesta no se pueden atar a la
+     * factura ni a la clasificación que los mandó a esta sección, y la ficha del
+     * dato no tiene con qué mostrar su procedencia. Opcional para no romper a
+     * ningún llamador: si no viene, se puebla como siempre y no se reconcilia
+     * ninguna traza (mejor sin sello que con un sello inventado).
+     */
+    dataEntryId?: string | null;
   },
   alerts: SystemAlertService = new SystemAlertService(),
 ): Promise<PopulateResult> {
@@ -697,6 +845,34 @@ export async function populateCostStructureFromApproval(
       });
     }
     console.log(`[populator] CostStructure ${structure.id} actualizada. Secciones: ${Object.keys(updateData).join(', ')}`);
+
+    // TRAZABILIDAD (T-06): recién acá, con la config ya guardada, cada número
+    // que aportó el documento queda además como DATO trazable —con su método
+    // 'ia_sugerido' y su link al comprobante— pasando por el MISMO reconciliador
+    // que usa el guardado del formulario. No es fatal: si falla, el costo ya
+    // quedó aplicado y lo que se pierde es la traza, así que se avisa fuerte en
+    // vez de tirar abajo una aprobación que ya es firme.
+    if (params.dataEntryId) {
+      try {
+        await reconcileIntakeDataPoints(db, {
+          structure: structure as unknown as { id: string; period: string } & Record<string, unknown>,
+          updateData,
+          costistId,
+          dataEntryId: params.dataEntryId,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[populator] No se pudo registrar la trazabilidad del documento:', err);
+        await alerts.create({
+          source: 'populator',
+          level: 'warning',
+          message:
+            `El documento se aplicó a "${structure.productName}" (${structure.period}), pero sus datos no quedaron ` +
+            `trazables: ${message}. Los números están en la estructura; no se van a poder abrir hasta su comprobante.`,
+        });
+      }
+    }
+
     return { populated: true, skippedReason: skippedMessage };
 
   } catch (err) {

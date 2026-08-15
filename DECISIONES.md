@@ -2450,3 +2450,527 @@ ART de verdad** — el horario se corre tres horas respecto de lo que venía pas
 **684 passed / 3 failed** — los 3 son `cost-period-compare.test.ts`, que necesita Postgres en
 `localhost:5433` y ya fallaban antes (verificado con `git stash`). `tsc --noEmit` limpio, ESLint sin
 errores. Sin migración.
+
+## El IVA entraba al costo — precedencia invertida en el libro mayor
+
+**El bug.** `src/application/validaciones/ledger-builder.ts` elegía el importe de la línea de
+costo con `totalAmount` primero y `netAmount` como respaldo. El total INCLUYE el IVA. El prompt de
+Groq ya pedía lo correcto ("el costeo se hace sobre el importe NETO (netAmount), nunca sobre el
+total con IVA") y el modelo obedecía: `netAmount` y `taxAmount` volvían bien. El código tiraba el
+valor bueno y se quedaba con el inflado. Medido de punta a punta por `buildLedgerDraft`, con los
+comprobantes del corpus avícola: MP-06 neto 10.000.000 entraba como 12.100.000 (+21,0 %), MP-03
+neto 9.870.000 como 10.906.350 (+10,5 %), MP-01 neto 11.025.000 como 12.182.625 (+10,5 %). No es
+un error de redondeo: es el margen del producto del cliente, y no avisaba nada.
+
+**La regla.** Vault de la cátedra, `001.1 - Clases (Mirta)/4. Materia prima — costo de adquisición,
+desperdicio y lote económico.md`, línea 27: "IVA: solo aplica si la empresa es responsable no
+inscripta o monotributista; si es responsable inscripta, el IVA no forma parte del costo de
+adquisición". El primer cliente pagante es Responsable Inscripto con saldo a favor de IVA: para él
+el IVA es un crédito fiscal, no un costo. La respuesta es el neto, sin ambigüedad.
+
+**Decisión: precedencia `netAmount` → `totalAmount − taxAmount` → `totalAmount`.** Se invirtió el
+orden y se corrigió el comentario de cabecera del archivo, que documentaba el comportamiento
+equivocado ("El monto preferido es el total; si no, el neto") — el comentario era tan bug como el
+código: era lo que iba a leer el próximo que tocara esto.
+
+**Decisión: con neto ausente pero IVA presente, el neto SE DERIVA (`total − tax`), no se cae al
+total.** El caso existe: el OCR lee "TOTAL" e "IVA 21%" pero se come el renglón del subtotal. Se
+eligió derivar por tres razones. (1) Es aritmética exacta, no una estimación: el prompt define
+`taxAmount = totalAmount − netAmount`, así que la resta reconstruye el mismo número que el
+comprobante trae impreso. (2) Quedarse con el total sería meter un IVA que tenemos identificado y
+cuantificado — el error más caro del producto, cometido a sabiendas. (3) La alternativa conservadora
+(no generar línea y mandar a carga manual) le pasa al costista un trabajo que la máquina puede hacer
+sin margen de error, y en la práctica termina en un importe tipeado a mano, que es más riesgoso que
+la resta. Guarda: solo se resta si `0 < taxAmount < totalAmount`; un IVA en 0, negativo o mayor o
+igual al total es un dato roto y ahí se usa el total tal cual. La resta se redondea a 4 decimales
+(la precisión de `Decimal(18,4)`) para que el punto flotante no genere importes tipo
+`9999999.999999998`.
+
+**Decisión: el último escalón sigue siendo `totalAmount`, y está bien que lo sea.** Sin neto y sin
+IVA discriminado no hay nada que restar: es la Factura C, el ticket sin desglose, el monotributista.
+En esos comprobantes el IVA no es recuperable y el total ES el costo de adquisición — la misma
+línea 27 del vault lo dice al revés. O sea que el fallback no es una concesión: es la otra mitad de
+la regla contable.
+
+**Decisión: un `netAmount` de 0 explícito no habilita el total.** `0` es un número válido, corta la
+cadena y la línea no se crea (queda para carga manual). Antes ese caso caía al total con IVA. Un
+neto en 0 es un dato que no se entendió, no una compra gratis; inventarle un importe con IVA adentro
+sería exactamente el bug que se está arreglando.
+
+**Otros puntos de decisión neto-vs-total, revisados uno por uno.** Se buscó en todo el repo y este
+era el único lugar donde la elección alimenta el costo. Los demás usos de `totalAmount` son
+legítimos y se dejaron intactos: `text-enricher.ts` imprime "Subtotal / IVA / Total" como texto para
+que el clasificador lea el comprobante (es transcripción, no aritmética de costo); `dedupe-key.ts`
+lo declara como identidad del comprobante (nunca como importe); `groq-schemas.ts` / `groq-types.ts`
+solo validan el contrato de extracción. `cost-structure-populator.ts` recibe el importe ya resuelto
+por el libro mayor (`amount: lp?.amount`), así que hereda el arreglo sin tocar nada — se corrigió su
+JSDoc, que decía "Monto total del documento", y el mensaje al costista que hablaba de "monto total
+reconocible". El prompt de Groq NO se tocó: ya era correcto.
+
+**Verificación.** `tests/validaciones/ledger-iva-neto.test.ts`, 10 tests nuevos, con los importes
+leídos de `corpus-clasificador/corpus.json` (casos MP-01, MP-03, MP-06) en vez de tipeados: una sola
+fuente de verdad, y si el corpus cambia el test mide lo nuevo. Cada caso assertea el neto, que el
+monto NO sea el total, que NO sea el importe inflado que registró la auditoría en
+`baseline.montoQueLlegoAlCosto`, que el sobrecosteo relativo sea exactamente 0, y que la diferencia
+contra el total sea el `taxAmount` del comprobante. Se comprobó que la guarda muerde: invirtiendo la
+precedencia a mano, 8 de los 10 tests se ponen rojos con el porcentaje de sobrecosteo impreso en el
+mensaje. `tests/validaciones/ledger-builder.test.ts` se actualizó (dos casos afirmaban la
+precedencia vieja). Suite de `tests/validaciones`: **17 passed**;
+`tests/application/validaciones-process-department.test.ts` (el otro que toca `CostLedgerEntry`):
+**11 passed**. `tsc --noEmit` limpio, `eslint src tests` 0 errores (13 warnings preexistentes). Sin
+migración: `CostLedgerEntry.amount` no cambia de tipo, cambia lo que se le escribe.
+
+**Ojo con lo ya cargado.** Este arreglo corrige lo que entre de ahora en más. Las líneas de
+`cost_ledger_entries` creadas antes siguen con el importe inflado, y los `UnitMovementSchedule` de
+Costeo por Procesos ya acumularon esos montos. No se escribió backfill acá: reescribir importes
+históricos sin la extracción original de cada documento sería adivinar, y algunos períodos pueden
+estar cerrados. Queda como decisión del negocio (recostear con los comprobantes a la vista) y
+pendiente explícito.
+
+## Capacidad normal en 0 — el 500 que salía por la puerta que nadie miraba
+
+**El bug (reproducido de punta a punta).** `PUT /cost-structures/:id/indirect-costs` con
+`normalCapacity: 0` devolvía **200 OK**. El `POST /cost-structures/:id/calculate` siguiente moría con
+un **500 crudo**: `"División por cero en cálculo monetario"`, tirado por `Money.divide`
+(`src/domain/value-objects/money.ts`) desde `calcVarianceAnalysis`, que hace
+`cipBudget.variable.divide(bp)` con `bp = 0`.
+
+Lo llamativo es que la validación YA existía: `validateCalculationInputs` corta con un 422 cuando la
+capacidad normal es 0. El problema es que **solo la llama `CalculationRunService.run()`**. El
+endpoint viejo `POST /cost-structures/:id/calculate` (`CostStructureService.calculate`) llama a
+`runCalculation` derecho, sin validación previa y sin `try/catch`. Dos puertas al mismo motor, una
+sola con guardia. La lección: una validación que vive en un servicio no protege al motor — tiene que
+estar EN el motor.
+
+**Decisión: el 0 se rechaza al guardar, en un schema de ENTRADA separado del de lectura.**
+`indirectCostConfigSchema` no se tocó y sigue aceptando `normalCapacity: 0`, a propósito: **no es
+solo el schema de entrada, es también el que re-parsea el JSONB ya persistido** en cada cálculo,
+export y comparación de períodos. Endurecerlo habría convertido cada estructura vieja con bp = 0 en
+un 500 al leerla — cambiando un bug por otro peor. La regla nueva vive en
+`indirectCostConfigInputSchema` (el mismo schema + un `superRefine`), que solo usa el `PUT`.
+
+Un `ZodError` sale como 400 "Datos de entrada inválidos" por el handler central, y eso no le sirve a
+nadie. Por eso el `PUT` parsea con `parseIndirectCostConfigInput`
+(`application/cost-structures/validate-inputs.ts`), que traduce ese issue puntual a un **422
+`MISSING_INPUT`** con el mismo `field` que ya usaba `validateCalculationInputs`. Cualquier otro
+problema de forma sigue saliendo 400, igual que antes.
+
+**Decisión: el motor LANZA, no devuelve variaciones en cero.** `calcVarianceAnalysis` ahora corta con
+`MissingInputError` (422) si `bp = 0`. La alternativa —devolver variaciones en cero, como hace
+`calcPredeterminedQuota`— era peor: con bp = 0 la cuota predeterminada YA es cero, así que el CIF
+aplicado es cero. Informar "variación presupuesto 0, variación volumen 0" significa decirle al
+costista que la carga fabril se aplicó perfecto, cuando en realidad **no se aplicó un solo peso**: el
+producto sale costeado sin CIF y con un margen que parece sano. Es exactamente el patrón que ya
+cortamos en E3 (actividad real en 0 ≠ "todavía no la sé") y en H2 (unidades que se evaporan entre
+departamentos): **mejor no dar ningún número que dar uno plausible y mal**.
+
+**El guard de `calcPredeterminedQuota` no se tocó.** Sigue devolviendo ceros con bp = 0. Es lo que
+permite que una estructura a medio cargar se pueda seguir mostrando en pantalla, y cambiarlo habría
+movido el corte a un lugar donde el costista todavía no tiene nada que hacer. El corte pasa donde el
+número empieza a ser una AFIRMACIÓN sobre el mes cerrado, no antes.
+
+**Decisión: la estructura que YA tiene 0 guardado da el mismo 422, no un 500.** El bp = 0 sigue
+entrando a la base por caminos que no pasan por el `PUT`: el poblador automático de documentos
+(`application/validaciones/cost-structure-populator.ts`) crea `productiveSettings` con
+`normalCapacity: 0` escribiendo directo en Prisma cuando aparece un centro productivo nuevo. Por eso
+el guard del motor no es redundante con el del schema: **es el único que cubre lo que ya está
+guardado**. Los tres caminos (guardar, validar antes de calcular, motor) emiten **la misma frase**,
+desde `mensajeCapacidadNormalEnCero()` — una sola definición, para que el costista no lea tres textos
+distintos del mismo problema.
+
+**Mensajes por NOMBRE del centro, nunca por id (F09-4).** `calcVarianceAnalysis` recibe un
+`centerName` opcional y `runCalculation` le pasa el nombre humano resuelto desde
+`indirectCosts.centers`. Sin nombre cae a "un centro productivo" — nunca a `prod1`. De paso se
+corrigió el mensaje viejo de `validateCalculationInputs`, que decía `El centro "prod1" no tiene
+capacidad normal cargada (bp = 0)`: filtraba el id interno y hablaba en jerga.
+
+**Consecuencia para el frontend.** La pantalla de Costos Indirectos no puede seguir mandando
+`normalCapacity: 0` como placeholder de un centro recién agregado: ahora eso bloquea el guardado de
+toda la sección con un 422. O se pide la capacidad en el alta del centro, o el centro no se manda en
+`productiveSettings` hasta tenerla.
+
+**Barrido de las otras divisiones.** Se revisaron todos los llamados a `Money.divide` y a
+`Decimal.dividedBy`/`.div()` del dominio y de `application/cost-structures`. `indirect-costs.ts:484`
+(el de este fix) era **el único divisor sin guardia alcanzable desde datos del usuario**. Ya estaban
+protegidos: `calculate.ts` (costo unitario, ternario sobre `unitsProduced > 0`), `direct-labor.ts`
+(`hourlyRate`, `hh.greaterThan(0)`; `iap`, `effectiveWorkDays.greaterThan(0)`), `raw-material.ts`
+(PPP, `balanceQty.isZero()`; Wilson, `denominator.isZero()`), `cost-statement.ts`
+(`salesRevenue.isZero()`), `closing-stock.ts`, `period-comparison.ts`, los cuatro repartos de
+`indirect-costs.ts` (`totalBase*.isZero()`), `joint-costs.ts` (`totalBase.lte(0)` y `units > 0`
+garantizado), `process-costing.ts` (`unidadesAJustificar`, `unidadesBuenas`, `produccionProcesada`) y
+`process-costing-engine.ts` (`conversionFromPrevious`, validado `positive()` en la ruta y `<= 0` en
+`domain/periods/setup-rules.ts`). No se tocó ninguno.
+
+**Verificación.** 9 tests nuevos: 5 unitarios en `tests/domain/indirect-costs.test.ts` (el guard tira
+422 y no el `Error` crudo, nombra el centro, cae al genérico sin nombre, bp > 0 no cambia nada, y la
+cuota predeterminada sigue devolviendo ceros) y 4 de integración HTTP en
+`tests/http/indirect-costs-capacidad-normal.test.ts` (el `PUT` con bp = 0 da **422 y no guarda nada**;
+con bp cargado da 200; el `POST /calculate` sobre una estructura que ya tenía bp = 0 da **422 y no
+persiste el cálculo**, no el 500 de antes; con bp cargado calcula y persiste). Corridos además los 49
+archivos de tests de motor, costos indirectos, prorrateos, períodos e importación Excel:
+**443 passed**, cero regresión. `tsc --noEmit` limpio; `eslint` sin errores en los archivos tocados.
+Sin migración.
+
+## Auditoría de RLS — el aislamiento entre inquilinos no tenía red de contención
+
+**El hallazgo.** Row-Level Security estaba escrito pero era **inerte**. Dos problemas distintos, uno
+de infraestructura y otro de datos:
+
+1. **El rol de la app es SUPERUSER** (implica `BYPASSRLS`), así que PostgreSQL ni siquiera evalúa las
+   políticas — tampoco las `FORCE`. Comprobado en vivo: con `app.user_id` seteado en el inquilino A,
+   un `SELECT * FROM cost_structures` devolvía filas del inquilino B. Este punto lo resuelve
+   infraestructura con un rol dedicado; acá no se tocó `DATABASE_URL` ni se creó ningún rol de app.
+2. **12 tablas de inquilino sin una sola política** (`relrowsecurity = f`, 0 políticas):
+   `cost_ledger_entries`, `cost_periods`, `allocation_bases`, `classification_audits`,
+   `company_target_budgets`, `empresa_connections`, `processed_caes`, `supplier_fingerprints`,
+   `daily_signals`, `late_data_decisions`, `vault_chat_sessions`, `audit_logs`.
+
+Lo que sostenía el aislamiento era, íntegramente, que cada servicio se acordara del
+`findFirst({ id, userId })`. No había nada abajo: el día que un endpoint nuevo se olvide el
+`where userId`, no falla ningún test — devuelve datos de otro cliente con un **200**.
+
+**Qué se hizo.** `prisma/rls.sql` pasó de 13 a **28 tablas** con `ENABLE` + `FORCE` + política
+(30 políticas: `allocation_bases` y `audit_logs` llevan dos, ver abajo). Todo idempotente
+(`DROP POLICY IF EXISTS` antes de cada `CREATE`), porque `apply-rls.mjs` corre más de una vez. **Sin
+migración nueva**: RLS en este repo nunca vivió en `prisma/migrations` — se aplica con
+`npm run db:rls`, que es lo que ya hacen `db:setup` y el arranque.
+
+**Cómo se resolvió el dueño en cada caso.** No se inventó ninguna columna; se verificó contra
+`schema.prisma` y contra el `\d` de la base.
+
+| Camino | Tablas |
+| --- | --- |
+| Columna propia `userId` | `cost_periods`, `late_data_decisions`, `vault_chat_sessions` |
+| Columna propia `costistId` (el costista **es** el inquilino, mismo rol que `userId`) | `cost_ledger_entries`, `empresa_connections`, `supplier_fingerprints`, `classification_audits`, `validation_history` |
+| `companyId` → `companies."userId"` | `company_target_budgets`, `processed_caes`, `allocation_bases` |
+| `structureId` → `cost_structures."userId"` | `cost_config_versions`, `allocation_base_values` |
+| `sessionId` → `vault_chat_sessions."userId"` | `vault_chat_messages` |
+
+Cuatro tablas se sumaron **fuera de las 12** porque dejarlas abiertas vaciaba de sentido a las que sí
+se protegieron: `allocation_base_values` (los números de las bases; la base sin sus valores no dice
+nada, los valores sí: m², horas máquina y focos de la planta del cliente), `cost_config_versions`
+(el histórico completo de la configuración del motor), `vault_chat_messages` (proteger la sesión y
+dejar abiertos los mensajes es proteger el sobre y no la carta) y `validation_history`.
+
+**`allocation_bases`: dos políticas, no una.** `companyId` en NULL significa *base precargada del
+sistema*, común a todos; con `companyId`, es base propia del cliente. Una sola política que metiera
+`companyId IS NULL` en el `USING` dejaría a **cualquier** inquilino borrar el catálogo compartido: el
+`USING` también gobierna `UPDATE` y `DELETE`. Van entonces `tenant_isolation` (`FOR ALL`, solo lo
+propio) y `system_bases_readable` (`FOR SELECT`, suma las del sistema). Las políticas permisivas se
+suman con OR por comando: **veo las mías + las del sistema, toco solo las mías**.
+
+**`audit_logs`: se protege, con políticas separadas por comando.** Es infraestructura y tiene dos
+propiedades que una política `"userId" = current_app_user_id()` a secas rompería. Primera: se escribe
+**fuera de todo contexto de inquilino** — un `auth.login.failed` de un email que no existe, jobs,
+webhooks; ahí `userId` es NULL a propósito, y un `WITH CHECK` por `userId` haría fallar justamente
+los registros de seguridad que más importan. Segunda: es append-only por diseño. La solución:
+
+- `tenant_isolation` **FOR SELECT** — cada uno ve solo lo suyo (las filas con `userId` NULL no las ve
+  nadie desde la app; son para el operador de la base).
+- `audit_append_only` **FOR INSERT WITH CHECK (true)** — escribir siempre se puede: la bitácora nunca
+  puede quedarse muda.
+- **Sin política de UPDATE ni de DELETE, a propósito.** Con RLS activo y sin política para esos
+  comandos, Postgres no deja modificar ni borrar **ninguna** fila. El append-only deja de ser una
+  convención de la capa de aplicación y pasa a estar *enforced* por la base.
+
+Se verificó que esto **no rompe el borrado de cuenta**: `audit_logs."userId"` es `ON DELETE SET NULL`
+y las acciones de integridad referencial se ejecutan salteando RLS. Probado con el rol sin
+`BYPASSRLS`: `DELETE FROM users` → 1 fila, y el registro de auditoría quedó vivo con `userId` en NULL.
+
+**`daily_signals`: la única exenta de las 12, y con motivo.** Es el corpus del pipeline nocturno de
+aprendizaje: lo escriben muchos inquilinos y lo lee **entero y a propósito** el job nocturno
+(`nightly-learning-service`) y el panel admin, sin contexto de inquilino. Una política de `SELECT`
+por `userId` dejaría al job leyendo **cero filas en silencio** — el peor desenlace posible: la
+funcionalidad muere sin ruido. Se revisó todo el código: no existe ninguna ruta de lectura de esa
+tabla para un costista (los únicos lectores son el job y `admin.routes`), así que el control efectivo
+es que esas rutas son admin-only. Queda escrito acá y en el allowlist del test.
+
+**Otras exenciones documentadas** (todas en `EXENTAS`, en `tests/config/rls-coverage.test.ts`, cada
+una con su motivo):
+
+- **Identidad y autenticación** — `users` (es la tabla *de* inquilinos, no una tabla *por* inquilino;
+  el login busca por email/CUIT sin contexto), `refresh_tokens` y `password_resets` (se buscan por
+  hash del token para **averiguar** de quién son; exigir el inquilino haría imposible refrescar una
+  sesión), `terms_acceptances` (se lee junto con el usuario en el login/me).
+- **Doble actor: la fila tiene dos dueños legítimos** — `data_entries` (la escribe el operario de la
+  empresa, cuyo `app.user_id` **no** es el del costista, y también la ingesta por apiKey, que no tiene
+  usuario alguno), `operator_memberships` (la ven el operario y el costista dueño de la conexión) y
+  `operator_invites` (se lee **por código**, por alguien que todavía no aceptó y puede no tener
+  cuenta). Acá el problema no es "todavía no seteamos el contexto": es que el modelo de inquilino
+  actual no tiene una columna que represente a los dos actores. Inventar una sería peor que dejarlo
+  escrito.
+- **Datos compartidos** — `macro_snapshots`, `vault_chunks`, `vault_edit_proposals`, `system_alerts`,
+  `terms_versions`.
+- **Trazabilidad heredada** — `evidence` y `trace_audit_log`, ya exentas desde Trazabilidad v1
+  (vínculo indirecto/opcional con el inquilino; `entityType`/`entityId` genéricos no resuelven dueño).
+
+**Consecuencia registrada: la deduplicación de CAE pasa a ser por inquilino.** `processed_caes` tiene
+`companyId` y no `costistId`, así que el dueño sale por la empresa. Hoy `ingest-data-entry` hace
+`findUnique({ where: { cae } })`, una búsqueda **global**: con RLS activo y contexto puesto, un CAE de
+otro inquilino deja de ser visible. Es el comportamiento correcto (el número de comprobante de otro
+cliente no debería frenar una carga), pero es un cambio de semántica y queda anotado.
+
+**Chequeo automático: por qué es un test estático y no una consulta a `pg_policies`.** El CI
+(`.github/workflows`) **no levanta Postgres**: corre lint, build y `npm run test`. Un test que
+consultara la base tendría que saltearse cuando no hay conexión, y un chequeo de aislamiento que se
+saltea en el único lugar por donde pasan obligatoriamente todos los cambios no protege nada: pasa en
+verde el día que alguien agrega una tabla sin política. `tests/config/rls-coverage.test.ts` compara
+las dos fuentes que definen la realidad —`prisma/schema.prisma` (crea las tablas) y `prisma/rls.sql`
+(aplica las políticas)— y **falla si una tabla del schema no está ni protegida ni exenta con motivo
+escrito**. Verificado en vivo: agregando un modelo de prueba al schema, el test rompe con
+`Tablas sin política y sin exención: fake_tenant_things`. Chequea además que toda tabla con política
+tenga `ENABLE` y `FORCE`, que no queden exenciones fantasma de tablas borradas, y que ningún motivo
+sea un placeholder.
+
+**Prueba de fuego con base viva: `tests/security/rls-cross-tenant.test.ts`.** Siembra dos inquilinos
+completos (28 tablas, un grafo entero: usuario → empresa → estructura → período → corridas, nodos,
+libro mayor, bases, chat, auditoría), se conecta con un rol que **no** saltea RLS, pone
+`app.user_id` en el inquilino A y verifica tabla por tabla que A **no ve** la fila de B y **sí ve** la
+propia. Lo segundo no es adorno: una política `USING (false)` también daría cero filas ajenas y sería
+inútil. Verifica además que sin contexto de inquilino no se ve nada de nadie, que la base de
+prorrateo del sistema la ven todos, que `audit_logs` acepta el `INSERT` sin inquilino pero rechaza
+`UPDATE`/`DELETE`, y que A no puede **escribir** una fila a nombre de B (el `WITH CHECK`).
+
+**Qué hace ese test cuando el rol disponible es superusuario** — que hoy, en local, es el caso normal.
+No pasa en verde: **se saltea gritando**. Imprime un cartel enmarcado con el motivo
+(`el rol "costear" saltea RLS (rolsuper=true, rolbypassrls=true)`), la advertencia de que **no probó
+nada**, y el SQL exacto para crear el rol de prueba. El diagnóstico corre al *colectar* el módulo
+—no en un `beforeAll`— para que vitest reporte los 33 tests como `skipped` en vez de 33 verdes
+falsos. Con `RLS_REQUIRE_PROBE=1` el skip se convierte en **fallo**: sirve para el día que exista un
+CI con el rol y alguien lo saque sin querer. Un test de aislamiento que pasa en silencio es peor que
+no tener test: da una garantía falsa.
+
+**Corrida real contra un rol sin BYPASSRLS (lo que se hizo y lo que se observó).** Se creó un rol
+temporal en el Postgres local:
+
+```sql
+CREATE ROLE costear_rls_probe LOGIN PASSWORD '***' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+GRANT USAGE ON SCHEMA public TO costear_rls_probe;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO costear_rls_probe;
+```
+
+y se corrió el test con `RLS_PROBE_DATABASE_URL` apuntando a ese rol. Resultado: **33 passed** — el
+aislamiento se verificó de verdad, no por el `where` de la query. Después se comprobó que el test
+**detecta el agujero real**, reproduciendo las dos formas del hallazgo:
+
+- `DROP POLICY tenant_isolation ON cost_ledger_entries` → 1 failed (A no veía ni su propia fila).
+- `ALTER TABLE cost_ledger_entries DISABLE ROW LEVEL SECURITY` (el estado exacto en el que estaban
+  las 12) → 2 failed, con el mensaje `cost_ledger_entries: A vio 1 fila(s) de B`.
+
+En ambos casos se restauró con `npm run db:rls` y **el rol temporal se borró al terminar**
+(`DROP ROLE costear_rls_probe`). No queda ningún rol nuevo en la base ni ninguna credencial en el
+repo; el `.env` no se tocó.
+
+**Lo que falta y no es de este cambio (para cuando infra cambie el rol de la app).** Las políticas
+son hoy inertes porque el rol saltea RLS. Cuando eso cambie, toda query que no corra dentro de
+`withTenant()` va a ver **cero filas** — y eso ya vale para las 13 tablas que tenían política desde
+antes, no es nuevo de acá. `withTenant` hoy se usa en un puñado de servicios
+(`calculation-run-service`, `late-data-service`, `data-point-service` y los de Costeo por Procesos);
+el resto lee con el cliente Prisma pelado. Antes de flipear el rol hay que: (a) extender `withTenant`
+a todas las rutas de inquilino, (b) resolver el costista dueño en la ingesta por apiKey y envolverla
+igual, y (c) decidir con qué rol corren los jobs que leen cross-tenant a propósito (pipeline nocturno,
+panel admin). Sin eso, el cambio de rol no es una mejora de seguridad: es una caída.
+
+**Verificación.** `npm run prisma:deploy` limpio **dos veces seguidas**; `npm run db:rls` limpio
+**dos veces seguidas** (117 statements, idempotente). Antes: **13 tablas con política**. Después:
+**28 tablas con política, 30 políticas**, todas con `relrowsecurity = t` y `relforcerowsecurity = t`.
+Suite completa (excluyendo los tres archivos que pegan a la API de Groq): **954 passed**, contra una
+línea de base de 949 — los 5 nuevos son los de `rls-coverage`; los 33 de `rls-cross-tenant` figuran
+como skipped porque el rol local es superusuario. `npx tsc --noEmit` limpio; `npx eslint src tests`
+**0 errores** (13 warnings preexistentes). Sin migración: RLS se aplica con `db:rls`.
+
+---
+
+## CL-03 — La sección imputada y su explicación son una sola cosa
+
+**El bug.** `costSection` y el texto que lee el costista se elegían por separado. Cuando Layer 4
+pisaba a la IA, la sección salía de Layer 4 pero el `reasoning` seguía saliendo de la IA. Medido en
+el documento GA-05 de la auditoría del 06/08/2026: el costista leía *"…lo que indica un gasto de
+comercialización"* mientras el sistema había imputado `MANO_DE_OBRA`.
+
+**Por qué importa más de lo que parece.** La explicación es la función que sostiene toda la promesa
+de trazabilidad del producto. Un texto que justifica una cosa mientras el sistema hizo otra es peor
+que no mostrar explicación: le enseña al costista que la explicación no es confiable, y a partir de
+ahí deja de leerla. Se pierde la función entera, no un caso.
+
+**Decisión: hacer el estado inválido irrepresentable, no chequearlo después.** Se introdujo el tipo
+`SectionDecision` (`{ section, reasoning, decidedBy, ruleDissent }`), y `buildSectionAndExplanation`
+devuelve el par ya armado desde el mismo objeto. No hay forma de setear una sección con la
+explicación de otra decisión, porque no hay dos campos que setear: hay uno. Se descartó a propósito
+la alternativa de comparar ambas al final — un chequeo posterior detecta el estado inválido, pero
+permite que exista.
+
+**Decisión de desempate: gana la IA, se lleva su propia explicación, y el desacuerdo se declara.**
+Cuando una regla determinista de Layer 4 contradice a la IA, se imputa lo que dice la IA, el texto
+mostrado es el de la IA (coherente con lo imputado), se agrega en el mismo texto que la regla de
+negocio apunta a otra sección, y el documento queda marcado para confirmación.
+
+Por qué la IA y no Layer 4: cuando se llega a ese punto, el `documentType` que se guarda **ya** es el
+de la IA, sin discusión, y Layer 4 corre sobre *ese* tipo. Quedarse con la sección de Layer 4
+mientras se le acepta el tipo a la IA mezcla dos lecturas del documento en un resultado que ninguna
+de las dos sostiene. Además, los dos casos medidos de este pisado —GA-05 y MULTI-01— los ganaba
+Layer 4 y en los dos Layer 4 estaba equivocada.
+
+Por qué se declara el desacuerdo en vez de resolverlo en silencio: la auditoría encontró que el
+escalamiento ya está mal repartido (4 de 6 revisiones son sobre documentos que el sistema clasificó
+bien), así que sumar revisiones tiene un costo real. Pero un desacuerdo entre una regla determinista
+y la IA es exactamente el caso donde la revisión **sí** vale: son las dos únicas fuentes que tiene el
+sistema y no coinciden.
+
+**Relación con CL-02.** CL-02 (rama `UNKNOWN` de `routePayroll`) sacó el disparador más frecuente de
+este pisado, porque era la rama que reportaba `requiresAI: false`. Esta corrección igual hace falta:
+el mecanismo de pisado es el peligro, no una rama en particular.
+
+**Sobre la verificación.** El documento GA-05 del corpus reconstruido **no reproduce** este bug (ver
+`corpus-clasificador/ground-truth.md`: la reconstrucción es una factura de proveedor por comisiones,
+que no dispara el ruteo de liquidación). Por eso la prueba de esta corrección es un test dirigido que
+**construye el desacuerdo explícitamente**, no la corrida del corpus.
+
+---
+
+## CL-09 — Condición frente al IVA: dos precedencias, la elige la empresa
+
+**El hueco.** No existía ningún campo de condición fiscal en `schema.prisma`. El único rastro del
+concepto en todo el backend era una línea del prompt de Groq (*"Asumí Responsable Inscripto por
+defecto"*) y un pedido de que la IA marcara los indicios de lo contrario en `qualityNote` — texto
+libre que nadie leía y que no cambiaba ninguna decisión de costeo.
+
+**La regla** (cátedra, Clase 4, línea 27): *"IVA: solo aplica si la empresa es responsable no
+inscripta o monotributista; si es responsable inscripta, el IVA no forma parte del costo de
+adquisición"*.
+
+**Decisión: no hay una precedencia universal, hay dos, y la elige la empresa.**
+
+- `RESPONSABLE_INSCRIPTO` → el IVA es crédito fiscal. Costo = **neto**:
+  `netAmount → (totalAmount − taxAmount) → totalAmount`. Es exactamente lo que dejó CL-01, sin
+  cambiar un byte.
+- `MONOTRIBUTO` / `EXENTO` → el IVA no se recupera, es un costo más. Costo = **total**:
+  `totalAmount → (netAmount + taxAmount) → netAmount`. Costear sobre el neto acá **subvalúa** el
+  costo real con la misma magnitud con la que costear sobre el total lo **sobrevalúa** para un RI.
+
+**Default para las empresas existentes: `RESPONSABLE_INSCRIPTO`.** No es el valor más frecuente ni el
+más conservador: es el **único que no revalúa datos vivos**. Todo lo que ya está calculado en la base
+se calculó bajo ese supuesto (el prompt lo asumía y `ledger-builder` costeaba sobre el neto sin
+preguntarle a nadie). Cualquier otro default haría que costos ya computados pasaran a estar regidos
+por una regla distinta de la que los produjo — una revaluación silenciosa. Con este default, la rama
+que corre para toda fila preexistente es byte por byte la misma que corría antes.
+
+**La condición real no se adivina, se señaliza.** `condicionIvaRevisar` levanta una bandera accionable
+en la empresa cuando la IA ve *"Factura C"*, *"Consumidor Final"*, *"Monotributista"* o *"Responsable
+No Inscripto"* en un comprobante, con la nota y la fecha. Así la `qualityNote` deja de perderse. Una
+empresa que en realidad no es RI queda mal costeada — pero **con un cartel encima**, hasta que un
+humano confirme, en vez de mal costeada en silencio.
+
+**Sobre el union local en `ledger-builder`.** El tipo `CondicionIva` está escrito a mano ahí en vez de
+importarse de `@prisma/client`, a propósito: ese módulo es una función pura sobre el JSON de la IA y
+no debe arrastrar el cliente de Prisma (lo testea un archivo que no levanta base). Un test verifica
+que los dos conjuntos de valores no se desincronicen.
+
+**Migración.** Aditiva e idempotente: el tipo se crea en un bloque que traga `duplicate_object`, las
+columnas usan `ADD COLUMN IF NOT EXISTS`, y **no hay ningún `UPDATE`** — el `DEFAULT` de Postgres
+completa las filas existentes sin reescribir ninguna otra columna. No agrega tablas, así que no toca
+`prisma/rls.sql`: `companies` ya tiene su política de inquilino.
+
+---
+
+## CL-04 — El rubro avícola existe: perfil `AVICULTURA`
+
+**El hueco.** El primer cliente pago es una explotación de postura de ~200.000 ponedoras en
+Tucumán, y su rubro no existía en `industry-profile.ts`. Se lo atendía con `AGRO`, escrito para
+agricultura extensiva. **Tres de los siete errores de alta confianza de la auditoría del
+06/08/2026 salen de esa suplantación**, y los tres son la misma clase de defecto — una regla
+correcta para otro rubro, afirmada con confianza alta sobre este:
+
+| Caso | Documento | Daba | Por qué |
+|---|---|---|---|
+| `CIP-02` | Gasoil de grupo electrógeno y calefacción | `MATERIA_PRIMA` conf 97 | `fuelIsMP: true`, regla escrita para tractores de cultivo |
+| `CIP-04` | Vacunas del plantel | `MATERIA_PRIMA` conf 97 | `'vacuna'` en los `mpKeywords` de AGRO |
+| `CIP-01` | Luz de los galpones | `GASTO_ADMINISTRACION` conf 97 | AGRO solo tiene `'electricidad rural'` (lo cerró CL-05) |
+
+**El eje que ordena el perfil entero.** R-MP-DIRECTA (Clase 1, l. 58): *"identificable con el
+objeto de costo"*. El objeto de costo acá es **el huevo**. Lo que se convierte en huevo —alimento
+balanceado, maíz, núcleo vitamínico, carbonato de calcio que literalmente forma la cáscara— es MP
+directa. Lo que sostiene al plantel sin incorporarse al huevo —sanidad, energía, calefacción,
+mantenimiento de galpones— es CIP, por R-MP-INDIRECTA (*"pasa automáticamente a CIP"*) y por
+R-CIP (Clase 1, l. 64: *"energía eléctrica, fuerza motriz, calefacción, mantenimiento"*).
+El mismo eje explica las tres exclusiones deliberadas del perfil, que están comentadas en el
+código: el gasoil del generador **no** es MP (es fuerza motriz), la vacuna **no** es MP (es
+material indirecto) y la gallina **no** es MP (es un activo amortizable; lo que sí es costo del
+período es su amortización, que está en `cipKeywords`).
+
+**La detección de rubro se arregló con más alcance que el pedido.** Agregar `avícol` no
+alcanzaba: `AGRO_RE` también matchea `agro`, `campo`, `ganad` y `avicultur`, así que un cliente
+que se describiera *"establecimiento agropecuario avícola"* seguía cayendo en AGRO — el defecto
+que había que sacar de circulación. Quedó `AVICOLA_RE` evaluada **antes** que `AGRO_RE`, con
+`avicultur` movido de una a la otra. Y con un contrapeso, `AVICOLA_NO_RE`: un *"frigorífico
+avícola"* es una planta de faena (su MP es el ave, no el balanceado) y una *"distribuidora
+avícola"* revende. Mandarlas a `AVICULTURA` sería repetir este mismo error en la dirección
+contraria, así que caen en `MANUFACTURA` y `COMERCIO`.
+
+**Medición — un perfil sin medir es un pasivo.** Comparación de tres vías sobre el corpus
+(detalle y advertencias en `corpus-clasificador/ground-truth.md`):
+
+| Perfil | Accuracy | Precisión ≥90 | Errores de alta confianza |
+|---|---|---|---|
+| `AGRO` | 61,1 % | 81,8 % (9/11) | **2** |
+| `DEFAULT` | 72,2 % | 100 % (11/11) | 0 |
+| **`AVICULTURA`** | **83,3 %** | **100 % (13/13)** | **0** |
+
+Le gana a los dos. En precisión empata con `DEFAULT` en 100 %, pero **con más denominador**
+(13/13 vs. 11/11): `CIP-02` y `CIP-04` dejan de ser un escalamiento —o un error de alta
+confianza bajo AGRO— y pasan a ser una respuesta correcta afirmada por regla, con
+`requiresAI: false`. O sea que la IA ni siquiera los ve. Por eso salieron de `FALLOS_CONOCIDOS`
+y pasaron a guardas de regresión, y por eso `PERFIL_BASE` del harness pasó a `'AVICULTURA'`.
+
+**⚠️ La medición se hizo SIN la IA, y eso hay que decirlo.** El 09/08/2026 la cuota compartida
+de Groq estaba agotada: el rate-limiter reportaba pedidos de espera de 475 s, 344 s y 228 s
+recortados a 60 s. La corrida de tres perfiles × 18 casos × 3 repeticiones no terminaba y
+bloqueaba al resto, así que se cortó. La tabla de arriba sale de correr los tres perfiles con
+`GROQ_API_KEY` vacío: Layer 5 devuelve `null` y decide la cascada por reglas. **A cambio es
+determinista** (0 casos inestables, 1,8 s) y mide exactamente lo que CL-04 tocó, que es el ruteo
+por keywords de Layer 4. Queda pendiente rehacerla con la IA cuando la cuota se recupere; no se
+espera que mueva el veredicto, porque bajo `AVICULTURA` los casos que deciden se resuelven antes
+de llegar a Layer 5.
+
+**Un hallazgo que retracta al ground-truth anterior: el string de rubro NO viaja a la IA.**
+Estaba escrito que describir la empresa cambiaba la respuesta de Layer 5 aunque el perfil de
+keywords fuera el mismo. Es falso: `input.industry` se usa en un solo lugar de todo el backend
+(`cascade-classifier.ts:230`, `categorizeIndustry`); lo que llega al prompt es
+`industryProfile.label` y la categoría, nunca el string crudo. Dos strings que resuelven a la
+misma categoría producen un prompt idéntico byte por byte. Aquella diferencia medida era ruido
+de muestreo (`temperature: 0.05` sin `seed`, una sola repetición) — el hallazgo que el propio
+documento advertía y que igual se cometió. Consecuencia práctica: cualquier string que resuelva
+a la categoría X sirve para medir el perfil X, que es lo que permite que la fila `AGRO` del
+harness siga midiendo AGRO con `'Productora agropecuaria'` ahora que ningún string avícola
+resuelve ahí.
+
+**Lo que NO se hizo, y por qué no se inventó.** Los subproductos de una postura (gallina de
+descarte, huevo roto) se analizaron contra la cátedra y quedaron a medias, documentado en
+`ground-truth.md`:
+
+- **Sí se implementó el eje de merma.** El vocabulario de merma avícola entró en `lossKeywords`,
+  que `layer0a` trata como merma de naturaleza ambigua → revisión humana. Es lo correcto y no una
+  omisión: Clase 21 define la pérdida normal por un *"umbral de tolerancia establecido por la
+  empresa o el ingeniero"* que **no está en el comprobante**, así que el sistema no puede elegir
+  entre absorber la merma en el costo y mandarla al estado de resultados sin preguntar.
+- **No se implementó el recupero.** Clase 43 ofrece Categoría 1 (reconocer al vender) y
+  Categoría 2 (deducir del costo del producto principal). **`CostSection` no tiene ninguna
+  sección de recupero**, así que hoy el sistema solo sabe hacer Categoría 1 — no por elección
+  sino por falta de vocabulario. Y elegir entre las dos depende de si el ingreso es
+  *"significativo"*, que es un juicio del costista sobre el negocio, no un dato del papel.
+  Encima la gallina de descarte no encaja limpio en la definición de subproducto (se vende sin
+  proceso adicional) ni en la de desperdicio (tiene valor de venta relevante).
+  **Es un hueco de modelo, no de keywords: agregar palabras no lo cierra.**
+- **`'gallina de descarte'` quedó deliberadamente fuera de `lossKeywords`**: es el fin
+  planificado del ciclo, no una pérdida. Meterla ahí habría hecho escalar una venta normal como
+  si fuera un siniestro.
+
+**El maple sigue abierto.** Se siguió el requisito (`'maple'` en `mpKeywords`) pero la cátedra no
+zanja el caso: R-MP-INDIRECTA da un criterio doble —*"no identificable en cantidad exacta **o** de
+importe mínimo"*— y el maple cumple el primero pero podría cumplir el segundo. Si la cátedra
+responde lo contrario, el cambio es chico y está localizado.
+
+**Nota de método que se pagó en carne propia.** El matcheo de Layer 4 es `lower.includes(kw)`,
+sin límite de palabra. La primera versión de este perfil tenía `'ración'` en `mpKeywords` y le
+sumaba un punto de Materia Prima a toda factura que dijera **repa-ración**. Se detectó midiendo
+`CIP-MANT-GALPON`, no leyendo. Está comentado en el código para que no vuelva.

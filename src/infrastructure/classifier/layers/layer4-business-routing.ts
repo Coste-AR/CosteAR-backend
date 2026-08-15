@@ -1,4 +1,4 @@
-import type { DocumentType, CostSection, IndustryCategory } from '../types.js';
+import type { DocumentType, CostSection, IndustryCategory, AcquisitionCostLink } from '../types.js';
 import { getIndustryProfile } from '../industry/industry-profile.js';
 import { routePayroll } from './layer4-payroll-routing.js';
 import { routeNota, routeFacturaCompra } from './layer4-invoice-routing.js';
@@ -9,6 +9,12 @@ export interface Layer4Result {
   requiresAI: boolean;
   reasoning: string;
   suggestedSection?: CostSection;
+  /**
+   * Presente cuando el documento declara ser un flete/seguro sobre una compra
+   * (ver `AcquisitionCostLink` en types.ts). Viaja hasta el resultado final para
+   * que la capa de aplicación pueda resolver el vínculo contra el libro.
+   */
+  acquisitionLink?: AcquisitionCostLink;
 }
 
 export function runLayer4(

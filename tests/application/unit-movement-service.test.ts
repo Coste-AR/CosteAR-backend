@@ -13,6 +13,9 @@ const mockTx = {
   costPeriod: { findFirst: vi.fn() },
   unitMovementSchedule: { findUnique: vi.fn(), upsert: vi.fn() },
   dataPoint: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  // El cuadro resuelve el NOMBRE de quien informó el recuento para mostrarlo en
+  // la procedencia, en vez del id crudo. Llegó con `feat/procedencia-del-recuento-visible`.
+  user: { findUnique: vi.fn(async () => ({ name: 'Operario de planta' })) },
   dataPointVersion: { create: vi.fn(), findFirst: vi.fn() },
   traceAuditLog: { create: vi.fn() },
 };
@@ -38,7 +41,7 @@ function mockProcessesContext(overrides: { sequence?: number; unified?: boolean 
     sequence: overrides.sequence ?? 1,
     defaultConversionAvanceEqualsMO: overrides.unified ?? true,
   });
-  mockTx.costPeriod.findFirst.mockResolvedValue({ id: 'per-1', label: 'Abril 2026' });
+  mockTx.costPeriod.findFirst.mockResolvedValue({ id: 'per-1', label: 'Abril 2026', code: '2026-04' });
 }
 
 /** upsert devuelve la fila que se "persistió" (los datos de `create`). */
@@ -366,5 +369,196 @@ describe('UnitMovementService — B15', () => {
       (c[0].data.fieldKey as string).split('.').pop(),
     );
     expect(createdFields).not.toContain('startedInProduction');
+  });
+});
+
+/**
+ * T-11 — LO QUE UNA PERSONA ESCRIBE EN EL CUADRO TIENE FICHA. TODO.
+ *
+ * Los grados de avance se guardaban en la fila y no dejaban ficha, siendo que
+ * mueven la producción equivalente y por lo tanto el costo unitario. Y ninguna
+ * ficha del cuadro tenía fecha del hecho, así que todas mostraban "Hecho: —".
+ */
+describe('UnitMovementService — grados de avance y fecha del hecho (T-11)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTx.dataPoint.create.mockResolvedValue({ id: 'dp-x' });
+    mockTx.dataPointVersion.create.mockResolvedValue({ id: 'v1', versionN: 1 });
+    mockTx.dataPoint.findFirst.mockResolvedValue(null);
+    mockTx.dataPoint.findMany.mockResolvedValue([]);
+    mockTx.unitMovementSchedule.findUnique.mockResolvedValue(null);
+  });
+
+  const cuadroBase = {
+    initialWip: 1000,
+    startedInProduction: 9000,
+    transferredOut: 8000,
+    normalLossPct: 0.05,
+    sourceArea: 'planta' as const,
+    method: 'manual' as const,
+  };
+
+  const creados = () =>
+    mockTx.dataPoint.create.mock.calls.map((c) => ({
+      field: (c[0].data.fieldKey as string).split('.').pop(),
+      unit: c[0].data.unit as string,
+      element: c[0].data.element as string,
+      periodoImputado: c[0].data.periodoImputado as string | null,
+      fechaHecho: c[0].data.fechaHecho as Date | null,
+    }));
+
+  it('los cuatro grados de avance cargados a mano crean su DataPoint', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    await service.save(
+      'user-1',
+      'st-1',
+      'dept-1',
+      'per-1',
+      {
+        ...cuadroBase,
+        finalWipMpAvance: 1,
+        finalWipConvAvance: 0.5,
+        initialWipMpAvance: 1,
+        initialWipConvAvance: 0.4,
+      },
+      actor,
+    );
+
+    const fields = creados().map((c) => c.field);
+    expect(fields).toContain('finalWipMpAvance');
+    expect(fields).toContain('finalWipConvAvance');
+    expect(fields).toContain('initialWipMpAvance');
+    expect(fields).toContain('initialWipConvAvance');
+
+    // Se guardan como FRACCIÓN, igual que viajan y que se persisten en la fila:
+    // la ficha muestra el mismo número que tiene la columna del cuadro.
+    const convFinal = mockTx.dataPoint.create.mock.calls.find((c) =>
+      (c[0].data.fieldKey as string).endsWith('finalWipConvAvance'),
+    )!;
+    expect(mockTx.dataPointVersion.create.mock.calls.some((v) => v[0].data.valueNum === 0.5)).toBe(true);
+    expect(convFinal[0].data.label).toContain('conversión');
+  });
+
+  it('un avance NO cargado no inventa una ficha', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    await service.save('user-1', 'st-1', 'dept-1', 'per-1', { ...cuadroBase }, actor);
+
+    const fields = creados().map((c) => c.field);
+    expect(fields).not.toContain('finalWipConvAvance');
+    expect(fields).not.toContain('initialWipMpAvance');
+  });
+
+  it('la fecha del hecho queda en cada ficha del cuadro (se acabó el «Hecho: —»)', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    await service.save(
+      'user-1',
+      'st-1',
+      'dept-1',
+      'per-1',
+      { ...cuadroBase, fechaHecho: '2026-04-30' },
+      actor,
+    );
+
+    const conFecha = creados();
+    expect(conFecha.length).toBeGreaterThan(0);
+    expect(conFecha.every((c) => c.fechaHecho?.toISOString().slice(0, 10) === '2026-04-30')).toBe(true);
+    // Cae DENTRO del período del cuadro ⇒ se imputa sola, sin preguntar nada.
+    expect(conFecha.every((c) => c.periodoImputado === '2026-04')).toBe(true);
+  });
+
+  it('sin fecha del hecho, el dato se imputa igual al período del cuadro (no se rompe nada)', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    await service.save('user-1', 'st-1', 'dept-1', 'per-1', { ...cuadroBase }, actor);
+
+    expect(creados().every((c) => c.periodoImputado === '2026-04')).toBe(true);
+  });
+
+  it('una fecha del hecho de OTRO mes deja el dato pendiente de imputación (§3, no lo decide el servidor)', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    await service.save(
+      'user-1',
+      'st-1',
+      'dept-1',
+      'per-1',
+      { ...cuadroBase, fechaHecho: '2026-03-28' },
+      actor,
+    );
+
+    expect(creados().every((c) => c.periodoImputado == null)).toBe(true);
+  });
+
+  it('corregir SOLO la fecha del hecho versiona el dato (es una corrección, no un no-op)', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    mockTx.dataPoint.findFirst.mockImplementation(async (args: { where: { fieldKey: string } }) => {
+      if (args.where.fieldKey.endsWith('startedInProduction')) {
+        return {
+          id: 'dp-started',
+          fechaHecho: new Date('2026-04-15T00:00:00.000Z'),
+          versions: [{ versionN: 1, valueNum: 9000 }],
+        };
+      }
+      return null;
+    });
+    mockTx.dataPointVersion.findFirst.mockResolvedValue({ versionN: 1, valueNum: 9000 });
+    mockTx.dataPoint.update.mockResolvedValue({ id: 'dp-started', status: 'borrador' });
+
+    await service.save(
+      'user-1',
+      'st-1',
+      'dept-1',
+      'per-1',
+      { ...cuadroBase, fechaHecho: '2026-04-30' },
+      actor,
+    );
+
+    const version = mockTx.dataPointVersion.create.mock.calls.find(
+      (c) => c[0].data.dataPointId === 'dp-started',
+    );
+    expect(version).toBeDefined();
+    expect(version![0].data.reason).toContain('fecha del hecho');
+  });
+
+  it('el guardado devuelve las fichas recién creadas y la fecha del hecho', async () => {
+    mockProcessesContext();
+    mockUpsertEcho();
+    const service = await makeService();
+
+    mockTx.dataPoint.findMany.mockResolvedValue([
+      {
+        id: 'dp-1',
+        fieldKey: 'proceso.cuadro.per-1.dept-1.finalWipConvAvance',
+        fechaHecho: new Date('2026-04-30T00:00:00.000Z'),
+      },
+    ]);
+
+    const out = await service.save(
+      'user-1',
+      'st-1',
+      'dept-1',
+      'per-1',
+      { ...cuadroBase, finalWipConvAvance: 0.5, fechaHecho: '2026-04-30' },
+      actor,
+    );
+
+    expect(out.traces.finalWipConvAvance).toBe('dp-1');
+    expect(out.fechaHecho).toBe('2026-04-30');
   });
 });
