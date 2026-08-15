@@ -11,3 +11,7 @@ prisma/*.db
 keys/
 graphify-out/
 .claude/worktrees/
+
+# Config personal de Claude Code (por maquina, no se comparte).
+# Las skills del equipo SI se commitean: viven en .claude/skills/
+.claude/settings.local.json
