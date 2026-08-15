@@ -115,6 +115,16 @@ export interface ProcessDepartmentInput {
    * estructura, no hay nada que arrastrar. Default 0.
    */
   initialWipTransferredCost?: number;
+  /**
+   * Cuántas unidades de ESTE departamento produce cada unidad recibida del
+   * anterior (H12): 1 tonelada de fruta → 500 litros de jugo ⇒ 500. Solo tiene
+   * sentido en seq > 1. Sin factor declarado —el caso de siempre, misma unidad
+   * en toda la cadena— es 1 y el motor se comporta como antes de H12.
+   *
+   * El factor cambia la UNIDAD DE MEDIDA, nunca el total en pesos: el mismo
+   * dinero queda repartido en más (o menos) pedacitos.
+   */
+  conversionFromPrevious?: number;
 
   jointAllocation?: ProcessJointAllocationInput;
 }
@@ -293,13 +303,21 @@ export class ProcessCostingEngine
           { field: 'sequence' },
         );
       }
+      // H12 — el costo unitario del anterior viene en LA UNIDAD DEL ANTERIOR
+      // ($/tonelada) y todas las unidades de este departamento están en la
+      // suya (litros). Antes de que la plata cruce la frontera hay que llevar
+      // el unitario a la unidad del que recibe, dividiendo por el factor: el
+      // dinero total no cambia, se reparte en más pedacitos. Sin factor
+      // declarado el divisor es 1 y esto es idéntico al comportamiento previo.
+      const previousUnitCost = previous.unitCost.div(dept.conversionFromPrevious ?? 1);
+
       transferred = calcTransferredCost({
         sequence: dept.sequence,
-        previousUnitCost: previous.unitCost,
+        previousUnitCost,
         initialWipTransferredCost: dept.initialWipTransferredCost ?? 0,
         initialWipUnits: schedule.initialWip,
         // "Costo del anterior del período" = unidades recibidas × costo unitario previo.
-        previousPeriodTransferredCost: schedule.receivedFromPrevious.times(previous.unitCost),
+        previousPeriodTransferredCost: schedule.receivedFromPrevious.times(previousUnitCost),
         receivedUnits: schedule.receivedFromPrevious,
         unitIncrease: schedule.unitIncrease,
         normalLossUnits: schedule.normalLoss,
