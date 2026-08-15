@@ -95,6 +95,7 @@ export class EmailService {
         });
       } catch (err) {
         console.error(`[email:smtp] Error al enviar a ${to}:`, err);
+        throw err;
       }
       return;
     }
@@ -114,10 +115,11 @@ export class EmailService {
       try {
         const responseFallback = await this.resend.emails.send({ from: 'onboarding@resend.dev', to, subject, html });
         if (responseFallback.error) {
-          console.error(`[email] También falló envío fallback:`, responseFallback.error);
+          throw new Error(responseFallback.error.message);
         }
       } catch (fallbackErr) {
-        console.error(`[email] Excepción en envío fallback:`, fallbackErr);
+        console.error(`[email] También falló el envío fallback:`, fallbackErr);
+        throw fallbackErr;
       }
     }
   }
