@@ -145,7 +145,12 @@ feature → dev → staging → main
 
 - **Nunca push directo** a `main`, `staging` ni `dev`. GitHub lo bloquea.
 - `main` solo acepta PRs desde `staging`; `staging` solo desde `dev`. No se saltean pasos.
-- `main` y `staging` exigen **review de otro socio + CI en verde**. `dev` exige CI en verde.
+- Las tres exigen **el CI en verde**, con `enforce_admins` activo en `main` y `staging`: ni un
+  administrador puede mergear con los tests o el typecheck en rojo.
+- **El review no bloquea el merge** (decisión del 15-08-2026: somos cuatro y exigir la
+  aprobación de otro frenaba más de lo que protegía). Cada uno puede mergear su propio PR.
+  **Pedí review igual** cuando el cambio toque el motor de cálculo, una migración, plata del
+  cliente, o vaya a `main`. Ahí el costo de equivocarse lo paga el cliente.
 
 ### 7. Bitácora
 

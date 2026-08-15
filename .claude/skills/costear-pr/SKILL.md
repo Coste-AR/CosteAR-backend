@@ -131,8 +131,12 @@ Y correr **`/costear-bitacora`** para registrar la sesión.
 
 ## Gotchas conocidos
 
-- **`main` y `staging` están protegidos** en backend y frontend: exigen review de otro socio y
-  el CI en verde. `dev` exige el CI. Si `gh pr merge` falla, no es un error de la skill.
+- **`main` y `staging` están protegidos** en backend y frontend: exigen PR y **el CI en verde**.
+  `dev` también. Si `gh pr merge` falla por los checks, no es un error de la skill.
+- **El review NO bloquea el merge** (decisión del equipo del 15-08-2026: con 4 personas, exigir
+  aprobación trababa el trabajo). Sigue siendo parte del proceso, pero como práctica: **pedile
+  review a alguien antes de mergear algo que toque lógica de negocio o plata del cliente.**
+  Nadie te lo va a impedir — por eso depende de vos.
 - **`CosteAR-admin` es privado y no tiene protección forzada** (limitación del plan Free de
   GitHub). Las reglas valen igual, por acuerdo.
 - El CI del backend tiene **dos jobs** (`build-and-test` e `integration-tests`) y los dos son
