@@ -16,17 +16,32 @@ const base =
   });
 
 /**
- * LAS TABLAS CON RLS, y solo esas.
+ * LOS MODELOS CON RLS, y solo esos.
  *
  * Espeja `prisma/rls.sql`. Acotar la lista importa: cada consulta a un modelo de
  * acá paga una transacción para poder setear `app.user_id`, y no tiene sentido
  * pagarla en `users`, `terms_versions` o el resto, que no tienen políticas.
  *
- * Si agregás una tabla a `rls.sql`, agregala acá. Si no, sus lecturas van a
- * volver vacías en cuanto el rol de conexión deje de ignorar RLS — que es
- * justamente el bug que este archivo existe para cerrar.
+ * TIENE QUE ESTAR SINCRONIZADO CON `prisma/rls.sql`: si una tabla tiene política
+ * y su modelo NO está acá, sus consultas nunca reciben el `set_config`, así que
+ * `current_app_user_id()` devuelve NULL y la política las rechaza — un INSERT
+ * falla con "new row violates row-level security policy" y un SELECT devuelve
+ * cero filas EN SILENCIO.
+ *
+ * Eso pasó de verdad: la corrección C-01 llevó el RLS de 13 a 30 tablas y esta
+ * lista quedó con las 13 viejas. CI lo encontró al insertar en `cost_periods`
+ * con un rol sin BYPASSRLS. Hoy no se nota porque el rol de la app saltea el
+ * RLS; el día que infra lo cambie, cada tabla que falte acá deja de funcionar.
+ *
+ * `tests/config/rls-coverage.test.ts` compara esta lista contra `rls.sql` y se
+ * pone en rojo si vuelven a separarse. No la edites a mano sin correrlo.
+ *
+ * Ojo con los nombres: son los del MODELO de Prisma, no los de la tabla. El
+ * `ByProductLine` de abajo estaba escrito como 'JointCostByProductLine' —el
+ * nombre de la tabla— así que nunca protegió nada.
  */
-const RLS_MODELS = new Set([
+export const RLS_MODELS = new Set([
+  // Las 13 originales.
   'Company',
   'CostStructure',
   'CostCalculation',
@@ -39,7 +54,24 @@ const RLS_MODELS = new Set([
   'ProcessDepartment',
   'UnitMovementSchedule',
   'JointCostAllocation',
-  'JointCostByProductLine',
+  'ByProductLine',
+  // Las que sumó C-01 y las que vinieron después.
+  'AllocationBase',
+  'AllocationBaseValue',
+  'AuditLog',
+  'ClassificationAudit',
+  'CompanyTargetBudget',
+  'CostConfigVersion',
+  'CostLedgerEntry',
+  'CostPeriod',
+  'EmpresaConnection',
+  'Evidence',
+  'LateDataDecision',
+  'ProcessedCAE',
+  'SupplierFingerprint',
+  'ValidationHistory',
+  'VaultChatMessage',
+  'VaultChatSession',
 ]);
 
 /**

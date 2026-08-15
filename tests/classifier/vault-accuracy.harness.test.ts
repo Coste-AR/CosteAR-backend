@@ -227,10 +227,13 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
 
     // Objetivo del equipo: ≥90% en casos operativos normales.
     expect(acc).toBeGreaterThanOrEqual(90);
-    // Timeout holgado igual que el test GAP: sin DB local cada caso que escala
-    // reintenta contra Prisma ausente antes de fallar gracefully y la corrida
-    // supera los 5000ms por defecto. En CI (con DB) es instantáneo.
-  }, 30000);
+    // Timeout de 180s, no 30s. Este test hace 55 llamadas a la API de Groq. Con
+    // los 30s que tenía venía pasando en 29,8s — un segundo de margen — y bastaba
+    // que la cuota del free tier apretara para que se pusiera rojo por TIEMPO y
+    // no por accuracy. Medido varias veces entre el 07 y el 10/08/2026.
+    // Un test que se pone rojo por el estado de una cuota externa enseña a
+    // ignorar el rojo, que es peor que no tenerlo.
+  }, 180_000);
 
   // Timeout holgado: es informativo y sin DB local cada caso que escala hace un
   // round-trip a Prisma (getCorrectionExamples) que reintenta contra el server
@@ -253,5 +256,5 @@ describe('Efectividad de clasificación vs. criterios cátedra (Mirta)', () => {
     }
     // eslint-disable-next-line no-console
     console.log('\n── GAP (divergencias conocidas, no cuentan en la métrica) ──\n' + rows.join('\n') + '\n');
-  }, 30000);
+  }, 180_000);
 });

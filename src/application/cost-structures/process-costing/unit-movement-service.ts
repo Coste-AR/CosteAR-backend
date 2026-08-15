@@ -73,7 +73,33 @@ const COST_FIELDS = [
 ] as const;
 type CostField = (typeof COST_FIELDS)[number];
 
-type TraceableField = CuadroField | CostField;
+/**
+ * GRADOS DE AVANCE — DATOS CARGADOS A MANO, CON FICHA (T-11).
+ *
+ * Se guardaban en la fila del cuadro y no generaban NINGÚN `DataPoint`: eran los
+ * únicos valores que una persona escribe en esta pantalla y que no dejaban
+ * rastro de quién los escribió ni cuándo.
+ *
+ * No son un detalle de presentación: la producción equivalente es
+ * "terminadas + existencia final × grado de avance", así que estos cuatro
+ * números mueven el denominador del costo unitario de cada elemento. Un informe
+ * donde el costo unitario se puede abrir hasta el fondo pero el avance que lo
+ * determinó no tiene ficha es un informe que promete trazabilidad y la corta
+ * justo en el dato más discutible del mes — el que informa la oficina técnica y
+ * el que el costista estima cuando planta no contesta (ver `countSourceFor`).
+ *
+ * Van con el MISMO prefijo de clave que el resto del cuadro: para la
+ * trazabilidad son datos del cuadro, no una familia nueva.
+ */
+const AVANCE_FIELDS = [
+  'finalWipMpAvance',
+  'finalWipConvAvance',
+  'initialWipMpAvance',
+  'initialWipConvAvance',
+] as const;
+type AvanceField = (typeof AVANCE_FIELDS)[number];
+
+type TraceableField = CuadroField | CostField | AvanceField;
 
 const COST_META: Record<CostField, { label: string; unit: string; element: 'MP' | 'MOD' | 'CIP' }> = {
   periodCostMp: { label: 'Costo de materia prima del período', unit: '$', element: 'MP' },
@@ -82,6 +108,40 @@ const COST_META: Record<CostField, { label: string; unit: string; element: 'MP' 
   initialWipCostMp: { label: 'Materia prima de la existencia inicial', unit: '$', element: 'MP' },
   initialWipCostMo: { label: 'Mano de obra de la existencia inicial', unit: '$', element: 'MOD' },
   initialWipCostCif: { label: 'Carga fabril de la existencia inicial', unit: '$', element: 'CIP' },
+};
+
+/**
+ * Los avances viajan como FRACCIÓN (0,80 = 80 %) en toda la aplicación, y acá se
+ * guardan tal cual se recibieron: la ficha muestra el mismo número que tiene la
+ * columna del cuadro, sin conversiones intermedias. La unidad es '%' por la
+ * misma razón que en `normalLossPct`, que ya se guardaba así.
+ *
+ * `element`: MP para el avance de materia prima. El de conversión se anota en
+ * MOD porque el enum no tiene una opción "conversión" y la conversión es
+ * MOD + CIP: MOD es el hogar estable de ese par (mismo criterio con el que las
+ * unidades del cuadro viven en MP).
+ */
+const AVANCE_META: Record<AvanceField, { label: string; unit: string; element: 'MP' | 'MOD' }> = {
+  finalWipMpAvance: {
+    label: 'Grado de avance de la existencia final en materia prima',
+    unit: '%',
+    element: 'MP',
+  },
+  finalWipConvAvance: {
+    label: 'Grado de avance de la existencia final en conversión',
+    unit: '%',
+    element: 'MOD',
+  },
+  initialWipMpAvance: {
+    label: 'Grado de avance de la existencia inicial en materia prima',
+    unit: '%',
+    element: 'MP',
+  },
+  initialWipConvAvance: {
+    label: 'Grado de avance de la existencia inicial en conversión',
+    unit: '%',
+    element: 'MOD',
+  },
 };
 
 const FIELD_META: Record<CuadroField, { label: string; unit: string; element: 'MP' }> = {
@@ -130,6 +190,7 @@ export class UnitMovementService {
         saved: null,
         resolved: null,
         traces: this.emptyTraces(),
+        fechaHecho: null,
       };
     }
 
@@ -154,7 +215,7 @@ export class UnitMovementService {
       exists: true,
       saved: this.serializeRow(row, await this.countedByName(row.countedBy)),
       resolved: resolved ? this.serialize(resolved) : null,
-      traces: await this.tracesFor(ctx),
+      ...(await this.tracesFor(ctx)),
     };
   }
 
@@ -279,7 +340,7 @@ export class UnitMovementService {
 
       // 2) Trazabilidad: un DataPoint por cada valor MANUAL provisto. El valor
       //    derivado por diferencia (el que el usuario NO cargó) queda afuera.
-      const trazables: TraceableField[] = [...CUADRO_FIELDS, ...COST_FIELDS];
+      const trazables: TraceableField[] = [...CUADRO_FIELDS, ...COST_FIELDS, ...AVANCE_FIELDS];
       for (const field of trazables) {
         const raw = body[field];
         if (raw === undefined) continue; // no ingresado a mano → no es DataPoint
@@ -292,7 +353,14 @@ export class UnitMovementService {
         saved: this.serializeRow(saved, await this.countedByName(saved.countedBy, tx)),
         resolved: this.serialize(resolved),
       };
-    });
+    }).then(async (out) => ({
+      // Las fichas recién creadas viajan de vuelta con el guardado. La pantalla
+      // las necesita en el mismo acto: para marcar los valores que acaban de
+      // quedar trazables, y —si la fecha del hecho cae fuera del período— para
+      // poder preguntar a qué período se imputan sin volver a consultar.
+      ...out,
+      ...(await this.tracesFor(ctx)),
+    }));
   }
 
   /**
@@ -412,7 +480,11 @@ export class UnitMovementService {
     actor: TraceActor,
   ): Promise<void> {
     const meta: { label: string; unit: string; element: 'MP' | 'MOD' | 'CIP' } =
-      field in COST_META ? COST_META[field as CostField] : FIELD_META[field as CuadroField];
+      field in COST_META
+        ? COST_META[field as CostField]
+        : field in AVANCE_META
+          ? AVANCE_META[field as AvanceField]
+          : FIELD_META[field as CuadroField];
     const fieldKey = this.fieldKey(ctx, field);
     const label = `${meta.label} · ${ctx.department.name}, ${ctx.period.label}`;
     const valueJson = {
@@ -448,20 +520,31 @@ export class UnitMovementService {
           // departamentos ya eran 12 fichas que el costista tenía que imputar a
           // mano, una por una, para poder cerrar el mes. En la práctica, el
           // período no se podía cerrar.
-          periodoImputado: ctx.period.code,
+          //
+          // La excepción es la fecha del hecho: si el costista declara que esto
+          // pasó en OTRO mes, la imputación deja de ser obvia y no la decide el
+          // servidor solo (manual §3). Ver `periodoImputadoFor`.
+          periodoImputado: this.periodoImputadoFor(body.fechaHecho, ctx.period.code) ?? undefined,
           sourceArea: body.sourceArea,
           method: body.method,
           valueNum: raw,
           valueJson,
+          fechaHecho: body.fechaHecho,
         },
         actor,
       );
       return;
     }
 
-    // Sin cambio de valor ⇒ no versionamos (no dejamos versiones espurias).
+    // Sin cambio de valor NI de fecha ⇒ no versionamos (no dejamos versiones
+    // espurias). La fecha entra en la comparación porque corregir cuándo pasó
+    // un hecho ES una corrección del dato: cambia su imputación y tiene que
+    // quedar firmada como cualquier otra.
     const lastValue = existing.versions[0]?.valueNum;
-    if (lastValue != null && Number(lastValue) === raw) return;
+    const fechaPrevia = existing.fechaHecho ? existing.fechaHecho.toISOString().slice(0, 10) : null;
+    const cambioValor = lastValue == null || Number(lastValue) !== raw;
+    const cambioFecha = body.fechaHecho !== undefined && body.fechaHecho !== fechaPrevia;
+    if (!cambioValor && !cambioFecha) return;
 
     await this.dataPoints.addVersionInTx(
       tx,
@@ -472,10 +555,33 @@ export class UnitMovementService {
         method: body.method,
         valueNum: raw,
         valueJson,
-        reason: 'Actualización del cuadro de movimiento de unidades',
+        fechaHecho: body.fechaHecho,
+        reason: cambioValor
+          ? 'Actualización del cuadro de movimiento de unidades'
+          : 'Corrección de la fecha del hecho del cuadro de movimiento de unidades',
       },
       actor,
     );
+  }
+
+  /**
+   * A QUÉ PERÍODO SE IMPUTA UN DATO DEL CUADRO.
+   *
+   * Sin fecha del hecho —o con una fecha que cae DENTRO del período que se está
+   * cargando— se imputa solo al período del cuadro: el dato se cargó para ese
+   * mes y no hay nada que preguntar.
+   *
+   * Con una fecha de OTRO mes queda en `null`, o sea pendiente. No es un olvido:
+   * es la misma regla de Órdenes (manual §3, `proposeImputation`). Un recuento
+   * de producción fechado en junio que alguien carga en el cuadro de julio puede
+   * ser un devengamiento legítimo o un error de tipeo, y el sistema no puede
+   * elegir por el costista. La pantalla pregunta con `ImputacionModal` apenas
+   * termina de guardar, y mientras tanto el resultado se marca incompleto (F04),
+   * que es exactamente lo que corresponde.
+   */
+  private periodoImputadoFor(fechaHecho: string | undefined, periodCode: string): string | null {
+    if (!fechaHecho) return periodCode;
+    return fechaHecho.slice(0, 7) === periodCode ? periodCode : null;
   }
 
   /** Clave estable de un valor del cuadro (única por estructura+depto+período+campo). */
@@ -483,25 +589,40 @@ export class UnitMovementService {
     return `proceso.cuadro.${ctx.period.id}.${ctx.department.id}.${field}`;
   }
 
-  /** dataPointId por campo trazable (null si es derivado o no se cargó). */
-  private async tracesFor(ctx: ProcessContext): Promise<Record<TraceableField, string | null>> {
-    const campos: TraceableField[] = [...CUADRO_FIELDS, ...COST_FIELDS];
+  /**
+   * `dataPointId` por campo trazable (null si es derivado o no se cargó) + la
+   * fecha del hecho del cuadro.
+   *
+   * La fecha sale de las fichas y no de la fila del cuadro porque es un dato de
+   * la CAPTURA, no del cálculo: todas las fichas del mismo (departamento,
+   * período) se cargan en el mismo acto y comparten la fecha. Sin devolverla, la
+   * ficha de cualquier valor del cuadro mostraba "Hecho: —" para siempre, y el
+   * formulario no tenía con qué rellenar el campo al volver a abrirlo.
+   */
+  private async tracesFor(
+    ctx: ProcessContext,
+  ): Promise<{ traces: Record<TraceableField, string | null>; fechaHecho: string | null }> {
+    const campos: TraceableField[] = [...CUADRO_FIELDS, ...COST_FIELDS, ...AVANCE_FIELDS];
     const keys = campos.map((f) => this.fieldKey(ctx, f));
     const dps = await this.db.dataPoint.findMany({
       where: { structureId: ctx.structure.id, fieldKey: { in: keys }, voidedAt: null },
-      select: { id: true, fieldKey: true },
+      select: { id: true, fieldKey: true, fechaHecho: true },
     });
     const byKey = new Map(dps.map((d) => [d.fieldKey, d.id]));
-    const out = this.emptyTraces();
+    const traces = this.emptyTraces();
     for (const field of campos) {
-      out[field] = byKey.get(this.fieldKey(ctx, field)) ?? null;
+      traces[field] = byKey.get(this.fieldKey(ctx, field)) ?? null;
     }
-    return out;
+    const conFecha = dps.find((d) => d.fechaHecho != null);
+    return {
+      traces,
+      fechaHecho: conFecha?.fechaHecho ? conFecha.fechaHecho.toISOString().slice(0, 10) : null,
+    };
   }
 
   private emptyTraces(): Record<TraceableField, string | null> {
     return Object.fromEntries(
-      [...CUADRO_FIELDS, ...COST_FIELDS].map((f) => [f, null]),
+      [...CUADRO_FIELDS, ...COST_FIELDS, ...AVANCE_FIELDS].map((f) => [f, null]),
     ) as Record<TraceableField, string | null>;
   }
 

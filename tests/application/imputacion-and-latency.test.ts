@@ -48,6 +48,11 @@ const mockTx = {
   costPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
   calculationNode: { create: vi.fn().mockResolvedValue({ id: 'node-1' }) },
   traceAuditLog: { create: vi.fn(), count: vi.fn(), findMany: vi.fn() },
+  // T-07 — la MISMA corrida escribe también la fila legada (`cost_calculations`),
+  // en esta transacción, para que el número que se muestra y el árbol que lo
+  // explica salgan de una sola ejecución del motor. Antes lo escribía el otro
+  // endpoint, en su propia corrida.
+  costCalculation: { create: vi.fn().mockResolvedValue({ id: 'calc-1' }) },
 };
 
 vi.mock('@/infrastructure/database/prisma.js', () => ({

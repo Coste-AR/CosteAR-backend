@@ -9,6 +9,8 @@ import type {
   AddVersionInput,
   EvidenceInput,
 } from '../../shared/schemas/trazabilidad.schema.js';
+import { MP_MOVEMENT_FIELD_KEYS } from './orders-input-points.js';
+import { buildAiProvenance, type AiProvenance } from './ai-provenance.js';
 
 /**
  * Servicio de Trazabilidad Total v1 (spec secciones A y C).
@@ -84,7 +86,73 @@ export class DataPointService {
    */
   async create(userId: string, structureId: string, input: CreateDataPointInput, actor: TraceActor) {
     await this.requireStructureOwned(userId, structureId);
+
+    // IDEMPOTENCIA DE LOS MOVIMIENTOS DE MP.
+    //
+    // Desde que el guardado de la sección reconcilia sus propios data points
+    // (`datapoint-reconciler`), el formulario de MP llega SEGUNDO: guarda la
+    // sección y recién después postea los movimientos nuevos para encolar su
+    // imputación. Sin esto, cada movimiento nacería dos veces —una por el
+    // backend y otra por el formulario— y la ficha PPP mostraría el doble de
+    // compras que la planilla.
+    //
+    // Se devuelve el dato que ya existe (mismo movimiento: misma etiqueta,
+    // misma fecha, mismo rol), así el formulario sigue recibiendo un id con el
+    // que imputar y la UX de imputación queda intacta.
+    const yaExiste = await this.findMpMovementPoint(structureId, input);
+    if (yaExiste) return yaExiste;
+
     return withTenant(userId, (tx) => this.createInTx(tx, structureId, input, actor));
+  }
+
+  /**
+   * Data point de un movimiento de MP ya registrado, si lo hay. Identidad del
+   * movimiento = (fieldKey, etiqueta, fecha del hecho, rol) — la misma tripleta
+   * (tipo, detalle, fecha) que usa el formulario para reconocer un movimiento
+   * guardado, más el rol que distingue cantidad de precio.
+   */
+  private async findMpMovementPoint(structureId: string, input: CreateDataPointInput) {
+    if (!MP_MOVEMENT_FIELD_KEYS.includes(input.fieldKey)) return null;
+    const role =
+      (input.valueJson as Record<string, unknown> | undefined)?.role ??
+      (input.fieldKey.endsWith('.precio') ? 'precio' : 'cantidad');
+
+    const candidates = await this.db.dataPoint.findMany({
+      where: {
+        structureId,
+        fieldKey: input.fieldKey,
+        label: input.label,
+        fechaHecho: input.fechaHecho ? new Date(input.fechaHecho) : null,
+        voidedAt: null,
+      },
+      include: { versions: { orderBy: { versionN: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return (
+      candidates.find((dp) => {
+        const json = dp.versions[0]?.valueJson as Record<string, unknown> | null;
+        const dpRole = json?.role ?? (dp.fieldKey.endsWith('.precio') ? 'precio' : 'cantidad');
+        return dpRole === role;
+      }) ?? null
+    );
+  }
+
+  /**
+   * Anulado lógico dentro de una transacción YA abierta (misma semántica que
+   * `void`: nunca DELETE, R1). Lo usa el reconciliador cuando un insumo
+   * desaparece de la sección guardada.
+   */
+  async voidInTx(tx: Prisma.TransactionClient, id: string, actor: TraceActor, comment: string) {
+    const updated = await tx.dataPoint.update({
+      where: { id },
+      data: { voidedAt: new Date(), status: 'anulado' },
+    });
+    await recordTraceAudit(
+      { entityType: 'DataPoint', entityId: id, action: 'anular', actor, comment },
+      tx,
+    );
+    return updated;
   }
 
   /**
@@ -103,8 +171,14 @@ export class DataPointService {
      * pertenece el dato en el momento de crearlo. Un comprobante que entra por
      * ingesta no lo sabe —de ahí toda la maquinaria de imputación—, pero un
      * valor del cuadro de movimiento sí: se carga PARA un período concreto.
+     *
+     * `dataEntryId` NO está en `createDataPointSchema` a propósito: es interno.
+     * Lo pone el populador de la ingesta (T-06) para que la ficha pueda llegar
+     * hasta el comprobante y su clasificación. Si viajara en el body de la API
+     * cualquier cliente podría atribuirle un documento a un dato que cargó a
+     * mano, que es exactamente la mentira que este campo existe para evitar.
      */
-    input: CreateDataPointInput & { periodoImputado?: string },
+    input: CreateDataPointInput & { periodoImputado?: string; dataEntryId?: string },
     actor: TraceActor,
   ) {
     const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
@@ -141,6 +215,9 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
+        // El documento del que salió el número (T-06). `null` cuando lo cargó
+        // una persona: la ficha lee esa ausencia como "sin sello de IA".
+        dataEntryId: input.dataEntryId ?? null,
       },
     });
     await recordTraceAudit(
@@ -176,7 +253,8 @@ export class DataPointService {
     tx: Prisma.TransactionClient,
     id: string,
     existing: { fechaHecho: Date | null },
-    input: AddVersionInput,
+    /** `dataEntryId`: ver la nota en `createInTx` — interno, nunca del body. */
+    input: AddVersionInput & { dataEntryId?: string },
     actor: TraceActor,
   ) {
     const evidenceId = await this.resolveEvidenceId(tx, input, actor.id);
@@ -208,6 +286,10 @@ export class DataPointService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         actorArea: input.sourceArea as any,
         deviceInfo: input.deviceInfo ?? actor.device,
+        // Documento de origen de ESTA versión (T-06). Se estampa por versión,
+        // no por dato: una compra que entró por factura y después la corrigió
+        // el costista a mano tiene que dejar de mostrar el sello de IA.
+        dataEntryId: input.dataEntryId ?? null,
       },
     });
     // Una corrección invalida cualquier firma previa: vuelve a 'borrador'
@@ -404,20 +486,36 @@ export class DataPointService {
       }
     }
 
+    // PROCEDENCIA IA (T-06). OPCIONAL a propósito: la clave solo aparece cuando
+    // la versión vigente entró por la ingesta de comprobantes. Todo consumidor
+    // que ya existía sigue recibiendo exactamente el mismo objeto que antes, y
+    // un dato cargado a mano no trae la clave — la ficha lee esa ausencia como
+    // "acá no intervino ninguna IA" y no dibuja sello.
+    const aiProvenance: AiProvenance | null = await buildAiProvenance(this.db, current);
+
     return {
       id: dp.id,
       label: dp.label,
       display,
       status: dp.status,
       signedBy,
+      ...(aiProvenance ? { aiProvenance } : {}),
       fields,
       periods: {
         hecho: dp.fechaHecho ? dp.fechaHecho.toISOString().slice(0, 10) : null,
         captacion: dp.fechaCaptacion.toISOString(),
         imputado: dp.periodoImputado,
       },
+      // El final de la cadena, cuando existe: el papel. `counterparty` viaja
+      // porque "Factura A 0001-00012345" sin decir de quién no le sirve a nadie
+      // que audite (T-04).
       evidence: current?.evidence
-        ? { kind: current.evidence.kind, reference: current.evidence.reference, fileUrl: current.evidence.fileUrl }
+        ? {
+            kind: current.evidence.kind,
+            reference: current.evidence.reference,
+            counterparty: current.evidence.counterparty,
+            fileUrl: current.evidence.fileUrl,
+          }
         : null,
       versions: versions.map((v) => ({
         n: v.versionN,
@@ -637,6 +735,53 @@ export class DataPointService {
       default:
         return ['Producción equivalente', ...cadena];
     }
+  }
+
+  /**
+   * T-05 — EL ÍNDICE DE INSUMOS TRAZABLES DE UNA ESTRUCTURA (`fieldKey` → dato).
+   *
+   * Las pantallas de CARGA (Materia Prima, Venta) muestran números que alguien
+   * tipeó: son datos con ficha, y para marcarlos hay que saber a qué `DataPoint`
+   * corresponde cada campo del formulario. El árbol de derivación no sirve para
+   * esto: solo nombra las hojas que participan del cálculo (los movimientos de
+   * MP, el precio y la cantidad vendida) y deja afuera todo lo demás —los cuatro
+   * insumos de Wilson, la existencia inicial, la cantidad producida—, además de
+   * no existir hasta que alguien calcula.
+   *
+   * Devuelve la `fieldKey` tal como la escribe `orders-input-points.ts`, que es
+   * la ÚNICA convención de nombres del sistema: las pantallas arman la misma
+   * clave y buscan por ella. No devuelve valores: el número que se muestra sale
+   * de la config guardada, acá solo viaja el vínculo con la ficha.
+   *
+   * Ámbito de inquilino igual que el resto de la ruta (`requireStructureOwned`);
+   * `DataPoint` además está en `RLS_MODELS`, así que la política de la base
+   * vuelve a filtrar por usuario aunque este chequeo se cayera.
+   */
+  async listDataPoints(userId: string, structureId: string) {
+    await this.requireStructureOwned(userId, structureId);
+
+    const points = await this.db.dataPoint.findMany({
+      where: { structureId, voidedAt: null, status: { not: 'anulado' } },
+      select: {
+        id: true,
+        element: true,
+        fieldKey: true,
+        label: true,
+        unit: true,
+        periodoImputado: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return points.map((dp) => ({
+      id: dp.id,
+      element: dp.element,
+      fieldKey: dp.fieldKey,
+      label: dp.label,
+      unit: dp.unit,
+      periodoImputado: dp.periodoImputado,
+      pending: dp.periodoImputado === null,
+    }));
   }
 
   /**

@@ -1,0 +1,11 @@
+-- T-04 — Comprobantes: la tabla `evidence` pasa a tener dueño de verdad.
+--
+-- Aditiva: no altera columnas, no borra nada, no toca ningún valor calculado.
+--
+-- Desde que existe el alta (POST /api/v1/evidence) todo comprobante nace con
+-- `uploadedBy`. Ese pasa a ser el predicado de la política RLS de la tabla
+-- (prisma/rls.sql, aplicada aparte por `npm run db:rls`) y la columna por la
+-- que se listan los comprobantes de un costista: sin índice, cada lectura y
+-- cada chequeo de la política son un seq scan sobre TODAS las facturas de
+-- TODOS los clientes.
+CREATE INDEX IF NOT EXISTS "evidence_uploadedBy_idx" ON "evidence"("uploadedBy");

@@ -42,6 +42,10 @@ export class CompanyService {
         description: input.description ?? null,
         // Si no lo eligen, mensual: es el ritmo más común y el default de la DB.
         periodicity: input.periodicity ?? 'MONTHLY',
+        // Si no la eligen, Responsable Inscripto: es el default de la columna y
+        // el supuesto con el que costea todo el sistema (ver DECISIONES.md,
+        // CL-09). Decide si el IVA de cada comprobante es costo o crédito fiscal.
+        condicionIva: input.condicionIva ?? 'RESPONSABLE_INSCRIPTO',
       },
     });
 
@@ -86,6 +90,16 @@ export class CompanyService {
       }
     }
 
+    // A diferencia del ritmo de costeo, la condición frente al IVA SÍ se puede
+    // corregir con la empresa en marcha: el sistema la asume Responsable
+    // Inscripto por defecto y la bandera `condicionIvaRevisar` existe justamente
+    // para que alguien venga a arreglarla. Rige HACIA ADELANTE: las líneas del
+    // libro mayor ya emitidas no se recalculan — son hechos con su comprobante
+    // atrás, y reescribirlas sería una revaluación silenciosa de datos vivos.
+    // Confirmar la condición apaga la bandera y su nota.
+    const condicionCambia = !!input.condicionIva && input.condicionIva !== existing.condicionIva;
+    const confirmaCondicion = !!input.condicionIva;
+
     const company = await this.db.company.update({
       where: { id },
       data: {
@@ -95,8 +109,32 @@ export class CompanyService {
         description: input.description ?? existing.description,
         isActive: input.isActive ?? existing.isActive,
         periodicity: input.periodicity ?? existing.periodicity,
+        condicionIva: input.condicionIva ?? existing.condicionIva,
+        ...(confirmaCondicion
+          ? { condicionIvaRevisar: false, condicionIvaRevisarNota: null, condicionIvaRevisarAt: null }
+          : {}),
       },
     });
+
+    // Cambiar la condición cambia cómo se costea todo lo que entre desde ahora.
+    // Queda como señal para que el pipeline/el admin lo vean, no como un log.
+    if (condicionCambia) {
+      await this.db.dailySignal.create({
+        data: {
+          type: 'USER_CORRECTION',
+          source: 'VALIDACIONES_CORRECCION',
+          status: 'PENDING',
+          content: `Condición frente al IVA corregida: ${existing.condicionIva} → ${input.condicionIva}`,
+          context: {
+            action: 'CONDICION_IVA_CONFIRMADA',
+            companyId: id,
+            anterior: existing.condicionIva,
+            nueva: input.condicionIva,
+          },
+          userId,
+        },
+      });
+    }
     await recordAudit(
       { ...ctx, userId, action: 'company.update', entityType: 'Company', entityId: id, oldValue: existing, newValue: company },
       this.db,

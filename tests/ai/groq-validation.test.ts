@@ -14,6 +14,10 @@ vi.mock('@/infrastructure/config/env.js', () => ({
 }));
 
 import { GroqService } from '@/infrastructure/ai/groq-service.js';
+import {
+  classifyResponseSchema,
+  documentAnalysisSchema,
+} from '@/infrastructure/ai/groq-schemas.js';
 
 // ── Helpers de respuesta ─────────────────────────────────────────────────────
 function ok(content: unknown) {
@@ -187,6 +191,182 @@ describe('classifyDocument — Zod validation + guided retry', () => {
     const res = await svc.classifyDocument(CLASSIFY_INPUT);
 
     expect(res).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Rangos numéricos: el esquema TIENE que ser la barrera. Antes, `confidence`
+// era z.number() sin rango y un 999 validaba limpio; el único freno era el
+// clamp de Layer 5 (Math.min(100, …)), que un refactor podía borrar.
+describe('classifyResponseSchema — rango de confidence', () => {
+  it('RECHAZA confidence: 999 en el esquema (no lo deja pasar para que lo clampee Layer 5)', () => {
+    const res = classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: 999 });
+
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.issues.some((i) => i.path.join('.') === 'confidence')).toBe(true);
+    }
+  });
+
+  it('RECHAZA confidence negativa e Infinity', () => {
+    expect(classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: -1 }).success).toBe(false);
+    expect(classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: Infinity }).success).toBe(false);
+    expect(classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: NaN }).success).toBe(false);
+  });
+
+  it('ACEPTA una confidence válida y los bordes 0 y 100', () => {
+    expect(classifyResponseSchema.safeParse(VALID_CLASSIFY).success).toBe(true);
+    expect(classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: 0 }).success).toBe(true);
+    expect(classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: 100 }).success).toBe(true);
+    expect(classifyResponseSchema.safeParse({ ...VALID_CLASSIFY, confidence: 72.5 }).success).toBe(true);
+  });
+});
+
+describe('documentAnalysisSchema — cotas de extractedData', () => {
+  const ed = VALID_ANALYZE.extractedData;
+
+  it('RECHAZA importes no finitos (Infinity envenenaría cualquier suma aguas abajo)', () => {
+    const res = documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE,
+      extractedData: { ...ed, netAmount: Infinity },
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('ACEPTA importes negativos (nota de crédito / ajuste son legítimos)', () => {
+    const res = documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE,
+      extractedData: { ...ed, totalAmount: -121000, netAmount: -100000 },
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it('RECHAZA hoursWorked / employeeCount negativos', () => {
+    expect(documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE, extractedData: { ...ed, hoursWorked: -8 },
+    }).success).toBe(false);
+    expect(documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE, extractedData: { ...ed, employeeCount: -3 },
+    }).success).toBe(false);
+    // …y acepta los valores razonables.
+    expect(documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE, extractedData: { ...ed, hoursWorked: 176, employeeCount: 12 },
+    }).success).toBe(true);
+  });
+
+  it('RECHAZA una lista de items degenerada (> 200) y acepta una normal', () => {
+    const item = { description: 'Chapa', quantity: 1, unitCost: 10, total: 10 };
+    expect(documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE, extractedData: { ...ed, items: Array.from({ length: 201 }, () => item) },
+    }).success).toBe(false);
+    expect(documentAnalysisSchema.safeParse({
+      ...VALID_ANALYZE, extractedData: { ...ed, items: Array.from({ length: 200 }, () => item) },
+    }).success).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Los mismos rangos, vistos desde el servicio: fuera de rango → reintento
+// guiado y, si insiste, salvataje + requiresReview. Nunca un número silencioso.
+describe('classifyDocument — confidence fuera de rango', () => {
+  it('confidence 999 en el 1er intento → reintento guiado que nombra el rango, luego OK', async () => {
+    groqFetchMock
+      .mockResolvedValueOnce(ok({ ...VALID_CLASSIFY, confidence: 999 }))
+      .mockResolvedValueOnce(ok(VALID_CLASSIFY));
+
+    const svc = new GroqService();
+    const res = await svc.classifyDocument(CLASSIFY_INPUT);
+
+    expect(res).toEqual(VALID_CLASSIFY);
+    expect(groqFetchMock).toHaveBeenCalledTimes(2);
+
+    const retryPrompt = lastUserMessageOf(1);
+    expect(retryPrompt).toContain('confidence');
+    expect(retryPrompt).toContain('0 y 100');
+  });
+
+  it('confidence 999 en ambos intentos → salvada a 0 + requiresReview (no clampeada a 100)', async () => {
+    groqFetchMock
+      .mockResolvedValueOnce(ok({ ...VALID_CLASSIFY, confidence: 999 }))
+      .mockResolvedValueOnce(ok({ ...VALID_CLASSIFY, confidence: 12345 }));
+
+    const svc = new GroqService();
+    const res = await svc.classifyDocument(CLASSIFY_INPUT);
+
+    expect(res).not.toBeNull();
+    expect(res?.confidence).toBe(0);      // salvataje, NO Math.min(100, 999)
+    expect(res?.confidence).not.toBe(100);
+    expect(res?.requiresReview).toBe(true);
+    // El resto de la clasificación se conserva.
+    expect(res?.documentType).toBe('FACTURA_COMPRA');
+    expect(res?.costSection).toBe('MATERIA_PRIMA');
+  });
+
+  it('confidence negativa en ambos intentos → salvada a 0 + requiresReview', async () => {
+    groqFetchMock
+      .mockResolvedValueOnce(ok({ ...VALID_CLASSIFY, confidence: -50 }))
+      .mockResolvedValueOnce(ok({ ...VALID_CLASSIFY, confidence: -1 }));
+
+    const svc = new GroqService();
+    const res = await svc.classifyDocument(CLASSIFY_INPUT);
+
+    expect(res?.confidence).toBe(0);
+    expect(res?.requiresReview).toBe(true);
+  });
+});
+
+describe('analyzeDocument — cotas numéricas de extractedData', () => {
+  const ANALYZE_INPUT = { text: 'Liquidación de sueldos julio' };
+
+  it('hoursWorked negativo en ambos intentos → campo anulado + requiresReview, resto conservado', async () => {
+    const bad = {
+      ...VALID_ANALYZE,
+      extractedData: { ...VALID_ANALYZE.extractedData, hoursWorked: -8 },
+    };
+    groqFetchMock.mockResolvedValueOnce(ok(bad)).mockResolvedValueOnce(ok(bad));
+
+    const svc = new GroqService();
+    const res = await svc.analyzeDocument(ANALYZE_INPUT);
+
+    expect(res).not.toBeNull();
+    expect(res?.extractedData?.hoursWorked).toBeNull();
+    expect(res?.extractedData?.netAmount).toBe(100000); // el resto se conserva
+    expect(res?.requiresReview).toBe(true);
+  });
+
+  it('employeeCount negativo en ambos intentos → campo anulado + requiresReview', async () => {
+    const bad = {
+      ...VALID_ANALYZE,
+      extractedData: { ...VALID_ANALYZE.extractedData, employeeCount: -3 },
+    };
+    groqFetchMock.mockResolvedValueOnce(ok(bad)).mockResolvedValueOnce(ok(bad));
+
+    const svc = new GroqService();
+    const res = await svc.analyzeDocument(ANALYZE_INPUT);
+
+    expect(res?.extractedData?.employeeCount).toBeNull();
+    expect(res?.extractedData?.totalAmount).toBe(121000);
+    expect(res?.requiresReview).toBe(true);
+  });
+
+  it('items degenerado (> 200) en ambos intentos → items descartado + requiresReview, importes conservados', async () => {
+    const item = { description: 'Chapa', quantity: 1, unitCost: 10, total: 10 };
+    const bad = {
+      ...VALID_ANALYZE,
+      extractedData: {
+        ...VALID_ANALYZE.extractedData,
+        items: Array.from({ length: 201 }, () => item),
+      },
+    };
+    groqFetchMock.mockResolvedValueOnce(ok(bad)).mockResolvedValueOnce(ok(bad));
+
+    const svc = new GroqService();
+    const res = await svc.analyzeDocument(ANALYZE_INPUT);
+
+    expect(res).not.toBeNull();
+    expect(res?.extractedData?.items).toBeUndefined();
+    expect(res?.extractedData?.netAmount).toBe(100000);
+    expect(res?.requiresReview).toBe(true);
   });
 });
 

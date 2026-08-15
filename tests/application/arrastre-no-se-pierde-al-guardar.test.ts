@@ -59,6 +59,9 @@ function makeDb() {
     // prueba eso, pero el guardado lo hace, así que el doble tiene que aguantarlo.
     dataPoint: {
       findFirst: vi.fn(async () => null),
+      // T-11 — el cuadro reconcilia sus datos contra los que ya existen (para
+      // versionar en vez de duplicar), así que ahora los lista antes de guardar.
+      findMany: vi.fn(async () => []),
       create: vi.fn(async () => ({ id: 'dp-1' })),
       update: vi.fn(async () => ({ id: 'dp-1' })),
     },

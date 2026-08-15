@@ -440,6 +440,17 @@ export class ProcessCostingEngine
    * transferido / CAUP, la justificación del costo y —como hojas— los datos del
    * cuadro que se cargaron a mano, con su `traceFieldKey` para que el servicio
    * los enlace a su `DataPoint` (drill-down del frontend hasta el origen).
+   *
+   * CADA CIFRA DEL INFORME LLEVA SU CLAVE (T-11)
+   * --------------------------------------------
+   * Los nodos CALCULADOS también salen con `traceFieldKey`, con el prefijo
+   * `proceso.informe.` — misma convención determinística que el cuadro
+   * (`proceso.cuadro.`), (período, departamento, campo). No resuelven contra
+   * ningún `DataPoint` (nadie los cargó: son cuentas), y eso está bien: la clave
+   * no existe para enlazarlos a un dato sino para que el informe de costos de
+   * producción pueda encontrar EL nodo de cada número que muestra sin comparar
+   * etiquetas. Casar por etiqueta significa que renombrar un título de pantalla
+   * apaga el drill-down en silencio, sin error ni test en rojo.
    */
   private buildDepartmentTree(
     dept: ProcessDepartmentInput,
@@ -449,6 +460,7 @@ export class ProcessCostingEngine
     joint: JointCostAllocationResult | undefined,
   ): TreeNode {
     const children: TreeNode[] = [];
+    const informe = (campo: string): string => `proceso.informe.${dept.periodId}.${dept.id}.${campo}`;
 
     // Costo transferido del anterior + su apertura (costo modificado + CAUP).
     if (transferred && report.previousDepartment) {
@@ -457,12 +469,14 @@ export class ProcessCostingEngine
         formula: 'costo modificado + CAUP',
         value: report.previousDepartment.costoUnitarioTransferido.toNumber(),
         unit: '$/u',
+        traceFieldKey: informe('deptoAnterior.costoUnitario'),
         children: [
           {
             label: 'Costo modificado',
             formula: '(costo EI del anterior + costo del anterior del período) ÷ unidades a justificar',
             value: transferred.costoModificado.toNumber(),
             unit: '$/u',
+            traceFieldKey: informe('costoModificado'),
             children: [],
           },
           {
@@ -470,9 +484,22 @@ export class ProcessCostingEngine
             formula: 'costo de la pérdida ÷ unidades buenas',
             value: transferred.caup.toNumber(),
             unit: '$/u',
+            traceFieldKey: informe('caup'),
             children: [],
           },
         ],
+      });
+
+      // La MISMA cifra en pesos que muestra el acumulado a justificar. Va como
+      // nodo propio y no como una lectura distinta del anterior porque en el
+      // informe son dos renglones distintos: uno es $/u y el otro $.
+      children.push({
+        label: 'Costo total del departamento anterior',
+        formula: 'unidades buenas × costo transferido por unidad',
+        value: report.previousDepartment.costoTotal.toNumber(),
+        unit: '$',
+        traceFieldKey: informe('deptoAnterior.costoTotal'),
+        children: [],
       });
     }
 
@@ -483,12 +510,39 @@ export class ProcessCostingEngine
         formula: 'costo total del elemento ÷ producción equivalente',
         value: e.costoUnitario.toNumber(),
         unit: '$/u',
+        traceFieldKey: informe(`elemento.${e.element}.costoUnitario`),
         children: [
-          { label: 'Costo total del elemento', value: e.costoTotal.toNumber(), unit: '$', children: [] },
-          { label: 'Producción equivalente', value: e.produccionProcesada.toNumber(), unit: 'u', children: [] },
+          {
+            label: 'Costo total del elemento',
+            formula: 'costo de la existencia inicial + costo del período',
+            value: e.costoTotal.toNumber(),
+            unit: '$',
+            traceFieldKey: informe(`elemento.${e.element}.costoTotal`),
+            // Acá termina la cadena de cuentas y empiezan los datos: los
+            // importes que alguien cargó en el cuadro, con su clave del cuadro
+            // para que el servicio los enlace a su ficha.
+            children: this.elementCostLeaves(dept, e.element),
+          },
+          {
+            label: 'Producción equivalente',
+            formula: 'unidades terminadas + existencia final × grado de avance',
+            value: e.produccionProcesada.toNumber(),
+            unit: 'u',
+            traceFieldKey: informe(`elemento.${e.element}.produccionEquivalente`),
+            children: [],
+          },
         ],
       });
     }
+
+    children.push({
+      label: 'Costo acumulado a justificar',
+      formula: 'costo del departamento anterior + costo total de cada elemento',
+      value: report.costoAcumuladoAJustificar.toNumber(),
+      unit: '$',
+      traceFieldKey: informe('acumuladoAJustificar'),
+      children: [],
+    });
 
     // Justificación del costo (Parte 2 del informe).
     children.push({
@@ -496,13 +550,16 @@ export class ProcessCostingEngine
       formula: 'unidades terminadas y transferidas × costo unitario total acumulado',
       value: report.costoTerminadasYTransferidas.toNumber(),
       unit: '$',
+      traceFieldKey: informe('terminadasYTransferidas'),
       children: [],
     });
     if (report.costoTerminadasEnStock.gt(0)) {
       children.push({
         label: 'Terminadas en existencia',
+        formula: 'unidades terminadas en existencia × costo unitario total acumulado',
         value: report.costoTerminadasEnStock.toNumber(),
         unit: '$',
+        traceFieldKey: informe('terminadasEnStock'),
         children: [],
       });
     }
@@ -512,6 +569,7 @@ export class ProcessCostingEngine
         formula: 'unidades extraordinarias × costo unitario total acumulado (va al Estado de Resultados)',
         value: report.costoPerdidasExtraordinarias.toNumber(),
         unit: '$',
+        traceFieldKey: informe('perdidasExtraordinarias'),
         children: [],
       });
     }
@@ -520,6 +578,15 @@ export class ProcessCostingEngine
       formula: 'costo acumulado a justificar − terminadas y transferidas − stock − extraordinarias',
       value: report.costoExistenciaFinalPorDiferencia.toNumber(),
       unit: '$',
+      traceFieldKey: informe('existenciaFinal'),
+      children: [],
+    });
+    children.push({
+      label: 'Total justificado',
+      formula: 'terminadas y transferidas + terminadas en existencia + extraordinarias + existencia final',
+      value: report.totalJustificado.toNumber(),
+      unit: '$',
+      traceFieldKey: informe('totalJustificado'),
       children: [],
     });
 
@@ -551,8 +618,55 @@ export class ProcessCostingEngine
       formula: 'costo unitario total acumulado del departamento',
       value: report.costoUnitarioTotalAcumulado.toNumber(),
       unit: '$/u',
+      traceFieldKey: informe('costoUnitarioAcumulado'),
       children,
     };
+  }
+
+  /**
+   * Los importes CARGADOS que componen el costo total de un elemento: existencia
+   * inicial y período, con la clave del cuadro (`proceso.cuadro.…`) para que se
+   * enlacen a la ficha del dato. Un departamento con conversión unificada suma
+   * mano de obra y carga fabril en una sola columna (CC), así que ese elemento
+   * abre en cuatro importes, no en dos: la suma es del motor, pero cada sumando
+   * lo cargó una persona y tiene que poder abrirse por separado.
+   */
+  private elementCostLeaves(dept: ProcessDepartmentInput, element: string): TreeNode[] {
+    const c = dept.costs;
+    const cuadro = (field: string): string => `proceso.cuadro.${dept.periodId}.${dept.id}.${field}`;
+    const leaf = (field: string, label: string, value: number | undefined): TreeNode => ({
+      label,
+      value: value ?? 0,
+      unit: '$',
+      children: [],
+      traceFieldKey: cuadro(field),
+    });
+
+    const mp = (): TreeNode[] => [
+      leaf('initialWipCostMp', 'Materia prima de la existencia inicial', c.mpInicial),
+      leaf('periodCostMp', 'Costo de materia prima del período', c.mpPeriodo),
+    ];
+    const mod = (): TreeNode[] => [
+      leaf('initialWipCostMo', 'Mano de obra de la existencia inicial', c.moInicial),
+      leaf('periodCostMo', 'Costo de mano de obra del período', c.moPeriodo),
+    ];
+    const cip = (): TreeNode[] => [
+      leaf('initialWipCostCif', 'Carga fabril de la existencia inicial', c.cifInicial),
+      leaf('periodCostCif', 'Carga fabril del período', c.cifPeriodo),
+    ];
+
+    switch (element) {
+      case 'MP':
+        return mp();
+      case 'MOD':
+        return mod();
+      case 'CIP':
+        return cip();
+      case 'CC':
+        return [...mod(), ...cip()];
+      default:
+        return [];
+    }
   }
 
   /**
