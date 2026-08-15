@@ -128,6 +128,16 @@ jobs:
         SQL
         npm run test:integration
 
+    # `evidence-append-only` firma un access token de verdad para adjuntar un
+    # comprobante, y firmar con RS256 necesita una clave privada real: sin esto
+    # falla con "secretOrPrivateKey must be an asymmetric key".
+    #
+    # Se genera un par nuevo en cada corrida, a propósito. Son claves de usar y
+    # tirar contra una base descartable — no hay ningún secreto que guardar en
+    # el repo ni en los settings de Actions.
+    - name: Generar claves efímeras para firmar JWT en los tests
+      run: node scripts/generate-keys.mjs >> "$GITHUB_ENV"
+
     # Segunda tanda, con el rol INVERTIDO, y por eso es un paso aparte.
     #
     # Los archivos de `vitest.db.config.ts` siembran sus fixtures con SQL crudo,
