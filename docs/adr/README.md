@@ -70,4 +70,4 @@ adelante todo va a esta carpeta, un archivo por decisión.
 
 <!-- Se agrega una línea por ADR. Más reciente arriba. -->
 
-_(todavía no hay ADRs registrados)_
+- [0001 — Separar los tests en tres suites según el rol de Postgres que necesitan](./0001-tres-suites-de-test-segun-el-rol-de-postgres.md) — 15-08-2026 · **Aceptada**. 61 tests no corrían en ningún lado, entre ellos los 34 del aislamiento entre empresas.
