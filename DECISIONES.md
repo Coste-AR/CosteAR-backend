@@ -1,5 +1,16 @@
 # Decisiones — Trazabilidad Total v1
 
+> ⚠️ **Registro histórico — cerrado.**
+>
+> Este archivo documenta la implementación de "Trazabilidad Total v1" y se conserva tal cual
+> como evidencia de esa etapa. **No se le agrega nada nuevo.**
+>
+> Las decisiones técnicas de acá en adelante van a [`docs/adr/`](./docs/adr/README.md),
+> un archivo por decisión, y se crean con `/costear-adr`.
+>
+> *(Nota agregada el 15-08-2026 al montar el sistema de trazabilidad del equipo.)*
+
+
 Registro vivo de decisiones tomadas de forma autónoma durante la implementación
 de la especificación "Trazabilidad Total v1", en la branch `AlanSandbox`.
 Regla general: ante ambigüedad, default más simple que cumpla la spec sin
