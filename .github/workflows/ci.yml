@@ -35,6 +35,13 @@ jobs:
     - name: Build
       run: npm run build
       
+    # Guarda contra el bug del 15-08-2026: cinco archivos que necesitaban base
+    # se salteaban solos acá y tampoco estaban en el include de la suite de
+    # integración. Eran 61 tests que no corrían en ningún lado, con el CI en
+    # verde igual. Este chequeo falla si vuelve a aparecer un archivo así.
+    - name: Ningún test con base puede quedar sin suite
+      run: npm run check:tests-base
+
     - name: Run Tests
       run: npm run test
 
@@ -120,3 +127,22 @@ jobs:
         ALTER DEFAULT PRIVILEGES FOR ROLE costear GRANT USAGE, SELECT ON SEQUENCES TO costear_app;
         SQL
         npm run test:integration
+
+    # Segunda tanda, con el rol INVERTIDO, y por eso es un paso aparte.
+    #
+    # Los archivos de `vitest.db.config.ts` siembran sus fixtures con SQL crudo,
+    # y el rol de la app no puede insertarlos: RLS los rechaza con
+    # `42501: new row violates row-level security policy`. Por eso acá
+    # DATABASE_URL apunta al DUEÑO.
+    #
+    # `rls-cross-tenant` es el caso fino: siembra con el dueño y VERIFICA con
+    # RLS_PROBE_DATABASE_URL, que apunta al rol restringido. Sin esa sonda no
+    # probaría nada. RLS_REQUIRE_PROBE=1 hace que falle en vez de saltearse
+    # — que es justo el modo de falla que nos escondió estos tests hasta ahora.
+    - name: Run DB-backed security & traceability tests
+      env:
+        MIGRATION_DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+        DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+        RLS_PROBE_DATABASE_URL: postgresql://costear_app:costear_app@localhost:5432/costear_test
+        RLS_REQUIRE_PROBE: '1'
+      run: npm run test:db
