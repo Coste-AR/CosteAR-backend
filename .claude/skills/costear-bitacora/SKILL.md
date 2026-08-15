@@ -103,7 +103,7 @@ Donde `<repo>` es `backend` · `frontend` · `admin` · `knowledge-base` · `tod
 ## Qué se hizo
 
 <!--
-  Para Alan y Juli, que no programan. En castellano llano.
+  Para Alan y Lauti, que no programan. En castellano llano.
   Si hay que usar un término técnico, se aclara entre paréntesis la primera vez.
   Tres a seis bullets. Qué cambió PARA EL USUARIO, no qué archivos se tocaron.
 -->
@@ -149,7 +149,7 @@ Donde `<repo>` es `backend` · `frontend` · `admin` · `knowledge-base` · `tod
 
 | Regla | Por qué |
 | --- | --- |
-| **Se escribe para quien no programa** | Alan y Juli tienen que poder leerla sin traductor |
+| **Se escribe para quien no programa** | Alan y Lauti tienen que poder leerla sin traductor |
 | **Todo link es real y verificado** | Una entrada sin links no sirve como trazabilidad |
 | **Lo que salió mal también se escribe** | Es la parte de la que se aprende |
 | **Nada de credenciales, tokens ni datos del cliente** | Aunque el repo sea privado |
