@@ -105,6 +105,23 @@ const extended = base.$extends({
   },
 });
 
+// H19: $transaction llamado directamente (sin withTenant) no activa
+// inExplicitTransaction(), así que la extensión de $allModels abría su propia
+// conexión por cada consulta RLS dentro del callback — rompiendo la atomicidad.
+// Este parche envuelve el callback de toda transacción interactiva en
+// enterExplicitTransaction para que la extensión se quede quieta.
+// Las batch transactions (array de operaciones) no tienen este problema.
+const _origTx = (extended as any).$transaction.bind(extended);
+(extended as any).$transaction = function (arg: any, options?: any) {
+  if (typeof arg === 'function') {
+    return _origTx(
+      (tx: any) => enterExplicitTransaction(() => (arg as (tx: any) => Promise<unknown>)(tx)),
+      options,
+    );
+  }
+  return _origTx(arg as any, options);
+};
+
 /**
  * El tipo extendido no es asignable a `PrismaClient`, y los 22 servicios reciben
  * `db: PrismaClient` por constructor. El casteo mantiene ese contrato: en

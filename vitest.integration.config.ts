@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
+import { CON_ROL_DE_APP } from './tests/db-dependent.mjs';
 
 /**
  * TESTS DE INTEGRACIÓN — contra una base Postgres de verdad.
@@ -38,7 +39,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/integration/**/*.test.ts'],
+    // La lista vive en `tests/db-dependent.mjs`, que también alimenta la
+    // exclusión de la suite rápida — así no se pueden desalinear.
+    //
+    // Acá van SOLO los que corren con el rol de la aplicación (sin BYPASSRLS).
+    // Los que siembran con SQL crudo necesitan el rol dueño y viven en
+    // `vitest.db.config.ts` (`npm run test:db`).
+    include: CON_ROL_DE_APP,
     globalSetup: ['./tests/integration/global-setup.ts'],
     // Una sola base compartida: correr en paralelo haría que un archivo borre
     // los datos que otro está usando.
