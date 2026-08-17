@@ -36,6 +36,7 @@ import { registerSystemAlertRoutes } from './routes/system-alert.routes.js';
 import { registerBenchmarkRoutes } from './routes/benchmark.routes.js';
 import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
 import { registerTermsRoutes } from './routes/terms.routes.js';
+import { registerIndustryProfileRoutes } from './routes/industry-profile.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -193,6 +194,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerAdminRoutes(api);
       await registerSystemAlertRoutes(api);
       await registerTermsRoutes(api);
+      await registerIndustryProfileRoutes(api);
     },
     { prefix },
   );
