@@ -8,9 +8,16 @@ import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-const DEMO_EMAIL = 'demo@costear.com';
-const DEMO_PASSWORD = 'CosteAR2026!';
+const DEMO_EMAIL = process.env.COSTEAR_USER;
+const DEMO_PASSWORD = process.env.COSTEAR_PASS;
 const PEPPER = process.env.ARGON2_PEPPER ?? '';
+
+function requireEnv(name, value) {
+  if (!value) {
+    throw new Error(`Falta ${name}. Definila en el entorno antes de ejecutar el seed.`);
+  }
+  return value;
+}
 
 const catedra = {
   rawMaterialConfig: {
@@ -68,15 +75,17 @@ const catedra = {
 };
 
 async function main() {
-  const passwordHash = await argon2.hash(DEMO_PASSWORD + PEPPER, {
+  const demoEmail = requireEnv('COSTEAR_USER', DEMO_EMAIL);
+  const demoPassword = requireEnv('COSTEAR_PASS', DEMO_PASSWORD);
+  const passwordHash = await argon2.hash(demoPassword + PEPPER, {
     type: argon2.argon2id, memoryCost: 65536, timeCost: 3, parallelism: 4,
   });
 
   const user = await prisma.user.upsert({
-    where: { email: DEMO_EMAIL },
+    where: { email: demoEmail },
     update: {},
     create: {
-      email: DEMO_EMAIL, passwordHash, name: 'Costista Demo',
+      email: demoEmail, passwordHash, name: 'Costista Demo',
       cuit: '20123456786', dni: '12345678',
       professionalType: 'CONTADOR_PUBLICO', province: 'Tucumán',
       onboardedAt: new Date(),
@@ -101,8 +110,7 @@ async function main() {
   });
 
   console.info('✔ Seed completo');
-  console.info(`  Usuario:    ${DEMO_EMAIL}`);
-  console.info(`  Contraseña: ${DEMO_PASSWORD}`);
+  console.info(`  Usuario: ${demoEmail}`);
 }
 
 main()
