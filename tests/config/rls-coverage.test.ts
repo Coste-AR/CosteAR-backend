@@ -71,7 +71,11 @@ const EXENTAS: Record<string, string> = {
     'Se lee por CÓDIGO, por alguien que todavía no aceptó la invitación y puede no ' +
     'tener cuenta. Exigir contexto de tenant rompería el alta por invitación.',
 
-  // --- Catálogo global del clasificador ---
+  // --- Catálogos globales del clasificador ---
+  vocabulario_terminos:
+    'Vocabulario de dominio por rubro (68 términos avícolas + futuros rubros): es ' +
+    'configuración compartida del clasificador, no dato de ningún tenant específico. ' +
+    'Solo se escribe desde seeds y el panel admin. Mismo patrón que macro_snapshots.',
   industry_profiles:
     'Catálogo de los 11 perfiles de industria (keywords MP/MOD/CIP, flags). ' +
     'Es configuración del sistema, idéntica para todos los tenants: no existe dato ' +

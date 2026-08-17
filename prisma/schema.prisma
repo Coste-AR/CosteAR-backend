@@ -1878,6 +1878,28 @@ model SystemAlert {
   @@map("system_alerts")
 }
 
+model VocabularioTermino {
+  id               String   @id @default(uuid()) @db.Uuid
+  externalId       String?
+  industryCategory String
+  termino          String
+  variantes        String[]
+  concepto         String
+  entidadDominio   String
+  seccion          String
+  yaEnPerfil       Boolean  @default(false)
+  ambiguo          Boolean  @default(false)
+  desambiguacion   String?
+  cita             String?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([industryCategory, termino])
+  @@index([industryCategory])
+  @@map("vocabulario_terminos")
+}
+
 model IndustryProfile {
   id              String   @id @default(uuid()) @db.Uuid
   category        String   @unique
