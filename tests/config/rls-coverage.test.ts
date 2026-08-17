@@ -71,6 +71,13 @@ const EXENTAS: Record<string, string> = {
     'Se lee por CÓDIGO, por alguien que todavía no aceptó la invitación y puede no ' +
     'tener cuenta. Exigir contexto de tenant rompería el alta por invitación.',
 
+  // --- Catálogo global del clasificador ---
+  industry_profiles:
+    'Catálogo de los 11 perfiles de industria (keywords MP/MOD/CIP, flags). ' +
+    'Es configuración del sistema, idéntica para todos los tenants: no existe dato ' +
+    'de un cliente en esta tabla. Solo se escribe desde el seed o el panel admin. ' +
+    'El acceso de lectura cross-tenant es por diseño, igual que macro_snapshots.',
+
   // --- Corpus cross-tenant por diseño ---
   daily_signals:
     'Corpus del pipeline nocturno de aprendizaje: se escribe desde muchos tenants y se ' +
