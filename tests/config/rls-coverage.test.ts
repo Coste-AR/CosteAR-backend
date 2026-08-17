@@ -76,6 +76,11 @@ const EXENTAS: Record<string, string> = {
     'Vocabulario de dominio por rubro (68 términos avícolas + futuros rubros): es ' +
     'configuración compartida del clasificador, no dato de ningún tenant específico. ' +
     'Solo se escribe desde seeds y el panel admin. Mismo patrón que macro_snapshots.',
+  industry_profiles:
+    'Catálogo de los 11 perfiles de industria (keywords MP/MOD/CIP, flags). ' +
+    'Es configuración del sistema, idéntica para todos los tenants: no existe dato ' +
+    'de un cliente en esta tabla. Solo se escribe desde el seed o el panel admin. ' +
+    'El acceso de lectura cross-tenant es por diseño, igual que macro_snapshots.',
 
   // --- Corpus cross-tenant por diseño ---
   daily_signals:
