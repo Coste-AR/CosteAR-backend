@@ -226,6 +226,10 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
       // de importe mínimo → material indirecto → CIP. La cátedra no zanja el caso.
       // Se sigue el requisito de CL-04 y queda declarado, no decidido en silencio.
       'maple', 'maples', 'huevera', 'estuche para huevo', 'caja para huevos',
+      // Planta de alimento — vocabulario del NOA agregado en G-03 (17/08/2026).
+      // 'marlo'/'marlo de maíz': raquis de la espiga; su presencia baja la
+      // calidad del maíz comprado; aparece en remitos con descuento por marlo.
+      'marlo', 'marlo de maíz',
       //
       // NO ESTÁN ACÁ, A PROPÓSITO:
       //  · 'gasoil'/'combustible' → fuerza motriz y calefacción, no se incorporan
@@ -274,6 +278,16 @@ const PROFILES: Record<IndustryCategory, IndustryProfile> = {
       // Servicios del establecimiento.
       'alquiler de campo', 'arrendamiento', 'seguro del establecimiento',
       'telefonía rural', 'telefonia rural', 'internet rural',
+      // Planta de alimento — G-03 (17/08/2026).
+      // 'bachada'/'bachadas': lote de mezcla de ~200 kg. Regionalismo del NOA.
+      // 'canjilón'/'canjilones': recipiente del elevador de grano dentro de planta.
+      // 'estiba'/'estiva': ambas ortografías circulan; tiempo de almacenamiento
+      //   del alimento elaborado (máx. 2 semanas).
+      // 'despique'/'despicado': corte parcial de pico → servicio sanitario (CIP).
+      'bachada', 'bachadas',
+      'canjilón', 'canjilones',
+      'estiba', 'estiva', 'estiba de harina',
+      'despique', 'despicado',
     ],
     modKeywords: [
       // MOD = quien manipula el plantel y el huevo en el galpón — R-MOD (Clase 1,
