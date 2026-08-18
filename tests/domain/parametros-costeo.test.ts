@@ -127,6 +127,40 @@ describe('S-02(b) — el catálogo de defaults', () => {
     expect(conOtroValor.valor).toBe(18);
   });
 
+  it('🔒 un parámetro DECIDIDO por el equipo sigue estando SIN CONFIRMAR', () => {
+    // La distinción que no se puede perder: elegir un valor para poder avanzar no
+    // es lo mismo que saberlo. La vida útil y los tamaños de huevo se decidieron
+    // el 18-08-2026 para no quedarnos parados, pero nadie se lo preguntó todavía
+    // al productor.
+    for (const clave of ['vida_util_lote_meses', 'tamanos_huevo']) {
+      const def = definicionDe(clave)!;
+      expect(def, `falta ${clave} en el catálogo`).toBeDefined();
+      expect(def.seguro, `${clave} no puede darse por seguro`).toBe(false);
+      expect(def.nota).toMatch(/DECIDIDO PROVISORIAMENTE/);
+
+      const r = resolverParametro(clave, [], {});
+      expect(r.confirmado, `${clave} se dio por confirmado`).toBe(false);
+    }
+  });
+
+  it('la vida útil quedó en 2 años y los tamaños en 3', () => {
+    expect(definicionDe('vida_util_lote_meses')!.valorDefault).toBe(24);
+    expect(definicionDe('tamanos_huevo')!.valorDefault).toBe(3);
+  });
+
+  it('cuando el cliente lo carga desde la pantalla, SÍ queda confirmado', () => {
+    // Es la diferencia que habilita que el productor configure sus propios
+    // parámetros: lo que carga él vale más que nuestro default.
+    const r = resolverParametro(
+      'vida_util_lote_meses',
+      [fila({ clave: 'vida_util_lote_meses', valorNum: 20, structureId: ESTRUCTURA, confirmado: true })],
+      { structureId: ESTRUCTURA },
+    );
+    expect(r.valor).toBe(20);
+    expect(r.confirmado).toBe(true);
+    expect(r.origen).toBe('estructura');
+  });
+
   it('el umbral de merma arranca sin decidir: no elige por el costista', () => {
     // S-04 depende de esto: sin umbral declarado, la merma va a revisión humana
     // en vez de que el sistema la clasifique solo.
