@@ -40,6 +40,15 @@ export interface DefinicionParametro {
  *
  * Los marcados `seguro: false` son los datos abiertos del plan: se usan para que
  * el sistema pueda calcular, pero el resultado los señala como sin confirmar.
+ *
+ * OJO CON LA DIFERENCIA, que es la que importa:
+ *
+ *   · `valorDefault` es lo que usa el sistema para no quedarse parado.
+ *   · `confirmado` (en la fila de `ParametroCosteo`) significa **lo dijo el cliente**.
+ *
+ * Un parámetro DECIDIDO PROVISORIAMENTE por el equipo sigue estando sin confirmar.
+ * Elegir un valor para poder avanzar no es lo mismo que saberlo, y el resultado
+ * tiene que poder decir cuál de las dos cosas es.
  */
 export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
   {
@@ -85,8 +94,23 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
     valorDefault: 24,
     seguro: false,
     nota:
-      'CONFLICTO ABIERTO (D-01): una fuente dice ~18 meses de vida productiva, ' +
-      'otra habla de un ciclo de ~2 años. 24 es el default del plan, no una decisión.',
+      'DECIDIDO PROVISORIAMENTE el 18-08-2026 (D-01): 2 años. Se eligió este valor para ' +
+      'poder avanzar, NO porque esté verificado. Una fuente del relevamiento dice ~18 ' +
+      'meses de vida productiva y otra habla de un ciclo de ~2 años: son 6 meses de ' +
+      'diferencia sobre el divisor de la amortización de TODO el plantel. ' +
+      'HAY QUE VERIFICARLO con el productor antes de mostrarle un costo como suyo.',
+  },
+  {
+    clave: 'tamanos_huevo',
+    descripcion:
+      'Cuántos tamaños de huevo se clasifican y se stockean por separado. ' +
+      'Define en cuántas líneas se abre la producción y el stock.',
+    valorDefault: 3,
+    seguro: false,
+    nota:
+      'DECIDIDO PROVISORIAMENTE el 18-08-2026 (D-02): 3 tamaños. Igual que la vida útil, ' +
+      'se eligió para poder avanzar. El plan barajaba 5 (Jumbo más 1 a 4) o 4 más descarte. ' +
+      'Confirmar con el productor: cambia cómo se abre el stock y el mix de venta.',
   },
   {
     clave: 'umbral_merma_normal_pct',
