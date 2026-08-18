@@ -61,23 +61,23 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  companies          Company[]
-  refreshTokens      RefreshToken[]
-  alerts             Alert[]
-  auditLogs          AuditLog[]
-  dataPointVersions  DataPointVersion[]
-  evidences          Evidence[]
-  calculationRuns    CalculationRun[]
-  passwordResets     PasswordReset[]
-  alertSettings      AlertSetting?
-  costistConnections EmpresaConnection[]  @relation("costist_connections")
+  companies           Company[]
+  refreshTokens       RefreshToken[]
+  alerts              Alert[]
+  auditLogs           AuditLog[]
+  dataPointVersions   DataPointVersion[]
+  evidences           Evidence[]
+  calculationRuns     CalculationRun[]
+  passwordResets      PasswordReset[]
+  alertSettings       AlertSetting?
+  costistConnections  EmpresaConnection[]  @relation("costist_connections")
   // Para EMPRESA_OPERATOR: puede pertenecer a varias empresas
-  memberships        OperatorMembership[]
+  memberships         OperatorMembership[]
   // Los documentos que ESTA persona subió por el portal (I5a). Distinto de
   // `EmpresaConnection.dataEntries`, que son los de toda la empresa.
-  uploadedDataEntries DataEntry[]         @relation("DataEntryUploader")
-  sentInvites        OperatorInvite[]     @relation("invite_sender")
-  receivedInvites    OperatorInvite[]     @relation("invite_receiver")
+  uploadedDataEntries DataEntry[]          @relation("DataEntryUploader")
+  sentInvites         OperatorInvite[]     @relation("invite_sender")
+  receivedInvites     OperatorInvite[]     @relation("invite_receiver")
 
   // Trazabilidad Total v1 (ver sección al final del archivo)
   traceAuditLogs TraceAuditLog[]
@@ -197,17 +197,21 @@ enum CondicionIva {
 }
 
 model Company {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @db.Uuid
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  industry    String?
-  cuit        String?
-  description String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime? // Soft delete
+  activosAmortizables  ActivoAmortizable[]
+  desperdicioRegistros DesperdicioRegistro[]
+  unidadesMedida       UnidadMedida[]
+  parametrosCosteo     ParametroCosteo[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  userId               String                @db.Uuid
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String
+  industry             String?
+  cuit                 String?
+  description          String?
+  isActive             Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  deletedAt            DateTime? // Soft delete
 
   // Modelo de períodos (problema C): el RITMO de costeo de la empresa. Se elige
   // una vez y el sistema arma los períodos solo. Por defecto, mensual.
@@ -307,15 +311,13 @@ enum CostPeriodStatus {
 
 /**
  * Qué hacer cuando llega un dato cuya fecha cae en un período YA CERRADO.
- *
  * El default es preguntar. La decisión de qué pasa con la plata de un mes que
  * ya se dio por bueno es del costista, no del sistema — y si el costista eligió
  * de antemano en el setup, esa elección ES su autorización y no hace falta
  * molestarlo cada vez.
- *
- *   ASK             — se le avisa y decide en el momento (default).
- *   CURRENT_PERIOD  — se imputa al período abierto de hoy.
- *   REOPEN          — se reabre el cerrado y se repropaga hacia adelante.
+ * ASK             — se le avisa y decide en el momento (default).
+ * CURRENT_PERIOD  — se imputa al período abierto de hoy.
+ * REOPEN          — se reabre el cerrado y se repropaga hacia adelante.
  */
 enum LateDataPolicy {
   ASK
@@ -323,7 +325,9 @@ enum LateDataPolicy {
   REOPEN
 }
 
-/** Qué se resolvió (o está por resolverse) con un dato atrasado. */
+/**
+ * Qué se resolvió (o está por resolverse) con un dato atrasado.
+ */
 enum LateDataChoice {
   CURRENT_PERIOD
   REOPEN
@@ -332,41 +336,46 @@ enum LateDataChoice {
 
 /**
  * Un dato llegó tarde: su fecha cae en un período que ya está cerrado.
- *
  * Mientras la decisión está pendiente el dato NO entra a ningún cálculo — el
  * mismo criterio que ya usa un dato sin imputar. Es preferible un resultado que
  * avisa que le falta algo, a uno completo que metió plata en el mes equivocado
  * sin que nadie lo autorizara.
  */
 model LateDataDecision {
-  id           String        @id @default(uuid()) @db.Uuid
-  dataPointId  String        @db.Uuid
-  dataPoint    DataPoint     @relation(fields: [dataPointId], references: [id], onDelete: Cascade)
-  structureId  String        @db.Uuid
-  structure    CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  userId       String        @db.Uuid // denormalizado para RLS y para la bandeja del costista
+  id          String        @id @default(uuid()) @db.Uuid
+  dataPointId String        @db.Uuid
+  dataPoint   DataPoint     @relation(fields: [dataPointId], references: [id], onDelete: Cascade)
+  structureId String        @db.Uuid
+  structure   CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  userId      String        @db.Uuid // denormalizado para RLS y para la bandeja del costista
 
-  /** Período cerrado al que apuntaba la fecha del dato. */
+  /**
+   * Período cerrado al que apuntaba la fecha del dato.
+   */
   targetPeriodCode String
-  /** Período abierto en el momento de detectarlo (la alternativa que se ofrece). */
+  /**
+   * Período abierto en el momento de detectarlo (la alternativa que se ofrece).
+   */
   openPeriodCode   String?
 
-  /** La política que estaba vigente cuando se detectó (para leer el histórico). */
+  /**
+   * La política que estaba vigente cuando se detectó (para leer el histórico).
+   */
   policyAtDetection LateDataPolicy
 
   /**
    * NULL = pendiente de decisión. Con valor, ya se resolvió.
    */
-  choice     LateDataChoice?
-  reason     String?
-  resolvedAt DateTime?       @db.Timestamptz
-  resolvedBy String?         @db.Uuid
+  choice       LateDataChoice?
+  reason       String?
+  resolvedAt   DateTime?       @db.Timestamptz
+  resolvedBy   String?         @db.Uuid
   /**
    * true si la resolvió la política previa del costista en vez de una decisión
    * en el momento. No es lo mismo "lo decidió ahora" que "lo dejó decidido
    * antes", y el historial tiene que poder distinguirlo.
    */
-  autoResolved Boolean @default(false)
+  autoResolved Boolean         @default(false)
 
   createdAt DateTime @default(now()) @db.Timestamptz
 
@@ -378,12 +387,14 @@ model LateDataDecision {
 }
 
 model CostPeriod {
-  id          String        @id @default(uuid()) @db.Uuid
-  structureId String        @db.Uuid
-  structure   CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  companyId   String        @db.Uuid // denormalizado para queries y RLS
-  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId      String        @db.Uuid // denormalizado para RLS
+  desperdicioRegistros DesperdicioRegistro[]
+  parametrosCosteo     ParametroCosteo[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  structureId          String                @db.Uuid
+  structure            CostStructure         @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  companyId            String                @db.Uuid // denormalizado para queries y RLS
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId               String                @db.Uuid // denormalizado para RLS
 
   /**
    * Código estable y ordenable: "2026-07" | "2026-07-Q1" (quincena) | "2026-Q3".
@@ -437,7 +448,6 @@ model CostPeriod {
 
   /**
    * Última vez que el job diario calculó este período. NULL = nunca.
-   *
    * Es el "standby": el job compara contra esta marca y se saltea los períodos
    * donde no llegó nada nuevo. Recalcular sin datos nuevos daría el mismo
    * número y enterraría el historial bajo treinta corridas idénticas, justo en
@@ -450,8 +460,8 @@ model CostPeriod {
   reopenedAt   DateTime? @db.Timestamptz
   reopenReason String?
 
-  createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt
   deletedAt DateTime? // Soft delete
 
   // Costeo por Procesos (B04): cuadros de movimiento de unidades del período.
@@ -468,14 +478,16 @@ model CostPeriod {
 }
 
 model CostStructure {
-  id            String              @id @default(uuid()) @db.Uuid
-  companyId     String              @db.Uuid
-  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId        String              @db.Uuid // denormalizado para RLS
-  productName   String
-  period        String // "YYYY-MM"
-  status        CostStructureStatus @default(DRAFT)
-  costingSystem CostingSystem       @default(ORDERS)
+  activosAmortizables ActivoAmortizable[]
+  parametrosCosteo    ParametroCosteo[]
+  id                  String              @id @default(uuid()) @db.Uuid
+  companyId           String              @db.Uuid
+  company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId              String              @db.Uuid // denormalizado para RLS
+  productName         String
+  period              String // "YYYY-MM"
+  status              CostStructureStatus @default(DRAFT)
+  costingSystem       CostingSystem       @default(ORDERS)
 
   // ---------------------------------------------------------------------------
   // FRECUENCIA DE COSTEO POR ESTRUCTURA
@@ -490,6 +502,8 @@ model CostStructure {
   // default: ninguna estructura existente cambia de comportamiento.
   // ---------------------------------------------------------------------------
   /**
+   * /**
+   * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
    */
   periodicity      Periodicity?
@@ -501,7 +515,7 @@ model CostStructure {
    * Día desde el que se cuentan los ciclos. Obligatorio (y solo válido) con
    * `CUSTOM_DAYS`: sin ancla, "cada 10 días" no define ningún período concreto.
    */
-  periodAnchorDate DateTime? @db.Date
+  periodAnchorDate DateTime?    @db.Date
 
   /**
    * Qué hacer con un dato que llega para un período ya cerrado. Default:
@@ -518,19 +532,20 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
+   * /**
    * Cuándo se completó el setup. NULL = todavía no. Una estructura de PROCESSES
    * sin sellar no puede calcular: sin departamentos declarados el resultado no
    * significaría nada.
    */
-  setupCompletedAt DateTime? @db.Timestamptz
+  setupCompletedAt      DateTime? @db.Timestamptz
   /**
    * ¿El proceso rinde coproductos o subproductos? Se pregunta en el setup
    * porque cambia qué pantallas tienen sentido después.
    */
-  hasJointProducts Boolean   @default(false)
+  hasJointProducts      Boolean   @default(false)
   /**
    * Cada cuántos días puede la oficina técnica informar el grado de avance.
-   *
    * No es lo mismo que `periodLengthDays`: esto es lo que la PLANTA puede hacer,
    * aquello es lo que el costista ELIGIÓ. Si la planta releva cada 15 días y el
    * costista pide ciclos de 3, el sistema calcularía tres veces sobre el mismo
@@ -692,16 +707,16 @@ model AlertSetting {
 // Una empresa puede estar conectada a uno o más costistas.
 // Cada conexión tiene su propio espacio de datos (data lake).
 model EmpresaConnection {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @db.Uuid
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  costistId String   @db.Uuid
-  costist   User     @relation("costist_connections", fields: [costistId], references: [id], onDelete: Cascade)
-  apiKey    String   @unique @default(uuid()) // clave para que la empresa suba datos
+  id                  String   @id @default(uuid()) @db.Uuid
+  companyId           String   @db.Uuid
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  costistId           String   @db.Uuid
+  costist             User     @relation("costist_connections", fields: [costistId], references: [id], onDelete: Cascade)
+  apiKey              String   @unique @default(uuid()) // clave para que la empresa suba datos
   whatsappPhoneNumber String?  @unique // formato E.164, ej "5493815551234". Null si no usa este canal.
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   dataEntries DataEntry[]
   memberships OperatorMembership[]
@@ -725,14 +740,12 @@ model OperatorMembership {
   /**
    * Este operario pertenece a la oficina técnica y puede informar el grado de
    * avance de la producción en proceso.
-   *
    * Es un permiso y no un rol nuevo a propósito: `EMPRESA_OPERATOR` ya es
    * "personal de la empresa cliente", que es exactamente lo que es la oficina
    * técnica. Un rol aparte obligaría a tocar auth, RLS, guards, invitaciones y
    * el panel admin para terminar con dos roles que en casi toda la app hacen lo
    * mismo. Lo que hay que distinguir no es quién se loguea: es de dónde salió el
    * dato (ver `CountSource`).
-   *
    * Lo habilita el costista, por operario, en el setup de la estructura.
    */
   canReportWipCount Boolean @default(false)
@@ -740,15 +753,12 @@ model OperatorMembership {
   /**
    * EL PUESTO DECLARADO de esta persona en la empresa (I5b): "Jefe de Depósito",
    * "Contador", "Ingeniero Industrial".
-   *
    * NO es el rol de login. `User.role` responde "qué puede hacer en el sistema"
    * y solo tiene tres valores, dos de los cuales son en la práctica la misma
    * persona. Esto responde "quién es en la planta", que es la pregunta que se
    * hace quien mira un costo raro.
-   *
    * Vive en la membresía y no en `User` porque el puesto es POR EMPRESA: la
    * misma persona puede ser jefe de depósito en una y asesor externo en otra.
-   *
    * Nullable: los operarios invitados antes de este campo no lo tienen, y
    * pedirlo retroactivamente sería inventarlo.
    */
@@ -821,11 +831,9 @@ model DataEntry {
 
   /**
    * QUIÉN SUBIÓ ESTE DOCUMENTO (I5a).
-   *
    * `costistId` es el DUEÑO de la conexión, no quien mandó el papel: si tres
    * personas de la misma planta mandan facturas, sin esto el sistema no puede
    * distinguirlas. El portal recibía el `operatorId` y lo descartaba.
-   *
    * Nullable porque las filas anteriores a este campo no tienen autor, y eso es
    * un hecho: no se puede inventar. La pantalla las marca como tales.
    * `SetNull` y no `Cascade` — si se borra el usuario, el documento y su
@@ -1040,7 +1048,7 @@ model CostLedgerEntry {
   //   SIN_EVIDENCIA            no verificable (sin documento de origen legible)
   //   CARGA_MANUAL             la tipeó el costista
   // Es una BANDERA, no un recálculo: ningún importe se reescribe (Opción B).
-  criterioImporteIva String?
+  criterioImporteIva  String?
   // Cuánto IVA quedó adentro del importe, cuando se pudo medir contra el
   // comprobante. Es la magnitud de la posible sobrevaluación, no un importe
   // corregido: nada lo consume para costear.
@@ -1116,7 +1124,7 @@ model DataPoint {
   voidedAt        DateTime?     @db.Timestamptz
   createdAt       DateTime      @default(now()) @db.Timestamptz
 
-  versions DataPointVersion[]
+  versions          DataPointVersion[]
   // Decisiones pendientes/resueltas por haber llegado tarde a un período cerrado.
   lateDataDecisions LateDataDecision[]
 
@@ -1145,16 +1153,13 @@ model DataPointVersion {
   actorRole     String
   /**
    * EL PUESTO DECLARADO de quien cargó este valor, ESTAMPADO acá (I5c).
-   *
    * Se copia de `OperatorMembership.jobTitle` al escribir la versión, y no se
    * lee de la ficha de la persona al mostrarla. La gente cambia de puesto: un
    * dato de marzo tiene que seguir diciendo el puesto que esa persona tenía EN
    * MARZO. Leerlo al vuelo reescribiría la historia cada vez que alguien
    * asciende, y esta tabla existe justamente para que eso no pase.
-   *
    * Es el lugar correcto porque la fila ya es inmutable por trigger
    * (`data_point_versions_append_only`).
-   *
    * Nullable: el costista no tiene membresía —es el dueño, no un operario— y
    * las versiones anteriores a este campo no lo tienen.
    */
@@ -1164,17 +1169,14 @@ model DataPointVersion {
 
   /**
    * EL DOCUMENTO DEL QUE SALIÓ ESTE VALOR, cuando salió de uno (T-06).
-   *
    * `method` ya decía CÓMO entró el dato ('ia_sugerido'), pero no de DÓNDE: no
    * había forma de ir de un número de la ficha a la factura que lo originó ni,
    * a través de ella, a la `ClassificationAudit` que explica por qué la IA lo
    * mandó a esa sección. La ficha podía decir "lo sugirió la IA" y nada más —
    * que es justamente la mitad que no sirve para auditar.
-   *
    * Nullable y así se queda: la enorme mayoría de los datos se cargan a mano,
    * y para esos la ausencia de documento es un hecho, no un faltante. La ficha
    * lo lee así: sin `dataEntryId` no se dibuja ningún sello de IA.
-   *
    * `NoAction` y no `SetNull`/`Cascade`, a diferencia del resto del esquema:
    * esta tabla es append-only POR TRIGGER (`data_point_versions_append_only`,
    * que rechaza todo UPDATE sin excepción). Un `SET NULL` en cascada es un
@@ -1273,6 +1275,8 @@ model CalculationRun {
   // no el período entero.
   // ---------------------------------------------------------------------------
   /**
+   * /**
+   * /**
    * Período al que pertenece. Nullable: las corridas anteriores al modelo de
    * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
    * dejarlas sin él.
@@ -1560,7 +1564,7 @@ model ProcessDepartment {
   // Unidad física de este departamento (H12): "toneladas", "litros", "kg" —
   // texto libre, la cátedra no fija un vocabulario único. NULL = no declarada,
   // que es el estado de todo departamento creado antes de este campo.
-  unit String? @db.VarChar(40)
+  unit                   String?  @db.VarChar(40)
   // Cuántas unidades de ESTE departamento produce cada unidad recibida del
   // anterior (ej. 1 tonelada de fruta → 550 litros de jugo ⇒ 550). Solo tiene
   // sentido para sequence > 1 — el primer departamento no recibe de nadie.
@@ -1587,22 +1591,19 @@ model ProcessDepartment {
 
 /**
  * De dónde salió el grado de avance de la existencia final.
- *
  * No es un detalle burocrático: la cátedra lo dice tres veces (clases 34, 36 y
  * 40). "El grado de avance lo determina la oficina técnica al cierre de cada
  * período, por departamento y por elemento — el área de costos lo recibe y
  * aplica, NO LO ESTIMA."
- *
  * El sistema no puede impedir que el costista lo cargue si la planta no
  * responde (sería inusable), pero sí puede dejar constancia de quién lo informó.
  * Un informe apoyado en avances estimados por costos y otro apoyado en un
  * recuento de planta no valen lo mismo, y esa diferencia tiene que estar a la
  * vista en vez de escondida.
- *
- *   TECHNICAL_OFFICE — lo informó planta/oficina técnica. Lo que pide la cátedra.
- *   COSTIST_ESTIMATE — lo estimó el área de costos. Válido, pero marcado.
- *   CARRIED_OVER     — viene arrastrado del período anterior, sin recuento nuevo.
- *   NOT_COUNTED      — no hay recuento (el default de lo que ya existía).
+ * TECHNICAL_OFFICE — lo informó planta/oficina técnica. Lo que pide la cátedra.
+ * COSTIST_ESTIMATE — lo estimó el área de costos. Válido, pero marcado.
+ * CARRIED_OVER     — viene arrastrado del período anterior, sin recuento nuevo.
+ * NOT_COUNTED      — no hay recuento (el default de lo que ya existía).
  */
 enum CountSource {
   TECHNICAL_OFFICE
@@ -1627,6 +1628,8 @@ model UnitMovementSchedule {
 
   // --- ENTRADAS (unidades) ---
   /**
+   * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -1653,6 +1656,8 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
+   * /**
    * /** Terminadas y transferidas al depto. siguiente (puede derivarse por diferencia).
    */
   transferredOut     Decimal? @db.Decimal(18, 4)
@@ -1691,32 +1696,33 @@ model UnitMovementSchedule {
 
   // --- COSTOS DEL PERÍODO (por elemento) ---
   /**
+   * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
-  periodCostMp      Decimal? @db.Decimal(18, 4)
+  periodCostMp           Decimal? @db.Decimal(18, 4)
   /**
    * Costo de Mano de Obra incurrido en el período.
    */
-  periodCostMo      Decimal? @db.Decimal(18, 4)
+  periodCostMo           Decimal? @db.Decimal(18, 4)
   /**
    * Costo de Carga Fabril (CIF) incurrido en el período.
    */
-  periodCostCif     Decimal? @db.Decimal(18, 4)
+  periodCostCif          Decimal? @db.Decimal(18, 4)
   /**
    * Costo $ de MP arrastrado en la EI.
    */
-  initialWipCostMp  Decimal? @db.Decimal(18, 4)
+  initialWipCostMp       Decimal? @db.Decimal(18, 4)
   /**
    * Costo $ de MO arrastrado en la EI.
    */
-  initialWipCostMo  Decimal? @db.Decimal(18, 4)
+  initialWipCostMo       Decimal? @db.Decimal(18, 4)
   /**
    * Costo $ de CIF arrastrado en la EI.
    */
-  initialWipCostCif Decimal? @db.Decimal(18, 4)
+  initialWipCostCif      Decimal? @db.Decimal(18, 4)
   /**
    * Costo $ del DEPARTAMENTO ANTERIOR contenido en la EI — solo sequence > 1 (B18).
-   *
    * Es lo que la existencia final del período pasado ya traía transferido de la
    * etapa previa (costo modificado + CAUP). Sin esta columna el arrastre entre
    * períodos perdía la porción "del departamento anterior" del inventario
@@ -1727,14 +1733,20 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
+   * /**
    * Quién informó el grado de avance de la existencia final. Ver `CountSource`.
    * Las filas anteriores a esta columna quedan en `NOT_COUNTED`, que es la
    * verdad: nadie registró de dónde salió el número.
    */
   countSource CountSource @default(NOT_COUNTED)
-  /** Cuándo se informó el recuento. */
+  /**
+   * Cuándo se informó el recuento.
+   */
   countedAt   DateTime?   @db.Timestamptz
-  /** Usuario que lo informó. */
+  /**
+   * Usuario que lo informó.
+   */
   countedBy   String?     @db.Uuid
 
   createdAt DateTime @default(now())
@@ -1854,26 +1866,26 @@ model ByProductLine {
 // ---------------------------------------------------------------------------
 
 model SystemAlert {
-  id            String    @id @default(uuid()) @db.Uuid
-  source        String    // ej. "sentry"
-  level         String    // ej. "error", "warning", "fatal"
-  message       String
-  sentryIssueId String?
-  sentryUrl     String?
+  id              String    @id @default(uuid()) @db.Uuid
+  source          String // ej. "sentry"
+  level           String // ej. "error", "warning", "fatal"
+  message         String
+  sentryIssueId   String?
+  sentryUrl       String?
   // Datos que el webhook de Sentry (Issue Alert) ya manda en data.issue pero
   // antes se descartaban, dejando solo el título cortado. NO incluye stack
   // trace ni breadcrumbs — eso Sentry no lo manda en la alerta de issue, hace
   // falta pedirlo a su API de eventos con un token que hoy no está configurado;
   // para eso sigue estando el link "Ver en Sentry".
-  culprit         String?   // dónde: archivo/función donde se originó
-  errorType       String?   // qué: metadata.type (ej. "TypeError")
-  errorValue      String?   // metadata.value (el mensaje de la excepción)
-  occurrenceCount Int?      // metadata.count del issue al momento del webhook
+  culprit         String? // dónde: archivo/función donde se originó
+  errorType       String? // qué: metadata.type (ej. "TypeError")
+  errorValue      String? // metadata.value (el mensaje de la excepción)
+  occurrenceCount Int? // metadata.count del issue al momento del webhook
   firstSeenAt     DateTime?
   lastSeenAt      DateTime?
   platform        String?
-  resolvedAt    DateTime?
-  createdAt     DateTime  @default(now())
+  resolvedAt      DateTime?
+  createdAt       DateTime  @default(now())
 
   @@map("system_alerts")
 }
@@ -1918,4 +1930,237 @@ model IndustryProfile {
   updatedAt       DateTime @updatedAt
 
   @@map("industry_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// UNIDADES DE MEDIDA Y PARÁMETROS DE COSTEO
+//
+// Por qué existen: el vertical avícola gestiona en "cajones de huevo" (360
+// huevos). Hasta acá el sistema no tenía dónde expresar eso: la unidad era un
+// string de pantalla sin factor de conversión, y constantes como "360 huevos por
+// cajón" o "24 meses de vida útil del lote" no tenían ningún lugar donde vivir
+// salvo hardcodeadas en el código.
+//
+// Un número de negocio hardcodeado es un número que nadie puede corregir sin un
+// PR — y que nadie sabe que está ahí hasta que da mal.
+// ---------------------------------------------------------------------------
+
+/**
+ * Unidad de medida como ENTIDAD, no como texto.
+ * La diferencia que importa es el factor: "cajón" no es una etiqueta, es 360
+ * huevos. Con el factor el sistema puede convertir y comparar; con un string
+ * solo puede imprimirlo.
+ */
+model UnidadMedida {
+  activosAmortizables  ActivoAmortizable[]
+  desperdicioRegistros DesperdicioRegistro[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  companyId            String                @db.Uuid
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId               String                @db.Uuid // denormalizado para RLS
+
+  /**
+   * Estable y en minúsculas: "cajon", "maple", "huevo", "kg".
+   */
+  codigo String
+  /**
+   * Cómo se muestra: "Cajón de huevo".
+   */
+  nombre String
+
+  /**
+   * Unidad BASE a la que convierte. NULL = esta ES una base (huevo, kg).
+   * Una sola cadena de conversión por familia: cajón → maple → huevo.
+   */
+  baseId String?       @db.Uuid
+  base   UnidadMedida? @relation("UnidadBase", fields: [baseId], references: [id], onDelete: Restrict)
+
+  derivadas UnidadMedida[] @relation("UnidadBase")
+
+  /**
+   * Cuántas unidades BASE entran en UNA de esta. Cajón sobre huevo = 360.
+   * En una unidad base es 1.
+   */
+  factor Decimal @default(1) @db.Decimal(18, 6)
+
+  parametros ParametroCosteo[]
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, codigo])
+  @@index([companyId])
+  @@map("unidades_medida")
+}
+
+/**
+ * Parámetro de costeo: una constante de negocio con nombre, valor y período.
+ * Es clave-valor a propósito. Con columnas fijas, cada rubro nuevo pediría una
+ * migración —y el objetivo del plan de rubros escalables es exactamente el
+ * contrario: que sumar un rubro sea cargar filas, no abrir un PR.
+ * Resolución en cascada: período → estructura → empresa. El más específico gana.
+ * Así un parámetro se puede cambiar para UN mes sin reescribir la historia.
+ */
+model ParametroCosteo {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  /**
+   * NULL = vale para toda la empresa.
+   */
+  structureId String?        @db.Uuid
+  structure   CostStructure? @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  /**
+   * NULL = default de la estructura; con valor, aplica solo a ese período.
+   */
+  periodId String?     @db.Uuid
+  period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  /**
+   * Estable, en snake_case: "huevos_por_cajon", "vida_util_lote_meses".
+   */
+  clave String
+
+  valorNum   Decimal? @db.Decimal(18, 6)
+  valorTexto String?
+
+  /**
+   * En qué unidad está expresado el valor, cuando corresponde.
+   */
+  unidadId String?       @db.Uuid
+  unidad   UnidadMedida? @relation(fields: [unidadId], references: [id], onDelete: SetNull)
+
+  /**
+   * Para qué sirve, en castellano. Es lo que ve quien lo edita.
+   */
+  descripcion String?
+
+  /**
+   * `false` mientras nadie lo confirmó con el cliente. Los cálculos igual corren,
+   * pero el resultado puede marcarlo: un default no confirmado no es un dato.
+   */
+  confirmado Boolean @default(false)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, structureId, periodId, clave])
+  @@index([companyId, clave])
+  @@index([structureId, clave])
+  @@index([periodId])
+  @@map("parametros_costeo")
+}
+
+// ---------------------------------------------------------------------------
+// ACTIVOS AMORTIZABLES Y DESPERDICIO (S-03 y S-04 del vertical avícola)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un activo que se compra una vez y produce durante meses.
+ * El caso que lo motiva es el plantel de ponedoras: el clasificador ya dejaba
+ * `gallina`, `ponedora` y `pollita` FUERA de las palabras de materia prima
+ * (`industry-profile.ts`) porque no son un insumo del período — pero esas
+ * facturas no tenían adónde ir.
+ */
+model ActivoAmortizable {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  structureId String?        @db.Uuid
+  structure   CostStructure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
+
+  /**
+   * "Lote de ponedoras Hy-Line — alta marzo 2026".
+   */
+  nombre String
+
+  costoAdquisicion Decimal @db.Decimal(18, 4)
+  /**
+   * Lo que se espera recuperar al final. En avicultura, la gallina de descarte.
+   */
+  valorResidual    Decimal @default(0) @db.Decimal(18, 4)
+
+  /**
+   * NULL = usar el parámetro de costeo del rubro (`vida_util_lote_meses`).
+   * La amortización NUNCA se carga: se deriva de estos tres campos.
+   */
+  vidaUtilMeses Int?
+
+  /**
+   * Desde cuándo existe. El período del alta NO amortiza.
+   */
+  fechaAlta DateTime @db.Date
+
+  /**
+   * Cuántas unidades son (6.300 aves), para poder expresar la cuota por unidad.
+   */
+  cantidad Decimal?      @db.Decimal(18, 4)
+  unidadId String?       @db.Uuid
+  unidad   UnidadMedida? @relation(fields: [unidadId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId])
+  @@index([structureId])
+  @@map("activos_amortizables")
+}
+
+enum NaturalezaDesperdicio {
+  NORMAL
+  EXTRAORDINARIA
+}
+
+/**
+ * Un desperdicio del período, con su naturaleza DECLARADA.
+ * `naturaleza` es opcional a propósito: NULL significa que nadie la declaró, no
+ * que sea normal. El umbral que separa lo normal de lo extraordinario no surge
+ * del comprobante —está escrito en `industry-profile.ts` por qué—, así que un
+ * registro sin naturaleza queda pendiente y no entra al cálculo.
+ */
+model DesperdicioRegistro {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  periodId String?     @db.Uuid
+  period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  /**
+   * "mortandad", "huevo roto", "maíz húmedo".
+   */
+  concepto String
+  valor    Decimal @db.Decimal(18, 4)
+
+  cantidad Decimal?      @db.Decimal(18, 4)
+  unidadId String?       @db.Uuid
+  unidad   UnidadMedida? @relation(fields: [unidadId], references: [id], onDelete: SetNull)
+
+  naturaleza    NaturalezaDesperdicio?
+  /**
+   * Lo que se recupera vendiéndolo. Se resta de la merma normal (regla R5).
+   */
+  valorRecupero Decimal                @default(0) @db.Decimal(18, 4)
+
+  /**
+   * Por qué se declaró así. Es lo que hace auditable la decisión.
+   */
+  motivo String?
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId])
+  @@index([periodId])
+  @@map("desperdicio_registros")
 }

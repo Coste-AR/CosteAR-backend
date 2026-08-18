@@ -387,3 +387,37 @@ DROP POLICY IF EXISTS audit_append_only ON audit_logs;
 CREATE POLICY audit_append_only ON audit_logs
   FOR INSERT
   WITH CHECK (true);
+
+-- unidades_medida y parametros_costeo: `userId` denormalizado, mismo patrón que
+-- cost_periods. El aislamiento entre empresas es de Postgres, no de TypeScript
+-- (DOM-07): sin estas políticas, un parámetro de costeo de un cliente sería
+-- legible por otro.
+ALTER TABLE unidades_medida ENABLE ROW LEVEL SECURITY;
+ALTER TABLE unidades_medida FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON unidades_medida;
+CREATE POLICY tenant_isolation ON unidades_medida
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE parametros_costeo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parametros_costeo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON parametros_costeo;
+CREATE POLICY tenant_isolation ON parametros_costeo
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
+-- denormalizado, mismo patrón que cost_periods.
+ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activos_amortizables FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON activos_amortizables;
+CREATE POLICY tenant_isolation ON activos_amortizables
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE desperdicio_registros ENABLE ROW LEVEL SECURITY;
+ALTER TABLE desperdicio_registros FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON desperdicio_registros;
+CREATE POLICY tenant_isolation ON desperdicio_registros
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
