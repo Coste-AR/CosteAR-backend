@@ -125,6 +125,12 @@ function makeDb(overrides: Record<string, unknown> = {}) {
     dataPoint: {
       findMany: vi.fn(async () => []),
     },
+    // El cierre corre el detector de anomalias y persiste lo que encuentre en la
+    // MISMA transaccion. Ojo: la variacion de CIF no necesita historia, asi que
+    // puede haber alertas ya en el primer periodo cerrado.
+    alert: {
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
     ...overrides,
   };
   // La apertura corre en una transacción: acá el "tx" es el mismo mock.
