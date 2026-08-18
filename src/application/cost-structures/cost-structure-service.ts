@@ -660,6 +660,7 @@ export class CostStructureService {
       sales: {
         unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
         quantity: s.salesQuantity ? Number(s.salesQuantity) : 0,
+        productionQuantity: s.productionQuantity == null ? null : Number(s.productionQuantity),
       },
     };
 
@@ -737,6 +738,7 @@ export class CostStructureService {
       sales: {
         unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
         quantity: s.salesQuantity ? Number(s.salesQuantity) : 0,
+        productionQuantity: s.productionQuantity == null ? null : Number(s.productionQuantity),
       },
     };
 

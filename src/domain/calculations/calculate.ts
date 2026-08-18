@@ -58,7 +58,22 @@ export interface CalculationInput {
   directLabor: DirectLaborConfig;
   indirectCosts: IndirectCostConfig;
   inventory: InventoryInput;
-  sales: { unitPrice: number; quantity: number };
+  sales: {
+    unitPrice: number;
+    quantity: number;
+    /**
+     * Unidades PRODUCIDAS del período. Existía de punta a punta —schema, ruta,
+     * servicio y trazabilidad— y el motor de Procesos ya la consumía, pero acá no
+     * estaba en el tipo: el costo unitario se calculaba con las unidades VENDIDAS.
+     *
+     * Producir 100 y vender 60 daba un costo unitario 66 % más alto que el real.
+     *
+     * Si falta, se mantiene el comportamiento anterior y se DICE en el resultado
+     * (`unitCost.basadoEn`), en vez de dar un número que parece el costo unitario
+     * y no lo es.
+     */
+    productionQuantity?: number | null;
+  };
 }
 
 /** Resultado por materia prima (Parte 3.1: N materias primas). */
@@ -197,6 +212,15 @@ export interface CalculationOutput {
       unitsProduced: number;
       unitProductionCost: number;  // costo de producción ÷ unidades producidas
       unitCostOfGoodsSold: number; // COGS ÷ unidades producidas
+      /**
+       * De dónde salió el divisor. `'vendidas'` significa que NO se cargó la
+       * cantidad producida y el costo unitario está calculado sobre lo vendido:
+       * es correcto solo si se vendió todo lo que se produjo.
+       *
+       * Se expone para que la pantalla pueda avisarlo. Un costo unitario mal
+       * dividido no se ve mal: se ve como un costo unitario.
+       */
+      basadoEn: 'producidas' | 'vendidas';
     };
   };
   /**
@@ -566,7 +590,12 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   // --- Costo unitario de producción (el número final del sistema) ---
   // costo de producción total ÷ unidades producidas. Guarda contra división por
   // cero: si todavía no se cargó la cantidad producida, el unitario queda en 0.
-  const unitsProduced = input.sales.quantity ?? 0;
+  // Las PRODUCIDAS son el divisor correcto del costo unitario. Solo si no se
+  // cargaron se cae a las vendidas, y queda dicho en `basadoEn`.
+  const cantidadProducida = input.sales.productionQuantity;
+  const hayProducidas = cantidadProducida != null && cantidadProducida > 0;
+  const unitsProduced = hayProducidas ? cantidadProducida : (input.sales.quantity ?? 0);
+  const basadoEn: 'producidas' | 'vendidas' = hayProducidas ? 'producidas' : 'vendidas';
   const unitProductionCost = unitsProduced > 0
     ? statement.productionCost.divide(unitsProduced).toNumber()
     : 0;
@@ -681,7 +710,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         },
       },
       indirectCosts: { perDepartment },
-      unitCost: { unitsProduced, unitProductionCost, unitCostOfGoodsSold },
+      unitCost: { unitsProduced, unitProductionCost, unitCostOfGoodsSold, basadoEn },
     },
     raw: { materials, labor, indirectPerDepartment, statement, margin },
   };

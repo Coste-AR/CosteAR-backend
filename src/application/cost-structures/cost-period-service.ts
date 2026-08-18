@@ -409,6 +409,8 @@ export class CostPeriodService {
         sales: {
           unitPrice: period.salesUnitPrice ? Number(period.salesUnitPrice) : 0,
           quantity: period.salesQuantity ? Number(period.salesQuantity) : 0,
+          productionQuantity:
+            period.productionQuantity == null ? null : Number(period.productionQuantity),
         },
       };
       const { raw: _raw, ...frozen } = runCalculation(input);

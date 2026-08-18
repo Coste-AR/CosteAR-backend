@@ -72,6 +72,9 @@ export const RLS_MODELS = new Set([
   'ValidationHistory',
   'VaultChatMessage',
   'VaultChatSession',
+  // S-02 del vertical avicola: parametros de costeo y unidades de medida.
+  'UnidadMedida',
+  'ParametroCosteo',
 ]);
 
 /**

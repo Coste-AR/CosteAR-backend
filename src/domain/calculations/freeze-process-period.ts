@@ -97,6 +97,12 @@ export function freezeProcessPeriod(input: ProcessFreezeInput): FrozenCalculatio
   const unitsProduced =
     input.productionQuantity ?? (finalUnitCost !== 0 ? productionCost / finalUnitCost : input.salesQuantity);
 
+  // De dónde salió el divisor. En Procesos, aunque no se cargue `productionQuantity`,
+  // las unidades se DERIVAN del cuadro de movimiento — que es la fuente real de la
+  // producción del período. Solo se cae a las vendidas si ni eso hay.
+  const basadoEn: 'producidas' | 'vendidas' =
+    input.productionQuantity != null || finalUnitCost !== 0 ? 'producidas' : 'vendidas';
+
   return {
     rawMaterialConsumed,
     directLaborTotal,
@@ -173,6 +179,7 @@ export function freezeProcessPeriod(input: ProcessFreezeInput): FrozenCalculatio
         // costo que el motor sí calculó bien (H11).
         unitProductionCost: finalUnitCost,
         unitCostOfGoodsSold: safeDiv(costOfGoodsSold, unitsProduced),
+        basadoEn,
       },
     },
   };
