@@ -66,9 +66,11 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
   {
     clave: 'costo_maple',
     descripcion: 'Costo del maple, que es material de empaque y va al costo variable.',
-    valorDefault: 0,
+    valorDefault: 200,
     seguro: false,
-    nota: 'Sin dato. Mientras esté en 0, el costo variable por cajón queda subestimado.',
+    nota:
+      '~$200 por unidad de consumo real, se compra en paquetes de 120 (reunión 001.2.46). ' +
+      'Es un precio de agosto de 2026: confirmar antes de costear otro período.',
   },
   {
     clave: 'gramaje_estandar_gr',
