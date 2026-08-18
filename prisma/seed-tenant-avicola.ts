@@ -1,8 +1,8 @@
-// Seed del tenant "Pico de Oro" — la avícola de Augusto Sáenz (Trancas, Tucumán).
+// Seed de un tenant del vertical avícola.
 //
 // Uso:
-//   tsx --env-file=.env prisma/seed-tenant-pico-de-oro.ts --company <uuid> [--structure <uuid>]
-//   tsx --env-file=.env prisma/seed-tenant-pico-de-oro.ts --company <uuid> --dry-run
+//   tsx --env-file=.env prisma/seed-tenant-avicola.ts --company <uuid> [--structure <uuid>]
+//   tsx --env-file=.env prisma/seed-tenant-avicola.ts --company <uuid> --dry-run
 //
 // QUÉ HACE Y QUÉ NO
 // -----------------
@@ -17,15 +17,13 @@
 // Es IDEMPOTENTE: se puede correr las veces que haga falta. Solo agrega lo que
 // falta y nunca pisa un valor que alguien haya confirmado.
 //
-// Contexto en la bóveda: `001.6.1 - Avícola Saenz — relevamiento inicial del
-// proceso (14-08-2026)`.
+// El relevamiento del cliente y sus cifras viven en el repo privado (CLI-02).
 
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PARAMETROS_AVICOLA } from '../src/domain/parametros/parametros-costeo.js';
 
 const prisma = new PrismaClient();
 
-const EMPRESA = 'Pico de Oro';
 
 /**
  * Unidades del negocio. El orden importa: cada una referencia a su base, así que
@@ -55,8 +53,8 @@ async function main() {
   if (!companyId) {
     throw new Error(
       'Falta --company <uuid>.\n\n' +
-        `Este seed configura una empresa que ya existe; no la crea. Dá de alta "${EMPRESA}" ` +
-        'por el flujo normal de la aplicación y volvé con su id.',
+        'Este seed configura una empresa que ya existe; no la crea. Dala de alta por el ' +
+        'flujo normal de la aplicación y volvé con su id.',
     );
   }
 
@@ -70,12 +68,9 @@ async function main() {
   }
 
   console.log(`Empresa: ${empresa.name} (${empresa.id})`);
-  if (!empresa.name.toLowerCase().includes('pico')) {
-    console.warn(
-      `⚠  El nombre no se parece a "${EMPRESA}". Verificá que sea la empresa correcta ` +
-        'antes de seguir: esto carga parámetros del rubro avícola.',
-    );
-  }
+  console.warn(
+    '⚠  Verificá que sea la empresa correcta: esto carga parámetros del rubro avícola.',
+  );
   if (dryRun) console.log('— dry-run: no se escribe nada —');
 
   const userId = empresa.userId;
@@ -167,13 +162,13 @@ async function main() {
   console.log(`Parámetros: ${creados} nuevo(s), ${respetados} ya estaban`);
 
   const sinConfirmar = PARAMETROS_AVICOLA.filter((p) => !p.seguro);
-  console.log(`\n⚠  ${sinConfirmar.length} parámetros quedan SIN CONFIRMAR y hay que cerrarlos con Augusto:`);
+  console.log(`\n⚠  ${sinConfirmar.length} parámetros quedan SIN CONFIRMAR y hay que cerrarlos con el cliente:`);
   for (const p of sinConfirmar) {
     console.log(`   · ${p.clave} = ${p.valorDefault} — ${p.nota}`);
   }
   console.log(
     '\nMientras sigan sin confirmar, el costo que salga es una estimación con los ' +
-      'supuestos del relevamiento, no el costo de Pico de Oro.',
+      'supuestos del relevamiento, no el costo real de la empresa.',
   );
 }
 
