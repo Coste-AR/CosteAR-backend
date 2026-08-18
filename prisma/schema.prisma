@@ -197,19 +197,21 @@ enum CondicionIva {
 }
 
 model Company {
-  unidadesMedida   UnidadMedida[]
-  parametrosCosteo ParametroCosteo[]
-  id               String            @id @default(uuid()) @db.Uuid
-  userId           String            @db.Uuid
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name             String
-  industry         String?
-  cuit             String?
-  description      String?
-  isActive         Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  deletedAt        DateTime? // Soft delete
+  activosAmortizables  ActivoAmortizable[]
+  desperdicioRegistros DesperdicioRegistro[]
+  unidadesMedida       UnidadMedida[]
+  parametrosCosteo     ParametroCosteo[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  userId               String                @db.Uuid
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String
+  industry             String?
+  cuit                 String?
+  description          String?
+  isActive             Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  deletedAt            DateTime? // Soft delete
 
   // Modelo de períodos (problema C): el RITMO de costeo de la empresa. Se elige
   // una vez y el sistema arma los períodos solo. Por defecto, mensual.
@@ -385,13 +387,14 @@ model LateDataDecision {
 }
 
 model CostPeriod {
-  parametrosCosteo ParametroCosteo[]
-  id               String            @id @default(uuid()) @db.Uuid
-  structureId      String            @db.Uuid
-  structure        CostStructure     @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  companyId        String            @db.Uuid // denormalizado para queries y RLS
-  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId           String            @db.Uuid // denormalizado para RLS
+  desperdicioRegistros DesperdicioRegistro[]
+  parametrosCosteo     ParametroCosteo[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  structureId          String                @db.Uuid
+  structure            CostStructure         @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  companyId            String                @db.Uuid // denormalizado para queries y RLS
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId               String                @db.Uuid // denormalizado para RLS
 
   /**
    * Código estable y ordenable: "2026-07" | "2026-07-Q1" (quincena) | "2026-Q3".
@@ -475,15 +478,16 @@ model CostPeriod {
 }
 
 model CostStructure {
-  parametrosCosteo ParametroCosteo[]
-  id               String              @id @default(uuid()) @db.Uuid
-  companyId        String              @db.Uuid
-  company          Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId           String              @db.Uuid // denormalizado para RLS
-  productName      String
-  period           String // "YYYY-MM"
-  status           CostStructureStatus @default(DRAFT)
-  costingSystem    CostingSystem       @default(ORDERS)
+  activosAmortizables ActivoAmortizable[]
+  parametrosCosteo    ParametroCosteo[]
+  id                  String              @id @default(uuid()) @db.Uuid
+  companyId           String              @db.Uuid
+  company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId              String              @db.Uuid // denormalizado para RLS
+  productName         String
+  period              String // "YYYY-MM"
+  status              CostStructureStatus @default(DRAFT)
+  costingSystem       CostingSystem       @default(ORDERS)
 
   // ---------------------------------------------------------------------------
   // FRECUENCIA DE COSTEO POR ESTRUCTURA
@@ -498,6 +502,7 @@ model CostStructure {
   // default: ninguna estructura existente cambia de comportamiento.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
    */
@@ -527,6 +532,7 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * Cuándo se completó el setup. NULL = todavía no. Una estructura de PROCESSES
    * sin sellar no puede calcular: sin departamentos declarados el resultado no
@@ -1270,6 +1276,7 @@ model CalculationRun {
   // ---------------------------------------------------------------------------
   /**
    * /**
+   * /**
    * Período al que pertenece. Nullable: las corridas anteriores al modelo de
    * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
    * dejarlas sin él.
@@ -1622,6 +1629,7 @@ model UnitMovementSchedule {
   // --- ENTRADAS (unidades) ---
   /**
    * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -1648,6 +1656,7 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
    * /**
    * /** Terminadas y transferidas al depto. siguiente (puede derivarse por diferencia).
    */
@@ -1688,6 +1697,7 @@ model UnitMovementSchedule {
   // --- COSTOS DEL PERÍODO (por elemento) ---
   /**
    * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
   periodCostMp           Decimal? @db.Decimal(18, 4)
@@ -1723,6 +1733,7 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
    * /**
    * Quién informó el grado de avance de la existencia final. Ver `CountSource`.
    * Las filas anteriores a esta columna quedan en `NOT_COUNTED`, que es la
@@ -1941,10 +1952,12 @@ model IndustryProfile {
  * solo puede imprimirlo.
  */
 model UnidadMedida {
-  id        String  @id @default(uuid()) @db.Uuid
-  companyId String  @db.Uuid
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId    String  @db.Uuid // denormalizado para RLS
+  activosAmortizables  ActivoAmortizable[]
+  desperdicioRegistros DesperdicioRegistro[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  companyId            String                @db.Uuid
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId               String                @db.Uuid // denormalizado para RLS
 
   /**
    * Estable y en minúsculas: "cajon", "maple", "huevo", "kg".
@@ -2041,4 +2054,113 @@ model ParametroCosteo {
   @@index([structureId, clave])
   @@index([periodId])
   @@map("parametros_costeo")
+}
+
+// ---------------------------------------------------------------------------
+// ACTIVOS AMORTIZABLES Y DESPERDICIO (S-03 y S-04 del vertical avícola)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un activo que se compra una vez y produce durante meses.
+ * El caso que lo motiva es el plantel de ponedoras: el clasificador ya dejaba
+ * `gallina`, `ponedora` y `pollita` FUERA de las palabras de materia prima
+ * (`industry-profile.ts`) porque no son un insumo del período — pero esas
+ * facturas no tenían adónde ir.
+ */
+model ActivoAmortizable {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  structureId String?        @db.Uuid
+  structure   CostStructure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
+
+  /**
+   * "Lote de ponedoras Hy-Line — alta marzo 2026".
+   */
+  nombre String
+
+  costoAdquisicion Decimal @db.Decimal(18, 4)
+  /**
+   * Lo que se espera recuperar al final. En avicultura, la gallina de descarte.
+   */
+  valorResidual    Decimal @default(0) @db.Decimal(18, 4)
+
+  /**
+   * NULL = usar el parámetro de costeo del rubro (`vida_util_lote_meses`).
+   * La amortización NUNCA se carga: se deriva de estos tres campos.
+   */
+  vidaUtilMeses Int?
+
+  /**
+   * Desde cuándo existe. El período del alta NO amortiza.
+   */
+  fechaAlta DateTime @db.Date
+
+  /**
+   * Cuántas unidades son (6.300 aves), para poder expresar la cuota por unidad.
+   */
+  cantidad Decimal?      @db.Decimal(18, 4)
+  unidadId String?       @db.Uuid
+  unidad   UnidadMedida? @relation(fields: [unidadId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId])
+  @@index([structureId])
+  @@map("activos_amortizables")
+}
+
+enum NaturalezaDesperdicio {
+  NORMAL
+  EXTRAORDINARIA
+}
+
+/**
+ * Un desperdicio del período, con su naturaleza DECLARADA.
+ * `naturaleza` es opcional a propósito: NULL significa que nadie la declaró, no
+ * que sea normal. El umbral que separa lo normal de lo extraordinario no surge
+ * del comprobante —está escrito en `industry-profile.ts` por qué—, así que un
+ * registro sin naturaleza queda pendiente y no entra al cálculo.
+ */
+model DesperdicioRegistro {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  periodId String?     @db.Uuid
+  period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  /**
+   * "mortandad", "huevo roto", "maíz húmedo".
+   */
+  concepto String
+  valor    Decimal @db.Decimal(18, 4)
+
+  cantidad Decimal?      @db.Decimal(18, 4)
+  unidadId String?       @db.Uuid
+  unidad   UnidadMedida? @relation(fields: [unidadId], references: [id], onDelete: SetNull)
+
+  naturaleza    NaturalezaDesperdicio?
+  /**
+   * Lo que se recupera vendiéndolo. Se resta de la merma normal (regla R5).
+   */
+  valorRecupero Decimal                @default(0) @db.Decimal(18, 4)
+
+  /**
+   * Por qué se declaró así. Es lo que hace auditable la decisión.
+   */
+  motivo String?
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId])
+  @@index([periodId])
+  @@map("desperdicio_registros")
 }
