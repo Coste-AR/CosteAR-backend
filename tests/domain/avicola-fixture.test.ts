@@ -1,19 +1,21 @@
 import { describe, it, expect } from 'vitest';
 
 /**
- * FIXTURE AVÍCOLA — T-01 (vertical Augusto Sáenz, Trancas).
+ * FIXTURE AVÍCOLA — T-01.
+ *
+ * ⚠️ DATOS FICTICIOS. Este repositorio es público: los números de un cliente real no
+ * entran acá. Los valores de abajo son inventados y no corresponden a ninguna
+ * explotación existente. El caso real, con sus cifras y su verificación, vive en el
+ * repositorio privado (`CosteAR-admin`, `docs/verticales/`).
+ *
+ * Lo que se prueba es la MATEMÁTICA, y esa es la misma con cualquier número.
  *
  * Por qué existe este archivo
  * ---------------------------
- * La tabla de aceptación del §11 del plan avícola está calculada a mano y NO cierra
- * con sus propios insumos declarados. Verificado:
- *
- *     6.300 aves × 120 g/día × 30 días = 22.680 kg
- *     22.680 kg × 330 $/kg             = 7.484.400   ← el plan dice 7.500.000
- *
- * La deriva de $15.600 se arrastra a todo lo que depende del costo de alimento:
- * costo variable unitario, costo total unitario, punto de equilibrio y brecha al PE.
- * Si alguien escribiera los tests contra la tabla del plan, una implementación
+ * La tabla de aceptación del plan avícola venía calculada a mano y NO cerraba con sus
+ * propios insumos: el costo del alimento estaba redondeado, y esa deriva se arrastraba
+ * al costo variable unitario, al costo total unitario, al punto de equilibrio y a la
+ * brecha. Si alguien escribiera los tests contra una tabla así, una implementación
  * CORRECTA los haría fallar.
  *
  * Cómo está escrito
@@ -23,93 +25,70 @@ import { describe, it, expect } from 'vitest';
  * precio del alimento, se cambia la constante y el fixture sigue siendo verdad.
  *
  * Esto es SOLO tests: no toca el motor de cálculo.
- *
- * Datos abiertos
- * --------------
- * Todo insumo sin confirmar está marcado con `🟡 confirmar con Augusto`. Esos son los
- * que hay que cerrar antes de que el fixture pase de "derivado y coherente" a
- * "verificado contra la realidad del cliente".
  */
 
 // ---------------------------------------------------------------------------
-// INSUMOS DECLARADOS
+// INSUMOS DECLARADOS — ficticios
 // ---------------------------------------------------------------------------
-// Fuente: bóveda `001.6.1 - Avícola Saenz — relevamiento inicial del proceso
-// (14-08-2026)` y §11 del plan avícola.
 
-/** Aves en producción en el galpón actual. El galpón admite 6.300-6.400 blancas. */
-const AVES = 6_300;
+/** Aves en producción. */
+const AVES = 5_000;
 
 /** Gramos de alimento por ave por día. */
-const GRAMAJE_G_DIA = 120;
+const GRAMAJE_G_DIA = 110;
 
 /** Días del mes de costeo. */
 const DIAS_MES = 30;
 
-/**
- * Precio del alimento por kg.
- * 🟡 confirmar con Augusto: ¿es costo completo de la bachada (MP + MOD + CIP de la
- * planta de alimento) o solo la materia prima? La diferencia cambia el costo variable
- * unitario y, con él, el punto de equilibrio.
- */
-const PRECIO_ALIMENTO_KG = 330;
+/** Precio del alimento por kg. */
+const PRECIO_ALIMENTO_KG = 400;
 
-/** Un cajón son 360 huevos. Unidad de gestión del cliente. */
+/** Un cajón son 360 huevos. Es la unidad de gestión del rubro. */
 const HUEVOS_POR_CAJON = 360;
 
 /** Un maple son 30 huevos. */
 const HUEVOS_POR_MAPLE = 30;
 
 /**
- * Postura medida sobre el lote activo: 94-94,5 % en el galpón de 1.504 gallinas.
- * Es la que usa la planilla del cliente para proyectar — y por eso sobreestima.
+ * Postura medida sobre el LOTE activo: solo las aves que están poniendo.
+ * Es la que se suele usar para proyectar — y por eso sobreestima.
  */
-const POSTURA_LOTE = 0.94;
+const POSTURA_LOTE = 0.92;
 
 /**
- * Postura medida sobre el plantel completo (incluye aves que no ponen: reposición,
- * descarte pendiente, mortandad del período). Es la que hay que usar para proyectar.
+ * Postura medida sobre el PLANTEL completo: incluye las aves que no ponen
+ * (reposición, descarte pendiente, mortandad del período). Es la que sirve para
+ * proyectar.
  */
-const POSTURA_PLANTEL = 0.885;
+const POSTURA_PLANTEL = 0.87;
 
-/**
- * Costo fijo mensual de la estructura.
- * 🟡 confirmar con Augusto: se derivó del PE declarado (630 cajones) y de la
- * contribución marginal unitaria. Cierra exacto, pero nunca fue declarado como dato.
- */
-const COSTO_FIJO_MENSUAL = 15_000_000;
+/** Costo fijo mensual de la estructura. */
+const COSTO_FIJO_MENSUAL = 12_000_000;
 
-/**
- * Costo variable por cajón.
- * 🟡 confirmar con Augusto: el desglose no está disponible. Se sabe que el alimento
- * es la mayor parte, pero faltan el costo del maple y el de reposición del plantel
- * para poder derivarlo desde cero en vez de tomarlo como dato.
- */
-const COSTO_VARIABLE_CAJON = 24_188.98;
+/** Costo variable por cajón. */
+const COSTO_VARIABLE_CAJON = 26_000;
 
-/** Precio promedio de venta por cajón, hoy. */
-const PRECIO_VENTA_CAJON = 48_000;
+/** Precio promedio de venta por cajón. */
+const PRECIO_VENTA_CAJON = 52_000;
 
 /**
  * Costo de adquisición por ave.
- * OJO: la nota de origen dice "$800 por cabeza" y a la vez
- * "6.300 ÷ 24 × $800 ≈ $2,8M/mes". Esa cuenta da $210.000, no $2,8M.
- * El valor bueno es el $2,8M — reproduce exacto el caso 3 del §11.
- * El costo por ave implícito es $10.666,67 (~USD 7, coherente con 001.2.43).
- * Cargar $800 subestimaría la amortización 13 veces.
+ *
+ * El plantel es un ACTIVO, no un insumo del período: se compra una vez y produce
+ * durante meses. Ver `src/domain/parametros/activo-amortizable.ts`.
  */
-const COSTO_ADQUISICION_AVE = 10_666.666_67;
+const COSTO_ADQUISICION_AVE = 9_000;
 
 /**
  * Vida útil del lote, en meses.
- * 🟡 CONFLICTO ABIERTO (D-01): 001.2.43 dice ~18 meses de vida productiva;
- * 001.2.46 habla de un ciclo de ~2 años; el plan usa 24 de default.
- * Acá se usa 24 por ser el default del plan. NO está resuelto.
+ *
+ * En producción sale de `ParametroCosteo` (`vida_util_lote_meses`), nunca de una
+ * constante: divide la amortización de todo el plantel.
  */
 const VIDA_UTIL_LOTE_MESES = 24;
 
-/** Valor residual del ave al final de su vida útil (gallina de descarte). */
-const VALOR_RESIDUAL_AVE = 0; // 🟡 confirmar con Augusto: la venta de descarte existe.
+/** Valor residual del ave al final de su vida útil (venta de descarte). */
+const VALOR_RESIDUAL_AVE = 0;
 
 // ---------------------------------------------------------------------------
 // DERIVACIONES
@@ -126,6 +105,9 @@ const cajonesConPostura = (aves: number, postura: number) =>
 const produccionCajonesLote = cajonesConPostura(AVES, POSTURA_LOTE);
 const produccionCajonesPlantel = cajonesConPostura(AVES, POSTURA_PLANTEL);
 
+/** Producción del período, en cajones enteros. */
+const PRODUCCION_CAJONES = Math.round(produccionCajonesPlantel);
+
 const contribucionUnitaria = PRECIO_VENTA_CAJON - COSTO_VARIABLE_CAJON;
 const puntoEquilibrioCajones = COSTO_FIJO_MENSUAL / contribucionUnitaria;
 
@@ -137,111 +119,104 @@ const resultadoMensual = (aves: number, postura: number) =>
 
 // ---------------------------------------------------------------------------
 
-describe('T-01 — Fixture avícola: la tabla del §11 recalculada desde sus insumos', () => {
-  describe('Caso 1-2 — Alimento: donde arranca la deriva', () => {
-    it('caso 1 · consumo mensual = 6.300 × 120 g × 30 = 22.680 kg', () => {
-      expect(consumoAlimentoKgMes).toBeCloseTo(22_680, 2);
+describe('T-01 — Fixture avícola: cada valor derivado de sus insumos', () => {
+  describe('Alimento: donde arrancaba la deriva del plan', () => {
+    it('consumo mensual = aves × gramaje × días', () => {
+      expect(consumoAlimentoKgMes).toBeCloseTo(16_500, 2);
     });
 
-    it('caso 2 · costo de alimento = 22.680 × 330 = 7.484.400 — NO los 7.500.000 del plan', () => {
-      expect(costoAlimentoMes).toBeCloseTo(7_484_400, 2);
-      // El error original, dejado explícito para que nadie lo reintroduzca:
-      expect(costoAlimentoMes).not.toBe(7_500_000);
-      expect(7_500_000 - costoAlimentoMes).toBeCloseTo(15_600, 2);
-    });
-  });
-
-  describe('Caso 3-4 — El plantel como activo amortizable', () => {
-    it('caso 3 · amortización mensual = 6.300 × 10.666,67 / 24 = 2.800.000', () => {
-      expect(amortizacionMensualPlantel).toBeCloseTo(2_800_000, 0);
-    });
-
-    it('caso 3b · con los $800 de la nota daría 210.000: 13x menos. No usar ese valor', () => {
-      const conValorErroneo = (AVES * 800) / VIDA_UTIL_LOTE_MESES;
-      expect(conValorErroneo).toBeCloseTo(210_000, 2);
-      expect(amortizacionMensualPlantel / conValorErroneo).toBeCloseTo(13.33, 1);
-    });
-
-    it('caso 4 · amortización por cajón sobre la producción declarada del §11 (472) = 5.932,20', () => {
-      const PRODUCCION_DECLARADA_SS11 = 472; // 🟡 ver el test de coherencia más abajo
-      expect(amortizacionMensualPlantel / PRODUCCION_DECLARADA_SS11).toBeCloseTo(5_932.2, 1);
+    it('costo de alimento = consumo × precio, sin redondear', () => {
+      expect(costoAlimentoMes).toBeCloseTo(6_600_000, 2);
+      // La lección del plan original: redondear acá arrastra el error hasta el
+      // punto de equilibrio. El valor se deriva, no se escribe a mano.
+      expect(costoAlimentoMes).toBe(consumoAlimentoKgMes * PRECIO_ALIMENTO_KG);
     });
   });
 
-  describe('Caso 5-6 — Postura de lote vs. postura de plantel', () => {
-    it('caso 5 · con postura de LOTE (94 %) → 493,5 cajones/mes', () => {
-      expect(produccionCajonesLote).toBeCloseTo(493.5, 2);
+  describe('El plantel como activo amortizable', () => {
+    it('amortización mensual = (costo − residual) / vida útil', () => {
+      expect(amortizacionMensualPlantel).toBeCloseTo(1_875_000, 0);
     });
 
-    it('caso 6 · con postura de PLANTEL (88,5 %) → 464,625 cajones/mes', () => {
-      expect(produccionCajonesPlantel).toBeCloseTo(464.625, 3);
+    it('amortización por cajón producido', () => {
+      expect(amortizacionMensualPlantel / PRODUCCION_CAJONES).toBeCloseTo(5_165.29, 2);
     });
 
-    it('caso 6b · proyectar con la de lote sobreestima la producción un 6,2 %', () => {
-      const sobreestimacion = produccionCajonesLote / produccionCajonesPlantel - 1;
-      expect(sobreestimacion).toBeCloseTo(0.0621, 3);
-    });
-  });
-
-  describe('Caso 7-8 — Costo unitario y contribución', () => {
-    it('caso 7 · contribución marginal unitaria = 48.000 − 24.188,98 = 23.811,02', () => {
-      expect(contribucionUnitaria).toBeCloseTo(23_811.02, 2);
-    });
-
-    it('caso 8 · costo total unitario = 55.968,64 — NO los 56.020 del plan', () => {
-      const PRODUCCION_DECLARADA_SS11 = 472;
-      const costoTotalUnitario =
-        COSTO_VARIABLE_CAJON + COSTO_FIJO_MENSUAL / PRODUCCION_DECLARADA_SS11;
-      expect(costoTotalUnitario).toBeCloseTo(55_968.64, 2);
-      expect(costoTotalUnitario).not.toBe(56_020);
+    it('🔒 la vida útil NO está hardcodeada: al acortarla, la cuota sube', () => {
+      const con18 =
+        (AVES * (COSTO_ADQUISICION_AVE - VALOR_RESIDUAL_AVE)) / 18;
+      expect(con18).toBeGreaterThan(amortizacionMensualPlantel);
+      expect(con18 / amortizacionMensualPlantel).toBeCloseTo(24 / 18, 4);
     });
   });
 
-  describe('Caso 9-10 — Punto de equilibrio', () => {
-    it('caso 9 · PE = 15.000.000 / 23.811,02 = 630 cajones — NO 631', () => {
-      expect(puntoEquilibrioCajones).toBeCloseTo(629.96, 2);
-      expect(Math.round(puntoEquilibrioCajones)).toBe(630);
-      expect(Math.round(puntoEquilibrioCajones)).not.toBe(631);
+  describe('Postura de lote vs. postura de plantel', () => {
+    it('con postura de LOTE la producción proyectada es mayor', () => {
+      expect(produccionCajonesLote).toBeCloseTo(383.333, 3);
     });
 
-    it('caso 10 · brecha al PE = 630 − 472 = 158 cajones — NO 159', () => {
-      const PRODUCCION_DECLARADA_SS11 = 472;
-      const brecha = Math.round(puntoEquilibrioCajones) - PRODUCCION_DECLARADA_SS11;
-      expect(brecha).toBe(158);
-      expect(brecha).not.toBe(159);
+    it('con postura de PLANTEL, que es la que sirve para proyectar', () => {
+      expect(produccionCajonesPlantel).toBeCloseTo(362.5, 3);
     });
 
-    it('caso 10b · el PE congelado de la planilla (572) implica un precio viejo de ~50.413', () => {
-      // Es el error exacto que la auditoría encontró: el PE quedó fijo con un precio
-      // que ya no rige. Al bajar el precio a 48.000, el PE sube de 572 a 630.
-      const PE_CONGELADO_PLANILLA = 572;
-      const precioViejoImplicito = COSTO_FIJO_MENSUAL / PE_CONGELADO_PLANILLA + COSTO_VARIABLE_CAJON;
-      expect(precioViejoImplicito).toBeCloseTo(50_412.76, 2);
-      expect(precioViejoImplicito).toBeGreaterThan(PRECIO_VENTA_CAJON);
+    it('proyectar con la de lote sobreestima la producción un 5,75 %', () => {
+      // Es el error que hace que una explotación crea que llega al equilibrio
+      // antes de lo que llega.
+      expect(produccionCajonesLote / produccionCajonesPlantel - 1).toBeCloseTo(0.0575, 4);
     });
   });
 
-  describe('Caso 11-12 — Resultado mensual y punto de cruce', () => {
-    it('caso 11 · a 6.300 aves con postura de plantel → −3.936.805 $/mes', () => {
-      expect(resultadoMensual(AVES, POSTURA_PLANTEL)).toBeCloseTo(-3_936_805, 0);
+  describe('Costo unitario y contribución', () => {
+    it('contribución marginal unitaria = precio − costo variable', () => {
+      expect(contribucionUnitaria).toBeCloseTo(26_000, 2);
     });
 
-    it('caso 12 · a 8.560 aves → +31.897 $/mes (punto de cruce)', () => {
-      expect(resultadoMensual(8_560, POSTURA_PLANTEL)).toBeCloseTo(31_897, 0);
+    it('costo total unitario = variable + fijo / producción', () => {
+      const costoTotalUnitario = COSTO_VARIABLE_CAJON + COSTO_FIJO_MENSUAL / PRODUCCION_CAJONES;
+      expect(costoTotalUnitario).toBeCloseTo(59_057.85, 2);
+      // Con este precio de venta, la explotación pierde en cada cajón.
+      expect(costoTotalUnitario).toBeGreaterThan(PRECIO_VENTA_CAJON);
+    });
+  });
+
+  describe('Punto de equilibrio', () => {
+    it('PE = costo fijo / contribución unitaria', () => {
+      expect(puntoEquilibrioCajones).toBeCloseTo(461.54, 2);
+      expect(Math.round(puntoEquilibrioCajones)).toBe(462);
     });
 
-    it('caso 12b · a 4.200 aves (el PE de la planilla) sigue perdiendo fuerte', () => {
-      // La planilla del cliente dice que a ~4.200 gallinas alcanza el equilibrio.
-      // Con los números correctos, a 4.200 aves pierde más de 7 millones por mes.
-      expect(resultadoMensual(4_200, POSTURA_PLANTEL)).toBeLessThan(-7_000_000);
+    it('brecha al PE = PE − producción', () => {
+      expect(Math.round(puntoEquilibrioCajones) - PRODUCCION_CAJONES).toBe(99);
     });
 
-    it('caso 12c · el punto de cruce en aves se deriva del PE en cajones', () => {
+    it('🚨 el PE se RECALCULA: un precio viejo lo deja congelado y mintiendo', () => {
+      // El error clásico de las planillas: el PE queda fijo con un precio que ya
+      // no rige. Si el precio baja, el PE real sube y la planilla no se entera.
+      const precioViejo = PRECIO_VENTA_CAJON * 1.08;
+      const peConPrecioViejo = COSTO_FIJO_MENSUAL / (precioViejo - COSTO_VARIABLE_CAJON);
+
+      expect(peConPrecioViejo).toBeLessThan(puntoEquilibrioCajones);
+      // Creer el PE viejo es creerse más cerca del equilibrio de lo que se está.
+      expect(puntoEquilibrioCajones - peConPrecioViejo).toBeGreaterThan(30);
+    });
+  });
+
+  describe('Resultado mensual y punto de cruce', () => {
+    it('a la escala actual, el resultado es negativo', () => {
+      expect(resultadoMensual(AVES, POSTURA_PLANTEL)).toBeCloseTo(-2_575_000, 0);
+    });
+
+    it('el punto de cruce está bastante más arriba que la escala actual', () => {
       const avesEnEquilibrio =
         (puntoEquilibrioCajones * HUEVOS_POR_CAJON) / (POSTURA_PLANTEL * DIAS_MES);
-      expect(avesEnEquilibrio).toBeCloseTo(8_541.84, 1);
-      // Muy lejos de las ~4.200 de la planilla del cliente:
-      expect(avesEnEquilibrio / 4_200).toBeGreaterThan(2);
+
+      expect(avesEnEquilibrio).toBeCloseTo(6_366.05, 1);
+      expect(resultadoMensual(6_367, POSTURA_PLANTEL)).toBeGreaterThan(0);
+      expect(resultadoMensual(6_366, POSTURA_PLANTEL)).toBeLessThan(0);
+    });
+
+    it('a la mitad de la escala de equilibrio, la pérdida es mucho mayor', () => {
+      expect(resultadoMensual(3_200, POSTURA_PLANTEL)).toBeLessThan(-5_000_000);
     });
   });
 
@@ -249,26 +224,6 @@ describe('T-01 — Fixture avícola: la tabla del §11 recalculada desde sus ins
     it('un cajón son 12 maples de 30 huevos', () => {
       expect(maplesPorCajon).toBe(12);
       expect(maplesPorCajon * HUEVOS_POR_MAPLE).toBe(HUEVOS_POR_CAJON);
-    });
-  });
-
-  describe('🟡 Incoherencia detectada en la fuente — NO resolver acá', () => {
-    it('la producción declarada del §11 (472) no se deriva de ninguna de las dos posturas', () => {
-      const PRODUCCION_DECLARADA_SS11 = 472;
-      const posturaImplicita =
-        (PRODUCCION_DECLARADA_SS11 * HUEVOS_POR_CAJON) / (AVES * DIAS_MES);
-
-      // Ni la de lote (94 %) ni la de plantel (88,5 %): implica 89,90 %.
-      expect(posturaImplicita).toBeCloseTo(0.899, 3);
-      expect(posturaImplicita).not.toBeCloseTo(POSTURA_LOTE, 2);
-      expect(posturaImplicita).not.toBeCloseTo(POSTURA_PLANTEL, 2);
-
-      // El §11 usa 472 para el costo unitario y la brecha, pero 88,5 % para los
-      // escenarios de escala. Las dos cosas no pueden ser ciertas a la vez.
-      // 🟡 confirmar con Augusto: ¿472 es producción REAL observada de un mes
-      // concreto, o una proyección? Si es real, la postura del plantel de ese mes
-      // fue 89,9 % y no 88,5 %.
-      expect(Math.abs(PRODUCCION_DECLARADA_SS11 - produccionCajonesPlantel)).toBeCloseTo(7.375, 2);
     });
   });
 });

@@ -134,6 +134,21 @@ Vienen de la especificación de Trazabilidad Total v1 y de la auditoría del mot
 
 ---
 
+## 5.bis Datos de clientes en repositorios públicos
+
+`CosteAR-backend` y `CosteAR-frontend` son **públicos**. `CosteAR-admin` es privado.
+
+|ID|Regla|
+|---|---|
+|**CLI-01**|**Los datos de un cliente no entran a un repositorio público.** Ni su nombre, ni su localidad, ni sus números reales — no en tests, no en seeds, no en comentarios, no en ejemplos, no en cuerpos de PR ni en mensajes de commit.|
+|**CLI-02**|Un fixture que necesita números realistas usa **datos ficticios** que ejerciten la misma matemática. El caso real, si hace falta conservarlo, va a `CosteAR-admin` (privado).|
+|**CLI-03**|Antes de abrir un PR que toque un vertical de un cliente: `git grep -in "<nombre del cliente>"`. Si devuelve algo, no se abre.|
+|**CLI-04**|Esto incluye la estructura económica: costo unitario, punto de equilibrio, precio de venta, márgenes y escala. **Que un competidor pueda leer el margen de un productor es un problema para él, no para nosotros.**|
+
+> **Ya pasó** (18-08-2026): se subió la estructura de costos completa de un cliente, con su nombre
+> al lado, a un repositorio público. Se anonimizó, pero **el historial de git es permanente**.
+> Lo barato es no escribirlo; una vez publicado, ya no hay vuelta atrás completa.
+
 ## 6. Guardarraíles — antipatrones ya observados
 
 |ID|Antipatrón|Qué hacer en su lugar|
