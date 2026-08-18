@@ -206,7 +206,7 @@ Al terminar, devolvé el link del issue creado y pegalo donde se venía hablando
   `CosteAR-admin` es privado, pero la regla de no pegar datos del cliente vale igual.
 - **No inventes números de issue ni de PR.** Si `gh` no te los devuelve, poné `—` y decilo.
 - **Si el issue nace de una reunión con el cliente, escribilo en el issue** ("sale de la reunión
-  del 12/08 con Augusto"). Dentro de tres meses nadie se acuerda de dónde salió el pedido.
+  del 12/08 con el cliente"). Dentro de tres meses nadie se acuerda de dónde salió el pedido.
 - **Esta skill no cierra issues.** Los cierra el PR que los resuelve, con `Closes #N`
   (ver `/costear-pr`).
 - Los issues son **referencia, no especificación**: el dev que implementa valida contra el repo

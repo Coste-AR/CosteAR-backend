@@ -81,7 +81,7 @@ const terminos = [
   },
   {
     externalId: 'AV-010', termino: 'postura', variantes: ['tasa de postura', '% de postura', 'porcentaje de postura'],
-    concepto: 'Huevos puestos ÷ aves vivas × 100. DOS métricas distintas: postura por LOTE y postura de PLANTEL. En Augusto: 94 % por lote vs. 88,5 % de plantel.',
+    concepto: 'Huevos puestos ÷ aves vivas × 100. DOS métricas distintas: postura por LOTE y postura de PLANTEL. En el cliente del vertical las dos difieren varios puntos.',
     entidadDominio: 'ProduccionDiaria → derivada · fórmula §8.1',
     seccion: 'NO_APLICA', yaEnPerfil: true, ambiguo: true,
     desambiguacion: 'AMBIGÜEDAD INTERNA: "postura" sin calificar no dice cuál de las dos es, y son números distintos que llevan a decisiones distintas.',
@@ -132,7 +132,7 @@ const terminos = [
     concepto: 'Sustitución del lote agotado por pollitas nuevas. Ciclo ~2 años desde el nacimiento.',
     entidadDominio: 'Lote.vida_util_meses · ParametroCosteo.vida_util_lote_meses',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: '⚠️ CONFLICTO DE DATO: 001.2.43 dice vida productiva ~18 meses; 001.2.46 dice ciclo ~2 años; el plan usa default 24 meses. Hay que cerrarlo con Augusto.',
+    desambiguacion: '⚠️ CONFLICTO DE DATO: 001.2.43 dice vida productiva ~18 meses; 001.2.46 dice ciclo ~2 años; el plan usa default 24 meses. Hay que cerrarlo con el cliente.',
     cita: 'Ciclo productivo de ~2 años desde el nacimiento hasta la faena — 001.2.46',
   },
   {
@@ -140,7 +140,7 @@ const terminos = [
     concepto: 'Σ huevos del ciclo ÷ aves ingresadas. Indicador de ciclo completo (~24 meses), NO mensual.',
     entidadDominio: 'Derivada de Lote + ProduccionDiaria · fórmula §8.1',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Augusto lo nombra como el dato que hoy NO tiene y más quiere.',
+    desambiguacion: 'El cliente lo nombra como el dato que hoy NO tiene y más quiere.',
     cita: 'Historial de rendimiento por lote (huevo por ave alojada) — 001.2.46',
   },
   {
@@ -153,7 +153,7 @@ const terminos = [
   },
   {
     externalId: 'AV-019', termino: 'spot', variantes: ['precio spot', 'mercado spot'],
-    concepto: 'Precio de mercado del momento, por oposición al precio "techo" que Augusto usa para presupuestar.',
+    concepto: 'Precio de mercado del momento, por oposición al precio "techo" que el cliente usa para presupuestar.',
     entidadDominio: 'Referencia de valuación',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: true,
     desambiguacion: 'Anglicismo financiero; fuera del agro tiene otros sentidos (publicidad, iluminación).',
@@ -164,7 +164,7 @@ const terminos = [
     concepto: 'Criterio conservador del cliente: valuar el insumo al precio más alto para cubrirse ante subas.',
     entidadDominio: 'Criterio de valuación configurable — NO es el PPP del motor',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: true,
-    desambiguacion: '⚠️ CHOCA CON EL MOTOR. CosteAR valúa por PPP. Augusto valúa por precio de reposición "con techo". Decisión pendiente, no se resuelve con vocabulario.',
+    desambiguacion: '⚠️ CHOCA CON EL MOTOR. CosteAR valúa por PPP. El cliente valúa por precio de reposición "con techo". Decisión pendiente, no se resuelve con vocabulario.',
     cita: 'siempre usar el techo más alto para cubrirse ante subas — 001.2.46',
   },
   {
@@ -188,7 +188,7 @@ const terminos = [
     concepto: 'En granja: conjunto de aves de la misma edad y raza. En granos: parcela de tierra sembrada.',
     entidadDominio: 'Lote (§7.1) — granja',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: true,
-    desambiguacion: '⚠️ COLISIÓN DENTRO DEL MISMO CLIENTE. Augusto usa "lote" para las dos cosas. También existe "lote de materia prima" (§7.2). Tres sentidos distintos.',
+    desambiguacion: '⚠️ COLISIÓN DENTRO DEL MISMO CLIENTE. El cliente usa "lote" para las dos cosas. También existe "lote de materia prima" (§7.2). Tres sentidos distintos.',
     cita: '001.2.46 — usa ambos sentidos',
   },
   {
@@ -268,12 +268,12 @@ const terminos = [
     concepto: '(consumo real − consumo teórico) / consumo teórico. Detecta sobreconsumo, robo o error de carga.',
     entidadDominio: 'Fórmula §8.2 desvio_consumo_pct · ReglaAlerta',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Método real de detección de Augusto: calculó alimento para 7 días y el operario lo pedía cada 10.',
+    desambiguacion: 'Método real de detección del cliente: calculó alimento para 7 días y el operario lo pedía cada 10.',
     cita: '§8.2 del plan',
   },
   {
     externalId: 'AV-034', termino: 'gramaje', variantes: ['gramos por ave', 'g/ave/día'],
-    concepto: 'Consumo estándar de alimento por ave por día. 120 g en el caso de Augusto.',
+    concepto: 'Consumo estándar de alimento por ave por día. El valor concreto se carga como parámetro de costeo, no se asume.',
     entidadDominio: 'ParametroCosteo.gramaje_estandar_gr · TablaEstandarPeso',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
     desambiguacion: 'Varía por raza y semana de vida.',
@@ -305,7 +305,7 @@ const terminos = [
   },
   {
     externalId: 'AV-038', termino: 'amortización del plantel', variantes: ['amortización de gallinas', 'reposición de gallina'],
-    concepto: '(costo del lote − valor residual) / vida útil en meses. En Augusto: ~$2,8 M/mes que deberían reservarse.',
+    concepto: '(costo del lote − valor residual) / vida útil en meses. Es la parte del costo que más se olvida reservar.',
     entidadDominio: 'Lote.vida_util_meses · fórmula §8.3 · CIP',
     seccion: 'COSTOS_INDIRECTOS', yaEnPerfil: true, ambiguo: true,
     desambiguacion: '⚠️ ERROR VERIFICADO: 001.2.46 dice "$800 por cabeza" y "6.300 ÷ 24 × $800 = ~$2,8M/mes". Esa cuenta da $210.000. El bueno es el $2,8M. Costo por ave implícito: $10.666,67. NO cargar $800.',
@@ -513,7 +513,7 @@ const terminos = [
   },
   {
     externalId: 'AV-064', termino: 'local Ejército', variantes: ['local Belgrano', 'canal gastronómico'],
-    concepto: 'Canales de venta propios de Augusto (dos locales) más el canal gastronómico.',
+    concepto: 'Canales de venta propios del cliente más el canal gastronómico.',
     entidadDominio: 'Venta.canal (enum)',
     seccion: 'VENTAS', yaEnPerfil: false, ambiguo: false,
     desambiguacion: 'Nombres de avenidas de San Miguel de Tucumán.',
@@ -548,7 +548,7 @@ const terminos = [
     concepto: 'Unidad de negocio de arriendo de finca, con potencial de exportación.',
     entidadDominio: 'FUERA de Fase 1',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'El plan la excluye (§4). El bot de Augusto ya tiene un canal "higos".',
+    desambiguacion: 'El plan la excluye (§4). El bot del cliente ya tiene un canal "higos".',
     cita: '001.2.43',
   },
 ];
