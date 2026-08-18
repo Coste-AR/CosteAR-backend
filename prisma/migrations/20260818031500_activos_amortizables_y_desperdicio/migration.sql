@@ -1,3 +1,10 @@
+-- OJO CON EL NOMBRE DE ESTA CARPETA: Prisma aplica las migraciones en orden
+-- alfabetico, y esta DEPENDE de la de parametros_costeo (referencia la tabla
+-- unidades_medida). Al crearla a mano se uso la hora LOCAL (00:28) mientras que
+-- Prisma habia nombrado la anterior con UTC (03:09), asi que esta quedaba
+-- primero y fallaba en base limpia con "relation unidades_medida does not exist".
+-- Solo se vio en CI: en una base que ya tenia las tablas, el error no aparece.
+--
 -- Activos amortizables y registro de desperdicio (S-03 y S-04 del vertical avicola).
 --
 -- ADITIVA (DOM-06): solo CREATE TYPE, CREATE TABLE, CREATE INDEX y ADD CONSTRAINT.
