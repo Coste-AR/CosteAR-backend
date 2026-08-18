@@ -190,7 +190,15 @@ suite('T-06 — procedencia de la clasificación IA en la ficha del dato', () =>
     // CONFIANZA CUALITATIVA. El 91 no llega crudo a NINGÚN campo del sello: un
     // porcentaje se lee como "probabilidad de estar bien" y no lo es.
     expect(prov.confianza).toBe('alta');
-    const sello = { ...prov, detalleTecnico: { ...prov.detalleTecnico, explicacion: null } };
+    // `confirmadoEl` se excluye del barrido: es un timestamp del servidor, no un lugar
+    // donde la confianza pueda filtrarse. Incluirlo hacía el test FLAKY — fallaba cada
+    // vez que la hora contenía esos dígitos, por ejemplo "…T02:28:44.691Z". Ya se
+    // verificó arriba que no es null; su formato no es lo que este test cuida.
+    const sello = {
+      ...prov,
+      confirmadoEl: null,
+      detalleTecnico: { ...prov.detalleTecnico, explicacion: null },
+    };
     expect(JSON.stringify(sello)).not.toContain('91');
     // La ÚNICA excepción es `explanation`, que es el texto que ya escribió el
     // clasificador y viaja VERBATIM: es un registro de auditoría, y reescribirlo
