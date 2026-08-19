@@ -421,3 +421,11 @@ DROP POLICY IF EXISTS tenant_isolation ON desperdicio_registros;
 CREATE POLICY tenant_isolation ON desperdicio_registros
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+-- reglas_alerta (S-05b): `userId` denormalizado, mismo patrón que cost_periods.
+ALTER TABLE reglas_alerta ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reglas_alerta FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON reglas_alerta;
+CREATE POLICY tenant_isolation ON reglas_alerta
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
