@@ -78,6 +78,8 @@ export const RLS_MODELS = new Set([
   // S-03 y S-04.
   'ActivoAmortizable',
   'DesperdicioRegistro',
+  // S-05b.
+  'ReglaAlerta',
 ]);
 
 /**
