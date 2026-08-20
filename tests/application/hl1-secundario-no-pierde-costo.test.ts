@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { computeProductiveBudgets } from '@/domain/calculations/calculate.js';
+import {
+  computeProductiveBudgets,
+  runCalculation,
+  type CalculationInput,
+} from '@/domain/calculations/calculate.js';
 import { primaryProration, secondaryProration } from '@/domain/calculations/indirect-costs.js';
 import { Money } from '@/domain/value-objects/money.js';
 import { MissingAllocationBaseError } from '@/domain/errors/calculation-errors.js';
@@ -47,6 +51,74 @@ describe('H-L1 — el prorrateo secundario no puede perder costo', () => {
       { centroDestinoId: 'mecanizado', fijo: 55, variable: 55 },
       { centroDestinoId: 'terminado', fijo: 45, variable: 45 },
     ],
+  };
+
+  /**
+   * Caso Dorado (costeo por Órdenes), el mismo fixture de `calculate.test.ts`.
+   * Se repite acá a propósito: ese archivo fija los números de la cátedra
+   * (DOM-05) y no se toca; este lo usa para probar qué pasa cuando Mantenimiento
+   * se queda sin reparto.
+   */
+  const dorado: CalculationInput = {
+    rawMaterial: {
+      materials: [
+        {
+          name: 'Chapa', code: 'MP-001', unit: 'u',
+          wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
+          stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
+          initialStock: { quantity: 100, unitCost: 1000 },
+          movements: [
+            { date: '05/01/2026', type: 'purchase', detail: 'Compra', quantity: 400, unitCost: 1200 },
+            { date: '15/01/2026', type: 'consumption', detail: 'Consumo', quantity: 300 },
+          ],
+        },
+      ],
+    },
+    directLabor: {
+      workingDays: {
+        totalDaysPerYear: 365,
+        unpaidAbsence: { sundays: 52, saturdays: 52, unjustifiedAbsences: 0, holidaysOnWeekend: 0 },
+        paidAbsence: { holidays: 15, vacations: 14, sickness: 0, specialLeaves: 0, workAccidents: 0 },
+      },
+      itcs: {
+        derivationBase: 0.27,
+        fixedArt: 0.015,
+        uncertainRemunerative: [
+          { name: 'PAP', coefficient: 0.05 },
+          { name: 'PPP', coefficient: 0.05 },
+        ],
+        uncertainNonRemunerative: [],
+      },
+      departments: [
+        { name: 'Corte', basicRemuneration: 800000, hoursWorked: 160 },
+        { name: 'Ensamblaje', basicRemuneration: 600000, hoursWorked: 160 },
+      ],
+    },
+    indirectCosts: {
+      centers: [
+        { id: 'corte', name: 'Corte', type: 'productive' },
+        { id: 'ensam', name: 'Ensamblaje', type: 'productive' },
+        { id: 'mant', name: 'Mantenimiento', type: 'service' },
+      ],
+      concepts: [
+        { name: 'Alquiler',    amount: { fixed: 300000, variable: 0 }, distribution: { corte: 40, ensam: 40, mant: 20 } },
+        { name: 'Energía',     amount: { fixed: 0, variable: 200000 }, distribution: { corte: 50, ensam: 30, mant: 20 } },
+        { name: 'Lubricantes', amount: { fixed: 0, variable: 100000 }, distribution: { corte: 0,  ensam: 0,  mant: 100 } },
+      ],
+      serviceDistributions: [
+        {
+          serviceCenterId: 'mant',
+          toProductiveFixed: { corte: 60, ensam: 40 },
+          toProductiveVariable: { corte: 60, ensam: 40 },
+        },
+      ],
+      productiveSettings: [
+        { centerId: 'corte', normalCapacity: 160, actualActivity: 150, actualCip: 350000 },
+        { centerId: 'ensam', normalCapacity: 160, actualActivity: 160, actualCip: 260000 },
+      ] as CalculationInput['indirectCosts']['productiveSettings'],
+    },
+    inventory: { initialWorkInProcess: 0, finalWorkInProcess: 0, initialFinishedGoods: 0, finalFinishedGoods: 0 },
+    sales: { unitPrice: 25000, quantity: 100 },
   };
 
   function presupuestos(serviceRows: unknown[], closureOrder?: string[]) {
@@ -164,6 +236,51 @@ describe('H-L1 — el prorrateo secundario no puede perder costo', () => {
       const b = computeProductiveBudgets(config);
       expect(b.p1!.fixed + b.p2!.fixed + b.p3!.fixed).toBeCloseTo(1000, 1);
     });
+  });
+
+  describe('los caminos que la UI no cubre', () => {
+    // La UI siempre manda `closureOrder`, derivado de las filas de reparto: por
+    // eso el bug nunca explotó en pantalla. A la pasada directa se llega por
+    // estructuras guardadas antes de que `closureOrder` existiera, por el import
+    // de Excel, por el populador de IA y por cualquier llamador de la API. Estos
+    // dos tests fijan la FORMA de config que emiten esos caminos.
+
+    it('populador de IA: la fila con `distributions: []` que agrega ya no pasa en silencio', () => {
+      // `cost-structure-populator.ts` le agrega a cada centro de servicio nuevo
+      // una fila `{ serviceCenterId, distributions: [] }` y nunca escribe
+      // `closureOrder`. El comentario dice "para que no queden vacíos", pero la
+      // fila que crea está vacía: cae en la pasada directa sin repartir nada.
+      expect(() =>
+        presupuestos([
+          filaMantenimiento,
+          { serviceCenterId: 'admplanta', distributions: [] },
+        ]),
+      ).toThrow(/Adm\. Planta/);
+    });
+
+    it('import de Excel: centros de servicio sin ninguna fila de reparto', () => {
+      // `excel-import/extract-indirect-costs.ts` extrae centros (productivos y
+      // de servicio) y conceptos, pero NO extrae repartos secundarios ni orden
+      // de cierre. Un Excel con un centro de servicio entra sin ninguna fila.
+      expect(() => presupuestos([])).toThrow(MissingAllocationBaseError);
+    });
+  });
+
+  it('el caso Dorado sin el reparto de Mantenimiento falla en vez de abaratar el costo', () => {
+    // Criterio de cierre del issue, sobre el caso de órdenes que vive en el repo
+    // (el dataset D01 de la auditoría no está en ninguno de los repos).
+    // Mantenimiento se lleva 20% del alquiler, 20% de la energía y el 100% de
+    // los lubricantes del prorrateo primario. Sin su reparto, todo eso no llega
+    // a Corte ni a Ensamblaje: antes el cálculo terminaba bien y el costo
+    // unitario salía más barato. Ahora corta.
+    const sinReparto: CalculationInput = {
+      ...dorado,
+      indirectCosts: { ...dorado.indirectCosts, serviceDistributions: [] },
+    };
+    expect(() => runCalculation(sinReparto)).toThrow(MissingAllocationBaseError);
+    expect(() => runCalculation(sinReparto)).toThrow(/Mantenimiento/);
+    // Y con el reparto puesto, el caso de cátedra sigue dando lo mismo (DOM-05).
+    expect(runCalculation(dorado).indirectCostsApplied).toBe(578750);
   });
 
   it('REGRESIÓN: repartir el secundario no muta el resultado del primario', () => {
