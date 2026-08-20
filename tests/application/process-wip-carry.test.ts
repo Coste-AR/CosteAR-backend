@@ -13,6 +13,9 @@ vi.mock('@/application/audit/audit-logger.js', () => ({
 /**
  * B18 · FX-P2 — ARRASTRE DE EXISTENCIAS ENTRE PERÍODOS (Azur Alcoholes, abril → mayo).
  *
+ * Caso de cátedra: Clase 22 — "Cálculo de costos por procesos: abril y mayo".
+ * El insumo de abril es el de FX-P1 (Clases 21-22).
+ *
  * Regla de la cátedra: "el inventario final del período 1 es el inventario
  * inicial del período 2". En Costeo por Procesos la producción no se corta a fin
  * de mes: lo que quedó a medio hacer en cada departamento es, literalmente, con
@@ -208,7 +211,7 @@ async function abrirMayo(opts: Parameters<typeof makeDb>[0] = {}) {
 
 // --- Tests ---------------------------------------------------------------------
 
-describe('B18 · FX-P2 — arrastre de existencias entre períodos (abril → mayo)', () => {
+describe('B18 · FX-P2 — arrastre de existencias entre períodos, abril → mayo (Clase 22)', () => {
   it('ancla: abril reproduce los costos unitarios de la cátedra ($3,75 y $6,532)', () => {
     const informe = informeDeAbril();
     const d = informe.departments.find((x) => x.name === 'Destilado')!;

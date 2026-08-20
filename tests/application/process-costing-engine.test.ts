@@ -89,7 +89,7 @@ const purificado: ProcessDepartmentInput = {
   initialWipTransferredCost: 11120,
 };
 
-describe('B17 — ProcessCostingEngine · FX-P1 end to end (Azur Alcoholes, abril)', () => {
+describe('B17 — ProcessCostingEngine · FX-P1 end to end, Azur Alcoholes abril (Clases 21-22)', () => {
   const engine = new ProcessCostingEngine();
   const input: ProcessCalculationInput = { departments: [destilado, purificado] };
 

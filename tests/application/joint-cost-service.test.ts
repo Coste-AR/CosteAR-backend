@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * (mismo patrón que unit-movement-service.test.ts): aíslan la orquestación
  * —repartir con el dominio, persistir, auditar y TRAZAR— sin una base viva. La
  * matemática de los cuatro métodos ya está probada en tests/domain/joint-costs.test.ts;
- * acá se reutilizan los mismos números ANCLA (FX-J1) para verificar el round-trip.
+ * acá se reutilizan los mismos números ANCLA (FX-J1, Clase 24) para verificar el round-trip.
  */
 
 const mockTx = {
@@ -147,7 +147,7 @@ describe('JointCostService — B16', () => {
     }
   });
 
-  it('los 4 métodos computan correctamente (números ancla FX-J1 del dominio)', async () => {
+  it('los 4 métodos computan correctamente (números ancla FX-J1, Clase 24)', async () => {
     mockProcessesContext();
     mockUpsertEcho();
     const service = await makeService();
@@ -201,7 +201,7 @@ describe('JointCostService — B16', () => {
     expect(round(m4.result.totalAllocated)).toBe(110000);
   });
 
-  it('FX-J2: una línea con costo asignado > valor de mercado se MUESTRA con pérdida, no se descarta', async () => {
+  it('FX-J2 (Clase 27): una línea con costo asignado > valor de mercado se MUESTRA con pérdida, no se descarta', async () => {
     mockProcessesContext();
     mockUpsertEcho();
     const service = await makeService();

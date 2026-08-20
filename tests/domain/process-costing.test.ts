@@ -139,7 +139,7 @@ describe('Costeo por Procesos — cuadro de movimiento de unidades (B06)', () =>
     ).toThrow(ProcessValidationError);
   });
 
-  it('Caso ancla — Azur Alcoholes, Destilado, abril', () => {
+  it('FX-P1 · Caso ancla — Azur Alcoholes, Destilado, abril (Clases 21-22)', () => {
     // EI 5.000 + puestas 30.000 = 35.000 a justificar.
     // Terminadas y transferidas 30.000; pérdida normal 2 % × 30.000 = 600;
     // pérdida extraordinaria 1.000 (⇒ pérdida real total = 600 + 1.000 = 1.600);
@@ -319,7 +319,7 @@ describe('Costeo por Procesos — producción equivalente (B07)', () => {
       // finalWip se deriva por diferencia = 3400
     });
 
-  it('Caso ancla — Azur Alcoholes, Destilado, abril → MP 34.400 / CC 33.720', () => {
+  it('FX-P1 · Caso ancla — Azur Alcoholes, Destilado, abril → MP 34.400 / CC 33.720 (Clases 21-22)', () => {
     const schedule = azurSchedule();
     // MP al 100 %, CC (conversión) al 80 %.
     const r = calcEquivalentProduction({
@@ -614,7 +614,7 @@ describe('Costeo por Procesos — informe de costos de producción (B10)', () =>
     };
   };
 
-  it('Caso ancla — Destilado (seq 1): costos $2,00/$1,75/$3,75 y EF $11.560 por AMBOS caminos', () => {
+  it('FX-P1 · Caso ancla — Destilado (seq 1): costos $2,00/$1,75/$3,75 y EF $11.560 por AMBOS caminos (Clases 21-22)', () => {
     const report = buildProductionCostReport(destiladoReportInput());
 
     // Sección A en blanco en el departamento inicial.
@@ -650,7 +650,7 @@ describe('Costeo por Procesos — informe de costos de producción (B10)', () =>
     );
   });
 
-  it('Caso ancla — Purificado (seq 2): costo total $6,532 y EF $31.992 por elemento', () => {
+  it('FX-P1 · Caso ancla — Purificado (seq 2): costo total $6,532 y EF $31.992 por elemento (Clases 21-22)', () => {
     const report = buildProductionCostReport(purificadoReportInput());
 
     // Sección A presente en un departamento posterior.
