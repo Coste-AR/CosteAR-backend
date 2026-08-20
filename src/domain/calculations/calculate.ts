@@ -231,7 +231,17 @@ export interface CalculationOutput {
        * dos (issue #89, ADR 0006).
        */
       unitFinishedGoodsCost: number;
-      unitCostOfGoodsSold: number; // COGS ÷ unidades producidas
+      /**
+       * Costo de productos terminados y VENDIDOS ÷ unidades VENDIDAS.
+       *
+       * El divisor es distinto del de los dos renglones de arriba a propósito:
+       * el CPV es el costo de lo que se vendió, no de lo que se produjo. Con la
+       * valuación consistente —lo producido y no vendido queda en existencia
+       * final de productos terminados— este número da igual que el costo
+       * unitario de producción: una unidad no cambia de costo por haberse
+       * vendido (issue #88).
+       */
+      unitCostOfGoodsSold: number;
       /**
        * De dónde salió el divisor. `'vendidas'` significa que NO se cargó la
        * cantidad producida y el costo unitario está calculado sobre lo vendido:
@@ -626,8 +636,19 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const unitFinishedGoodsCost = unitsProduced > 0
     ? statement.finishedGoodsCost.divide(unitsProduced).toNumber()
     : 0;
-  const unitCostOfGoodsSold = unitsProduced > 0
-    ? statement.costOfGoodsSold.divide(unitsProduced).toNumber()
+  // El CPV unitario se divide por las unidades VENDIDAS (#88). El CPV es el
+  // costo de las unidades que se vendieron: dividirlo por las producidas da el
+  // costo unitario escalado por la proporción de venta, que no es el costo de
+  // nada. Producir 100 y vender 60 lo dejaba 40 % subvaluado.
+  //
+  // Los dos divisores vivían en una sola variable. Cuando `3b9e8ae` arregló el
+  // costo unitario de producción cambiándola a las producidas —arreglo correcto,
+  // no hay que revertirlo—, este número heredó el error que el otro dejó de
+  // tener. Por eso ahora son dos variables distintas, cada una con su
+  // significado, y no una compartida.
+  const unidadesVendidas = input.sales.quantity ?? 0;
+  const unitCostOfGoodsSold = unidadesVendidas > 0
+    ? statement.costOfGoodsSold.divide(unidadesVendidas).toNumber()
     : 0;
 
   // CHEQUEO DE CONSISTENCIA DE MATERIA PRIMA.
