@@ -178,6 +178,13 @@ export function freezeProcessPeriod(input: ProcessFreezeInput): FrozenCalculatio
         // más riesgo de redondeo, y si unitsProduced cae a 0 devuelve $0 sobre un
         // costo que el motor sí calculó bien (H11).
         unitProductionCost: finalUnitCost,
+        // En PROCESOS los dos costos unitarios coinciden, y no es una simetría
+        // de conveniencia: `finalUnitCost` es el costo unitario total acumulado
+        // del último departamento, o sea el de las unidades TERMINADAS Y
+        // TRANSFERIDAS. La producción en proceso ya entró en ese número por
+        // producción equivalente —ahí es donde Procesos la contempla—, así que
+        // no hay un segundo renglón que agregar como sí lo hay en Órdenes (#89).
+        unitFinishedGoodsCost: finalUnitCost,
         unitCostOfGoodsSold: safeDiv(costOfGoodsSold, unitsProduced),
         basadoEn,
       },
