@@ -12,6 +12,7 @@ import {
   secondaryProrationStepwise,
   calcPredeterminedQuota,
   calcVarianceAnalysis,
+  checkVarianceIdentity,
   fvZero,
   type CostCenter,
   type IndirectCostConcept,
@@ -101,6 +102,16 @@ export interface CalculationOutput {
     rawMaterialMatches: boolean;
     /** Diferencia (estado de costos − ficha de stock). Cero cuando coincide. */
     rawMaterialDifference: number;
+    /**
+     * En TODOS los centros con cierre cargado se cumple el control de cátedra
+     * `var. presupuesto + var. volumen = −(sobre/sub-aplicación)`, con
+     * tolerancia de un centavo por el redondeo de serialización.
+     */
+    varianceIdentityMatches: boolean;
+    /** La mayor diferencia absoluta entre centros. Cero cuando todos cierran. */
+    varianceIdentityWorstDifference: number;
+    /** Centros que se pasaron de la tolerancia, para poder nombrarlos. */
+    varianceIdentityOffenders: string[];
   };
   detail: {
     rawMaterial: {
@@ -774,6 +785,31 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     rawMaterialConsumed,
   );
 
+  // CONTROL DE VARIACIONES DE CÁTEDRA, centro por centro.
+  //
+  //     var. presupuesto + var. volumen = −(sobre/sub-aplicación)
+  //
+  // Mismo caso que el chequeo de arriba: la regla estaba escrita en la
+  // documentación de `calcVarianceAnalysis` desde el primer día y el motor NO
+  // la corría. Se engancha acá, al lado del de materia prima, que es donde ya
+  // están todos los números.
+  //
+  // Los centros PENDIENTES DE CIERRE tienen las tres variaciones en cero (ver
+  // más arriba: sin actividad real ni CIP real no hay contra qué comparar), así
+  // que la identidad cierra sola. Eso está bien, pero conviene tenerlo presente:
+  // verde acá NO significa "el cierre del mes está verificado", significa
+  // "las variaciones que existen son coherentes entre sí".
+  //
+  // NO bloquea el cálculo: informa. Igual que el de materia prima.
+  let worstVariance = 0;
+  const varianceOffenders: string[] = [];
+  for (const [centerId, dept] of Object.entries(indirectPerDepartment)) {
+    const check = checkVarianceIdentity(dept.variance);
+    const diff = Math.abs(check.difference.toNumber());
+    if (diff > worstVariance) worstVariance = diff;
+    if (!check.matches) varianceOffenders.push(centerNameById.get(centerId) ?? centerId);
+  }
+
   return {
     rawMaterialConsumed: rawMaterialConsumed.toNumber(),
     directLaborTotal: directLaborTotal.toNumber(),
@@ -785,6 +821,9 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     consistency: {
       rawMaterialMatches: rmConsistency.matches,
       rawMaterialDifference: rmConsistency.difference.toNumber(),
+      varianceIdentityMatches: varianceOffenders.length === 0,
+      varianceIdentityWorstDifference: worstVariance,
+      varianceIdentityOffenders: varianceOffenders,
     },
     detail: {
       rawMaterial: {

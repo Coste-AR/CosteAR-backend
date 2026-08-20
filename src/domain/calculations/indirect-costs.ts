@@ -527,4 +527,60 @@ export function calcVarianceAnalysis(
   return { cipApplied, overUnderApplied, budgetVariance, volumeVariance };
 }
 
+/**
+ * Tolerancia del control de variaciones: un centavo.
+ *
+ * NO es para "dejar pasar" un error de cálculo. Es porque los tres números se
+ * redondean por SEPARADO al serializar (`Money.toNumber()` → 2 decimales,
+ * ROUND_HALF_EVEN), y tres redondeos independientes no tienen por qué sumar
+ * cero aunque el álgebra sí lo haga.
+ *
+ * Caso medido (auditoría de Órdenes del 20-08, centro "Terminación"):
+ *
+ *     var. presupuesto   −6.866,67
+ *     var. volumen       +14.533,33
+ *     suma                7.666,66
+ *     −(sobre/sub aplic.) 7.666,67   ← un centavo de diferencia
+ *
+ * El motor está bien: `Money` mantiene 28 dígitos de precisión y la identidad
+ * cierra exacta ahí adentro. El centavo nace al mostrarlo.
+ */
+export const TOLERANCIA_IDENTIDAD_VARIACIONES = 0.01;
+
+/**
+ * CONTROL DE CÁTEDRA SOBRE LAS VARIACIONES.
+ *
+ *     variación presupuesto + variación volumen = −(sobre/sub-aplicación)
+ *
+ * o, equivalente y más cómodo de chequear: los tres suman cero.
+ *
+ * ── POR QUÉ SE CHEQUEA SOBRE LOS NÚMEROS REDONDEADOS ─────────────────────────
+ *
+ * Se comparan los valores tal como salen serializados (`toNumber()`), NO los
+ * `Money` de precisión completa. Es deliberado.
+ *
+ * Con precisión completa la identidad es una tautología: se demuestra en dos
+ * líneas de álgebra a partir de las propias fórmulas de `calcVarianceAnalysis`,
+ * así que el control daría verde siempre, por construcción. Sería un control
+ * decorativo — de los que este repositorio ya tuvo de más.
+ *
+ * Sobre los números redondeados, en cambio, verifica algo que puede fallar de
+ * verdad: que lo que el costista LEE cierre. Un desvío mayor a un centavo ya no
+ * es redondeo — es que alguien tocó una de las tres fórmulas sin tocar las
+ * otras dos, y eso hay que avisarlo.
+ */
+export function checkVarianceIdentity(v: VarianceAnalysis): {
+  matches: boolean;
+  difference: Money;
+} {
+  const suma = new Decimal(v.budgetVariance.toNumber())
+    .plus(v.volumeVariance.toNumber())
+    .plus(v.overUnderApplied.toNumber());
+
+  return {
+    matches: suma.abs().lessThanOrEqualTo(TOLERANCIA_IDENTIDAD_VARIACIONES),
+    difference: Money.of(suma),
+  };
+}
+
 export { fvZero, fvAdd };
