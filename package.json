@@ -23,7 +23,7 @@
         "prisma:migrate": "prisma migrate dev",
         "prisma:deploy": "node scripts/migrate-deploy.mjs",
         "db:rls": "node scripts/apply-rls.mjs",
-        "db:seed": "node prisma/seed.mjs",
+        "db:seed": "node --env-file=.env prisma/seed.mjs",
         "seed:tenant-avicola": "tsx --env-file=.env prisma/seed-tenant-avicola.ts",
         "admin:reset": "tsx --env-file=.env scripts/seed-admin.ts",
         "db:backfill-trazabilidad": "node scripts/backfill-trazabilidad.mjs",
