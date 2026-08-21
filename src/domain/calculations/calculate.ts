@@ -23,6 +23,11 @@ import {
 } from '../../domain/calculations/indirect-costs.js';
 import { MissingAllocationBaseError } from '../../domain/errors/calculation-errors.js';
 import {
+  imputarDesperdicios,
+  type DesperdicioRegistrado,
+  type ImputacionDesperdicio,
+} from '../../domain/calculations/desperdicio.js';
+import {
   calcCostStatement,
   calcGrossMargin,
   checkRawMaterialConsistency,
@@ -57,6 +62,17 @@ export interface CalculationInput {
   rawMaterial: RawMaterialSection;
   directLabor: DirectLaborConfig;
   indirectCosts: IndirectCostConfig;
+  /**
+   * Desperdicio declarado del período (issue #92, regla R5 de la clase 4).
+   *
+   * `desperdicio.ts` implementaba R5 desde hacía tiempo y **su único importador
+   * era su propio test**: el motor no tenía dónde recibir el dato. Acá está.
+   *
+   * Opcional: sin desperdicios declarados el cálculo da exactamente lo mismo que
+   * antes. Un registro SIN naturaleza declarada no entra al cálculo y queda
+   * listado como pendiente — elegir por el costista sería peor que no calcular.
+   */
+  desperdicios?: DesperdicioRegistrado[];
   inventory: InventoryInput;
   sales: {
     unitPrice: number;
@@ -87,7 +103,37 @@ export interface CalculationOutput {
   rawMaterialConsumed: number;
   directLaborTotal: number;
   indirectCostsApplied: number;
+  /** Costo NORMAL de producción: MP + MOD + CIP aplicados, sin la variación presupuesto. */
   productionCost: number;
+  /**
+   * Σ variación presupuesto de los centros que cerraron el período (#90).
+   * Positiva = costó más de lo presupuestado y encarece el costo real.
+   *
+   * OPCIONAL: los cálculos guardados antes de que este renglón existiera no lo
+   * tienen, y decir "cero" sobre un cálculo que nunca lo consideró sería
+   * afirmar que no hubo variación cuando lo que pasa es que no se midió.
+   */
+  budgetVariance?: number;
+  /** Costo REAL de producción = normal + variación presupuesto (#90). */
+  realProductionCost?: number;
+  /**
+   * Desperdicio del período imputado según R5 (#92). Las dos cifras van
+   * SEPARADAS a propósito: una es costo del producto y la otra es pérdida de la
+   * empresa, y mezclarlas esconde exactamente lo que el costista tiene que ver.
+   *
+   * OPCIONAL: los cálculos anteriores a que esto existiera no lo tienen, y no es
+   * lo mismo "no hubo desperdicio" que "no se midió".
+   */
+  desperdicio?: {
+    /** Merma normal neta de recupero: la absorben las unidades buenas. Ya está en el costo. */
+    alCosto: number;
+    /** Merma extraordinaria: pérdida del período. Se sacó del costo. */
+    alResultado: number;
+    /** Recupero restado del costo de materiales. */
+    recuperoAplicado: number;
+    /** Registros sin naturaleza declarada: no entraron al cálculo, y por qué. */
+    pendientes: { concepto: string; valor: number; motivo: string }[];
+  };
   costOfGoodsSold: number;
   grossMargin: number;
   grossMarginPct: number;
@@ -231,7 +277,17 @@ export interface CalculationOutput {
        * dos (issue #89, ADR 0006).
        */
       unitFinishedGoodsCost: number;
-      unitCostOfGoodsSold: number; // COGS ÷ unidades producidas
+      /**
+       * Costo de productos terminados y VENDIDOS ÷ unidades VENDIDAS.
+       *
+       * El divisor es distinto del de los dos renglones de arriba a propósito:
+       * el CPV es el costo de lo que se vendió, no de lo que se produjo. Con la
+       * valuación consistente —lo producido y no vendido queda en existencia
+       * final de productos terminados— este número da igual que el costo
+       * unitario de producción: una unidad no cambia de costo por haberse
+       * vendido (issue #88).
+       */
+      unitCostOfGoodsSold: number;
       /**
        * De dónde salió el divisor. `'vendidas'` significa que NO se cargó la
        * cantidad producida y el costo unitario está calculado sobre lo vendido:
@@ -607,6 +663,8 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const perDepartment: CalculationOutput['detail']['indirectCosts']['perDepartment'] = {};
   const indirectPerDepartment: CalculationOutput['raw']['indirectPerDepartment'] = {};
   let indirectCostsApplied = Money.zero();
+  /** Σ variación presupuesto de los centros que cerraron (#90). Ver el estado de costos. */
+  let budgetVarianceTotal = Money.zero();
 
   // Nombre humano de cada centro: lo que ve el costista cuando el motor corta.
   // El id interno (prod1, serv2…) nunca sale en un mensaje (F09-4).
@@ -662,6 +720,15 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         );
 
     indirectCostsApplied = indirectCostsApplied.add(variance.cipApplied);
+    // (#90) La variación PRESUPUESTO va al estado de costos: es lo que costó de
+    // más —o de menos— hacer lo que se hizo, y es costo del producto. Los
+    // centros pendientes de cierre aportan cero, porque su variación ES cero:
+    // sin CIP real no hay contra qué comparar.
+    //
+    // La variación VOLUMEN no se toca acá a propósito. Va al estado de
+    // resultados como pérdida del período (capacidad ociosa), y la cátedra
+    // marca justamente esa confusión como la que más se olvida.
+    budgetVarianceTotal = budgetVarianceTotal.add(variance.budgetVariance);
 
     perDepartment[setting.centerId] = {
       cipTotal: actualCip.toNumber(),
@@ -709,12 +776,25 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   );
   const finalRM = Money.sum(materials.map((x) => x.ledger.finalBalanceValue));
 
+  // --- Desperdicio del período (R5, clase 4) ---
+  // `imputarDesperdicios` reparte cada registro entre costo y resultado según su
+  // naturaleza DECLARADA, y deja aparte los que no la tienen. Se llama siempre:
+  // sin registros devuelve todo en cero y el cálculo no cambia.
+  const desperdicio: ImputacionDesperdicio = imputarDesperdicios(input.desperdicios ?? []);
+
   const statement = calcCostStatement({
     initialRawMaterial: initialRM,
     rawMaterialPurchases: purchases,
     finalRawMaterial: finalRM,
     directLabor: directLaborTotal,
     indirectCostsApplied,
+    budgetVariance: budgetVarianceTotal,
+    // R5 (#92). La merma NORMAL no se pasa a propósito: ya está adentro del
+    // costo —se consumió— y las unidades buenas la absorben sin cálculo
+    // adicional, igual que en Procesos. Lo que se resta es su recupero y la
+    // merma extraordinaria, que nunca es costo.
+    wasteRecovery: Money.of(desperdicio.recuperoAplicado),
+    extraordinaryLoss: Money.of(desperdicio.alResultado),
     initialWorkInProcess: Money.of(input.inventory.initialWorkInProcess),
     finalWorkInProcess: Money.of(input.inventory.finalWorkInProcess),
     initialFinishedGoods: Money.of(input.inventory.initialFinishedGoods),
@@ -749,8 +829,19 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const unitFinishedGoodsCost = unitsProduced > 0
     ? statement.finishedGoodsCost.divide(unitsProduced).toNumber()
     : 0;
-  const unitCostOfGoodsSold = unitsProduced > 0
-    ? statement.costOfGoodsSold.divide(unitsProduced).toNumber()
+  // El CPV unitario se divide por las unidades VENDIDAS (#88). El CPV es el
+  // costo de las unidades que se vendieron: dividirlo por las producidas da el
+  // costo unitario escalado por la proporción de venta, que no es el costo de
+  // nada. Producir 100 y vender 60 lo dejaba 40 % subvaluado.
+  //
+  // Los dos divisores vivían en una sola variable. Cuando `3b9e8ae` arregló el
+  // costo unitario de producción cambiándola a las producidas —arreglo correcto,
+  // no hay que revertirlo—, este número heredó el error que el otro dejó de
+  // tener. Por eso ahora son dos variables distintas, cada una con su
+  // significado, y no una compartida.
+  const unidadesVendidas = input.sales.quantity ?? 0;
+  const unitCostOfGoodsSold = unidadesVendidas > 0
+    ? statement.costOfGoodsSold.divide(unidadesVendidas).toNumber()
     : 0;
 
   // CHEQUEO DE CONSISTENCIA DE MATERIA PRIMA.
@@ -779,6 +870,9 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     directLaborTotal: directLaborTotal.toNumber(),
     indirectCostsApplied: indirectCostsApplied.toNumber(),
     productionCost: statement.productionCost.toNumber(),
+    budgetVariance: statement.budgetVariance.toNumber(),
+    realProductionCost: statement.realProductionCost.toNumber(),
+    desperdicio,
     costOfGoodsSold: statement.costOfGoodsSold.toNumber(),
     grossMargin: margin.grossMargin.toNumber(),
     grossMarginPct: margin.grossMarginPct.toPercent(),
