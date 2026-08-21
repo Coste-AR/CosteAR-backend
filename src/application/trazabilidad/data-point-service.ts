@@ -757,9 +757,10 @@ export class DataPointService {
    * `DataPoint` además está en `RLS_MODELS`, así que la política de la base
    * vuelve a filtrar por usuario aunque este chequeo se cayera.
    */
-  async listDataPoints(userId: string, structureId: string) {
+  async listDataPoints(userId: string, structureId: string, cursor?: string, limit = 50) {
     await this.requireStructureOwned(userId, structureId);
 
+    const take = limit + 1;
     const points = await this.db.dataPoint.findMany({
       where: { structureId, voidedAt: null, status: { not: 'anulado' } },
       select: {
@@ -771,17 +772,25 @@ export class DataPointService {
         periodoImputado: true,
       },
       orderBy: { createdAt: 'asc' },
+      take,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
-    return points.map((dp) => ({
-      id: dp.id,
-      element: dp.element,
-      fieldKey: dp.fieldKey,
-      label: dp.label,
-      unit: dp.unit,
-      periodoImputado: dp.periodoImputado,
-      pending: dp.periodoImputado === null,
-    }));
+    const hasMore = points.length === take;
+    const items = hasMore ? points.slice(0, limit) : points;
+
+    return {
+      items: items.map((dp) => ({
+        id: dp.id,
+        element: dp.element,
+        fieldKey: dp.fieldKey,
+        label: dp.label,
+        unit: dp.unit,
+        periodoImputado: dp.periodoImputado,
+        pending: dp.periodoImputado === null,
+      })),
+      nextCursor: hasMore ? items[items.length - 1]!.id : null,
+    };
   }
 
   /**

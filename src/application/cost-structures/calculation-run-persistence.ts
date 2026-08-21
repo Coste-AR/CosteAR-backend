@@ -37,11 +37,9 @@ export interface PersistCalculationRunParams {
   /** Default `MANUAL`: el botón del costista, que es como se calculaba hasta hoy. */
   trigger?: RunTrigger;
   /** Snapshot de los insumos ya resueltos (JSON). */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  inputsSnapshot: any;
+  inputsSnapshot: unknown;
   /** Resultado consolidado del motor (JSON). */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  results: any;
+  results: unknown;
   /** Árbol de derivación a persistir en `calculation_nodes`. */
   tree: TreeNode[];
   /** Auditoría de la corrida: quién y el resumen (`runId`/`runN` se agregan acá). */
@@ -123,8 +121,8 @@ export async function persistCalculationRun(
       validated,
       validatedAt: validated ? new Date() : null,
       validatedBy: validated ? params.executedBy : null,
-      inputsSnapshot: params.inputsSnapshot,
-      results: params.results,
+      inputsSnapshot: params.inputsSnapshot as Prisma.InputJsonValue,
+      results: params.results as Prisma.InputJsonValue,
     },
   });
 

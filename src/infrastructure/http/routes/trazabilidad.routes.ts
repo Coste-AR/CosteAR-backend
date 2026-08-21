@@ -35,6 +35,10 @@ const paginationQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
+const cursorQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
 
 /** Actor de trazabilidad: rol del JWT, Ã¡rea del body, dispositivo de la request. */
 function actorFrom(request: FastifyRequest, area: string) {
@@ -166,7 +170,9 @@ export async function registerTrazabilidadRoutes(app: FastifyInstance): Promise<
   // participan del cálculo, y no existe hasta que alguien calcula).
   app.get('/structures/:id/data-points', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);
-    return { data: await service.listDataPoints(request.authUser!.id, id) };
+    const { cursor, limit } = cursorQuery.parse(request.query);
+    const { items, nextCursor } = await service.listDataPoints(request.authUser!.id, id, cursor, limit);
+    return { data: items, nextCursor };
   });
 
   app.get('/data-points/:id/trace', { preHandler: authenticate }, async (request) => {
