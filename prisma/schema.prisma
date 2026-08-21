@@ -197,6 +197,7 @@ enum CondicionIva {
 }
 
 model Company {
+  reglasAlerta         ReglaAlerta[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   unidadesMedida       UnidadMedida[]
@@ -478,6 +479,7 @@ model CostPeriod {
 }
 
 model CostStructure {
+  reglasAlerta        ReglaAlerta[]
   activosAmortizables ActivoAmortizable[]
   parametrosCosteo    ParametroCosteo[]
   id                  String              @id @default(uuid()) @db.Uuid
@@ -502,6 +504,7 @@ model CostStructure {
   // default: ninguna estructura existente cambia de comportamiento.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
@@ -532,6 +535,7 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * Cuándo se completó el setup. NULL = todavía no. Una estructura de PROCESSES
@@ -661,6 +665,8 @@ enum AlertType {
   MARGIN_BELOW_THRESHOLD
   MACRO_CHANGE
   COST_SPIKE
+  /// Indicador físico fuera de rango: humedad, postura, peso, días de estiba.
+  INDICADOR_FISICO
 }
 
 model Alert {
@@ -1277,6 +1283,7 @@ model CalculationRun {
   /**
    * /**
    * /**
+   * /**
    * Período al que pertenece. Nullable: las corridas anteriores al modelo de
    * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
    * dejarlas sin él.
@@ -1630,6 +1637,7 @@ model UnitMovementSchedule {
   /**
    * /**
    * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -1656,6 +1664,7 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
    * /**
    * /**
    * /** Terminadas y transferidas al depto. siguiente (puede derivarse por diferencia).
@@ -1698,6 +1707,7 @@ model UnitMovementSchedule {
   /**
    * /**
    * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
   periodCostMp           Decimal? @db.Decimal(18, 4)
@@ -1733,6 +1743,7 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
    * /**
    * /**
    * Quién informó el grado de avance de la existencia final. Ver `CountSource`.
@@ -1952,6 +1963,7 @@ model IndustryProfile {
  * solo puede imprimirlo.
  */
 model UnidadMedida {
+  reglasAlerta         ReglaAlerta[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   id                   String                @id @default(uuid()) @db.Uuid
@@ -2163,4 +2175,86 @@ model DesperdicioRegistro {
   @@index([companyId])
   @@index([periodId])
   @@map("desperdicio_registros")
+}
+
+// ---------------------------------------------------------------------------
+// REGLAS DE ALERTA POR INDICADOR FÍSICO
+//
+// Por qué no alcanzaba con lo que había: el detector de anomalías compara COSTOS
+// contra su propia historia. Eso avisa cuando el costo ya se movió.
+//
+// En una explotación, la señal temprana es física: la humedad de un grano al
+// ingreso, el porcentaje de producción, los días que la materia prima lleva
+// almacenada, el peso de los animales contra la tabla de la raza. Cuando esos
+// se salen de rango, el costo TODAVÍA no se movió — pero se va a mover.
+//
+// Todos los umbrales son configurables. Ninguno se escribe en el código: el que
+// sabe cuál es el umbral es el productor, no nosotros.
+// ---------------------------------------------------------------------------
+
+enum CondicionAlerta {
+  /// Dispara cuando la lectura SUPERA el umbral. Ej: humedad > 16 %.
+  MAYOR
+  /// Dispara cuando la lectura QUEDA POR DEBAJO. Ej: postura < 85 %.
+  MENOR
+  /// Dispara cuando se aparta del valor de referencia más que el umbral, en
+  /// cualquiera de los dos sentidos. Ej: peso ±10 % contra la tabla de la raza.
+  FUERA_DE_RANGO_PCT
+}
+
+enum SeveridadAlerta {
+  INFO
+  ADVERTENCIA
+  CRITICA
+}
+
+enum CanalAlerta {
+  IN_APP
+  EMAIL
+}
+
+model ReglaAlerta {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  structureId String?        @db.Uuid
+  structure   CostStructure? @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  /// Qué se mide, en snake_case: "humedad_maiz_ingreso", "postura_plantel".
+  indicador   String
+  /// Para qué sirve, en castellano. Es lo que ve quien la configura.
+  descripcion String
+
+  condicion CondicionAlerta
+  umbral    Decimal         @db.Decimal(18, 6)
+
+  /// En qué unidad está el umbral, cuando corresponde.
+  unidadId String?       @db.Uuid
+  unidad   UnidadMedida? @relation(fields: [unidadId], references: [id], onDelete: SetNull)
+
+  /**
+   * Cuántas lecturas consecutivas tienen que cumplir la condición antes de
+   * disparar. 1 = al instante.
+   * Existe porque no es lo mismo una caída puntual que una sostenida: una
+   * postura baja un día puede ser el termómetro, y tres días seguidos es un
+   * problema. Alertar por la primera hace que se ignoren todas.
+   */
+  lecturasSostenidas Int @default(1)
+
+  severidad     SeveridadAlerta @default(ADVERTENCIA)
+  /// A quién avisar. Vacío = al dueño de la estructura.
+  destinatarios String[]        @default([])
+  canal         CanalAlerta     @default(IN_APP)
+
+  activa Boolean @default(true)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, structureId, indicador])
+  @@index([companyId, activa])
+  @@map("reglas_alerta")
 }
