@@ -1,4 +1,4 @@
-import type { Decimal } from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import { Money } from '../../domain/value-objects/money.js';
 import {
   calcOptimalLot,
@@ -459,6 +459,107 @@ function pairsToVariableRecord(pairs: SecondaryDistributionPair[]): Record<strin
   return r;
 }
 
+/**
+ * Guarda de completitud del prorrateo secundario (H-L1).
+ *
+ * El secundario tiene que transferir el costo COMPLETO de los centros de
+ * servicio a los productivos: lo que no se reparte, no desaparece del negocio
+ * —desaparece del cálculo—, y sale por menos costo unitario. Es el peor modo
+ * de fallar que puede tener este motor: sin error, con un número más chico.
+ *
+ * Los dos métodos tenían el mismo agujero por puertas distintas:
+ *
+ * - Pasada DIRECTA: `secondaryProration` itera sobre las distribuciones
+ *   cargadas. Un servicio SIN entrada no se recorre nunca y su primario queda
+ *   afuera. (Un servicio CON entrada pero con base total 0 tampoco repartía,
+ *   por el `if (!totalBase...)` que protege la división.)
+ * - Pasada ESCALONADA: itera sobre `closureOrder`. Un servicio que no está en
+ *   el orden nunca cierra, su costo queda en `byCenter[servicio]`, y como acá
+ *   abajo solo se copian los centros productivos, se pierde igual. La
+ *   validación de "reparto vacío" de `secondaryProrationStepwise` solo alcanza
+ *   a los que SÍ están en el orden.
+ *
+ * Por eso la guarda vive acá y no adentro de cada pasada: este es el único
+ * punto que conoce a la vez el universo de centros, su costo primario y qué
+ * método se va a usar. Chequear fijo y variable por separado replica la
+ * granularidad que el escalonado ya usa.
+ */
+function assertSecundarioCompleto(
+  centers: CostCenter[],
+  primary: Record<string, FixedVariable>,
+  repartenFijo: Set<string>,
+  repartenVariable: Set<string>,
+): void {
+  for (const c of centers) {
+    if (c.type !== 'service') continue;
+    const costo = primary[c.id];
+    if (!costo) continue;
+    const nombre = c.name?.trim() || 'un centro de servicio';
+
+    if (!costo.fixed.isZero() && !repartenFijo.has(c.id)) {
+      throw new MissingAllocationBaseError(
+        c.id,
+        `El centro de servicio «${nombre}» tiene costo fijo del prorrateo primario pero no reparte a ningún centro. ` +
+          `Sin ese reparto su costo no llega a los centros productivos y el costo unitario sale más bajo de lo que es. ` +
+          `Cargá a qué centros reparte «${nombre}» y volvé a guardar Costos Indirectos.`,
+      );
+    }
+    if (!costo.variable.isZero() && !repartenVariable.has(c.id)) {
+      throw new MissingAllocationBaseError(
+        c.id,
+        `El centro de servicio «${nombre}» tiene costo variable del prorrateo primario pero no reparte a ningún centro. ` +
+          `Sin ese reparto su costo no llega a los centros productivos y el costo unitario sale más bajo de lo que es. ` +
+          `Cargá a qué centros reparte «${nombre}» y volvé a guardar Costos Indirectos.`,
+      );
+    }
+  }
+}
+
+/**
+ * Control de cierre del secundario (H-L1): Σ primario de TODOS los centros
+ * tiene que ser igual a Σ CIP de los productivos después de repartir.
+ *
+ * La guarda de arriba nombra al centro culpable —que es lo que el usuario
+ * necesita— pero solo cubre las formas de perder costo que ya conocemos. Este
+ * control cubre las que no: si alguna vez se escapa un peso por otro camino,
+ * salta acá en vez de salir por un costo unitario más chico.
+ *
+ * Mismo espíritu que `checkRawMaterialConsistency`, que ya existía en el motor
+ * y que fue un defecto real el día que estuvo apagado.
+ *
+ * TOLERANCIA: acá no se puede comparar con `isZero()` exacto como hace la
+ * consistencia de materia prima, porque el reparto DIVIDE. Repartir $100 entre
+ * tres centros da tres cuotas de 33.333…(28 dígitos, la precisión de
+ * decimal.js) que sumadas no vuelven a dar $100 exacto: sobra o falta algo del
+ * orden de 1e-25. Ese residuo no es costo perdido, es aritmética. Se tolera
+ * medio centavo, que es varios órdenes de magnitud más que el residuo y varios
+ * menos que cualquier pérdida real: un servicio que no reparte deja afuera su
+ * costo primario entero, no una fracción de centavo.
+ */
+const TOLERANCIA_CIERRE_SECUNDARIO = new Decimal('0.005');
+
+function assertSecundarioNoPierdeCosto(
+  centers: CostCenter[],
+  primary: Record<string, FixedVariable>,
+  productivo: Record<string, FixedVariable>,
+): void {
+  const totalPrimario = Money.sum(centers.map((c) => primary[c.id]?.fixed ?? Money.zero())).add(
+    Money.sum(centers.map((c) => primary[c.id]?.variable ?? Money.zero())),
+  );
+  const totalProductivo = Money.sum(Object.values(productivo).map((v) => v.fixed)).add(
+    Money.sum(Object.values(productivo).map((v) => v.variable)),
+  );
+  const diferencia = totalPrimario.subtract(totalProductivo);
+  if (diferencia.toDecimal().abs().greaterThan(TOLERANCIA_CIERRE_SECUNDARIO)) {
+    throw new MissingAllocationBaseError(
+      'indirectCosts.serviceDistributions',
+      `El prorrateo secundario no cierra: llegaron ${totalProductivo.toFixed()} a los centros productivos de un ` +
+        `total primario de ${totalPrimario.toFixed()} (diferencia ${diferencia.toFixed()}). Revisá que todos los ` +
+        `centros de servicio repartan su costo y volvé a guardar Costos Indirectos.`,
+    );
+  }
+}
+
 export function resolveProductiveCip(
   indirectCosts: IndirectCostConfig,
 ): Record<string, FixedVariable> {
@@ -486,7 +587,20 @@ export function resolveProductiveCip(
       toProductiveFixed: pairsToFixedRecord(d.distributions),
       toProductiveVariable: pairsToVariableRecord(d.distributions),
     }));
-    return secondaryProration(centers, primary, dists);
+    // H-L1: un servicio sin entrada acá —o con la entrada vacía— no se recorre
+    // y su costo primario se pierde en silencio. Solo cuentan como "reparten"
+    // los que tienen al menos un destino con importe.
+    assertSecundarioCompleto(
+      centers,
+      primary,
+      new Set(dists.filter((d) => Object.keys(d.toProductiveFixed ?? {}).length > 0).map((d) => d.serviceCenterId)),
+      new Set(
+        dists.filter((d) => Object.keys(d.toProductiveVariable ?? {}).length > 0).map((d) => d.serviceCenterId),
+      ),
+    );
+    const directo = secondaryProration(centers, primary, dists);
+    assertSecundarioNoPierdeCosto(centers, primary, directo);
+    return directo;
   }
 
   // Camino escalonado: construir los cierres en el orden pedido.
@@ -510,11 +624,20 @@ export function resolveProductiveCip(
     };
   });
 
+  // H-L1 por la otra puerta: `secondaryProrationStepwise` valida el reparto
+  // vacío SOLO de los servicios que están en `closureOrder`. Un servicio que no
+  // figura en el orden nunca cierra, su costo se queda en `byCenter[servicio]`
+  // y acá abajo, que copia únicamente los productivos, se pierde en silencio.
+  // Para el escalonado "reparte" significa "está en el orden de cierre".
+  const enElOrden = new Set(order);
+  assertSecundarioCompleto(centers, primary, enElOrden, enElOrden);
+
   const { byCenter } = secondaryProrationStepwise(centers, primary, closures);
   const out: Record<string, FixedVariable> = {};
   for (const c of centers) {
     if (c.type === 'productive') out[c.id] = byCenter[c.id] ?? fvZero();
   }
+  assertSecundarioNoPierdeCosto(centers, primary, out);
   return out;
 }
 
