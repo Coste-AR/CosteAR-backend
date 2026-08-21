@@ -427,6 +427,8 @@ export class CostPeriodService {
           naturaleza: naturalezaADominio(d.naturaleza),
           valorRecupero: Number(d.valorRecupero),
         })),
+        // #90 — trabajos de terceros del período: columna propia, no CIP.
+        thirdPartyWork: Number(period.thirdPartyWork ?? 0),
         inventory: inventorySchema.parse({}),
         sales: {
           unitPrice: period.salesUnitPrice ? Number(period.salesUnitPrice) : 0,

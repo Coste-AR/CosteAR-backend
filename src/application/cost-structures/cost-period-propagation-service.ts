@@ -46,6 +46,8 @@ export interface PeriodLike {
   productionQuantity?: Prisma.Decimal | null;
   status?: string;
   id?: string;
+  /** Trabajos de terceros del período (#90). Columna propia, default 0. */
+  thirdPartyWork?: Prisma.Decimal | number | null;
   /**
    * Desperdicios declarados del período (#92). Opcional: un período cargado sin
    * `include` no los trae, y entonces el motor no imputa ninguno — que es lo
