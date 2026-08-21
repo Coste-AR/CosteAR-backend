@@ -14,7 +14,8 @@
 | Staging | `staging` | Railway (staging) | **Producción actual** — hay un cliente real |
 | Main | `main` | Railway (main) | Ambiente de referencia — hoy 39 días atrás |
 
-> ⚠️ **`staging` es producción** mientras no se resuelvan los issues #88/#89/#90.  
+> ⚠️ **`staging` es producción**: hay un cliente real usándolo.
+> *(Los issues #88, #89 y #90 que esta nota mencionaba quedaron resueltos el 21-08.)*  
 > Promover a `main` es el objetivo, no el estado actual.
 
 ---
@@ -44,10 +45,38 @@ Verificar manualmente:
 - [ ] La migración que va en este PR **no contiene** `DROP INDEX`, `DROP TABLE`, ni `DROP COLUMN` sobre tablas con datos (DOM-06). Usar `git diff dev -- prisma/migrations/` para revisarla.
 - [ ] Si la migración usa `npm run prisma:migrate`, el script `scripts/migrate-dev.mjs` la limpió automáticamente (ver CMD-04 en CLAUDE.md). Confirmar que el SQL en `prisma/migrations/` es solo aditivo.
 - [ ] Ningún secreto ni dato de cliente en el diff (`git grep -in "DEMO_PASSWORD\|CosteAR2026"` devuelve vacío).
+- [ ] **`node scripts/check-migrations.mjs` contra el ambiente destino da verde** (ver Paso 0 de la sección 2). Si da 🟡 o 🔴, resolverlo ANTES de promover — no durante el deploy.
+- [ ] **Verificar que el trabajo llegó a `dev`**, no que los PRs figuran mergeados (REV-08). Entre el 20 y el 21-08 pasó tres veces que un PR quedó en verde con el trabajo afuera: `git log origin/dev` y mirar los archivos, no la lista de PRs.
 
 ---
 
 ## 2. Cómo correr las migraciones en producción
+
+### Paso 0 — Diagnóstico (SIEMPRE, y antes de tocar nada)
+
+```bash
+DATABASE_URL=<url del ambiente> node scripts/check-migrations.mjs
+```
+
+Solo lee. Contesta la pregunta que decide todo lo que sigue: **si hay una migración
+marcada como fallida, ¿dejó algo hecho o no dejó nada?** Según la respuesta, la acción
+correcta es la **opuesta** en cada caso:
+
+| Veredicto | Qué hacer |
+| --- | --- |
+| 🟢 No dejó nada | Nada especial: `migrate-deploy.mjs` la re-aplica solo |
+| 🟡 Ya está aplicada de hecho | `npx prisma migrate resolve --applied "<nombre>"` — y **recién después** deployar |
+| 🔴 Parcial | Limpieza a mano. **No automatizar**: hay que mirar qué quedó a medias |
+
+> ⚠️ **Por qué este paso existe.** `migrate-deploy.mjs` marca toda migración fallida como
+> `rolled-back` para reintentarla. Eso arregla el caso común y **rompe el caso 🟡**: si la
+> migración ya se aplicó y quedó mal registrada, reintentarla falla con `already exists` y el
+> deploy queda a medias.
+>
+> No es teórico. El 21-08, en la base de desarrollo,
+> `20260818031500_activos_amortizables_y_desperdicio` figuraba *iniciada y nunca terminada* desde
+> el 19-08, y sin embargo **todos sus objetos existían**. Si `staging` tiene el mismo registro, el
+> primer deploy que se intente ahí va a cortar.
 
 Las migraciones se aplican en dos pasos, en ese orden:
 
