@@ -99,11 +99,22 @@ async function main() {
   console.log('  CosteAR — diagnóstico de migraciones (lectura)');
   console.log('═══════════════════════════════════════════════\n');
 
+  // OJO CON EL CRITERIO: Prisma NO borra la fila del intento fallido. Cuando se
+  // resuelve una migración, ESCRIBE UNA FILA NUEVA con `finished_at`. O sea que
+  // una migración sana puede tener dos filas: la del intento que falló (con
+  // `rolled_back_at`) y la de la resolución.
+  //
+  // Mirar fila por fila daría un falso positivo sobre migraciones ya resueltas
+  // —y un diagnóstico de deploy que grita en falso se termina ignorando—. Por
+  // eso se agrupa por nombre: una migración está en problemas solo si NINGUNA de
+  // sus filas quedó terminada y sin revertir.
   const fallidas = await prisma.$queryRawUnsafe(`
-    select migration_name, started_at, finished_at, rolled_back_at
+    select migration_name, min(started_at) as started_at,
+           max(finished_at) as finished_at, max(rolled_back_at) as rolled_back_at
     from _prisma_migrations
-    where finished_at is null or rolled_back_at is not null
-    order by started_at asc
+    group by migration_name
+    having bool_and(finished_at is null or rolled_back_at is not null)
+    order by min(started_at) asc
   `);
 
   if (fallidas.length === 0) {
