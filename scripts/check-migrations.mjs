@@ -54,6 +54,33 @@ if (!url) {
 
 const prisma = new PrismaClient({ datasources: { db: { url } } });
 
+/**
+ * A qué base se está mirando, SIN la contraseña.
+ *
+ * No es un adorno: el error más fácil de cometer acá es correr el diagnóstico
+ * contra la base equivocada —la local, por ejemplo— y quedarse tranquilo con un
+ * resultado que no corresponde al ambiente que se va a deployar.
+ */
+function describirDestino(u) {
+  try {
+    const parsed = new URL(u);
+    const base = parsed.pathname.replace(/^\//, '') || '(sin nombre)';
+    return `${base} en ${parsed.hostname}:${parsed.port || '5432'}`;
+  } catch {
+    return '(no se pudo interpretar la URL)';
+  }
+}
+
+/** ¿Parece la base local? Si el objetivo era un ambiente remoto, hay que frenar. */
+function esLocal(u) {
+  try {
+    const h = new URL(u).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  } catch {
+    return false;
+  }
+}
+
 /** Objetos que una migración dice crear, leídos de su propio SQL. */
 function objetosQueCrea(nombre) {
   const sqlPath = join(MIGRATIONS_DIR, nombre, 'migration.sql');
@@ -98,6 +125,12 @@ async function main() {
   console.log('═══════════════════════════════════════════════');
   console.log('  CosteAR — diagnóstico de migraciones (lectura)');
   console.log('═══════════════════════════════════════════════\n');
+  console.log(`📍 Mirando: ${describirDestino(url)}`);
+  if (esLocal(url)) {
+    console.log('   ⚠️  Es una base LOCAL. Si querías mirar staging o producción,');
+    console.log('       frená: el resultado de acá no dice nada de ese ambiente.');
+  }
+  console.log('');
 
   // OJO CON EL CRITERIO: Prisma NO borra la fila del intento fallido. Cuando se
   // resuelve una migración, ESCRIBE UNA FILA NUEVA con `finished_at`. O sea que

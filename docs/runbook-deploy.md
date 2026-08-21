@@ -54,9 +54,66 @@ Verificar manualmente:
 
 ### Paso 0 — Diagnóstico (SIEMPRE, y antes de tocar nada)
 
-```bash
-DATABASE_URL=<url del ambiente> node scripts/check-migrations.mjs
+**Dónde se corre:** en tu computadora, en una terminal parada en la carpeta del backend
+(`costear_repo/costear-api/CosteAR-backend`). No se corre dentro de Railway ni en la web.
+
+#### Opción A — con Railway CLI (la más simple, no hay que copiar credenciales)
+
+```powershell
+railway link            # elegir el proyecto y el ambiente STAGING
+railway run node scripts/check-migrations.mjs
 ```
+
+`railway run` inyecta las variables del ambiente solo. Si no tenés el CLI: `npm i -g @railway/cli`
+y después `railway login`.
+
+#### Opción B — a mano, pegando la URL
+
+**1.** En [railway.app](https://railway.app) → proyecto → ambiente **staging** → servicio
+**Postgres** → pestaña **Variables**.
+
+**2.** Copiar **`DATABASE_PUBLIC_URL`** (la que tiene `proxy.rlwy.net` o similar).
+
+> ⚠️ **No sirve `DATABASE_URL` a secas si dice `postgres.railway.internal`**: esa dirección solo
+> existe *dentro* de Railway y desde tu máquina no resuelve. Es el motivo más común de que esto
+> "no funcione".
+
+**3.** En la terminal, **PowerShell** (es la de Windows por defecto):
+
+```powershell
+$env:DATABASE_URL = "postgresql://...pegar acá la URL pública..."
+node scripts/check-migrations.mjs
+```
+
+Si usás **Git Bash** en vez de PowerShell, es distinto:
+
+```bash
+DATABASE_URL="postgresql://..." node scripts/check-migrations.mjs
+```
+
+> ⚠️ `VARIABLE=valor comando` **es sintaxis de bash y no funciona en PowerShell**: ahí hay que
+> setear `$env:` en una línea aparte, como arriba.
+
+**4.** Al terminar, borrar la variable para no dejar la credencial de producción dando vueltas en
+esa terminal:
+
+```powershell
+Remove-Item Env:\DATABASE_URL
+```
+
+**Nunca** pegar esa URL en un archivo del repo, en un issue ni en un chat: lleva usuario y
+contraseña de producción.
+
+#### Cómo leer el resultado
+
+Lo primero que imprime es **contra qué base está mirando**:
+
+```
+📍 Mirando: railway en containers-us-west-1.proxy.rlwy.net:6543
+```
+
+Si ahí dice `localhost`, estás mirando tu base local y **el resultado no dice nada de staging**.
+El script te avisa, pero conviene mirarlo igual.
 
 Solo lee. Contesta la pregunta que decide todo lo que sigue: **si hay una migración
 marcada como fallida, ¿dejó algo hecho o no dejó nada?** Según la respuesta, la acción
