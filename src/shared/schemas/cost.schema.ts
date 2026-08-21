@@ -342,6 +342,27 @@ export const indirectCostConfigSchema = z.object({
   // repartir a otro que aún no cerró). Si falta, se usa la pasada directa
   // legada (retrocompatible con FX1/FX3 y con estructuras ya cargadas).
   closureOrder: z.array(z.string().min(1)).max(100).optional().default([]),
+  /**
+   * TRABAJOS DE TERCEROS del período (issue #90, cátedra clase 20).
+   *
+   * Procesos que se mandan a hacer afuera —un tratamiento térmico, un bordado,
+   * un flete de proceso— y que forman parte del costo de producción.
+   *
+   * ⚠️ **NO son un CIP, y por eso NO entran al prorrateo.** La clase 20 es
+   * explícita: *«los trabajos de terceros se registran por separado de los
+   * CIP»*. No se reparten entre centros, no tienen cuota y no generan
+   * variaciones: van derecho al estado de costos, como un renglón propio entre
+   * el costo normal y el real.
+   *
+   * Vive en esta sección porque es donde el costista los carga y porque el JSON
+   * ya se persiste y se versiona con el resto —no porque sean carga fabril—.
+   * Si alguna vez alguien los suma a `concepts` para "simplificar", se van a
+   * repartir entre los centros y a diluirse en las cuotas: el costo total daría
+   * parecido y el de cada centro quedaría mal.
+   *
+   * Default 0: una estructura que no manda nada afuera no cambia en nada.
+   */
+  thirdPartyWork: nonNeg.optional().default(0),
   // Por depto productivo: capacidad normal, actividad real y CIP real (datos
   // manuales de fin de mes). El PRESUPUESTO no es manual: se deriva del prorrateo
   // y se persiste automáticamente (solo lectura en la UI).

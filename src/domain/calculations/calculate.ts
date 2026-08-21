@@ -114,7 +114,12 @@ export interface CalculationOutput {
    * afirmar que no hubo variación cuando lo que pasa es que no se midió.
    */
   budgetVariance?: number;
-  /** Costo REAL de producción = normal + variación presupuesto (#90). */
+  /**
+   * Trabajos de terceros del período (#90). Se exponen aparte porque son un
+   * renglón propio del estado de costos, no un CIP más.
+   */
+  thirdPartyWork?: number;
+  /** Costo REAL = normal + trabajos de terceros + variación presupuesto (#90). */
   realProductionCost?: number;
   /**
    * Desperdicio del período imputado según R5 (#92). Las dos cifras van
@@ -788,6 +793,11 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     finalRawMaterial: finalRM,
     directLabor: directLaborTotal,
     indirectCostsApplied,
+    // #90 — Trabajos de terceros. Van por SEPARADO de los CIP: no pasaron por
+    // el prorrateo ni por las cuotas, así que se suman acá enteros. Si se
+    // hubieran tratado como un concepto de CIF, ya estarían repartidos entre los
+    // centros y sumarlos otra vez sería contarlos dos veces.
+    thirdPartyWork: Money.of(input.indirectCosts.thirdPartyWork ?? 0),
     budgetVariance: budgetVarianceTotal,
     // R5 (#92). La merma NORMAL no se pasa a propósito: ya está adentro del
     // costo —se consumió— y las unidades buenas la absorben sin cálculo
@@ -870,6 +880,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     directLaborTotal: directLaborTotal.toNumber(),
     indirectCostsApplied: indirectCostsApplied.toNumber(),
     productionCost: statement.productionCost.toNumber(),
+    thirdPartyWork: statement.thirdPartyWork.toNumber(),
     budgetVariance: statement.budgetVariance.toNumber(),
     realProductionCost: statement.realProductionCost.toNumber(),
     desperdicio,
