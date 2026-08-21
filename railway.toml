@@ -2,9 +2,20 @@
 builder = "nixpacks"
 
 [deploy]
-# Aplica las migraciones Prisma pendientes ANTES de que el deploy salga vivo.
-# Si falla, Railway mantiene la versión anterior (no deja el server sin su schema).
-preDeployCommand = "node scripts/migrate-deploy.mjs"
+# Aplica las migraciones pendientes Y LAS POLÍTICAS RLS antes de que el deploy
+# salga vivo. Si falla, Railway mantiene la versión anterior (no deja el server
+# sin su schema, ni con tablas nuevas sin aislamiento entre empresas).
+#
+# ANTES corría solo `migrate-deploy.mjs`. Eso dejaba un hueco silencioso: una
+# migración que agrega una tabla nueva la creaba en producción **sin políticas de
+# RLS**, porque `apply-rls.mjs` solo se corría a mano. El aislamiento entre
+# empresas depende de RLS en Postgres, no de TypeScript (DOM-07): una tabla sin
+# política no falla ni avisa — devuelve las filas de todos los inquilinos.
+#
+# `db:setup` corre los dos, en orden: primero migrar, después aplicar políticas
+# (necesita que las tablas ya existan). `rls.sql` es idempotente —36 `DROP POLICY
+# IF EXISTS`— así que repetirlo en cada deploy es barato y seguro.
+preDeployCommand = "npm run db:setup"
 startCommand = "node dist/infrastructure/http/entry.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

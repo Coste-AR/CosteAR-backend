@@ -142,7 +142,26 @@ export async function buildApp(): Promise<FastifyInstance> {
   }
 
   // --- Healthcheck ---
-  app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));
+  //
+  // Devuelve QUÉ VERSIÓN está corriendo, no solo que el proceso está vivo.
+  //
+  // Durante la auditoría del 20-08 la pregunta "¿este defecto está afectando al
+  // cliente?" no se pudo contestar en ninguno de los tres casos, y siempre por
+  // lo mismo: **no se sabía qué SHA corría en cada ambiente**. El runbook pedía
+  // anotarlo a mano después de cada deploy, y anotar a mano algo que la
+  // plataforma ya sabe es una promesa que se incumple sola.
+  //
+  // `RAILWAY_GIT_COMMIT_SHA` y `RAILWAY_ENVIRONMENT_NAME` las inyecta Railway en
+  // cada deploy. En local no existen y el endpoint lo dice ('desconocido'), en
+  // vez de inventar un valor que después alguien lea como si fuera cierto.
+  app.get('/health', async () => ({
+    status: 'ok',
+    version:
+      process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'desconocido',
+    environment:
+      process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV ?? 'desconocido',
+    ts: new Date().toISOString(),
+  }));
 
   // --- Demo de Trazabilidad Total v1 ---
   // Arnés de verificación estático (HTML+JS vanilla, sin build step) porque

@@ -174,9 +174,19 @@ Aplica las políticas de Row Level Security sobre las tablas nuevas. Debe correr
 
 ### En Railway (infra)
 
-> ⚠️ **Hueco de infra** — completar con quien administre Railway.
+> ✅ **Resuelto el 21-08.** `railway.toml` corre `npm run db:setup` como `preDeployCommand`, o sea
+> **migraciones + políticas RLS antes de que el deploy salga vivo**. Si falla, Railway mantiene la
+> versión anterior: no deja el servidor sin su schema ni con tablas nuevas sin aislamiento.
+>
+> Antes corría solo `migrate-deploy.mjs`, y eso dejaba un hueco silencioso: una migración que
+> agregaba una tabla la creaba en producción **sin políticas RLS**, porque `apply-rls.mjs` se
+> corría a mano. Una tabla sin política no falla ni avisa — devuelve las filas de todos los
+> inquilinos.
+>
+> **Los pasos 1 y 2 de abajo ya no hay que correrlos a mano en un deploy normal.** Quedan
+> documentados para cuando haya que intervenir (por ejemplo, después de un 🟡 del Paso 0).
 
-- [ ] ¿Railway corre `npm run db:setup` automáticamente en cada deploy, o hay que dispararlo a mano?
+- [x] ¿Railway corre `npm run db:setup` automáticamente en cada deploy? **Sí**, vía `preDeployCommand`.
 - [ ] ¿Cuál es el comando de build/start configurado en Railway para cada ambiente?
 - [ ] ¿Existe un `Procfile` o configuración de Railway que orqueste la secuencia?
 
@@ -187,9 +197,26 @@ Aplica las políticas de Row Level Security sobre las tablas nuevas. Debe correr
 ### Endpoint de health check
 
 ```bash
-curl https://<URL_RAILWAY_STAGING>/api/v1/health
-# Esperado: { "status": "ok", "version": "<SHA>" }
+curl https://<URL_RAILWAY_STAGING>/health
 ```
+
+Devuelve:
+
+```json
+{
+  "status": "ok",
+  "version": "<SHA del commit deployado>",
+  "environment": "staging",
+  "ts": "2026-08-21T20:00:00.000Z"
+}
+```
+
+> ✅ **Ya no hace falta anotar el SHA a mano.** `version` sale de `RAILWAY_GIT_COMMIT_SHA`, que
+> Railway inyecta en cada deploy. Preguntarle al ambiente qué está corriendo siempre va a ser más
+> confiable que una planilla que alguien tiene que acordarse de actualizar.
+>
+> Si dice `"desconocido"`, es que la variable no está: el endpoint **no inventa** un valor, porque
+> un SHA plausible pero falso es peor que ninguno.
 
 > ⚠️ **Hueco de infra** — completar:
 > - URL de Railway para staging: `_______________`
