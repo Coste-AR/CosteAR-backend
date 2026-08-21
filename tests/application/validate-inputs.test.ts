@@ -89,4 +89,32 @@ describe('validateCalculationInputs — 500 → 422 accionable', () => {
     expect(wrapped.statusCode).toBe(422);
     expect(wrapped.message).toContain('base de distribución total = 0');
   });
+
+  // allocation-check (issue #100): centro de servicio sin base de distribución
+  // → 422 antes de correr el motor, no un número malo silencioso.
+  it('centro de servicio sin distribución asignada → MissingInputError con nombre del centro', () => {
+    const input = baseInput();
+    input.indirectCosts.centers.push({ id: 'svc1', name: 'Mantenimiento', type: 'service' });
+    // serviceDistributions vacío: Mantenimiento no tiene base asignada
+    try {
+      validateCalculationInputs(input);
+      expect.fail('debía tirar MissingInputError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(MissingInputError);
+      expect((err as MissingInputError).statusCode).toBe(422);
+      expect((err as MissingInputError).message).toContain('Mantenimiento');
+      expect((err as MissingInputError).message).toContain('base de distribución');
+    }
+  });
+
+  it('centro de servicio CON distribución → no tira error', () => {
+    const input = baseInput();
+    input.indirectCosts.centers.push({ id: 'svc1', name: 'Mantenimiento', type: 'service' });
+    input.indirectCosts.serviceDistributions.push({
+      serviceCenterId: 'svc1',
+      distributions: [{ centerId: 'c1', fixed: 100, variable: 0 }],
+      distributionMode: 'manual',
+    } as CalculationInput['indirectCosts']['serviceDistributions'][number]);
+    expect(() => validateCalculationInputs(input)).not.toThrow();
+  });
 });
