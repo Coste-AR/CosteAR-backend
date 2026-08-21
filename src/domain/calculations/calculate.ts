@@ -87,7 +87,19 @@ export interface CalculationOutput {
   rawMaterialConsumed: number;
   directLaborTotal: number;
   indirectCostsApplied: number;
+  /** Costo NORMAL de producción: MP + MOD + CIP aplicados, sin la variación presupuesto. */
   productionCost: number;
+  /**
+   * Σ variación presupuesto de los centros que cerraron el período (#90).
+   * Positiva = costó más de lo presupuestado y encarece el costo real.
+   *
+   * OPCIONAL: los cálculos guardados antes de que este renglón existiera no lo
+   * tienen, y decir "cero" sobre un cálculo que nunca lo consideró sería
+   * afirmar que no hubo variación cuando lo que pasa es que no se midió.
+   */
+  budgetVariance?: number;
+  /** Costo REAL de producción = normal + variación presupuesto (#90). */
+  realProductionCost?: number;
   costOfGoodsSold: number;
   grossMargin: number;
   grossMarginPct: number;
@@ -494,6 +506,8 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const perDepartment: CalculationOutput['detail']['indirectCosts']['perDepartment'] = {};
   const indirectPerDepartment: CalculationOutput['raw']['indirectPerDepartment'] = {};
   let indirectCostsApplied = Money.zero();
+  /** Σ variación presupuesto de los centros que cerraron (#90). Ver el estado de costos. */
+  let budgetVarianceTotal = Money.zero();
 
   // Nombre humano de cada centro: lo que ve el costista cuando el motor corta.
   // El id interno (prod1, serv2…) nunca sale en un mensaje (F09-4).
@@ -549,6 +563,15 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         );
 
     indirectCostsApplied = indirectCostsApplied.add(variance.cipApplied);
+    // (#90) La variación PRESUPUESTO va al estado de costos: es lo que costó de
+    // más —o de menos— hacer lo que se hizo, y es costo del producto. Los
+    // centros pendientes de cierre aportan cero, porque su variación ES cero:
+    // sin CIP real no hay contra qué comparar.
+    //
+    // La variación VOLUMEN no se toca acá a propósito. Va al estado de
+    // resultados como pérdida del período (capacidad ociosa), y la cátedra
+    // marca justamente esa confusión como la que más se olvida.
+    budgetVarianceTotal = budgetVarianceTotal.add(variance.budgetVariance);
 
     perDepartment[setting.centerId] = {
       cipTotal: actualCip.toNumber(),
@@ -602,6 +625,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     finalRawMaterial: finalRM,
     directLabor: directLaborTotal,
     indirectCostsApplied,
+    budgetVariance: budgetVarianceTotal,
     initialWorkInProcess: Money.of(input.inventory.initialWorkInProcess),
     finalWorkInProcess: Money.of(input.inventory.finalWorkInProcess),
     initialFinishedGoods: Money.of(input.inventory.initialFinishedGoods),
@@ -677,6 +701,8 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     directLaborTotal: directLaborTotal.toNumber(),
     indirectCostsApplied: indirectCostsApplied.toNumber(),
     productionCost: statement.productionCost.toNumber(),
+    budgetVariance: statement.budgetVariance.toNumber(),
+    realProductionCost: statement.realProductionCost.toNumber(),
     costOfGoodsSold: statement.costOfGoodsSold.toNumber(),
     grossMargin: margin.grossMargin.toNumber(),
     grossMarginPct: margin.grossMarginPct.toPercent(),
