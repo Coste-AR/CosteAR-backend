@@ -1,4 +1,5 @@
 import { Worker, type Job } from 'bullmq';
+import * as Sentry from '@sentry/node';
 import { QUEUE_NAMES, getConnection } from './queues.js';
 import { DailyRunService } from '../../application/cost-structures/daily-run-service.js';
 
@@ -39,11 +40,20 @@ export function startDailyRunWorker(): Worker {
 
       return conteo;
     },
-    { connection, concurrency: 1 },
+    {
+      connection,
+      concurrency: 1,
+      // El daily-run puede calcular docenas de estructuras: hasta 5 min es normal.
+      // Sin lockDuration explícito BullMQ usa 30 s — demasiado corto y el job
+      // quedaría stale antes de terminar.
+      lockDuration: 5 * 60 * 1000,
+      maxStalledCount: 1,
+    },
   );
 
   worker.on('failed', (job, err) => {
     console.error(`[daily-run] Job ${job?.id} falló:`, err);
+    Sentry.captureException(err, { tags: { worker: 'daily-run', jobId: job?.id } });
   });
   // Sin este listener un error de conexión a Redis se propaga como
   // unhandledRejection y server.ts lo trata como fatal, tirando el proceso.

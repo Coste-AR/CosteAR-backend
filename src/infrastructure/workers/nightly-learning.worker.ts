@@ -1,4 +1,5 @@
 import { Worker, type Job } from 'bullmq';
+import * as Sentry from '@sentry/node';
 import { QUEUE_NAMES, getConnection } from './queues.js';
 import { NightlyLearningService } from '../../application/nightly-learning/nightly-learning-service.js';
 
@@ -18,11 +19,18 @@ export function startNightlyLearningWorker(): Worker {
         throw err;
       }
     },
-    { connection, concurrency: 1 },
+    {
+      connection,
+      concurrency: 1,
+      // El pipeline nightly puede procesar muchos registros: 10 min es el techo razonable.
+      lockDuration: 10 * 60 * 1000,
+      maxStalledCount: 1,
+    },
   );
 
   worker.on('failed', (job, err) => {
     console.error(`[nightly-learning] Job ${job?.id} falló:`, err);
+    Sentry.captureException(err, { tags: { worker: 'nightly-learning', jobId: job?.id } });
   });
   // Sin este listener, un error de conexión a Redis (no de un job) queda sin
   // manejar: BullMQ/ioredis lo emite como 'error' del EventEmitter, y sin
