@@ -1,4 +1,5 @@
 import { Worker } from 'bullmq';
+import * as Sentry from '@sentry/node';
 import { getConnection, QUEUE_NAMES, recalculateQueue } from './queues.js';
 import { BcraClient } from '../external-apis/bcra.js';
 import { IndecClient } from '../external-apis/indec.js';
@@ -46,8 +47,17 @@ export function startMacroSyncWorker(): Worker {
 
       return { significantChange };
     },
-    { connection: getConnection() },
+    {
+      connection: getConnection(),
+      // Sync macro: llama a 3 APIs externas. 2 min es generoso para redes lentas.
+      lockDuration: 2 * 60 * 1000,
+      maxStalledCount: 1,
+    },
   );
+  worker.on('failed', (job, err) => {
+    console.error(`[macro-sync] Job ${job?.id} falló:`, err);
+    Sentry.captureException(err, { tags: { worker: 'macro-sync', jobId: job?.id } });
+  });
   worker.on('error', (err) => console.warn('[worker] macro-sync error:', err.message));
   return worker;
 }

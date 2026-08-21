@@ -185,7 +185,11 @@ export function freezeProcessPeriod(input: ProcessFreezeInput): FrozenCalculatio
         // producción equivalente —ahí es donde Procesos la contempla—, así que
         // no hay un segundo renglón que agregar como sí lo hay en Órdenes (#89).
         unitFinishedGoodsCost: finalUnitCost,
-        unitCostOfGoodsSold: safeDiv(costOfGoodsSold, unitsProduced),
+        // Por las VENDIDAS, no por las producidas (#88). Acá el defecto era más
+        // fácil de ver que en Órdenes: `costOfGoodsSold` es `finalUnitCost ×
+        // vendidas`, así que dividirlo por las producidas daba el costo unitario
+        // escalado por la proporción de venta — el costo de nada.
+        unitCostOfGoodsSold: safeDiv(costOfGoodsSold, input.salesQuantity),
         basadoEn,
       },
     },

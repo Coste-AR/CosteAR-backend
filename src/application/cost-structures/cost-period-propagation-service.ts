@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from '@prisma/client';
+import type { NaturalezaDesperdicio as NaturalezaDb, PrismaClient, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { recordAudit, type AuditContext } from '../audit/audit-logger.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
@@ -46,6 +46,17 @@ export interface PeriodLike {
   productionQuantity?: Prisma.Decimal | null;
   status?: string;
   id?: string;
+  /**
+   * Desperdicios declarados del período (#92). Opcional: un período cargado sin
+   * `include` no los trae, y entonces el motor no imputa ninguno — que es lo
+   * mismo que pasaba antes de que este dato existiera.
+   */
+  desperdicioRegistros?: Array<{
+    concepto: string;
+    valor: Prisma.Decimal;
+    naturaleza: NaturalezaDb | null;
+    valorRecupero: Prisma.Decimal;
+  }>;
 }
 
 /**

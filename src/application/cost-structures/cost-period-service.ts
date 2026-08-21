@@ -10,6 +10,7 @@ import {
   type FrozenCalculation,
 } from '../../domain/calculations/calculate.js';
 import { type PeriodLike, type ProductiveSetting } from './cost-period-propagation-service.js';
+import { naturalezaADominio } from './desperdicio-service.js';
 import {
   rawMaterialSectionSchema,
   directLaborConfigSchema,
@@ -130,7 +131,14 @@ export class CostPeriodService {
   }
 
   private async requirePeriod(userId: string, periodId: string) {
-    const p = await this.db.costPeriod.findFirst({ where: { id: periodId, userId } });
+    const p = await this.db.costPeriod.findFirst({
+      where: { id: periodId, userId },
+      // #92 — los desperdicios vigentes viajan con el período: el motor los
+      // necesita para aplicar R5 al cerrar y al comparar. Sin el `include` la
+      // lista llega vacía y el desperdicio no se imputa, que es justamente el
+      // agujero que este trabajo viene a tapar.
+      include: { desperdicioRegistros: { where: { deletedAt: null } } },
+    });
     if (!p) throw new NotFoundError('Período no encontrado');
     return p;
   }
@@ -405,6 +413,20 @@ export class CostPeriodService {
         rawMaterial: rawMaterialSectionSchema.parse(period.rawMaterialConfig),
         directLabor: directLaborConfigSchema.parse(period.directLaborConfig),
         indirectCosts: indirectCostConfigSchema.parse(period.indirectCostConfig),
+        // #92 — R5. Los desperdicios declarados del período entran al motor por
+        // acá. Si el período se cargó sin `include`, la lista viene vacía y el
+        // cálculo da lo mismo que antes: no imputar nada es el comportamiento
+        // correcto cuando no hay nada declarado.
+        desperdicios: (period.desperdicioRegistros ?? []).map((d) => ({
+          concepto: d.concepto,
+          valor: Number(d.valor),
+          // La base guarda MAYÚSCULAS y el dominio minúsculas: se traduce con la
+          // misma función que usa el servicio, y no a mano. Un mapeo suelto que
+          // no matchea deja la naturaleza en `null`, y un registro sin naturaleza
+          // NO entra al cálculo: el desperdicio desaparecería en silencio.
+          naturaleza: naturalezaADominio(d.naturaleza),
+          valorRecupero: Number(d.valorRecupero),
+        })),
         inventory: inventorySchema.parse({}),
         sales: {
           unitPrice: period.salesUnitPrice ? Number(period.salesUnitPrice) : 0,

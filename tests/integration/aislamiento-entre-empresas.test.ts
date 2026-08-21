@@ -85,7 +85,7 @@ describe('La empresa A no puede leer nada de la B', () => {
    * setear el inquilino no se convirtió en una llave maestra.
    */
   it('🔑 el costista SÍ lee lo suyo, con las políticas aplicadas', async () => {
-    const propias = await withTenantContext(A.userId, () =>
+    const { items: propias } = await withTenantContext(A.userId, () =>
       new CostStructureService(db).listByCompany(A.userId, A.companyId),
     );
     expect(propias.map((s) => s.id)).toEqual([A.structureId]);

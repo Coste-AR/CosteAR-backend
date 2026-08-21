@@ -117,6 +117,15 @@ describe('Costo unitario', () => {
     expect(f.detail.unitCost.unitProductionCost).toBe(220);
   });
 
+  it('el CPV unitario divide por las VENDIDAS, y da el mismo costo por unidad (#88)', () => {
+    const f = freezeProcessPeriod(base);
+
+    // `costOfGoodsSold` es 220 × 700 vendidas. Dividirlo por las 800 producidas
+    // daba 192,50: el costo unitario escalado por la proporción de venta, que no
+    // es el costo de nada. Una unidad no cambia de costo por haberse vendido.
+    expect(f.detail.unitCost.unitCostOfGoodsSold).toBe(220);
+  });
+
   it('sin productionQuantity (Procesos nunca lo carga) deriva las unidades del último departamento, no de las vendidas (H11)', () => {
     const f = freezeProcessPeriod({ ...base, productionQuantity: null });
 

@@ -141,11 +141,22 @@ describe('S-02(a) — unidades producidas vs. vendidas en el costo unitario', ()
     }
   });
 
-  it('el COGS unitario usa el mismo divisor que el costo de producción unitario', () => {
+  it('cada unitario usa SU divisor: producción por las producidas, CPV por las vendidas', () => {
+    // Este test afirmaba lo contrario —que los dos usan el mismo divisor— y por
+    // eso el defecto de #88 quedó consagrado en la suite: cuando `3b9e8ae`
+    // cambió la variable compartida a las producidas, el CPV unitario heredó el
+    // error que el otro número dejó de tener, y el test lo bendijo.
+    //
+    // El CPV es el costo de las unidades VENDIDAS. Dividirlo por las producidas
+    // da el costo unitario escalado por la proporción de venta, que no es el
+    // costo de nada.
     const r = runCalculation(input({ unitPrice: 2000, quantity: 60, productionQuantity: 100 }));
     const { unitProductionCost, unitCostOfGoodsSold } = r.detail.unitCost;
 
     expect(r.productionCost / 100).toBeCloseTo(unitProductionCost, 6);
-    expect(r.costOfGoodsSold / 100).toBeCloseTo(unitCostOfGoodsSold, 6);
+    // A 2 decimales y no a 6: `costOfGoodsSold` ya sale redondeado a centavos,
+    // y dividirlo DESPUÉS por 60 no da lo mismo que dividir con los 28 dígitos
+    // del motor y redondear al final. La diferencia es de tres milésimas.
+    expect(r.costOfGoodsSold / 60).toBeCloseTo(unitCostOfGoodsSold, 2);
   });
 });
