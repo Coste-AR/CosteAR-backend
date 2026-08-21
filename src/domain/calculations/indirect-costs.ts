@@ -128,7 +128,12 @@ export function secondaryProration(
   const productiveIds = centers.filter((c) => c.type === 'productive').map((c) => c.id);
   const result: Record<string, FixedVariable> = {};
   for (const id of productiveIds) {
-    result[id] = primary[id] ?? fvZero();
+    // COPIA, no la referencia del primario: más abajo esta función reasigna
+    // `result[id].fixed` in situ, y guardar la referencia hacía que repartir el
+    // secundario MUTARA el resultado del prorrateo primario del llamador. Nadie
+    // lo notaba porque el primario no se volvía a leer; cualquier control que
+    // compare primario contra secundario ve el primario ya inflado.
+    result[id] = { ...(primary[id] ?? fvZero()) };
   }
 
   for (const dist of serviceDistributions) {
