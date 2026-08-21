@@ -23,6 +23,11 @@ import {
 } from '../../domain/calculations/indirect-costs.js';
 import { MissingAllocationBaseError } from '../../domain/errors/calculation-errors.js';
 import {
+  imputarDesperdicios,
+  type DesperdicioRegistrado,
+  type ImputacionDesperdicio,
+} from '../../domain/calculations/desperdicio.js';
+import {
   calcCostStatement,
   calcGrossMargin,
   checkRawMaterialConsistency,
@@ -57,6 +62,17 @@ export interface CalculationInput {
   rawMaterial: RawMaterialSection;
   directLabor: DirectLaborConfig;
   indirectCosts: IndirectCostConfig;
+  /**
+   * Desperdicio declarado del período (issue #92, regla R5 de la clase 4).
+   *
+   * `desperdicio.ts` implementaba R5 desde hacía tiempo y **su único importador
+   * era su propio test**: el motor no tenía dónde recibir el dato. Acá está.
+   *
+   * Opcional: sin desperdicios declarados el cálculo da exactamente lo mismo que
+   * antes. Un registro SIN naturaleza declarada no entra al cálculo y queda
+   * listado como pendiente — elegir por el costista sería peor que no calcular.
+   */
+  desperdicios?: DesperdicioRegistrado[];
   inventory: InventoryInput;
   sales: {
     unitPrice: number;
@@ -100,6 +116,24 @@ export interface CalculationOutput {
   budgetVariance?: number;
   /** Costo REAL de producción = normal + variación presupuesto (#90). */
   realProductionCost?: number;
+  /**
+   * Desperdicio del período imputado según R5 (#92). Las dos cifras van
+   * SEPARADAS a propósito: una es costo del producto y la otra es pérdida de la
+   * empresa, y mezclarlas esconde exactamente lo que el costista tiene que ver.
+   *
+   * OPCIONAL: los cálculos anteriores a que esto existiera no lo tienen, y no es
+   * lo mismo "no hubo desperdicio" que "no se midió".
+   */
+  desperdicio?: {
+    /** Merma normal neta de recupero: la absorben las unidades buenas. Ya está en el costo. */
+    alCosto: number;
+    /** Merma extraordinaria: pérdida del período. Se sacó del costo. */
+    alResultado: number;
+    /** Recupero restado del costo de materiales. */
+    recuperoAplicado: number;
+    /** Registros sin naturaleza declarada: no entraron al cálculo, y por qué. */
+    pendientes: { concepto: string; valor: number; motivo: string }[];
+  };
   costOfGoodsSold: number;
   grossMargin: number;
   grossMarginPct: number;
@@ -619,6 +653,12 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   );
   const finalRM = Money.sum(materials.map((x) => x.ledger.finalBalanceValue));
 
+  // --- Desperdicio del período (R5, clase 4) ---
+  // `imputarDesperdicios` reparte cada registro entre costo y resultado según su
+  // naturaleza DECLARADA, y deja aparte los que no la tienen. Se llama siempre:
+  // sin registros devuelve todo en cero y el cálculo no cambia.
+  const desperdicio: ImputacionDesperdicio = imputarDesperdicios(input.desperdicios ?? []);
+
   const statement = calcCostStatement({
     initialRawMaterial: initialRM,
     rawMaterialPurchases: purchases,
@@ -626,6 +666,12 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     directLabor: directLaborTotal,
     indirectCostsApplied,
     budgetVariance: budgetVarianceTotal,
+    // R5 (#92). La merma NORMAL no se pasa a propósito: ya está adentro del
+    // costo —se consumió— y las unidades buenas la absorben sin cálculo
+    // adicional, igual que en Procesos. Lo que se resta es su recupero y la
+    // merma extraordinaria, que nunca es costo.
+    wasteRecovery: Money.of(desperdicio.recuperoAplicado),
+    extraordinaryLoss: Money.of(desperdicio.alResultado),
     initialWorkInProcess: Money.of(input.inventory.initialWorkInProcess),
     finalWorkInProcess: Money.of(input.inventory.finalWorkInProcess),
     initialFinishedGoods: Money.of(input.inventory.initialFinishedGoods),
@@ -703,6 +749,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     productionCost: statement.productionCost.toNumber(),
     budgetVariance: statement.budgetVariance.toNumber(),
     realProductionCost: statement.realProductionCost.toNumber(),
+    desperdicio,
     costOfGoodsSold: statement.costOfGoodsSold.toNumber(),
     grossMargin: margin.grossMargin.toNumber(),
     grossMarginPct: margin.grossMarginPct.toPercent(),

@@ -18,6 +18,9 @@ import { Percentage } from '../value-objects/percentage.js';
  *   7  = COSTO NORMAL DE PRODUCCIÓN DEL PERÍODO
  *   7b Variación presupuesto               (±)
  *   7c = COSTO REAL DE PRODUCCIÓN
+ *   7d Recupero de desperdicio             (−)
+ *   7e Merma extraordinaria                (−)
+ *   7f = COSTO DE PRODUCCIÓN NETO DE DESPERDICIO
  *   8  Inv. Inicial Productos en Proceso   (+)
  *   9  Inv. Final Productos en Proceso     (−)
  *   10 = COSTO DE PRODUCTOS TERMINADOS
@@ -63,6 +66,31 @@ export interface CostStatementInput {
    */
   budgetVariance?: Money;
 
+  /**
+   * Recupero de la merma NORMAL: lo que se saca vendiendo el desperdicio.
+   *
+   * La cátedra es explícita (clase 4): «el recupero se contabiliza como
+   * reducción del costo de materiales, no como ingreso separado». Se resta como
+   * renglón propio y NO se descuenta de `rawMaterialConsumed`, para no romper el
+   * chequeo de consistencia contra la ficha de stock: la ficha registra lo que
+   * salió del almacén, y el recupero no cambia esa cantidad.
+   */
+  wasteRecovery?: Money;
+
+  /**
+   * Merma EXTRAORDINARIA, neta de su recupero. **Se RESTA del costo.**
+   *
+   * R5: la merma extraordinaria es pérdida del período y NUNCA costo. Su costo
+   * ya está adentro de MP + MOD + CIP —se consumió—, así que para sacarla del
+   * producto hay que restarla acá y llevarla al estado de resultados.
+   *
+   * La merma NORMAL no aparece en esta interfaz **a propósito**: las unidades
+   * buenas la absorben sin cálculo adicional, igual que en Procesos
+   * (`normalLossAbsorbedAutomatically`). Ya está en el costo; sumarla otra vez
+   * sería contarla dos veces.
+   */
+  extraordinaryLoss?: Money;
+
   initialWorkInProcess: Money;
   finalWorkInProcess: Money;
 
@@ -83,6 +111,12 @@ export interface CostStatementResult {
   budgetVariance: Money;
   /** (7c) Costo REAL de producción = normal + variación presupuesto. */
   realProductionCost: Money;
+  /** (7d) Recupero de la merma normal, restado del costo. Cero si no se pasó. */
+  wasteRecovery: Money;
+  /** (7e) Merma extraordinaria sacada del costo. Va al resultado del período. */
+  extraordinaryLoss: Money;
+  /** (7f) Costo de producción neto de desperdicio: el que sigue hacia el CPV. */
+  netProductionCost: Money;
   finishedGoodsCost: Money; // (10)
   costOfGoodsSold: Money; // (13)
 }
@@ -111,10 +145,21 @@ export function calcCostStatement(input: CostStatementInput): CostStatementResul
   const budgetVariance = input.budgetVariance ?? Money.zero();
   const realProductionCost = productionCost.add(budgetVariance);
 
-  // (10) Costo de productos terminados = Costo REAL + Inv.Inicial PP − Inv.Final PP.
-  // Parte del real y no del normal: si partiera del normal, la variación
-  // presupuesto no llegaría nunca al costo del producto vendido.
-  const finishedGoodsCost = realProductionCost
+  // (7d–7e) Desperdicio (R5). Los dos renglones RESTAN:
+  //   · el recupero, porque reduce el costo de los materiales (clase 4);
+  //   · la merma extraordinaria, porque es pérdida del período y nunca costo.
+  // La merma NORMAL no figura acá: ya está adentro del costo y las unidades
+  // buenas la absorben sin cálculo adicional.
+  const wasteRecovery = input.wasteRecovery ?? Money.zero();
+  const extraordinaryLoss = input.extraordinaryLoss ?? Money.zero();
+  const netProductionCost = realProductionCost
+    .subtract(wasteRecovery)
+    .subtract(extraordinaryLoss);
+
+  // (10) Costo de productos terminados = Costo NETO + Inv.Inicial PP − Inv.Final PP.
+  // Parte del neto y no del normal: si partiera del normal, ni la variación
+  // presupuesto ni el desperdicio llegarían al costo del producto vendido.
+  const finishedGoodsCost = netProductionCost
     .add(input.initialWorkInProcess)
     .subtract(input.finalWorkInProcess);
 
@@ -128,6 +173,9 @@ export function calcCostStatement(input: CostStatementInput): CostStatementResul
     productionCost,
     budgetVariance,
     realProductionCost,
+    wasteRecovery,
+    extraordinaryLoss,
+    netProductionCost,
     finishedGoodsCost,
     costOfGoodsSold,
   };
