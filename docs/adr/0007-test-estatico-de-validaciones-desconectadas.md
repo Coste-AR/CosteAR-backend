@@ -1,4 +1,4 @@
-# 0005 — Detectar por análisis estático las validaciones que se construyen y nunca se llaman
+# 0007 — Detectar por análisis estático las validaciones que se construyen y nunca se llaman
 
 - **Fecha:** 2026-08-20
 - **Estado:** Aceptada
@@ -32,9 +32,14 @@ Se agrega `tests/config/validaciones-enchufadas.test.ts`, un **test estático si
 1. una ruta de validación registrada (`…-check`, `…/validate`) no la nombra ningún otro archivo del repo, o
 2. un módulo de `src/domain/` no lo importa ningún archivo de `src/`.
 
-Lleva un diccionario `EXENCIONES` con el motivo escrito de cada excepción, con las mismas guardas que `EXENTAS` en `rls-coverage.test.ts`: sin fantasmas, sin contradicciones, sin placeholders.
+Lleva **dos** diccionarios, con las mismas guardas que `EXENTAS` en `rls-coverage.test.ts` (sin fantasmas, sin contradicciones, sin placeholders):
 
-**Se entrega en rojo, a propósito.** Es el criterio de cierre del issue: hoy debe delatar `allocation-check` y los cuatro módulos huérfanos. Cuando se cierren esos issues, queda verde solo.
+- `EXENCIONES` — casos legítimos y permanentes: las cuatro rutas que solo consume el frontend, cada una con el archivo y la línea que la llama.
+- `DEUDA_CONOCIDA` — los cinco hallazgos vivos, **cada uno con su issue**: `allocation-check` (#100), `desperdicio.ts` (#92), `reglas-alerta.ts` (#74), y `activo-amortizable.ts` / `parametros-costeo.ts` (hallazgos nuevos, todavía sin issue propio).
+
+**Se entrega en verde**, con los cinco hallazgos anotados como deuda. Un test agregado en rojo dejaría el CI de `dev` rojo de forma permanente hasta que se cierren cinco issues ajenos, y eso choca de frente con `PR-02` y `GIT-05`. Peor: un CI rojo crónico hace que la gente deje de mirarlo, y lo primero que se pierde con eso son los hallazgos **nuevos**, que es lo único que este archivo aporta y los issues no.
+
+Para que "deuda" no sea un sinónimo cómodo de "silenciado", **hay un test que exige que toda entrada de `DEUDA_CONOCIDA` nombre un issue**. Un hallazgo sin issue no es deuda: es un hallazgo perdido.
 
 ## Alternativas consideradas
 
@@ -43,7 +48,8 @@ Lleva un diccionario `EXENCIONES` con el motivo escrito de cada excepción, con 
 | **Chequeo dinámico: levantar la app y ver qué rutas se ejercitan** | El CI no levanta Postgres (ver ADR 0001). Un control que se saltea justo donde pasan todos los cambios no protege nada. Y "no la llama nadie" **no es observable en runtime**: que una corrida no pase por una ruta no prueba que esté muerta |
 | **Regla de ESLint (`no-unused-modules`)** | Razona por archivo y no distingue "importado por un test" de "importado por el producto", que es exactamente la distinción que importa acá |
 | **Arreglar los cuatro síntomas y no construir el detector** | Es lo que se venía haciendo. `reglas-alerta.ts` demuestra que no alcanza: el quinto caso apareció solo |
-| **Entregarlo verde, con los hallazgos ya exentos** | Convierte el hallazgo en deuda invisible el mismo día que se documenta. Si se decide igual (ver abajo), que sea una decisión escrita, no el estado por defecto |
+| **Entregarlo en rojo, como pide literalmente el issue** | Deja el CI de `dev` rojo hasta que se cierren cinco issues ajenos. Rompe `PR-02` y `GIT-05`, y bloquea al equipo entero por un hallazgo que ya está escrito en sus issues |
+| **Entregarlo verde con un `EXENCIONES` único** | Mezcla "esto está bien así" con "esto está mal y lo sabemos" en la misma lista. A los dos meses nadie distingue cuál era cuál y la deuda se vuelve invisible |
 | **Comparar cadenas en vez de resolver los imports** | Se probó primero y **da falsos positivos**: `money.ts` se importa de cinco formas distintas y una búsqueda textual encuentra una. Daba `percentage.ts` por huérfano teniendo dos importadores reales |
 
 ## Consecuencias
@@ -58,7 +64,8 @@ Lleva un diccionario `EXENCIONES` con el motivo escrito de cada excepción, con 
 
 - **El test solo ve este repo.** `CosteAR-frontend` es otro repositorio, así que una ruta que solo consume la web se vería muerta desde acá. Se resuelve con exenciones que citan archivo y línea del frontend — verificable a mano, pero **se desactualiza en silencio** si el frontend deja de llamarla.
 - Heurísticas de texto sobre el código fuente: reconoce `app.get('…')` literal. Una ruta armada dinámicamente se le escapa.
-- **Entregado en rojo, deja el CI de `dev` en rojo** hasta que se cierren los issues de `allocation-check` y de los módulos huérfanos. Eso choca con **PR-02** y **GIT-05** de `CLAUDE.md`. Es una decisión de equipo, no técnica: o se cierran esos issues primero, o se acepta el rojo, o se exentan como deuda conocida con su issue. **Queda planteada explícitamente, sin resolver por defecto.**
+- **El CI queda en verde con cinco problemas abiertos adentro.** Es el costo real de esta decisión: quien mire solamente el semáforo no se entera de que existen. La mitigación es que `DEUDA_CONOCIDA` es un inventario legible, con su issue por línea, y que la guarda del issue impide agrandarlo en silencio.
+- **`activo-amortizable.ts` y `parametros-costeo.ts` entran a la deuda sin issue propio.** Es la entrada más floja de la lista y hay que cerrarla abriendo esos issues.
 
 **Qué se rompe si alguien la revierte sin leer esto**
 
@@ -70,4 +77,9 @@ Lleva un diccionario `EXENCIONES` con el motivo escrito de cada excepción, con 
 npx vitest run tests/config/validaciones-enchufadas.test.ts
 ```
 
-Hoy: 2 tests en rojo (la ruta huérfana y los 4 módulos), 3 guardas del diccionario en verde. El día que ese comando dé 5 en verde **sin exenciones nuevas**, el patrón está cerrado.
+Hoy: **7 en verde**, con los cinco hallazgos en `DEUDA_CONOCIDA`.
+
+Dos comprobaciones que valen más que el verde:
+
+1. **Sigue cazando lo nuevo.** Agregar un archivo cualquiera bajo `src/domain/` que nadie importe pone el test en rojo en la corrida siguiente. Verificado el 20-08 con un archivo descartable.
+2. **La deuda se vacía sola.** Cada vez que se cierra uno de los issues #100, #92 o #74, se borra su línea. El día que `DEUDA_CONOCIDA` quede vacío, el patrón está cerrado.

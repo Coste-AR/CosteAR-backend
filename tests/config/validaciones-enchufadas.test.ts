@@ -59,11 +59,18 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
  */
 
 /**
- * Validaciones desconectadas A PROPÓSITO, cada una con su motivo.
+ * DOS DICCIONARIOS, PORQUE SON DOS COSAS DISTINTAS.
+ *
+ * `EXENCIONES` son casos legítimos y permanentes: está desconectado del backend
+ * y está bien que lo esté. No hay nada que arreglar.
+ *
+ * `DEUDA_CONOCIDA` son hallazgos REALES que todavía no se arreglaron. No están
+ * perdonados: están anotados, cada uno con el issue que los sigue. La diferencia
+ * con no escribirlos es toda: la lista de abajo es exactamente el inventario del
+ * problema, y se vacía sola a medida que los issues se cierran.
  *
  * La clave es la ruta tal como se registra, o la ruta del módulo desde la raíz
- * del repositorio. Agregar una entrada acá es una decisión consciente que queda
- * escrita; NO poner nada y que el test siga verde es lo que este archivo evita.
+ * del repositorio.
  */
 const EXENCIONES: Record<string, string> = {
   // --- Rutas que consume el frontend, que este test no puede ver ---
@@ -80,6 +87,44 @@ const EXENCIONES: Record<string, string> = {
     'Es la validación de un dato individual desde la ficha del dato. Verificado en ' +
     'CosteAR-frontend, src/features/cost-structures/trazabilidad-hooks.ts:279.',
 };
+
+/**
+ * DEUDA CONOCIDA: hallazgos vivos, cada uno con su issue.
+ *
+ * Este test nació en rojo con estos cinco. Se anotan acá para que el CI quede en
+ * verde —un CI rojo permanente lo primero que hace es que la gente deje de
+ * mirarlo, y con él se pierden los hallazgos NUEVOS, que es lo único que este
+ * archivo puede aportar que no aporte ya el issue— pero cada línea es un
+ * problema abierto, no un problema resuelto.
+ *
+ * **Toda entrada de acá tiene que nombrar su issue.** Hay un test que lo exige.
+ * Sin esa regla, este diccionario sería el mismo silencio que el archivo vino a
+ * cerrar, nada más que con mejor letra.
+ *
+ * Se borra la línea cuando se cierra el issue. Si alguien cierra el issue y se
+ * olvida de borrarla, la guarda de "exenciones que en realidad sí se llaman" se
+ * pone roja y avisa.
+ */
+const DEUDA_CONOCIDA: Record<string, string> = {
+  '/structures/:id/allocation-check':
+    'Issue #100. Registrada, devuelve el mensaje correcto y no la llama nadie: ni el backend ' +
+    'ni el frontend. Hay que enchufarla antes de calcular, que es para lo que se escribió.',
+  'src/domain/calculations/desperdicio.ts':
+    'Issue #92. El motor no puede contabilizar desperdicio: el módulo, su tabla y sus 181 ' +
+    'líneas de test existen, y el único importador es su propio archivo de test.',
+  'src/domain/alertas/reglas-alerta.ts':
+    'Issue #74. Las reglas de alerta por indicador físico se mergearon a dev el 19-08 y ' +
+    'todavía no las consume ningún servicio. Es el caso más nuevo del patrón.',
+  'src/domain/parametros/activo-amortizable.ts':
+    'Hallazgo NUEVO de este test, sin issue propio todavía (sale con #98). Amortización del ' +
+    'plantel (S-03): el módulo existe, ningún archivo de src/ lo importa.',
+  'src/domain/parametros/parametros-costeo.ts':
+    'Hallazgo NUEVO de este test, sin issue propio todavía (sale con #98). Los parámetros de ' +
+    'costeo (umbrales configurables) no los lee ningún servicio; solo sus tests.',
+};
+
+/** Todo lo que este test no debe reportar hoy, sea por buen motivo o por deuda. */
+const SILENCIADAS: Record<string, string> = { ...EXENCIONES, ...DEUDA_CONOCIDA };
 
 // ---------------------------------------------------------------------------
 // Lectura del código fuente
@@ -225,7 +270,7 @@ function dominioSinLlamadores(): string[] {
 describe('validaciones construidas y nunca enchufadas', () => {
   it('toda ruta de validación registrada tiene al menos un llamador, o su exención', () => {
     const huerfanas = rutasDeValidacion()
-      .filter((r) => !EXENCIONES[r.ruta])
+      .filter((r) => !SILENCIADAS[r.ruta])
       .filter((r) => llamadoresDe(r).length === 0);
 
     // Si esto se pone rojo: o la ruta se llama desde donde corresponde, o se
@@ -239,7 +284,7 @@ describe('validaciones construidas y nunca enchufadas', () => {
   });
 
   it('todo módulo de src/domain/ lo importa alguien de src/, o está exento', () => {
-    const huerfanos = dominioSinLlamadores().filter((f) => !EXENCIONES[f]);
+    const huerfanos = dominioSinLlamadores().filter((f) => !SILENCIADAS[f]);
 
     // Un módulo de dominio que solo importa su test es doctrina codificada que
     // el producto NO ejecuta: los tests pasan en verde y el usuario no recibe
@@ -253,7 +298,7 @@ describe('validaciones construidas y nunca enchufadas', () => {
     // rls-coverage.test.ts.
     const rutas = new Set(rutasDeValidacion().map((r) => r.ruta));
     const modulos = new Set(ARCHIVOS_SRC.filter((f) => f.startsWith('src/domain/')));
-    const fantasmas = Object.keys(EXENCIONES).filter((k) => !rutas.has(k) && !modulos.has(k));
+    const fantasmas = Object.keys(SILENCIADAS).filter((k) => !rutas.has(k) && !modulos.has(k));
 
     expect(fantasmas, `Exenciones de cosas inexistentes: ${fantasmas.join(', ')}`).toEqual([]);
   });
@@ -262,7 +307,7 @@ describe('validaciones construidas y nunca enchufadas', () => {
     // Una exención de más miente sobre el estado del código: afirma "esto está
     // desconectado a propósito" sobre algo que funciona perfectamente.
     const conectadasIgual = rutasDeValidacion()
-      .filter((r) => EXENCIONES[r.ruta])
+      .filter((r) => SILENCIADAS[r.ruta])
       .filter((r) => llamadoresDe(r).length > 0)
       .map((r) => r.ruta);
 
@@ -273,10 +318,42 @@ describe('validaciones construidas y nunca enchufadas', () => {
   });
 
   it('cada exención trae un motivo, no un placeholder', () => {
-    const flojas = Object.entries(EXENCIONES)
+    const flojas = Object.entries(SILENCIADAS)
       .filter(([, motivo]) => motivo.trim().length < 40)
       .map(([k]) => k);
 
     expect(flojas, `Exenciones sin explicación real: ${flojas.join(', ')}`).toEqual([]);
+  });
+
+  it('toda DEUDA_CONOCIDA nombra su issue', () => {
+    // LA REGLA QUE SEPARA "anotado" de "silenciado".
+    //
+    // Mandar un hallazgo a DEUDA_CONOCIDA deja el CI en verde, y eso es
+    // justamente lo peligroso: sin esta guarda, el diccionario sería un lugar
+    // cómodo donde tirar cualquier cosa que moleste, que es el mismo silencio
+    // que este archivo vino a cerrar.
+    //
+    // Exigir el número de issue obliga a que alguien lo haya escrito en algún
+    // lado donde el equipo lo ve. Un hallazgo sin issue no es deuda: es un
+    // hallazgo perdido.
+    const sinIssue = Object.entries(DEUDA_CONOCIDA)
+      .filter(([, motivo]) => !/#\d+/.test(motivo))
+      .map(([k]) => k);
+
+    expect(
+      sinIssue,
+      `Deuda conocida sin issue que la siga: ${sinIssue.join(', ')}. ` +
+        'Abrí el issue y ponelo en el motivo, o arreglá el hallazgo.',
+    ).toEqual([]);
+  });
+
+  it('nada está en los dos diccionarios a la vez', () => {
+    // EXENCIONES dice "está bien así"; DEUDA_CONOCIDA dice "está mal y lo
+    // sabemos". Una clave en los dos lados es una contradicción sobre el estado
+    // del código, y gana la que el spread deje última: silencio por accidente.
+    const enAmbos = Object.keys(EXENCIONES).filter((k) => k in DEUDA_CONOCIDA);
+
+    expect(enAmbos, `Claves duplicadas entre EXENCIONES y DEUDA_CONOCIDA: ${enAmbos.join(', ')}`)
+      .toEqual([]);
   });
 });
