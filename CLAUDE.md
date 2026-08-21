@@ -44,14 +44,14 @@ motor de costeo es sagrada — ver §5.
 Node 22 · TypeScript strict · Prisma + PostgreSQL · Vitest · **npm** (no pnpm, no yarn).
 
 ```bash
-npm run dev                 # servidor con watch
-npm run lint                # eslint src tests
-npm run typecheck           # tsc --noEmit
-npm test                    # vitest run
-npm run test:integration    # necesita Postgres levantado (docker-compose up -d)
-npm run build               # prisma generate && tsc
-npm run prisma:migrate      # migraciones en dev
-npm run db:setup            # migrate-deploy + apply-rls
+npm run dev                          # servidor con watch
+npm run lint                         # eslint src tests
+npm run typecheck                    # tsc --noEmit
+npm test                             # vitest run
+npm run test:integration             # necesita Postgres levantado (docker-compose up -d)
+npm run build                        # prisma generate && tsc
+npm run prisma:migrate <nombre>      # migraciones en dev — VER CMD-04
+npm run db:setup                     # migrate-deploy + apply-rls
 ```
 
 |ID|Regla|Fuente|
@@ -59,6 +59,7 @@ npm run db:setup            # migrate-deploy + apply-rls
 |**CMD-01**|**`npm` siempre.** Nunca mezclar con pnpm o yarn — hay un solo `package-lock.json`.|Equipo|
 |**CMD-02**|**Al bajar una rama con cambios en `prisma/schema.prisma`, correr `npx prisma generate` antes de nada.** Sin eso `tsc` tira errores falsos que no existen (nos pasó con el PR #54).|Santiago, 08-2026|
 |**CMD-03**|Los tests de integración necesitan Postgres real. Si no hay Docker levantado, decilo — no los marques como "pasan".|Equipo|
+|**CMD-04**|**Nunca `npx prisma migrate dev` directo.** Siempre `npm run prisma:migrate <nombre>`. El script (`scripts/migrate-dev.mjs`) filtra automáticamente las sentencias de deriva de `vault_chunks` (issue #72) que romperían el RAG si se aplicaran. Usar el comando crudo saltea esa protección.|Giuliana, 08-2026|
 
 ---
 
@@ -205,5 +206,6 @@ Por eso `/costear-bitacora` al cerrar una sesión (DOC-03) y el ADR en el mismo 
 
 |Fecha|Qué cambió|Fuente|
 |---|---|---|
+|2026-08-21|**CMD-04** + `scripts/migrate-dev.mjs`: automatiza el filtrado de deriva de `vault_chunks` que antes se hacía a mano en cada migración (issue #72). `npm run prisma:migrate` ahora llama al script en lugar de `prisma migrate dev` directo.|Giuliana|
 |2026-08-18|Secciones **5.bis** (datos de clientes en repos públicos, CLI-01 a CLI-04) y **6.bis** (protocolo de revisión, REV-01 a REV-08). Las dos salen de cosas que pasaron ese día: se publicó la estructura de costos de un betatester en un repo público, y ocho PRs se mergearon el mismo día que se abrieron.|Santiago|
 |2026-08-15|Creación. Reglas destiladas del repo `asomelab/de-wall`, de la spec de Trazabilidad Total v1 y de la auditoría del motor.|Santiago|

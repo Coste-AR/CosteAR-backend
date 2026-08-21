@@ -20,7 +20,7 @@
         "lint": "eslint src tests",
         "typecheck": "tsc --noEmit",
         "prisma:generate": "prisma generate",
-        "prisma:migrate": "prisma migrate dev",
+        "prisma:migrate": "node scripts/migrate-dev.mjs",
         "prisma:deploy": "node scripts/migrate-deploy.mjs",
         "db:rls": "node scripts/apply-rls.mjs",
         "db:seed": "node prisma/seed.mjs",
