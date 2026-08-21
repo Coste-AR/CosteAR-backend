@@ -116,11 +116,11 @@ const DEUDA_CONOCIDA: Record<string, string> = {
     'Issue #74. Las reglas de alerta por indicador físico se mergearon a dev el 19-08 y ' +
     'todavía no las consume ningún servicio. Es el caso más nuevo del patrón.',
   'src/domain/parametros/activo-amortizable.ts':
-    'Hallazgo NUEVO de este test, sin issue propio todavía (sale con #98). Amortización del ' +
-    'plantel (S-03): el módulo existe, ningún archivo de src/ lo importa.',
+    'Issue #116. Amortización del plantel (S-03): tabla, migración, RLS y lógica existen, y ' +
+    'ningún servicio la lee. Depende de #115 para la vida útil.',
   'src/domain/parametros/parametros-costeo.ts':
-    'Hallazgo NUEVO de este test, sin issue propio todavía (sale con #98). Los parámetros de ' +
-    'costeo (umbrales configurables) no los lee ningún servicio; solo sus tests.',
+    'Issue #115. El catálogo de parámetros y su cascada existen, y ningún servicio los lee: ' +
+    'los umbrales que deberían salir de ahí siguen siendo constantes. Bloquea #92 y #116.',
 };
 
 /** Todo lo que este test no debe reportar hoy, sea por buen motivo o por deuda. */

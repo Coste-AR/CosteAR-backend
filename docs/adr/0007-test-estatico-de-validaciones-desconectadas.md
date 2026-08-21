@@ -35,7 +35,7 @@ Se agrega `tests/config/validaciones-enchufadas.test.ts`, un **test estático si
 Lleva **dos** diccionarios, con las mismas guardas que `EXENTAS` en `rls-coverage.test.ts` (sin fantasmas, sin contradicciones, sin placeholders):
 
 - `EXENCIONES` — casos legítimos y permanentes: las cuatro rutas que solo consume el frontend, cada una con el archivo y la línea que la llama.
-- `DEUDA_CONOCIDA` — los cinco hallazgos vivos, **cada uno con su issue**: `allocation-check` (#100), `desperdicio.ts` (#92), `reglas-alerta.ts` (#74), y `activo-amortizable.ts` / `parametros-costeo.ts` (hallazgos nuevos, todavía sin issue propio).
+- `DEUDA_CONOCIDA` — los cinco hallazgos vivos, **cada uno con su issue**: `allocation-check` (#100), `desperdicio.ts` (#92), `reglas-alerta.ts` (#74), `parametros-costeo.ts` (#115) y `activo-amortizable.ts` (#116), los dos hallazgos nuevos que destapó este test.
 
 **Se entrega en verde**, con los cinco hallazgos anotados como deuda. Un test agregado en rojo dejaría el CI de `dev` rojo de forma permanente hasta que se cierren cinco issues ajenos, y eso choca de frente con `PR-02` y `GIT-05`. Peor: un CI rojo crónico hace que la gente deje de mirarlo, y lo primero que se pierde con eso son los hallazgos **nuevos**, que es lo único que este archivo aporta y los issues no.
 
@@ -65,7 +65,7 @@ Para que "deuda" no sea un sinónimo cómodo de "silenciado", **hay un test que 
 - **El test solo ve este repo.** `CosteAR-frontend` es otro repositorio, así que una ruta que solo consume la web se vería muerta desde acá. Se resuelve con exenciones que citan archivo y línea del frontend — verificable a mano, pero **se desactualiza en silencio** si el frontend deja de llamarla.
 - Heurísticas de texto sobre el código fuente: reconoce `app.get('…')` literal. Una ruta armada dinámicamente se le escapa.
 - **El CI queda en verde con cinco problemas abiertos adentro.** Es el costo real de esta decisión: quien mire solamente el semáforo no se entera de que existen. La mitigación es que `DEUDA_CONOCIDA` es un inventario legible, con su issue por línea, y que la guarda del issue impide agrandarlo en silencio.
-- **`activo-amortizable.ts` y `parametros-costeo.ts` entran a la deuda sin issue propio.** Es la entrada más floja de la lista y hay que cerrarla abriendo esos issues.
+- **Dos de los cinco los encontró este test, no una persona** (#115 y #116). Eso es a favor del test y en contra del proceso: eran una tabla, una migración, una política de RLS y su lógica de dominio, todo mergeado, sin nadie que las leyera.
 
 **Qué se rompe si alguien la revierte sin leer esto**
 
@@ -82,4 +82,4 @@ Hoy: **7 en verde**, con los cinco hallazgos en `DEUDA_CONOCIDA`.
 Dos comprobaciones que valen más que el verde:
 
 1. **Sigue cazando lo nuevo.** Agregar un archivo cualquiera bajo `src/domain/` que nadie importe pone el test en rojo en la corrida siguiente. Verificado el 20-08 con un archivo descartable.
-2. **La deuda se vacía sola.** Cada vez que se cierra uno de los issues #100, #92 o #74, se borra su línea. El día que `DEUDA_CONOCIDA` quede vacío, el patrón está cerrado.
+2. **La deuda se vacía sola.** Cada vez que se cierra uno de los issues #100, #92, #74, #115 o #116, se borra su línea. El día que `DEUDA_CONOCIDA` quede vacío, el patrón está cerrado.
