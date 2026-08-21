@@ -118,12 +118,18 @@ export class CostStructureService {
     return structure;
   }
 
-  async listByCompany(userId: string, companyId: string, includeDeleted = false) {
+  async listByCompany(userId: string, companyId: string, includeDeleted = false, cursor?: string, limit = 50) {
     await this.requireCompany(userId, companyId);
-    return this.db.costStructure.findMany({
+    const take = limit + 1;
+    const structures = await this.db.costStructure.findMany({
       where: { companyId, userId, ...(includeDeleted ? {} : { deletedAt: null }) },
       orderBy: [{ deletedAt: 'asc' }, { period: 'desc' }],
+      take,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
+    const hasMore = structures.length === take;
+    const items = hasMore ? structures.slice(0, limit) : structures;
+    return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
   }
 
 

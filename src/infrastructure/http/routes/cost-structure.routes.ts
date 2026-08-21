@@ -50,11 +50,21 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     { preHandler: authenticate },
     async (request) => {
       const { companyId } = companyIdParam.parse(request.params);
-      const { includeDeleted } = z
-        .object({ includeDeleted: z.coerce.boolean().optional() })
+      const { includeDeleted, cursor, limit } = z
+        .object({
+          includeDeleted: z.coerce.boolean().optional(),
+          cursor: z.string().optional(),
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+        })
         .parse(request.query);
-      const list = await service.listByCompany(request.authUser!.id, companyId, includeDeleted);
-      return { data: list };
+      const { items, nextCursor } = await service.listByCompany(
+        request.authUser!.id,
+        companyId,
+        includeDeleted,
+        cursor,
+        limit,
+      );
+      return { data: items, nextCursor };
     },
   );
 
