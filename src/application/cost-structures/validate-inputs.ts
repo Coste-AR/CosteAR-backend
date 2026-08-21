@@ -75,6 +75,22 @@ export function validateCalculationInputs(input: CalculationInput): void {
       'No hay conceptos de CIF cargados (alquiler, energía, etc.) — el presupuesto de los centros productivos no se puede derivar sin ellos.',
     );
   }
+
+  // Allocation-check (issue #100 / L1): los centros de servicio sin base de
+  // distribución hacen que su costo desaparezca en la pasada directa (bug
+  // cerrado en #91). Detectarlo ACÁ —antes de correr el motor— da un 422
+  // accionable con el nombre del centro, no un error crudo más abajo.
+  const withDist = new Set(input.indirectCosts.serviceDistributions.map((d) => d.serviceCenterId));
+  const services = input.indirectCosts.centers.filter((c) => c.type === 'service');
+  for (const svc of services) {
+    if (!withDist.has(svc.id)) {
+      throw new MissingInputError(
+        `indirectCosts.serviceDistributions.${svc.id}`,
+        `El centro de servicio "${svc.name}" no tiene base de distribución asignada. ` +
+          'Asignale una base de distribución antes de calcular — sin ella su costo desaparece del resultado.',
+      );
+    }
+  }
 }
 
 /** Traduce cualquier error crudo del motor (JS `Error`) a un 422 accionable. */
