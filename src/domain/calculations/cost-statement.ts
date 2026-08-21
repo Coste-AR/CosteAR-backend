@@ -16,6 +16,7 @@ import { Percentage } from '../value-objects/percentage.js';
  *   5  Mano de Obra Directa                (+)
  *   6  CIP Aplicados                       (+)
  *   7  = COSTO NORMAL DE PRODUCCIÓN DEL PERÍODO
+ *   7a Trabajos de terceros                (+)
  *   7b Variación presupuesto               (±)
  *   7c = COSTO REAL DE PRODUCCIÓN
  *   7d Recupero de desperdicio             (−)
@@ -64,6 +65,17 @@ export interface CostStatementInput {
    * CIP real contra el cual comparar— y además deja intacto el resultado de
    * cualquier cálculo anterior a que este renglón existiera.
    */
+  /**
+   * TRABAJOS DE TERCEROS del período (#90).
+   *
+   * Procesos mandados a hacer afuera que son parte del costo de producción.
+   * SUMAN, y suman **por separado de los CIP**: la cátedra (clase 20) los
+   * registra aparte justamente porque no se prorratean entre centros ni generan
+   * cuotas ni variaciones. Opcional: sin trabajos de terceros el costo real es
+   * el de siempre.
+   */
+  thirdPartyWork?: Money;
+
   budgetVariance?: Money;
 
   /**
@@ -109,7 +121,9 @@ export interface CostStatementResult {
   productionCost: Money;
   /** (7b) La variación presupuesto que se incorporó al costo. Cero si no se pasó. */
   budgetVariance: Money;
-  /** (7c) Costo REAL de producción = normal + variación presupuesto. */
+  /** (7a) Trabajos de terceros incorporados al costo. Cero si no se pasaron. */
+  thirdPartyWork: Money;
+  /** (7c) Costo REAL de producción = normal + trabajos de terceros + variación presupuesto. */
   realProductionCost: Money;
   /** (7d) Recupero de la merma normal, restado del costo. Cero si no se pasó. */
   wasteRecovery: Money;
@@ -141,9 +155,10 @@ export function calcCostStatement(input: CostStatementInput): CostStatementResul
     .add(input.directLabor)
     .add(input.indirectCostsApplied);
 
-  // (7b–7c) Costo REAL = normal ± variación presupuesto.
+  // (7a–7c) Costo REAL = normal + trabajos de terceros ± variación presupuesto.
+  const thirdPartyWork = input.thirdPartyWork ?? Money.zero();
   const budgetVariance = input.budgetVariance ?? Money.zero();
-  const realProductionCost = productionCost.add(budgetVariance);
+  const realProductionCost = productionCost.add(thirdPartyWork).add(budgetVariance);
 
   // (7d–7e) Desperdicio (R5). Los dos renglones RESTAN:
   //   · el recupero, porque reduce el costo de los materiales (clase 4);
@@ -171,6 +186,7 @@ export function calcCostStatement(input: CostStatementInput): CostStatementResul
   return {
     rawMaterialConsumed,
     productionCost,
+    thirdPartyWork,
     budgetVariance,
     realProductionCost,
     wasteRecovery,
