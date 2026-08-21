@@ -59,7 +59,8 @@ el período abierto, igual que los datos de venta.
 **A favor**
 
 - El estado de costos queda completo: ya tiene todos los renglones de la estructura canónica.
-- El dato entra por la ruta de Costos Indirectos que **ya existe**, sin migración ni endpoint nuevo.
+- El dato vive **donde corresponde**: fuera de la config de CIP, así que nadie lo confunde con un concepto a prorratear.
+- Se versiona append-only y se espeja en el período, con el mismo patrón ya probado de los datos de venta.
 - Una estructura que no manda nada afuera no cambia en nada: el default es 0.
 
 **En contra / lo que aceptamos pagar**
