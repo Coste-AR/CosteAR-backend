@@ -116,6 +116,7 @@ Se abren con `/costear-pr`. La plantilla de `.github/pull_request_template.md` s
 |**DOC-02**|`DECISIONES.md` es **registro histórico** de la implementación de Trazabilidad Total v1. **No agregar nada nuevo ahí** — va a `docs/adr/`.|
 |**DOC-03**|Al cerrar una sesión de trabajo, correr `/costear-bitacora`: escribe la entrada en `CosteAR-admin/bitacora/` para que el equipo no técnico sepa qué pasó.|
 |**DOC-04**|Los diseños largos previos a implementar siguen yendo a `docs/plans/YYYY-MM-DD-slug.md`, como ya se venía haciendo.|
+|**DOC-05**|**Runbook de deploy**: `docs/runbook-deploy.md`. Leerlo antes de promover cualquier rama a `staging` o `main`. Actualizarlo después de cada deploy real.|
 
 ---
 
