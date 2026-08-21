@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { Money } from '@/domain/value-objects/money.js';
 import { calcCostStatement } from '@/domain/calculations/cost-statement.js';
 import { runCalculation, type CalculationInput } from '@/domain/calculations/calculate.js';
-import { indirectCostConfigSchema } from '@/shared/schemas/cost.schema.js';
+import {
+  indirectCostConfigSchema,
+  updateThirdPartyWorkSchema,
+} from '@/shared/schemas/cost.schema.js';
 
 /**
  * #90 (segunda parte) — Los TRABAJOS DE TERCEROS del estado de costos.
@@ -125,11 +128,13 @@ describe('#90 — trabajos de terceros en el estado de costos', () => {
           centers: [{ id: 'unico', name: 'Único', type: 'productive' }],
           concepts: [{ name: 'CIF', amount: { fixed: 0, variable: 0 }, distribution: { unico: 1 } }],
           serviceDistributions: [],
-          ...(thirdPartyWork !== undefined ? { thirdPartyWork } : {}),
           productiveSettings: [
             { centerId: 'unico', normalCapacity: 100, actualActivity: 100, actualCip: 0 },
           ],
         }),
+        // Dato PROPIO del período: no viaja dentro de la config de costos
+        // indirectos, aunque en pantalla se cargue al lado (ADR 0009).
+        ...(thirdPartyWork !== undefined ? { thirdPartyWork } : {}),
         inventory: { initialWorkInProcess: 0, finalWorkInProcess: 0, initialFinishedGoods: 0, finalFinishedGoods: 0 },
         sales: { unitPrice: 3000, quantity: 100, productionQuantity: 100 },
       };
@@ -161,28 +166,30 @@ describe('#90 — trabajos de terceros en el estado de costos', () => {
       expect(con).toBeCloseTo(1250, 6);
     });
 
-    it('una estructura sin el campo se lee igual que antes (default 0)', () => {
-      // Retrocompatibilidad: el JSON ya persistido no tiene `thirdPartyWork`, y
-      // volverlo impasable convertiría un dato viejo en un error al leer.
+    it('sin el dato, el cálculo es idéntico al de antes de que existiera', () => {
+      // Retrocompatibilidad: la columna nace con default 0 y el input lo trata
+      // como opcional, así que una estructura vieja calcula exactamente igual.
+      const r = runCalculation(caso());
+      expect(r.thirdPartyWork).toBe(0);
+      expect(r.realProductionCost).toBeCloseTo(r.productionCost, 6);
+    });
+
+    it('el endpoint rechaza un importe negativo', () => {
+      expect(() => updateThirdPartyWorkSchema.parse({ thirdPartyWork: -100 })).toThrow();
+      expect(updateThirdPartyWorkSchema.parse({ thirdPartyWork: 25000 }).thirdPartyWork).toBe(25000);
+    });
+
+    it('NO viaja dentro de la config de costos indirectos', () => {
+      // Es la regla del ADR 0009: si alguien lo devuelve al JSON de la sección,
+      // termina sumado a los conceptos y diluido en las cuotas.
       const cfg = indirectCostConfigSchema.parse({
         centers: [{ id: 'unico', name: 'Único', type: 'productive' }],
         concepts: [{ name: 'CIF', amount: { fixed: 0, variable: 0 }, distribution: { unico: 1 } }],
         serviceDistributions: [],
+        thirdPartyWork: 25000,
         productiveSettings: [{ centerId: 'unico', normalCapacity: 100, actualActivity: 100, actualCip: 0 }],
       });
-      expect(cfg.thirdPartyWork).toBe(0);
-    });
-
-    it('el schema rechaza un importe negativo', () => {
-      expect(() =>
-        indirectCostConfigSchema.parse({
-          centers: [{ id: 'unico', name: 'Único', type: 'productive' }],
-          concepts: [{ name: 'CIF', amount: { fixed: 0, variable: 0 }, distribution: { unico: 1 } }],
-          serviceDistributions: [],
-          thirdPartyWork: -100,
-          productiveSettings: [{ centerId: 'unico', normalCapacity: 100, actualActivity: 100, actualCip: 0 }],
-        }),
-      ).toThrow();
+      expect((cfg as Record<string, unknown>).thirdPartyWork).toBeUndefined();
     });
   });
 });

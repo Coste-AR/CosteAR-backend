@@ -73,6 +73,17 @@ export interface CalculationInput {
    * listado como pendiente — elegir por el costista sería peor que no calcular.
    */
   desperdicios?: DesperdicioRegistrado[];
+  /**
+   * TRABAJOS DE TERCEROS del período (#90, ADR 0009): procesos mandados a hacer
+   * afuera que son parte del costo de producción.
+   *
+   * Es un dato PROPIO del período, no una parte de los costos indirectos: la
+   * cátedra (clase 20) los registra por separado de los CIP porque no se
+   * prorratean entre centros ni generan cuotas. Por eso entra acá y no dentro de
+   * `indirectCosts` — si viviera ahí, la próxima persona lo sumaría a los
+   * conceptos "para simplificar" y se diluiría en las cuotas.
+   */
+  thirdPartyWork?: number | null;
   inventory: InventoryInput;
   sales: {
     unitPrice: number;
@@ -797,7 +808,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     // el prorrateo ni por las cuotas, así que se suman acá enteros. Si se
     // hubieran tratado como un concepto de CIF, ya estarían repartidos entre los
     // centros y sumarlos otra vez sería contarlos dos veces.
-    thirdPartyWork: Money.of(input.indirectCosts.thirdPartyWork ?? 0),
+    thirdPartyWork: Money.of(input.thirdPartyWork ?? 0),
     budgetVariance: budgetVarianceTotal,
     // R5 (#92). La merma NORMAL no se pasa a propósito: ya está adentro del
     // costo —se consumió— y las unidades buenas la absorben sin cálculo
