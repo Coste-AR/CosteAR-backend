@@ -11,6 +11,7 @@ import {
   createCostStructureSchema,
   updateLateDataPolicySchema,
   updateSalesSchema,
+  updateThirdPartyWorkSchema,
 } from '../../../shared/schemas/cost.schema.js';
 import { captureMethodSchema } from '../../../shared/schemas/trazabilidad.schema.js';
 
@@ -221,6 +222,22 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     );
     return { data: updated };
   });
+
+  app.put(
+    '/cost-structures/:id/third-party-work',
+    { preHandler: authenticate },
+    async (request) => {
+      const { id } = idParam.parse(request.params);
+      const { thirdPartyWork } = updateThirdPartyWorkSchema.parse(request.body);
+      const updated = await service.updateThirdPartyWork(
+        request.authUser!.id,
+        id,
+        thirdPartyWork,
+        auditContext(request),
+      );
+      return { data: updated };
+    },
+  );
 
   app.post('/cost-structures/:id/calculate', { preHandler: authenticate }, async (request) => {
     const { id } = idParam.parse(request.params);

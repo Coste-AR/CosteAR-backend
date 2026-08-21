@@ -621,6 +621,63 @@ export class CostStructureService {
   }
 
   /**
+   * TRABAJOS DE TERCEROS del período (#90, ADR 0009).
+   *
+   * Procesos mandados a hacer afuera —un tratamiento térmico, un bordado, un
+   * flete de proceso— que son parte del costo de producción y van como renglón
+   * propio del estado de costos, entre el costo normal y el real.
+   *
+   * Tiene endpoint y columna propios, y NO vive dentro de la config de costos
+   * indirectos, aunque en pantalla se cargue al lado: la cátedra (clase 20) los
+   * registra por separado de los CIP porque **no se prorratean entre centros ni
+   * generan cuotas**. Si compartiera el JSON con los conceptos, tarde o temprano
+   * alguien lo suma ahí "para simplificar" y se diluye en las cuotas — el costo
+   * total daría parecido y el de cada centro quedaría mal.
+   *
+   * Mismo patrón que los datos de venta: versión append-only de la config (R1),
+   * columna vigente, espejo en el período abierto y auditoría, todo en la misma
+   * transacción (R2).
+   */
+  async updateThirdPartyWork(
+    userId: string,
+    id: string,
+    thirdPartyWork: number,
+    ctx: AuditContext,
+  ) {
+    const before = await this.requireStructure(userId, id);
+
+    return this.db.$transaction(async (tx) => {
+      // Un mes cerrado no se edita: sus números ya se dieron por buenos.
+      const period = await requireWritablePeriod(tx, id);
+
+      await this.appendConfigVersion(tx, id, 'thirdPartyWork', { thirdPartyWork }, userId);
+
+      const updated = await tx.costStructure.update({
+        where: { id },
+        data: { thirdPartyWork },
+      });
+
+      if (period) {
+        await tx.costPeriod.update({ where: { id: period.id }, data: { thirdPartyWork } });
+      }
+
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_structure.third_party_work.update',
+          entityType: 'CostStructure',
+          entityId: id,
+          oldValue: { thirdPartyWork: before.thirdPartyWork },
+          newValue: { thirdPartyWork },
+        },
+        tx,
+      );
+      return updated;
+    });
+  }
+
+  /**
    * Ejecuta el motor de cálculo sobre la configuración persistida y guarda un
    * snapshot inmutable. Devuelve el resultado.
    */
@@ -662,6 +719,8 @@ export class CostStructureService {
       rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
+      // #90 — dato propio del período, no parte de los costos indirectos.
+      thirdPartyWork: Number(s.thirdPartyWork ?? 0),
       inventory: inventorySchema.parse(inventoryOverride ?? {}),
       sales: {
         unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,

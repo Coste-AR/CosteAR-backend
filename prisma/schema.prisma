@@ -430,6 +430,19 @@ model CostPeriod {
    */
   productionQuantity Decimal? @db.Decimal(18, 4)
 
+  /**
+   * TRABAJOS DE TERCEROS del período: procesos mandados a hacer afuera (un
+   * tratamiento térmico, un bordado, un flete de proceso) que son parte del
+   * costo de producción.
+   *
+   * ⚠️ NO son un CIP y NO se prorratean. La cátedra (clase 20) los registra por
+   * separado de los costos indirectos justamente porque no se reparten entre
+   * centros ni generan cuotas: van derecho al estado de costos, entre el costo
+   * normal y el real. Si alguien los mueve a los conceptos de CIF, se diluyen en
+   * las cuotas y el costo de cada centro queda mal. Ver ADR 0009.
+   */
+  thirdPartyWork Decimal @default(0) @db.Decimal(18, 4)
+
   // Cierre: congela el período. `closedRunId` apunta al cálculo que quedó fijo.
   closedAt    DateTime? @db.Timestamptz
   closedBy    String?   @db.Uuid
@@ -573,6 +586,19 @@ model CostStructure {
    * Unidades PRODUCIDAS (costo unitario). Si no está, se cae a las vendidas.
    */
   productionQuantity Decimal? @db.Decimal(18, 4)
+
+  /**
+   * TRABAJOS DE TERCEROS del período: procesos mandados a hacer afuera (un
+   * tratamiento térmico, un bordado, un flete de proceso) que son parte del
+   * costo de producción.
+   *
+   * ⚠️ NO son un CIP y NO se prorratean. La cátedra (clase 20) los registra por
+   * separado de los costos indirectos justamente porque no se reparten entre
+   * centros ni generan cuotas: van derecho al estado de costos, entre el costo
+   * normal y el real. Si alguien los mueve a los conceptos de CIF, se diluyen en
+   * las cuotas y el costo de cada centro queda mal. Ver ADR 0009.
+   */
+  thirdPartyWork Decimal @default(0) @db.Decimal(18, 4)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

@@ -30,6 +30,7 @@ import { registerJointCostRoutes } from './routes/joint-cost.routes.js';
 import { registerProcessCalculationRoutes } from './routes/process-calculation.routes.js';
 import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
+import { healthPayload } from './health.js';
 import { registerVaultRoutes } from './routes/vault.routes.js';
 import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
@@ -142,7 +143,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   }
 
   // --- Healthcheck ---
-  app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));
+  // Devuelve QUÉ VERSIÓN está corriendo, no solo que el proceso está vivo.
+  // El payload vive en `health.ts` para poder testearlo sin construir la app
+  // entera (que necesita base, y el CI unitario no la levanta).
+  app.get('/health', async () => healthPayload());
 
   // --- Demo de Trazabilidad Total v1 ---
   // Arnés de verificación estático (HTML+JS vanilla, sin build step) porque
