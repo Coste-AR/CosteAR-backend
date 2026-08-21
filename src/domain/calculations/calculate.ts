@@ -211,6 +211,26 @@ export interface CalculationOutput {
     unitCost: {
       unitsProduced: number;
       unitProductionCost: number;  // costo de producción ÷ unidades producidas
+      /**
+       * Costo de PRODUCTOS TERMINADOS ÷ unidades terminadas.
+       *
+       * El renglón de arriba (`unitProductionCost`) divide el costo de
+       * PRODUCCIÓN DEL PERÍODO, que es la definición de la cátedra —clase 2,
+       * práctica resuelta: $2.306.000 ÷ 4.612 kg = $500/kg— y va ANTES de
+       * ajustar por producción en proceso. Ese número, por definición, no se
+       * mueve cuando queda trabajo a medio terminar.
+       *
+       * El costo de productos terminados sí pasa por la producción en proceso:
+       *
+       *     costo de producción + EI prod. en proceso − EF prod. en proceso
+       *
+       * Es el costo de lo que efectivamente salió terminado, y es el que hay
+       * que mirar para poner precio en un período donde no se terminó todo. Se
+       * agrega como número aparte en vez de cambiar el de arriba: los dos son
+       * renglones distintos del estado de costos y la cátedra los muestra a los
+       * dos (issue #89, ADR 0006).
+       */
+      unitFinishedGoodsCost: number;
       unitCostOfGoodsSold: number; // COGS ÷ unidades producidas
       /**
        * De dónde salió el divisor. `'vendidas'` significa que NO se cargó la
@@ -722,6 +742,13 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
   const unitProductionCost = unitsProduced > 0
     ? statement.productionCost.divide(unitsProduced).toNumber()
     : 0;
+  // Costo unitario de PRODUCTOS TERMINADOS (#89). El numerador ya lo calculaba
+  // `cost-statement.ts` —costo de producción + EI prod. en proceso − EF prod. en
+  // proceso— y no se usaba en ningún lado: era el único número del motor donde
+  // la producción en proceso podía entrar, y no entraba a ninguno.
+  const unitFinishedGoodsCost = unitsProduced > 0
+    ? statement.finishedGoodsCost.divide(unitsProduced).toNumber()
+    : 0;
   const unitCostOfGoodsSold = unitsProduced > 0
     ? statement.costOfGoodsSold.divide(unitsProduced).toNumber()
     : 0;
@@ -833,7 +860,13 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
         },
       },
       indirectCosts: { perDepartment },
-      unitCost: { unitsProduced, unitProductionCost, unitCostOfGoodsSold, basadoEn },
+      unitCost: {
+        unitsProduced,
+        unitProductionCost,
+        unitFinishedGoodsCost,
+        unitCostOfGoodsSold,
+        basadoEn,
+      },
     },
     raw: { materials, labor, indirectPerDepartment, statement, margin },
   };
