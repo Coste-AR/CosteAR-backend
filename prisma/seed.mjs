@@ -8,9 +8,15 @@ import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-const DEMO_EMAIL = 'demo@costear.com';
-const DEMO_PASSWORD = 'CosteAR2026!';
+const DEMO_EMAIL = process.env.DEMO_EMAIL;
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
 const PEPPER = process.env.ARGON2_PEPPER ?? '';
+
+if (!DEMO_EMAIL || !DEMO_PASSWORD) {
+  console.error('Error: DEMO_EMAIL y DEMO_PASSWORD son obligatorios.');
+  console.error('Definílos en .env o exportálos antes de correr el seed.');
+  process.exit(1);
+}
 
 const catedra = {
   rawMaterialConfig: {
