@@ -218,19 +218,37 @@ Devuelve:
 > Si dice `"desconocido"`, es que la variable no está: el endpoint **no inventa** un valor, porque
 > un SHA plausible pero falso es peor que ninguno.
 
-> ⚠️ **Hueco de infra** — completar:
-> - URL de Railway para staging: `_______________`
-> - URL de Railway para main: `_______________`
-> - ¿El endpoint `/health` expone el SHA del commit? Si no, agregar `git rev-parse --short HEAD` al response.
+> ✅ **Desde el 22-08 esto lo verifica el CI solo.** El workflow **Smoke post-deploy**
+> (`.github/workflows/post-deploy-smoke.yml`) corre después de cada push a `staging` o `main`,
+> consulta `/health` hasta 12 veces y **falla en rojo si el ambiente no termina sirviendo el commit
+> que se mergeó**. Ya no hay que acordarse de mirar: si no aparece en Actions, el deploy no llegó.
+>
+> Para re-verificar un ambiente sin pushear nada: Actions → *Smoke post-deploy* → **Run workflow**.
+>
+> ⚠️ **Hueco de infra que queda** — el workflow necesita las URLs **públicas** de Railway, cargadas
+> como variables de repositorio en *Settings → Secrets and variables → Actions → Variables*:
+> - `STAGING_HEALTH_URL`: `_______________`
+> - `MAIN_HEALTH_URL`: `_______________`
+>
+> La URL **interna** (`.railway.internal`) no sirve: no resuelve desde afuera de Railway. Mientras
+> falten, el workflow **falla diciendo cuál falta** en vez de dar un verde vacío.
 
 ### Verificar el SHA que quedó corriendo
 
+Lo hace el CI. A mano, si hace falta:
+
 ```bash
-# Desde el repo local, el SHA de staging después del deploy debería ser:
+# El SHA que debería estar corriendo:
 git rev-parse origin/staging
 
-# Comparar con lo que reporta el health check o los logs de Railway.
+# Y el mismo chequeo que corre el workflow, desde cualquier máquina:
+node scripts/smoke-deploy.mjs --url https://<URL_RAILWAY_STAGING> --sha $(git rev-parse origin/staging)
 ```
+
+> El script distingue tres situaciones que a ojo se confunden: **el ambiente todavía sirve la
+> versión anterior** (sigue esperando), **no responde** (reiniciando o caído, sigue esperando) y
+> **dice `desconocido`** (falta `RAILWAY_GIT_COMMIT_SHA`, aborta enseguida porque esperar no lo
+> arregla).
 
 ### Qué mirar en Sentry
 

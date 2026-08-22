@@ -1,0 +1,77 @@
+# ¿EL DEPLOY LLEGÓ DE VERDAD?
+#
+# Después de cada push a `staging` o `main`, Railway deploya solo. Este job
+# espera a que el ambiente sirva EXACTAMENTE el commit que se acaba de mergear
+# y, si no aparece, falla en rojo.
+#
+# Reemplaza el paso manual del runbook —«anotá el SHA después de cada deploy»—
+# que nunca se ejecutó. Durante la auditoría del 20-08 la pregunta «¿esto está
+# afectando al cliente?» quedó sin respuesta TRES veces por no saber qué versión
+# corría dónde.
+#
+# ⚠️ Necesita las variables de repositorio STAGING_HEALTH_URL y MAIN_HEALTH_URL
+#    (Settings → Secrets and variables → Actions → Variables). Son las URLs
+#    PÚBLICAS de Railway: la interna `.railway.internal` no resuelve desde acá.
+#    Si faltan, el job lo dice y falla — no da un verde vacío.
+name: Smoke post-deploy
+
+on:
+  push:
+    branches: [ "staging", "main" ]
+  # Para poder re-verificar un ambiente sin pushear nada.
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente a verificar
+        type: choice
+        options: [ staging, main ]
+        default: staging
+
+jobs:
+  verificar-version-deployada:
+    runs-on: ubuntu-latest
+    # `staging` tiene un cliente real: si el deploy no llegó, hay que enterarse.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Elegir la URL del ambiente
+        id: ambiente
+        env:
+          RAMA: ${{ github.event.inputs.ambiente || github.ref_name }}
+          STAGING_URL: ${{ vars.STAGING_HEALTH_URL }}
+          MAIN_URL: ${{ vars.MAIN_HEALTH_URL }}
+        run: |
+          if [ "$RAMA" = "main" ]; then URL="$MAIN_URL"; else URL="$STAGING_URL"; fi
+
+          if [ -z "$URL" ]; then
+            if [ "$RAMA" = "main" ]; then VAR=MAIN_HEALTH_URL; else VAR=STAGING_HEALTH_URL; fi
+            echo "::error::Falta la URL pública de '$RAMA'. Cargar la variable de repositorio $VAR en Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Verificando el ambiente de '$RAMA'."
+
+      # Railway recién arranca el build cuando GitHub le avisa del push, y antes
+      # de servir corre `db:setup` (migraciones + políticas RLS). Preguntar de
+      # entrada garantiza un primer intento perdido; se le da ventaja.
+      - name: Darle tiempo al build de Railway
+        run: sleep 45
+
+      - name: El ambiente tiene que estar sirviendo este commit
+        run: node scripts/smoke-deploy.mjs --url "${{ steps.ambiente.outputs.url }}" --sha "${{ github.sha }}" --intentos 12 --espera 15
+
+      - name: Qué mirar si esto falló
+        if: failure()
+        run: |
+          echo "::notice::El ambiente no está sirviendo ${{ github.sha }}."
+          echo "1. Logs de deploy en Railway: ¿falló el build o el preDeployCommand?"
+          echo "2. Una migración a medio aplicar bloquea CUALQUIER deploy (P3009):"
+          echo "   ver docs/runbook-deploy.md, Paso 0."
+          echo "3. Si el ambiente responde 'desconocido', falta RAILWAY_GIT_COMMIT_SHA."
