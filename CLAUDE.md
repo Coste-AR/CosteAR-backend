@@ -159,6 +159,7 @@ Se abren con `/costear-pr`. La plantilla de `.github/pull_request_template.md` s
 |**PR-05**|**Para mergear se usa `gh pr merge --auto --squash`**, no el botón a mano. GitHub mergea solo cuando el CI pasa: nadie espera mirando la pantalla y nadie mergea en el medio. *(En `CosteAR-admin` no está disponible: es privado y el plan Free no lo incluye.)*|
 |**PR-06**|**Después de mergear, verificar que el trabajo LLEGÓ** (`git log origin/dev`), no que el PR figura en verde. Un PR apilado mergeado contra su rama de abajo aparece como `MERGED` y el trabajo no llega. Pasó 3 veces entre el 20 y el 21-08.|
 |**PR-07**|**`main` es el único que publica.** `staging` → ambiente *staging* (**pre-producción**, acá se prueba); `main` → ambiente *production* (**producción**). Promover a `staging` es probar, promover a `main` es publicar. La verificación la hace el CI: el workflow *Smoke post-deploy* consulta `/health` del ambiente que le toca a la rama y **falla si no termina sirviendo el commit mergeado**. No se anota el SHA a mano ni se mira Railway: si el job está verde, el deploy llegó.|
+|**PR-08**|**Lo que cambió el 22-08 y por qué está en `docs/2026-08-22-cambios-de-flujo-y-ambientes.md`.** Leerlo antes de abrir el primer PR o tocar un ambiente: explica el flujo nuevo, el mapa de ambientes y las alternativas que ya se descartaron, para no rediscutirlas.|
 
 ---
 
