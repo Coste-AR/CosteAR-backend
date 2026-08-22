@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { classifyDocument } from '../../src/infrastructure/classifier/cascade-classifier.js';
+
+// `classifyDocument` llega a la API de Groq y una llamada normal tarda ~4,9s,
+// justo en el borde del timeout por defecto de 5000ms. Cuando la cuota del free
+// tier aprieta, estos tests fallan por TIEMPO y no por comportamiento. Ver la
+// nota extendida en waste-intent.test.ts.
+vi.setConfig({ testTimeout: 30_000 });
 
 const BASE = { costistId: 'c-001', companyId: 'co-001', dataEntryId: 'de-001' };
 
@@ -19,9 +25,13 @@ describe('classifyDocument — conflicto entre capas (cero errores silenciosos)'
   });
 
   it('SÍ auto-clasifica un recibo de sueldo aunque mencione el CUIT del empleador (ruido débil, no conflicto)', async () => {
+    // El puesto está declarado a propósito: lo que este test mide es que el CUIT
+    // del empleador no genere un conflicto de TIPO de documento (recibo vs
+    // factura). Sin puesto, el documento escalaría por la corrección CL-02 y el
+    // test dejaría de medir lo que dice medir.
     const text = `
       RECIBO DE SUELDO
-      Empleado: María González  CUIL 27-28765432-1
+      Empleado: María González — operaria de línea  CUIL 27-28765432-1
       CUIT empleador: 30-11111111-2
       OBRA SOCIAL: OSDE   ANSES
       SUELDO BÁSICO

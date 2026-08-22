@@ -23,7 +23,10 @@ const confirmSchema = z.object({
       companyId: z.string(),
       companyName: z.string(),
       rawContent: z.string().min(1).max(5000),
-      costSection: z.enum(['MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS', 'DESCONOCIDO']),
+      costSection: z.enum([
+        'MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS',
+        'GASTO_COMERCIALIZACION', 'GASTO_ADMINISTRACION', 'GASTO_FINANCIERO', 'DESCONOCIDO',
+      ]),
       documentType: z.string(),
       estimatedImpact: z.string().optional(),
     })
@@ -60,5 +63,20 @@ export async function registerCostitaChatRoutes(app: FastifyInstance): Promise<v
     const input = confirmSchema.parse(request.body);
     const result = await svc.confirm(request.authUser!.id, input);
     return reply.status(201).send({ data: result });
+  });
+
+  /**
+   * POST /costista-chat/feedback
+   * El costista reporta explícitamente un error o sugerencia.
+   */
+  app.post('/costista-chat/feedback', { preHandler: authenticate }, async (request, reply) => {
+    const feedbackSchema = z.object({
+      message: z.string().min(1),
+      type: z.enum(['ASSISTANT_MISS', 'IMPROVEMENT_REPORT']),
+      details: z.string().optional()
+    });
+    const input = feedbackSchema.parse(request.body);
+    await svc.submitFeedback(request.authUser!.id, input);
+    return reply.status(201).send({ success: true });
   });
 }

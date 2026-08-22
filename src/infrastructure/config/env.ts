@@ -32,6 +32,16 @@ const envSchema = z.object({
 
   GROQ_API_KEY: z.string().min(1).default('groq_placeholder'),
 
+  // IA — Voyage AI (embeddings para indexar la bóveda de costeo)
+  VOYAGE_API_KEY: z.string().min(1).default('voyage_placeholder'),
+
+  WHATSAPP_VERIFY_TOKEN: z.string().min(1).default('whatsapp_verify_placeholder'),
+  WHATSAPP_API_TOKEN: z.string().min(1).default('whatsapp_api_placeholder'),
+  // App Secret de Meta (App Dashboard → Settings → Basic) para verificar la
+  // firma X-Hub-Signature-256 del webhook. Sin esto, el POST rechaza todo
+  // (falla cerrado, no abierto).
+  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),
   INDEC_API_URL: z.string().url().default('https://apis.datos.gob.ar/series/api'),
   // dolarapi.com: API pública sin key para el dólar blue (el BCRA no lo publica).
@@ -46,6 +56,13 @@ const envSchema = z.object({
   ACCESS_GATE_HASH: z
     .string()
     .default('$argon2id$v=19$m=65536,t=3,p=4$MPvy55gNDLwuV9DhPoRgbw$Z4Ag/77XbyG1OBrNA7rMiEG9dYt0/jkHwDRAEfplvVw'),
+
+  SENTRY_DSN: z.string().optional(),
+  // Firma HMAC-SHA256 del webhook de Sentry (header sentry-hook-signature).
+  // Es el "Client Secret" que Sentry muestra al crear la integración interna
+  // (Settings → Developer Settings → tu integración → Webhooks). Sin esto
+  // configurado, el webhook rechaza todo (falla cerrado, no abierto).
+  SENTRY_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

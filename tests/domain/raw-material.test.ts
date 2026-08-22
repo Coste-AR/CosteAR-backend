@@ -5,6 +5,7 @@ import {
   calcStockLedgerPPP,
   type StockMovementInput,
 } from '@/domain/calculations/raw-material.js';
+import { CalcError, DomainError } from '@/domain/errors/domain-error.js';
 
 /**
  * Ground truth: valores exactos de la hoja "1-MP Ejemplo" del Excel v3.0.
@@ -98,6 +99,40 @@ describe('Hoja 1 — Materia Prima', () => {
           { date: '01/01', type: 'purchase', detail: 'X', quantity: 10 },
         ]),
       ).toThrow(/sin costo unitario/);
+    });
+
+    /**
+     * Los dos rechazos de arriba son datos que el costista cargó mal, no bugs
+     * del motor. Si salen como `Error` pelado, el handler HTTP los manda a un 500
+     * "Error interno del servidor" y el mensaje —que es lo único que le dice qué
+     * corregir— se pierde en el log.
+     */
+    it('los dos son errores de dominio 422, no fallas internas', () => {
+      const consumo = () =>
+        calcStockLedgerPPP(100, 800, [
+          { date: '01/01', type: 'consumption', detail: 'X', quantity: 500 },
+        ]);
+      const compra = () =>
+        calcStockLedgerPPP(0, 0, [{ date: '01/01', type: 'purchase', detail: 'X', quantity: 10 }]);
+
+      for (const fn of [consumo, compra]) {
+        expect(fn).toThrow(CalcError);
+        try {
+          fn();
+        } catch (e) {
+          expect(e).toBeInstanceOf(DomainError);
+          expect((e as CalcError).statusCode).toBe(422);
+          expect((e as CalcError).code).toBe('CALC_ERROR');
+        }
+      }
+    });
+
+    it('el mensaje conserva los números del saldo y del consumo', () => {
+      expect(() =>
+        calcStockLedgerPPP(1200, 800, [
+          { date: '15/05', type: 'consumption', detail: 'Orden Prod. 01', quantity: 2000 },
+        ]),
+      ).toThrow('Consumo "Orden Prod. 01" (2000) supera el saldo disponible (1200)');
     });
   });
 });

@@ -1,11 +1,15 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import { Redis } from 'ioredis';
+import { getRedisClient } from '../redis/client.js';
 import { getEnv } from '../config/env.js';
 import { errorHandler } from './error-handler.js';
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { registerAuthRoutes } from './routes/auth.routes.js';
 import { registerAccessGateRoutes } from './routes/access-gate.routes.js';
 import { registerCompanyRoutes } from './routes/company.routes.js';
@@ -14,10 +18,27 @@ import { registerMacroRoutes } from './routes/macro.routes.js';
 import { registerAlertRoutes } from './routes/alert.routes.js';
 import { registerUserRoutes } from './routes/user.routes.js';
 import { registerValidacionesRoutes } from './routes/validaciones.routes.js';
-import { registerDataPointRoutes } from './routes/data-point.routes.js';
 import { registerEmpresaPortalRoutes } from './routes/empresa-portal.routes.js';
 import { registerCostitaChatRoutes } from './routes/costista-chat.routes.js';
 import { registerAdvisorRoutes } from './routes/advisor.routes.js';
+import { registerTrazabilidadRoutes } from './routes/trazabilidad.routes.js';
+import { registerAllocationBaseRoutes } from './routes/allocation-base.routes.js';
+import { registerProcessDepartmentRoutes } from './routes/process-department.routes.js';
+import { registerProcessSetupRoutes } from './routes/process-setup.routes.js';
+import { registerUnitMovementRoutes } from './routes/unit-movement.routes.js';
+import { registerJointCostRoutes } from './routes/joint-cost.routes.js';
+import { registerProcessCalculationRoutes } from './routes/process-calculation.routes.js';
+import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
+import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
+import { healthPayload } from './health.js';
+import { registerVaultRoutes } from './routes/vault.routes.js';
+import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
+import { registerAdminRoutes } from './routes/admin.routes.js';
+import { registerSystemAlertRoutes } from './routes/system-alert.routes.js';
+import { registerBenchmarkRoutes } from './routes/benchmark.routes.js';
+import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
+import { registerTermsRoutes } from './routes/terms.routes.js';
+import { registerIndustryProfileRoutes } from './routes/industry-profile.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -26,6 +47,15 @@ import { registerAdvisorRoutes } from './routes/advisor.routes.js';
  */
 export async function buildApp(): Promise<FastifyInstance> {
   const env = getEnv();
+
+  if (env.SENTRY_DSN) {
+    Sentry.init({
+      dsn: env.SENTRY_DSN,
+      integrations: [nodeProfilingIntegration()],
+      tracesSampleRate: 1.0,
+      profilesSampleRate: 1.0,
+    });
+  }
 
   const app = Fastify({
     logger:
@@ -39,6 +69,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.setErrorHandler(errorHandler);
+
+  if (env.SENTRY_DSN) {
+    Sentry.setupFastifyErrorHandler(app);
+  }
 
   // --- Seguridad de transporte y cabeceras ---
   await app.register(helmet, {
@@ -63,6 +97,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // SIEMPRE, para no depender de que CORS_ORIGIN esté bien seteado en el deploy.
   // Cubre los dos nombres del proyecto ("costear-frontend" y "coste-ar-frontend")
   // y sus URLs de preview. Ej: coste-ar-frontend.vercel.app, coste-ar-frontend-xxx.vercel.app
+  // Nota: no hace falta una entrada para sentry.io acá — el webhook de Sentry
+  // es server-to-server (sin header Origin), CORS no aplica a esa llamada.
+  // Había una entrada así antes (/^https:\/\/.*sentry\.io$/) que además era
+  // bypasseable con dominios tipo "evilsentry.io" — se saca directamente.
   const alwaysAllowed = [
     /^https:\/\/costear-frontend[a-z0-9-]*\.vercel\.app$/,
     /^https:\/\/coste-ar-frontend[a-z0-9-]*\.vercel\.app$/,
@@ -93,15 +131,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   if (env.NODE_ENV !== 'test') {
     // retryStrategy: null → falla inmediato si no hay conexión, no reintenta.
     // connectTimeout: 4 000 ms → no bloquea el startup indefinidamente.
-    const redis = new Redis(env.REDIS_URL, {
-      maxRetriesPerRequest: 0,
-      retryStrategy: () => null,
-      lazyConnect: true,
-      connectTimeout: 4_000,
-    });
-    await redis.connect().catch(() => {
-      app.log.warn('Redis no disponible: rate limit usará memoria local');
-    });
+    const redis = getRedisClient();
     await app.register(rateLimit, {
       global: true,
       max: 120,
@@ -113,7 +143,32 @@ export async function buildApp(): Promise<FastifyInstance> {
   }
 
   // --- Healthcheck ---
-  app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));
+  // Devuelve QUÉ VERSIÓN está corriendo, no solo que el proceso está vivo.
+  // El payload vive en `health.ts` para poder testearlo sin construir la app
+  // entera (que necesita base, y el CI unitario no la levanta).
+  app.get('/health', async () => healthPayload());
+
+  // --- Demo de Trazabilidad Total v1 ---
+  // Arnés de verificación estático (HTML+JS vanilla, sin build step) porque
+  // el repo del frontend real de CosteAR no está disponible en este checkout
+  // — ver DECISIONES.md. Sirve same-origin para no pelear con CORS/CSP.
+  const demoDir = fileURLToPath(new URL('../../../public/demo/', import.meta.url));
+  const demoFiles: Record<string, { file: string; type: string }> = {
+    '/demo': { file: 'index.html', type: 'text/html; charset=utf-8' },
+    '/demo/': { file: 'index.html', type: 'text/html; charset=utf-8' },
+    '/demo/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
+    '/demo/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
+    '/demo/app.js': { file: 'app.js', type: 'application/javascript; charset=utf-8' },
+  };
+  for (const [route, { file, type }] of Object.entries(demoFiles)) {
+    app.get(route, async (_request, reply) => {
+      const content = await readFile(demoDir + file, 'utf-8');
+      reply.header('Content-Type', type).send(content);
+    });
+  }
+
+  // --- Webhooks ---
+  await app.register(registerWhatsappRoutes);
 
   // --- Rutas de la API (versionadas) ---
   const prefix = `/api/${env.API_VERSION}`;
@@ -127,10 +182,25 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerAlertRoutes(api);
       await registerUserRoutes(api);
       await registerValidacionesRoutes(api);
-      await registerDataPointRoutes(api);
       await registerEmpresaPortalRoutes(api);
+      await registerBenchmarkRoutes(api);
       await registerCostitaChatRoutes(api);
       await registerAdvisorRoutes(api);
+      await registerTrazabilidadRoutes(api);
+      await registerAllocationBaseRoutes(api);
+      await registerProcessDepartmentRoutes(api);
+      await registerProcessSetupRoutes(api);
+  await registerUnitMovementRoutes(api);
+      await registerJointCostRoutes(api);
+      await registerProcessCalculationRoutes(api);
+      await registerCostPeriodRoutes(api);
+      await registerDesperdicioRoutes(api);
+      await registerVaultRoutes(api);
+      await registerVaultProposalRoutes(api);
+      await registerAdminRoutes(api);
+      await registerSystemAlertRoutes(api);
+      await registerTermsRoutes(api);
+      await registerIndustryProfileRoutes(api);
     },
     { prefix },
   );

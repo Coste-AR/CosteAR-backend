@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runCalculation, type CalculationInput } from '@/application/cost-structures/calculate.js';
+import { runCalculation, type CalculationInput } from '@/domain/calculations/calculate.js';
 
 /**
  * CASO DE PRUEBA DORADO (test de aceptación — costeo Por Órdenes).
@@ -18,12 +18,17 @@ describe('Caso Dorado — costeo Por Órdenes', () => {
   // Presupuesto OMITIDO a propósito: debe derivarse del prorrateo, no tipearse.
   const input: CalculationInput = {
     rawMaterial: {
-      wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
-      stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
-      initialStock: { quantity: 100, unitCost: 1000 },
-      movements: [
-        { date: '05/01/2026', type: 'purchase', detail: 'Compra', quantity: 400, unitCost: 1200 },
-        { date: '15/01/2026', type: 'consumption', detail: 'Consumo', quantity: 300 },
+      materials: [
+        {
+          name: 'Chapa', code: 'MP-001', unit: 'u',
+          wilson: { annualDemand: 6000, orderCost: 5000, holdingRate: 0.3, unitCost: 1200 },
+          stockPolicy: { minConsumption: 20, maxConsumption: 40, minLeadTime: 5, maxLeadTime: 12, safetyStock: 200 },
+          initialStock: { quantity: 100, unitCost: 1000 },
+          movements: [
+            { date: '05/01/2026', type: 'purchase', detail: 'Compra', quantity: 400, unitCost: 1200 },
+            { date: '15/01/2026', type: 'consumption', detail: 'Consumo', quantity: 300 },
+          ],
+        },
       ],
     },
     directLabor: {
@@ -135,9 +140,64 @@ describe('Caso Dorado — costeo Por Órdenes', () => {
     expect(r.indirectCostsApplied).toBe(578750);
   });
 
+  // ── Costo unitario: el número final del sistema ────────────────────────────
+  it('costo unitario de producción = costo de producción ÷ unidades producidas', () => {
+    const r = runCalculation(input);
+    expect(r.detail.unitCost.unitsProduced).toBe(100); // sales.quantity
+    expect(r.detail.unitCost.unitProductionCost).toBeCloseTo(r.productionCost / 100, 2);
+    expect(r.detail.unitCost.unitCostOfGoodsSold).toBeCloseTo(r.costOfGoodsSold / 100, 2);
+    expect(r.detail.unitCost.unitProductionCost).toBeGreaterThan(0);
+  });
+
+  it('costo unitario = 0 (no revienta) cuando aún no se cargó la cantidad producida', () => {
+    const r = runCalculation({ ...input, sales: { unitPrice: 0, quantity: 0 } });
+    expect(r.detail.unitCost.unitsProduced).toBe(0);
+    expect(r.detail.unitCost.unitProductionCost).toBe(0);
+  });
+
   it('días hábiles efectivos = 232 e itcsPercent expuesto como porcentaje (>1)', () => {
     const r = runCalculation(input);
     expect(r.detail.directLabor.workingDays).toBe(232);
     expect(r.detail.directLabor.itcsPercent).toBeGreaterThan(1);
   });
+
+  /**
+   * EL CONTROL QUE ESTABA APAGADO.
+   *
+   * La MP consumida se puede saber por dos caminos, y tienen que dar lo mismo:
+   *
+   *   (a) sumando lo que cada ficha de stock (PPP) dice que salió;
+   *   (b) Existencia inicial + Compras − Existencia final, del estado de costos.
+   *
+   * `checkRawMaterialConsistency` compara los dos. Existía, tenía tests propios, y
+   * no se llamaba desde ningún lado: el detector de inconsistencias estaba
+   * implementado y apagado. Ahora el cálculo lo corre e informa el resultado.
+   */
+  describe('Consistencia de materia prima', () => {
+    it('el cálculo la informa', () => {
+      const r = runCalculation(input);
+
+      expect(r.consistency).toBeDefined();
+      expect(typeof r.consistency!.rawMaterialMatches).toBe('boolean');
+    });
+
+    it('sobre el caso de cátedra los dos caminos coinciden', () => {
+      const r = runCalculation(input);
+
+      expect(r.consistency!.rawMaterialMatches).toBe(true);
+      expect(r.consistency!.rawMaterialDifference).toBe(0);
+    });
+
+    it('NO bloquea el cálculo: informa', () => {
+      const r = runCalculation(input);
+
+      // Un costista al que le frenan el cálculo por una diferencia de redondeo no
+      // puede trabajar; uno al que se le avisa, sí. El resto de los tests de este
+      // archivo fija los números del caso; acá solo importa que el cálculo siga
+      // produciéndolos.
+      expect(r.rawMaterialConsumed).toBeGreaterThan(0);
+      expect(r.productionCost).toBeGreaterThan(0);
+    });
+  });
+
 });

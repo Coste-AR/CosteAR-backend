@@ -63,6 +63,14 @@ export const registerSchema = z.object({
 
   // Paso 4 — Preferencias
   marginThresholdPct: z.number().finite().min(0).max(100).default(15),
+
+  // Términos y condiciones — obligatorio. `termsVersionId` es la versión
+  // EXACTA que se le mostró al usuario (viene de GET /terms/current); el
+  // service la valida contra la versión activa real, no confía en el string.
+  acceptedTerms: z.literal(true, {
+    errorMap: () => ({ message: 'Tenés que aceptar los Términos y Condiciones para registrarte' }),
+  }),
+  termsVersionId: z.string().uuid('Falta la versión de los Términos y Condiciones'),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 

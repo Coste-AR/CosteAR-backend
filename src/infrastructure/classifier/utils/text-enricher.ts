@@ -22,6 +22,7 @@ export function buildEnrichedText(
       currency?: string | null;
       items?: { description: string; quantity?: number | null; unitCost?: number | null; total?: number | null }[];
       department?: string | null;
+      role?: string | null;
       hoursWorked?: number | null;
       employeeCount?: number | null;
     } | null;
@@ -100,6 +101,9 @@ export function buildEnrichedText(
   if (d.hoursWorked != null) parts.push(`Horas trabajadas: ${d.hoursWorked}`);
   if (d.employeeCount != null) parts.push(`Empleados: ${d.employeeCount}`);
   if (d.department) parts.push(`Área/Departamento: ${d.department}`);
+  // Puesto/cargo: clave para Layer 4 (MOD vs mano de obra indirecta). Se emite
+  // con etiqueta "Puesto/Cargo:" para que el fallback por texto lo reconozca.
+  if (d.role) parts.push(`Puesto/Cargo: ${d.role}`);
 
   return parts.filter(Boolean).join('\n');
 }

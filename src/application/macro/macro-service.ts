@@ -1,8 +1,9 @@
 import type { PrismaClient, MacroSource } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
-import { runCalculation, type CalculationInput } from '../cost-structures/calculate.js';
+import { Decimal } from 'decimal.js';
+import { runCalculation, type CalculationInput } from '../../domain/calculations/calculate.js';
 import {
-  rawMaterialConfigSchema,
+  rawMaterialSectionSchema,
   directLaborConfigSchema,
   indirectCostConfigSchema,
   inventorySchema,
@@ -66,6 +67,36 @@ export class MacroService {
   }
 
   /**
+   * Inflación NACIONAL acumulada entre dos fechas, componiendo las tasas
+   * mensuales de IPC_NACIONAL (no las suma: dos meses al 5% dan 10.25%, no 10%).
+   *
+   * Devuelve null si no hay NINGÚN snapshot de IPC en el rango — nunca se
+   * inventa un número ni se aproxima con datos parciales silenciosos.
+   */
+  async cumulativeInflation(
+    from: Date,
+    to: Date,
+  ): Promise<{ deltaPct: number; monthsUsed: number; snapshots: { value: number; effectiveDate: Date }[] } | null> {
+    const rows = await this.db.macroSnapshot.findMany({
+      where: { indicatorCode: 'IPC_NACIONAL', effectiveDate: { gte: from, lte: to } },
+      orderBy: { effectiveDate: 'asc' },
+    });
+
+    if (rows.length === 0) return null;
+
+    let factor = new Decimal(1);
+    for (const row of rows) {
+      factor = factor.times(new Decimal(1).plus(new Decimal(row.value.toString()).dividedBy(100)));
+    }
+
+    return {
+      deltaPct: factor.minus(1).times(100).toDecimalPlaces(2, Decimal.ROUND_HALF_EVEN).toNumber(),
+      monthsUsed: rows.length,
+      snapshots: rows.map((r) => ({ value: Number(r.value), effectiveDate: r.effectiveDate })),
+    };
+  }
+
+  /**
    * Preview de propagación: simula el impacto de un cambio en una variable
    * macro sobre TODAS las estructuras ACTIVAS del costista, SIN persistir nada.
    * Devuelve, por estructura, el resultado anterior y el nuevo, y el delta.
@@ -91,7 +122,7 @@ export class MacroService {
       try {
         // Cálculo BASE (sin cambio)
         const baseInput: CalculationInput = {
-          rawMaterial: rawMaterialConfigSchema.parse(s.rawMaterialConfig),
+          rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
           directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
           indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
           inventory: inventorySchema.parse({}),

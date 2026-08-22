@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ValidacionesService } from '../../../application/validaciones/validaciones-service.js';
+import { ValidacionesLedgerService } from '../../../application/validaciones/validaciones-ledger-service.js';
 import { EmpresaConnectionService } from '../../../application/empresa/empresa-connection-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 
@@ -9,7 +10,8 @@ const DOC_TYPES = [
   'PLANILLA_HORAS', 'NOTA_DEBITO', 'NOTA_CREDITO', 'DESCONOCIDO',
 ] as const;
 const COST_SECTIONS = [
-  'MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS', 'DESCONOCIDO',
+  'MATERIA_PRIMA', 'MANO_DE_OBRA', 'COSTOS_INDIRECTOS', 'VENTAS',
+  'GASTO_COMERCIALIZACION', 'GASTO_ADMINISTRACION', 'GASTO_FINANCIERO', 'DESCONOCIDO',
 ] as const;
 
 const reviewSchema = z.object({
@@ -20,6 +22,13 @@ const reviewSchema = z.object({
   // Es la verdad de oro que alimenta el aprendizaje del clasificador.
   correctedDocumentType: z.enum(DOC_TYPES).optional(),
   correctedCostSection: z.enum(COST_SECTIONS).optional(),
+  // Costeo por Procesos: departamento elegido a mano al aprobar (opcional —
+  // sin esto el documento queda en la cola de pendientes de Costeo por Procesos).
+  processDepartmentId: z.string().uuid().optional(),
+});
+
+const assignDepartmentSchema = z.object({
+  processDepartmentId: z.string().uuid(),
 });
 
 const submitViaKeySchema = z.object({
@@ -29,6 +38,7 @@ const submitViaKeySchema = z.object({
 
 export async function registerValidacionesRoutes(app: FastifyInstance): Promise<void> {
   const svc = new ValidacionesService();
+  const ledgerSvc = new ValidacionesLedgerService();
   const connSvc = new EmpresaConnectionService();
 
   // ----- Conexiones empresa -----
@@ -60,6 +70,13 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     return reply.send({ data: { success: true } });
   });
 
+  app.put('/conexiones/:connectionId/whatsapp', { preHandler: authenticate }, async (request, reply) => {
+    const { connectionId } = request.params as { connectionId: string };
+    const { phoneNumber } = z.object({ phoneNumber: z.string().min(8).max(20) }).parse(request.body);
+    const conn = await connSvc.setWhatsappNumber(request.authUser!.id, connectionId, phoneNumber);
+    return reply.send({ data: conn });
+  });
+
   // ----- Submit público por API key (sin JWT) -----
 
   app.post('/datos/submit', async (request, reply) => {
@@ -68,8 +85,33 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
       return reply.status(401).send({ error: { message: 'API key requerida' } });
     }
     const input = submitViaKeySchema.parse(request.body);
-    const entry = await connSvc.submitDataViaApiKey(apiKey, input);
-    return reply.status(201).send({ data: { id: entry.id, status: entry.status } });
+    const result = await connSvc.submitDataViaApiKey(apiKey, input);
+
+    // Contrato estable: `id`, `status` e `isDuplicate` van SIEMPRE, en los dos
+    // casos. Un cliente que lee `data.id` nunca se rompe, y uno que quiera
+    // distinguir el duplicado no necesita chequear si el campo existe.
+    //
+    // 201 = se creó una entrada nueva. 200 = ya existía (no se creó nada).
+    // En el duplicado, `id` apunta a la entrada YA existente: es a lo que
+    // corresponde el comprobante que acaba de mandar.
+    if (result.isDuplicate) {
+      return reply.status(200).send({
+        data: {
+          id: result.duplicateEntryId,
+          status: result.duplicateStatus,
+          isDuplicate: true,
+          message: result.message,
+        },
+      });
+    }
+    return reply.status(201).send({
+      data: {
+        id: result.id,
+        status: result.status,
+        isDuplicate: false,
+        classification: result.classification,
+      },
+    });
   });
 
   // ----- Validaciones (costista revisa) -----
@@ -139,48 +181,47 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
   // Libro mayor de costos respaldado por documentos (trazabilidad)
   app.get('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
     const { companyId, period } = request.query as { companyId?: string; period?: string };
-    const ledger = await svc.getLedger(request.authUser!.id, { companyId, period });
+    const ledger = await ledgerSvc.getLedger(request.authUser!.id, { companyId, period });
     return reply.send({ data: ledger });
   });
 
-  // Carga manual de una línea del libro mayor
   const manualLedgerSchema = z.object({
     companyId: z.string().uuid(),
     period: z.string().regex(/^\d{4}-\d{2}$/),
-    costSection: z.enum(COST_SECTIONS),
-    description: z.string().min(1).max(200),
-    amount: z.number().finite().positive().max(9_999_999_999_999),
-    supplier: z.string().max(120).optional(),
-    currency: z.string().max(8).optional(),
+    costSection: z.string().min(1),
+    description: z.string().min(1),
+    amount: z.number().positive(),
+    supplier: z.string().optional(),
+    currency: z.string().optional(),
     docDate: z.string().optional(),
   });
+
   app.post('/validaciones/ledger', { preHandler: authenticate }, async (request, reply) => {
     const input = manualLedgerSchema.parse(request.body);
-    const created = await svc.createManualLedgerEntry(request.authUser!.id, input);
+    const created = await ledgerSvc.createManualLedgerEntry(request.authUser!.id, input);
     return reply.status(201).send({ data: created });
   });
 
-  // Editar una línea del libro mayor
   const updateLedgerSchema = z.object({
-    costSection: z.enum(COST_SECTIONS).optional(),
-    description: z.string().min(1).max(200).optional(),
-    amount: z.number().finite().positive().max(9_999_999_999_999).optional(),
-    supplier: z.string().max(120).nullable().optional(),
+    costSection: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    amount: z.number().positive().optional(),
+    supplier: z.string().nullable().optional(),
     period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-    currency: z.string().max(8).optional(),
+    currency: z.string().optional(),
     docDate: z.string().nullable().optional(),
   });
+
   app.patch('/validaciones/ledger/:id', { preHandler: authenticate }, async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
     const input = updateLedgerSchema.parse(request.body);
-    const updated = await svc.updateLedgerEntry(request.authUser!.id, id, input);
+    const updated = await ledgerSvc.updateLedgerEntry(request.authUser!.id, id, input);
     return reply.send({ data: updated });
   });
 
-  // Borrar una línea del libro mayor
   app.delete('/validaciones/ledger/:id', { preHandler: authenticate }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const result = await svc.deleteLedgerEntry(request.authUser!.id, id);
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const result = await ledgerSvc.deleteLedgerEntry(request.authUser!.id, id);
     return reply.send({ data: result });
   });
 
@@ -189,5 +230,20 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     const { entryId } = request.params as { entryId: string };
     const history = await svc.getEntryHistory(entryId, request.authUser!.id);
     return reply.send({ data: history });
+  });
+
+  // Costeo por Procesos: documentos aprobados sin departamento asignado todavía.
+  app.get('/validaciones/pending-departments/:costStructureId', { preHandler: authenticate }, async (request, reply) => {
+    const { costStructureId } = request.params as { costStructureId: string };
+    const items = await svc.listUnassignedForStructure(request.authUser!.id, costStructureId);
+    return reply.send({ data: items });
+  });
+
+  // Costeo por Procesos: asignar (a mano) el departamento de un documento ya aprobado.
+  app.post('/validaciones/:entryId/assign-department', { preHandler: authenticate }, async (request, reply) => {
+    const { entryId } = request.params as { entryId: string };
+    const { processDepartmentId } = assignDepartmentSchema.parse(request.body);
+    const result = await svc.assignDepartment(entryId, request.authUser!.id, processDepartmentId);
+    return reply.send({ data: result });
   });
 }

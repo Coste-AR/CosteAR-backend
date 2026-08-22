@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "companies" ADD COLUMN "deletedAt" TIMESTAMP(3);
+-- AlterTable
+ALTER TABLE "cost_periods" ADD COLUMN "deletedAt" TIMESTAMP(3);

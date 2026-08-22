@@ -1,0 +1,158 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ "dev", "staging", "main" ]
+  pull_request:
+    branches: [ "dev", "staging", "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [22.x]
+        
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run Linter
+      run: npm run lint
+      
+    - name: Prisma Generate
+      run: npx prisma generate
+      
+    - name: Build
+      run: npm run build
+      
+    # Guarda contra el bug del 15-08-2026: cinco archivos que necesitaban base
+    # se salteaban solos acá y tampoco estaban en el include de la suite de
+    # integración. Eran 61 tests que no corrían en ningún lado, con el CI en
+    # verde igual. Este chequeo falla si vuelve a aparecer un archivo así.
+    - name: Ningún test con base puede quedar sin suite
+      run: npm run check:tests-base
+
+    - name: Run Tests
+      run: npm run test
+
+  # Aparte del job de arriba a propósito: estos tests necesitan una base
+  # Postgres de verdad. El aislamiento entre empresas depende de RLS —políticas
+  # que viven en Postgres, no en TypeScript— y de los filtros por userId de la
+  # capa de aplicación. Con Prisma mockeado no se puede verificar ninguna de las
+  # dos: un mock confirma que se llamó a findFirst con cierto where, no que la
+  # base no devuelva las filas del otro inquilino.
+  integration-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Misma imagen que docker-compose: la migración add_vault_chunks corre
+        # CREATE EXTENSION vector y con un postgres:16 común falla.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: costear_test
+          POSTGRES_USER: costear
+          POSTGRES_PASSWORD: costear
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U costear"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # DOS ROLES, a propósito.
+      #
+      # POSTGRES_USER es SUPERUSUARIO por construcción, y Postgres ignora RLS
+      # entero para un superusuario. Corriendo los tests con él, esta suite daba
+      # verde probando solo los filtros de la capa de aplicación y sin decir una
+      # palabra sobre la mitad de la protección. Lo detectó el propio test del
+      # rol en la primera corrida de esta rama.
+      #
+      # Migraciones y políticas van con el dueño; los tests, con un rol de
+      # aplicación sin BYPASSRLS — que es como corresponde que sea producción,
+      # y es lo que `prisma/rls.sql` viene advirtiendo en su encabezado.
+      MIGRATION_DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+      DATABASE_URL: postgresql://costear_app:costear_app@localhost:5432/costear_test
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js 22.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Prisma Generate
+      run: npx prisma generate
+
+    # El rol con el que corre la app: sin superusuario y sin BYPASSRLS, así las
+    # políticas efectivamente se aplican. Los permisos se otorgan DESPUÉS de
+    # migrar, porque las tablas todavía no existen acá — de eso se encarga el
+    # paso siguiente.
+    - name: Crear el rol de aplicación (sin BYPASSRLS)
+      env:
+        PGPASSWORD: costear
+      run: |
+        psql -h localhost -U costear -d costear_test -v ON_ERROR_STOP=1 <<'SQL'
+        CREATE ROLE costear_app LOGIN PASSWORD 'costear_app' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+        GRANT USAGE ON SCHEMA public TO costear_app;
+        SQL
+
+    # El global-setup corre migrate-deploy y apply-rls con MIGRATION_DATABASE_URL
+    # (el dueño) antes del primer test; los tests usan DATABASE_URL (la app).
+    - name: Run Integration Tests
+      env:
+        PGPASSWORD: costear
+      run: |
+        # Las tablas se crean recién en el global-setup, así que los permisos
+        # sobre ellas se otorgan por defecto, para todo lo que cree el dueño.
+        psql -h localhost -U costear -d costear_test -v ON_ERROR_STOP=1 <<'SQL'
+        ALTER DEFAULT PRIVILEGES FOR ROLE costear GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO costear_app;
+        ALTER DEFAULT PRIVILEGES FOR ROLE costear GRANT USAGE, SELECT ON SEQUENCES TO costear_app;
+        SQL
+        npm run test:integration
+
+    # `evidence-append-only` firma un access token de verdad para adjuntar un
+    # comprobante, y firmar con RS256 necesita una clave privada real: sin esto
+    # falla con "secretOrPrivateKey must be an asymmetric key".
+    #
+    # Se genera un par nuevo en cada corrida, a propósito. Son claves de usar y
+    # tirar contra una base descartable — no hay ningún secreto que guardar en
+    # el repo ni en los settings de Actions.
+    - name: Generar claves efímeras para firmar JWT en los tests
+      run: node scripts/generate-keys.mjs >> "$GITHUB_ENV"
+
+    # Segunda tanda, con el rol INVERTIDO, y por eso es un paso aparte.
+    #
+    # Los archivos de `vitest.db.config.ts` siembran sus fixtures con SQL crudo,
+    # y el rol de la app no puede insertarlos: RLS los rechaza con
+    # `42501: new row violates row-level security policy`. Por eso acá
+    # DATABASE_URL apunta al DUEÑO.
+    #
+    # `rls-cross-tenant` es el caso fino: siembra con el dueño y VERIFICA con
+    # RLS_PROBE_DATABASE_URL, que apunta al rol restringido. Sin esa sonda no
+    # probaría nada. RLS_REQUIRE_PROBE=1 hace que falle en vez de saltearse
+    # — que es justo el modo de falla que nos escondió estos tests hasta ahora.
+    - name: Run DB-backed security & traceability tests
+      env:
+        MIGRATION_DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+        DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+        RLS_PROBE_DATABASE_URL: postgresql://costear_app:costear_app@localhost:5432/costear_test
+        RLS_REQUIRE_PROBE: '1'
+      run: npm run test:db

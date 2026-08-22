@@ -5,12 +5,8 @@ import { NotFoundError, ForbiddenError, ConflictError } from '../../domain/error
 import { EmailService } from '../../infrastructure/email/email-service.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { randomBytes } from 'node:crypto';
-import { classifyDocument } from '../../infrastructure/classifier/cascade-classifier.js';
-import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
-import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
-import { buildStrongDedupeKey } from '../../infrastructure/classifier/utils/dedupe-key.js';
-import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
-import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
+import { ingestDataEntry } from '../ingest/ingest-data-entry.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -37,6 +33,7 @@ export class EmpresaPortalService {
     private readonly db: PrismaClient = prisma,
     private readonly emailService: EmailService = new EmailService(),
     private readonly groq: GroqService = new GroqService(),
+    private readonly alerts: SystemAlertService = new SystemAlertService(),
   ) {}
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -57,16 +54,25 @@ export class EmpresaPortalService {
 
   // ── Costista: invitar operador ─────────────────────────────────────────────
 
+  /**
+   * @param jobTitle EL PUESTO DECLARADO en esta empresa: "Jefe de Depósito",
+   * "Contador". No es el rol de login —ese solo dice qué puede hacer en el
+   * sistema— sino quién es la persona en la planta, que es la pregunta que se
+   * hace quien está mirando un costo raro. Opcional: si no se sabe, "no consta"
+   * es mejor que un puesto inventado.
+   */
   async inviteOperator(
     companyId: string,
     costistId: string,
     operatorName: string,
     operatorEmail: string,
+    jobTitle?: string | null,
   ): Promise<{
     email: string;
     tempPassword?: string;
     inviteCode: string;
     isNewUser: boolean;
+    emailSent: boolean;
   }> {
     const normalizedEmail = operatorEmail.toLowerCase().trim();
 
@@ -109,9 +115,13 @@ export class EmpresaPortalService {
           inviteeId: existingUser.id,
           status: 'PENDING',
           expiresAt,
+          // El invitado ya tiene cuenta: su membresía recién se crea cuando
+          // acepte, así que el puesto viaja acá hasta entonces.
+          jobTitle: jobTitle ?? null,
         },
       });
 
+      let emailSent = true;
       try {
         await this.emailService.sendOperatorInviteCode(
           normalizedEmail,
@@ -120,10 +130,16 @@ export class EmpresaPortalService {
           inviteCode,
         );
       } catch (err) {
+        emailSent = false;
         console.warn('[empresa-portal] Email de código de invitación no enviado:', err);
+        await this.alerts.create({
+          source: 'empresa-portal',
+          level: 'warning',
+          message: `No se pudo enviar el email de código de invitación a ${normalizedEmail} (código: ${inviteCode}). Pasáselo manualmente.`,
+        });
       }
 
-      return { email: normalizedEmail, inviteCode, isNewUser: false };
+      return { email: normalizedEmail, inviteCode, isNewUser: false, emailSent };
     }
 
     // CASO A: usuario nuevo
@@ -143,7 +159,12 @@ export class EmpresaPortalService {
 
     // Membership activa inmediata (aceptó implícitamente)
     await this.db.operatorMembership.create({
-      data: { operatorId: newUser.id, connectionId: connection.id, isActive: true },
+      data: {
+        operatorId: newUser.id,
+        connectionId: connection.id,
+        isActive: true,
+        jobTitle: jobTitle ?? null,
+      },
     });
 
     // Invitación ya aceptada (registro histórico)
@@ -160,6 +181,7 @@ export class EmpresaPortalService {
       },
     });
 
+    let emailSent = true;
     try {
       await this.emailService.sendOperatorInvite(
         normalizedEmail,
@@ -169,10 +191,16 @@ export class EmpresaPortalService {
         inviteCode,
       );
     } catch (err) {
+      emailSent = false;
       console.warn('[empresa-portal] Email de invitación no enviado:', err);
+      await this.alerts.create({
+        source: 'empresa-portal',
+        level: 'warning',
+        message: `No se pudo enviar el email de invitación a ${normalizedEmail} (código: ${inviteCode}). Pasáselo manualmente.`,
+      });
     }
 
-    return { email: normalizedEmail, tempPassword, inviteCode, isNewUser: true };
+    return { email: normalizedEmail, tempPassword, inviteCode, isNewUser: true, emailSent };
   }
 
   // ── Operador: aceptar invitación por código ────────────────────────────────
@@ -196,8 +224,16 @@ export class EmpresaPortalService {
     // Crear membership si no existe
     await this.db.operatorMembership.upsert({
       where: { operatorId_connectionId: { operatorId, connectionId: invite.connectionId } },
-      create: { operatorId, connectionId: invite.connectionId, isActive: true },
-      update: { isActive: true },
+      create: {
+        operatorId,
+        connectionId: invite.connectionId,
+        isActive: true,
+        jobTitle: invite.jobTitle,
+      },
+      // Al reactivar una membresía vieja se respeta el puesto que ya tenía si la
+      // invitación nueva no trae uno: el costista puede estar solo devolviéndole
+      // el acceso a alguien que ya trabajaba ahí, no redefiniendo su puesto.
+      update: { isActive: true, ...(invite.jobTitle ? { jobTitle: invite.jobTitle } : {}) },
     });
 
     await this.db.operatorInvite.update({
@@ -364,169 +400,29 @@ export class EmpresaPortalService {
       costStructureId = structure.id;
     }
 
-    // ── Step 1: Fetch company industry for industry-aware classification ────────
-    const company = await this.db.company.findUnique({
-      where: { id: companyId },
-      select: { industry: true, description: true },
-    });
-    const industry = company?.industry ?? null;
-    const companyContext = company?.description ?? null;
-
-    // ── Step 2: Run Groq document analysis (extraction + quality + OCR) ────────
-    const aiAnalysis = await this.groq.analyzeDocument({
-      text: input.rawContent,
-      fileData: input.fileData,
-      fileMimeType: input.fileMimeType,
-      fileName: input.fileName,
-      companyContext,
-    });
-
-    // ── Step 3: Build enriched text (solves image classification problem) ──────
-    // Para imágenes: rawContent = "[Archivo: img.jpg]" → sin señales.
-    // enrichedText combina el OCR de Groq con los datos extraídos para que
-    // las capas 1-4 puedan clasificar correctamente.
-    const enrichedText = buildEnrichedText(input.rawContent, aiAnalysis);
-
-    // ── Step 4: Extract supplier CUIT — desde enrichedText (incluye OCR) ──────
-    const textToClassify = enrichedText || input.rawContent || (input.fileName ?? '');
-    const foundCuits = extractCuits(textToClassify);
-    const supplierCuit = foundCuits[0] ?? null;
-
-    // ── Step 5: Check for duplicate CAE ───────────────────────────────────────
-    const cae = extractCAE(textToClassify);
-    if (cae) {
-      const existingCAE = await this.db.processedCAE.findUnique({ where: { cae } });
-      if (existingCAE) {
-        return {
-          isDuplicate: true,
-          duplicateEntryId: existingCAE.dataEntryId,
-          message: 'Este documento ya fue enviado anteriormente.',
-        };
-      }
-    }
-
-    // ── Step 5b: Dedup sin CAE — clave fuerte proveedor + nro comprobante ──────
-    // Cubre el caso típico: el operario manda la misma factura (foto) dos veces.
-    // Solo bloquea con clave fuerte (ambos datos presentes) para no rechazar
-    // compras legítimas repetidas. Ignora entradas ya rechazadas.
-    const dedupeKey = buildStrongDedupeKey({
-      supplier:      aiAnalysis?.extractedData?.supplier ?? null,
-      invoiceNumber: aiAnalysis?.extractedData?.invoiceNumber ?? null,
-    });
-    if (dedupeKey) {
-      const existingDup = await this.db.dataEntry.findFirst({
-        where: {
-          connectionId: membership.connectionId,
-          dedupeKey,
-          status: { not: 'REJECTED' },
-        },
-        select: { id: true },
-      });
-      if (existingDup) {
-        return {
-          isDuplicate: true,
-          duplicateEntryId: existingDup.id,
-          message: 'Este comprobante ya fue enviado antes (mismo proveedor y número).',
-        };
-      }
-    }
-
-    // ── Step 6: Run cascade classifier v2 ─────────────────────────────────────
-    const classification = await classifyDocument({
-      text: input.rawContent || (input.fileName ?? ''),
-      enrichedText,
-      industry,
-      sourceType: input.sourceType,
-      costistId,
-      companyId,
-      dataEntryId: 'pending',
-      supplierCuit,
-      groqQuality: aiAnalysis?.quality ?? null,
-      extractedData: aiAnalysis?.extractedData as Record<string, unknown> | null ?? null,
-    });
-
-    if (classification.qualityGate === 'FAIL') {
-      throw new ConflictError(
-        classification.explanation ||
-        'El documento es ilegible o no se pudo leer bien. Por favor, enviá una foto o archivo más claro y con mejor iluminación.'
-      );
-    }
-
-    // ── Step 5: Upload file to Cloudinary (if present) ────────────────────────
-    let fileUrl: string | null = null;
-    if (input.fileData && input.fileMimeType && input.fileName) {
-      try {
-        fileUrl = await uploadToCloudinary(input.fileData, input.fileMimeType, input.fileName);
-      } catch (err) {
-        // No bloqueamos el flujo si Cloudinary falla — el archivo queda sin URL
-        console.error('[Cloudinary] Upload failed:', err);
-      }
-    }
-
-    // ── Step 6: Save DataEntry ─────────────────────────────────────────────────
-    const aiJson = aiAnalysis ? JSON.stringify(aiAnalysis) : null;
-
-    const entry = await this.db.dataEntry.create({
-      data: {
+    // ── Ingesta: análisis IA + dedup + clasificación + persistencia ────────────
+    // Camino compartido con `/datos/submit` y el webhook de WhatsApp para que
+    // ninguna entrada llegue al costista sin ClassificationAudit.
+    return ingestDataEntry(
+      {
         connectionId: membership.connectionId,
         costistId,
-        costStructureId,
-        rawContent: input.rawContent || (input.fileName ? `[Archivo: ${input.fileName}]` : ''),
+        companyId,
+        // QUIÉN lo mandó (I5a). Hasta acá el `operatorId` se usaba solo para
+        // averiguar a qué empresa pertenece y después se descartaba: el
+        // documento quedaba con "empresa X, costista Y" y nada más. Si tres
+        // personas de la misma planta mandaban facturas, el sistema no podía
+        // distinguirlas.
+        uploadedBy: operatorId,
+        rawContent: input.rawContent,
         sourceType: input.sourceType,
-        status: 'PENDING',
-        fileName: input.fileName ?? null,
-        fileData: null,           // ya no guardamos base64 en la DB
-        fileMimeType: input.fileMimeType ?? null,
-        fileUrl,
-        dedupeKey,
-        reviewNote: aiJson,
+        costStructureId,
+        fileName: input.fileName,
+        fileData: input.fileData,
+        fileMimeType: input.fileMimeType,
       },
-    });
-
-    // ── Step 7: Persist audit + CAE in a transaction ──────────────────────────
-    await this.db.$transaction(async (tx) => {
-      await tx.classificationAudit.create({
-        data: {
-          dataEntryId: entry.id,
-          companyId,
-          costistId,
-          qualityGate: classification.qualityGate,
-          definitiveSignal: classification.definitiveSignal,
-          corroboratingSignals: classification.signals as unknown as Parameters<typeof tx.classificationAudit.create>[0]['data']['corroboratingSignals'],
-          numericValidationDelta: 0,
-          supplierFingerprintUsed: classification.supplierFingerprintUsed,
-          aiUsed: classification.aiUsed,
-          confidenceCap: classification.confidenceCap,
-          documentType: classification.documentType,
-          costSection: classification.costSection,
-          confidence: classification.confidence,
-          requiresReview: classification.requiresReview,
-          intent: classification.intent,
-          industryCategory: classification.industryCategory,
-          explanation: classification.explanation,
-        },
-      });
-
-      if (cae) {
-        await tx.processedCAE.create({
-          data: { cae, dataEntryId: entry.id, companyId },
-        });
-      }
-    });
-
-    return {
-      id: entry.id,
-      status: entry.status,
-      aiResponse: aiJson,
-      classification: {
-        documentType: classification.documentType,
-        costSection: classification.costSection,
-        confidence: classification.confidence,
-        requiresReview: classification.requiresReview,
-        qualityGate: classification.qualityGate,
-      },
-      isDuplicate: false,
-    };
+      { db: this.db, groq: this.groq, alerts: this.alerts },
+    );
   }
 
   // ── Operador: historial de envíos ──────────────────────────────────────────
@@ -562,6 +458,17 @@ export class EmpresaPortalService {
       where: {
         connectionId: { in: connectionIds },
         ...(costStructureId ? { costStructureId } : {}),
+        // "MIS envíos" ahora sí son míos (I5a).
+        //
+        // Filtraba por conexión, o sea por EMPRESA: el operario veía todo lo que
+        // hubiera mandado cualquiera de sus compañeros, en una pantalla que se
+        // llama "mis envíos". Además de mentir el título, le mostraba a cada
+        // persona los documentos del resto.
+        //
+        // `uploadedBy: null` incluye los anteriores a este campo: no se sabe
+        // quién los mandó, y esconderlos le haría desaparecer envíos propios de
+        // la pantalla. Viajan marcados como sin autor y la pantalla lo dice.
+        OR: [{ uploadedBy: operatorId }, { uploadedBy: null }],
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -578,8 +485,47 @@ export class EmpresaPortalService {
         fileMimeType: true,
         fileUrl: true,
         connectionId: true,
+        uploadedBy: true,
         connection: { select: { company: { select: { name: true } } } },
       },
     });
+  }
+
+  // ── Operador: Métricas (Fase 4) ───────────────────────────────────────────
+
+  async getStructureMetrics(operatorId: string, connectionId: string, structureId: string) {
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId, connectionId, isActive: true },
+      include: { connection: { select: { companyId: true } } },
+    });
+    if (!membership) throw new ForbiddenError('No tenés acceso a esta empresa.');
+
+    // Verificar que la estructura pertenece a esa empresa
+    const structure = await this.db.costStructure.findFirst({
+      where: { id: structureId, companyId: membership.connection.companyId, deletedAt: null },
+      select: { id: true, productName: true }
+    });
+    if (!structure) throw new NotFoundError('Estructura no encontrada o no pertenece a la empresa.');
+
+    // Traer el último CostCalculation para esta estructura
+    const latestCalc = await this.db.costCalculation.findFirst({
+      where: { costStructureId: structureId },
+      orderBy: { calculatedAt: 'desc' }
+    });
+
+    if (!latestCalc) {
+      return null;
+    }
+
+    return {
+      productName: structure.productName,
+      productionCost: Number(latestCalc.productionCost),
+      grossMargin: Number(latestCalc.grossMargin),
+      grossMarginPct: Number(latestCalc.grossMarginPct),
+      rawMaterialConsumed: Number(latestCalc.rawMaterialConsumed),
+      directLaborTotal: Number(latestCalc.directLaborTotal),
+      indirectCostsApplied: Number(latestCalc.indirectCostsApplied),
+      calculatedAt: latestCalc.calculatedAt
+    };
   }
 }

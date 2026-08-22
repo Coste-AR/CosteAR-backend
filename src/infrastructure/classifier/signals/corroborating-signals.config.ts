@@ -13,6 +13,14 @@ export interface ContradictionRule {
   and: string;
   penalty: number;
   reason: string;
+  /**
+   * Tipo de documento (hipótesis) que esta contradicción desacredita. La señal
+   * `if` es la débil que queda refutada por la señal definitiva `and`; por eso
+   * `penalizes` es el tipo asociado a `if`. La penalización se resta SOLO a este
+   * tipo, no a todos: restar a todos hundía también al tipo probablemente
+   * correcto (p. ej. FACTURA_COMPRA) y empujaba casos claros a revisión humana.
+   */
+  penalizes: DocumentType;
 }
 
 export const CORROBORATING_SIGNALS: CorroboratingSignal[] = [
@@ -34,7 +42,7 @@ export const CORROBORATING_SIGNALS: CorroboratingSignal[] = [
   // ── Planilla de horas indicators ────────────────────────────────────────────
   { label: 'DEPT_HOURS',       pattern: /\bDEPARTAMENTO\b.*\bHORAS\b|\bHORAS\b.*\bDEPARTAMENTO\b/i, pts: 25, type: 'PLANILLA_HORAS' },
   { label: 'TURNO_JORNADA',    pattern: /\bTURNO\b.*\bJORNADA\b|\bJORNADA\b.*\bTURNO\b/i, pts: 20, type: 'PLANILLA_HORAS' },
-  { label: 'HOURS_FORMAT',     pattern: /\bHs?\.\s*\d+[\.,]\d{2}\b/,                   pts: 15, type: 'PLANILLA_HORAS' },
+  { label: 'HOURS_FORMAT',     pattern: /\bHs?\.\s*\d+[.,]\d{2}\b/,                    pts: 15, type: 'PLANILLA_HORAS' },
   // ── Remito indicators ───────────────────────────────────────────────────────
   { label: 'REMITO_KEYWORD',   pattern: /\bREMITO\b/i,                                  pts: 25, type: 'REMITO' },
   { label: 'FECHA_ENTREGA',    pattern: /\bFECHA\s+DE\s+(ENTREGA|REMISI[OÓ]N)\b/i,     pts: 18, type: 'REMITO' },
@@ -42,7 +50,15 @@ export const CORROBORATING_SIGNALS: CorroboratingSignal[] = [
 ];
 
 export const CONTRADICTIONS: ContradictionRule[] = [
-  { if: 'REMITO_KEYWORD', and: 'CAE_FOUND', penalty: -30, reason: 'Remito no puede tener CAE' },
-  { if: 'ANSES', and: 'PTO_VENTA_HEADER', penalty: -25, reason: 'Liquidación no tiene PtoVta' },
-  { if: 'CUIL_KEYWORD', and: 'CAE_FOUND', penalty: -15, reason: 'CUIL inusual en factura con CAE' },
+  // REMITO_KEYWORD (tipo REMITO) + CAE_FOUND: un remito no lleva CAE, así que la
+  // presencia del CAE refuta la hipótesis REMITO. Penaliza solo a REMITO.
+  { if: 'REMITO_KEYWORD', and: 'CAE_FOUND', penalty: -30, reason: 'Remito no puede tener CAE', penalizes: 'REMITO' },
+  // ANSES (tipo LIQUIDACION_MOD) + PTO_VENTA_HEADER: una liquidación no tiene
+  // punto de venta; el PtoVta refuta la hipótesis de liquidación. Penaliza solo
+  // a LIQUIDACION_MOD.
+  { if: 'ANSES', and: 'PTO_VENTA_HEADER', penalty: -25, reason: 'Liquidación no tiene PtoVta', penalizes: 'LIQUIDACION_MOD' },
+  // CUIL_KEYWORD (tipo LIQUIDACION_MOD) + CAE_FOUND: un CUIL en un documento con
+  // CAE (factura real) es inusual; debilita la hipótesis de liquidación, no la
+  // de factura. Penaliza solo a LIQUIDACION_MOD.
+  { if: 'CUIL_KEYWORD', and: 'CAE_FOUND', penalty: -15, reason: 'CUIL inusual en factura con CAE', penalizes: 'LIQUIDACION_MOD' },
 ];

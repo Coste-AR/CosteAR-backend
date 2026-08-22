@@ -15,17 +15,26 @@
 
 import { getEnv } from '../config/env.js';
 import { groqFetch } from './groq-rate-limiter.js';
+import { tryParseJson, DETERMINISTIC_SAMPLING } from './groq-client.js';
+import {
+  costitaChatResponseSchema,
+  salvageCostitaChatResponse,
+  fallbackCostitaChatResponse,
+  describeZodIssues,
+} from './groq-schemas.js';
+import { getRedisClient } from '../redis/client.js';
+import { createHash } from 'node:crypto';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const TEXT_MODEL   = 'llama-3.3-70b-versatile';
 
-export type ChatActionType = 'CREATE_ENTRY' | 'CREATE_ALERT' | 'INFO_ONLY';
+export type ChatActionType = 'CREATE_ENTRY' | 'CREATE_ALERT' | 'INFO_ONLY' | 'VAULT_QUESTION';
 
 export interface ProposedEntry {
   companyId: string;
   companyName: string;
   rawContent: string;
-  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'DESCONOCIDO';
+  costSection: 'MATERIA_PRIMA' | 'MANO_DE_OBRA' | 'COSTOS_INDIRECTOS' | 'VENTAS' | 'GASTO_COMERCIALIZACION' | 'GASTO_ADMINISTRACION' | 'GASTO_FINANCIERO' | 'DESCONOCIDO';
   documentType: string;
   estimatedImpact?: string; // ej: "+15% en Costos Indirectos"
 }
@@ -71,14 +80,25 @@ Temas de soporte técnico sobre cómo operar la aplicación:
 4. Cómo consultar y cargar transacciones en el Libro de Costos de cada empresa, y cómo exportar los reportes de cálculo a Excel.
 5. Cómo leer la tabla de variaciones de costos indirectos (CIP) y analizar los resultados en la pestaña "Resultado".
 
+Además de estos temas de soporte, los costistas a veces preguntan sobre METODOLOGÍA DE COSTEO en sí (por ejemplo: "¿qué es el ITCS?", "¿cómo se calcula el PPP?", "¿qué es la capacidad ociosa?", "¿cómo funciona el prorrateo secundario escalonado?"). Esas preguntas NO las respondas vos: no sabés la metodología exacta de la cátedra y inventar una respuesta sería peligroso para un costista que confía en el número. Para esas preguntas, devolvé "actionType": "VAULT_QUESTION" con "reply": "" — un componente separado del sistema va a buscar la respuesta real en la Bóveda de Conocimiento. Usá VAULT_QUESTION únicamente para preguntas de METODOLOGÍA/TEORÍA de costos, nunca para preguntas de "cómo uso la app" (esas siguen siendo INFO_ONLY con los 5 temas de arriba).
+
 Reglas de formato de respuesta:
 - Respondé de forma amable, concisa y en español rioplatense (máximo 4 oraciones).
-- Siempre retorná un JSON con "actionType": "INFO_ONLY" y las propiedades "proposedEntry" y "proposedAlert" como null.
+- Siempre retorná un JSON con "proposedEntry" y "proposedAlert" como null.
 
-Ejemplo de respuesta JSON obligatoria:
+Ejemplo de respuesta para soporte de uso de la app:
 {
   "reply": "Para invitar a un operador, andá a la pestaña 'Personal Autorizado' dentro de los detalles del cliente y hacé clic en 'Invitar Operador'. Ingresá su email y el sistema le enviará un código de acceso.",
   "actionType": "INFO_ONLY",
+  "confidence": 100,
+  "proposedEntry": null,
+  "proposedAlert": null
+}
+
+Ejemplo de respuesta para una pregunta de metodología de costeo:
+{
+  "reply": "",
+  "actionType": "VAULT_QUESTION",
   "confidence": 100,
   "proposedEntry": null,
   "proposedAlert": null
@@ -92,7 +112,8 @@ export class GroqCostitaChat {
   }
 
   get isConfigured(): boolean {
-    return this.apiKey.length > 10;
+    // Ver nota en GroqService: el placeholder no debe contar como configurado.
+    return this.apiKey.length > 10 && this.apiKey !== 'groq_placeholder';
   }
 
   async interpret(
@@ -128,6 +149,32 @@ Variables macro actuales: ${macroSummary}`;
       ...conversationHistory.slice(-6), // últimos 3 intercambios
     ];
 
+    const cacheKey = `costear:rag:cache:${createHash('sha256').update(JSON.stringify(messages)).digest('hex')}`;
+    const redis = getRedisClient();
+
+    try {
+      if (redis.status === 'ready') {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          // La caché se valida igual que la respuesta fresca: una entrada
+          // escrita por una versión anterior (o envenenada) no puede saltearse
+          // el esquema solo por venir de Redis.
+          const validated = costitaChatResponseSchema.safeParse(tryParseJson(cached));
+          if (validated.success) {
+            // Anotar en un log (stdout por ahora) que se usó caché
+            console.log(`[groq-costista-chat] Cache hit para key ${cacheKey}`);
+            return validated.data;
+          }
+          // Entrada inválida: se descarta y se sigue al pedido fresco, que es
+          // mejor respuesta para el costista que el fallback genérico.
+          console.warn(`[groq-costista-chat] Entrada de caché inválida en ${cacheKey}; se descarta y se reconsulta.`);
+          await redis.del(cacheKey);
+        }
+      }
+    } catch (e) {
+      console.warn('[groq-costista-chat] Redis cache error:', e);
+    }
+
     try {
       const res = await groqFetch(GROQ_API_URL, {
         method: 'POST',
@@ -139,7 +186,16 @@ Variables macro actuales: ${macroSummary}`;
           model: TEXT_MODEL,
           messages,
           max_tokens: 500,
-          temperature: 0.2,
+          // Se podría defender que un chat "quiere" ser variado, pero acá no:
+          // este call site YA es determinista por otro lado — la respuesta se
+          // cachea 24h en Redis con una clave que es el hash de `messages`, así
+          // que el primer sorteo del muestreo quedaba congelado un día entero
+          // para todos los que preguntaran lo mismo. Con `temperature: 0.2` eso
+          // significaba que la calidad de la respuesta que veía el costista
+          // dependía del azar del primer request, y que dos costistas con la
+          // misma duda recibían instrucciones distintas sobre la MISMA pantalla.
+          // Ver DETERMINISTIC_SEED en groq-client.ts.
+          ...DETERMINISTIC_SAMPLING,
           response_format: { type: 'json_object' },
         }),
       });
@@ -151,7 +207,39 @@ Variables macro actuales: ${macroSummary}`;
 
       const data = await res.json() as { choices: { message: { content: string } }[] };
       const raw  = data.choices[0]?.message.content ?? '';
-      const parsed = JSON.parse(raw) as CostitaChatResponse;
+
+      // `response_format: json_object` garantiza JSON sintáctico, no que
+      // actionType/severity/costSection estén en rango ni que confidence sea un
+      // 0-100. Sin esto, un actionType inventado o un confidence: 999 llegaban
+      // al frontend tal cual (costista-chat-service.ts devuelve el resultado
+      // derecho y la ruta lo serializa).
+      const validated = costitaChatResponseSchema.safeParse(tryParseJson(raw));
+      let parsed: CostitaChatResponse;
+      if (validated.success) {
+        parsed = validated.data;
+      } else {
+        // Antes de tirar la respuesta entera se intenta salvarla: un
+        // `confidence: 120` se clampea a 100 y no le borra al costista una
+        // explicación correcta por un campo accesorio. Si lo que falló es el
+        // `actionType`, un payload propuesto o el `reply` mismo, no se salva
+        // nada — ver salvageCostitaChatResponse — y se cae al fallback.
+        const salvaged = salvageCostitaChatResponse(tryParseJson(raw), validated.error.issues);
+        if (salvaged) {
+          console.warn(
+            `[groq-costista-chat] Respuesta con campos inválidos; se normalizaron y se devuelve igual:\n${describeZodIssues(validated.error.issues)}`,
+          );
+          parsed = salvaged;
+        } else {
+          // Se devuelve el fallback seguro (no `null`): el costista ve el mismo
+          // mensaje que cuando la IA no está disponible, y nunca un dato sin
+          // validar. Contrapartida asumida: al no ser `null`, el servicio no
+          // registra la señal ASSISTANT_MISS — el diagnóstico queda en este log.
+          console.error(
+            `[groq-costista-chat] Respuesta inválida de la IA; se usa el fallback seguro:\n${describeZodIssues(validated.error.issues)}`,
+          );
+          return fallbackCostitaChatResponse();
+        }
+      }
 
       // Sanitize: si propone una empresa que no está en el portfolio, rechazar
       if (parsed.proposedEntry?.companyId) {
@@ -159,6 +247,15 @@ Variables macro actuales: ${macroSummary}`;
         if (!valid) {
           parsed.proposedEntry.companyId = '';
         }
+      }
+
+      // Guardar en caché por 24h
+      try {
+        if (redis.status === 'ready') {
+          await redis.setex(cacheKey, 86400, JSON.stringify(parsed));
+        }
+      } catch (e) {
+        console.warn('[groq-costista-chat] Falló al guardar en caché:', e);
       }
 
       return parsed;

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CosteAR — Demo de Trazabilidad Total v1</title>
+<link rel="stylesheet" href="/demo/style.css" />
+</head>
+<body>
+
+<header>
+  <h1>CosteAR — Demo de Trazabilidad Total v1</h1>
+  <p>Arnés de verificación (no es el frontend real de producción — ver DECISIONES.md). Corre contra tu backend local.</p>
+</header>
+
+<main>
+
+  <section id="sec-conexion">
+    <h2>1. Conexión</h2>
+    <div class="row">
+      <input id="apiBase" value="" placeholder="http://localhost:3000/api/v1" />
+      <input id="identifier" placeholder="Email o CUIT" />
+      <input id="password" type="password" placeholder="Contraseña" />
+      <button id="btnLogin">Ingresar</button>
+    </div>
+    <div class="status" id="statusLogin"></div>
+  </section>
+
+  <section id="sec-setup">
+    <h2>2. Estructura de costos de prueba</h2>
+    <div class="row">
+      <button id="btnSetup" disabled>Crear empresa + estructura + cargar MP/MOD/CIP (ejemplo cátedra)</button>
+      <span class="status" id="statusSetup"></span>
+    </div>
+  </section>
+
+  <section id="sec-calc">
+    <h2>3. Resultado — árbol de derivación persistido</h2>
+    <div class="row">
+      <button id="btnCalc" disabled>Calcular (POST /structures/:id/calculate)</button>
+      <button id="btnRuns" class="secondary" disabled>Ver historial de corridas</button>
+    </div>
+    <div class="status" id="statusCalc"></div>
+    <div id="tree"></div>
+    <div id="runsList"></div>
+  </section>
+
+  <section id="sec-trace">
+    <h2>4. Ficha de un dato (TraceCard) — compra con cantidad + precio</h2>
+    <div class="row">
+      <button id="btnCreateDp" disabled>Crear compra de ejemplo (2 data points hermanos)</button>
+      <button id="btnValidate" class="secondary" disabled>Validar</button>
+      <button id="btnRevision" class="secondary" disabled>Pedir revisión</button>
+    </div>
+    <div class="status" id="statusTrace"></div>
+    <div id="traceCard"></div>
+  </section>
+
+  <section id="sec-imputacion">
+    <h2>5. Doble período — dato sin imputar bloquea el cálculo</h2>
+    <div class="row">
+      <button id="btnPendingDp" disabled>Crear dato SIN imputar</button>
+      <button id="btnCalcBlocked" class="secondary" disabled>Intentar calcular (debería dar 422)</button>
+      <input id="periodoInput" placeholder="YYYY-MM" value="2026-06" />
+      <button id="btnImputar" class="secondary" disabled>Imputar y recalcular</button>
+    </div>
+    <div class="status" id="statusImputacion"></div>
+  </section>
+
+  <section id="sec-audit">
+    <h2>6. Bitácora + latencia de captación</h2>
+    <div class="row">
+      <button id="btnAudit" disabled>GET /structures/:id/audit</button>
+    </div>
+    <div id="auditOut"></div>
+  </section>
+
+</main>
+
+<script src="/demo/app.js"></script>
+</body>
+</html>

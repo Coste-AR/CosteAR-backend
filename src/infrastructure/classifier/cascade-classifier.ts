@@ -1,16 +1,21 @@
 // src/infrastructure/classifier/cascade-classifier.ts
-import { runQualityGate, PARTIAL_CONFIDENCE_CAP } from './layers/layer0-quality-gate.js';
+import { runQualityGate } from './layers/layer0-quality-gate.js';
 import { detectIntent }   from './layers/layer0a-intent-detection.js';
 import { runLayer1 }      from './layers/layer1-definitive-signals.js';
 import { runLayer2 }      from './layers/layer2-corroborating-signals.js';
 import { runLayer3 }      from './layers/layer3-numeric-validation.js';
 import { runLayer4 }      from './layers/layer4-business-routing.js';
+import type { Layer4Result } from './layers/layer4-business-routing.js';
 import { runLayer5 }      from './layers/layer5-ai-fallback.js';
+import { detectAcquisitionCostLink } from './layers/layer4-acquisition-link.js';
 import { categorizeIndustry, getIndustryProfile } from './industry/industry-profile.js';
 import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
 import { prisma } from '../database/prisma.js';
 
+// OJO: 72 se usa con DOS escalas distintas (ver caveat detallado en la asignación
+// de `confidence`, ~línea 267): umbral de PROBABILIDAD calibrada para la rama de
+// señal definitiva, y umbral de PUNTOS acumulados para la rama corroborante.
 const CONFIDENCE_THRESHOLD = 72;
 
 /**
@@ -20,30 +25,134 @@ const CONFIDENCE_THRESHOLD = 72;
  */
 const STRONG_COMPETITOR = 30;
 
+/** Nombre legible de cada sección, para poder citarla en una explicación. */
+const SECTION_LABEL: Record<CostSection, string> = {
+  MATERIA_PRIMA:          'Materia Prima',
+  MANO_DE_OBRA:           'Mano de Obra Directa',
+  COSTOS_INDIRECTOS:      'Costos Indirectos de Producción',
+  VENTAS:                 'Ventas',
+  GASTO_COMERCIALIZACION: 'Gasto de Comercialización',
+  GASTO_ADMINISTRACION:   'Gasto de Administración',
+  GASTO_FINANCIERO:       'Gasto Financiero',
+  MULTIPLE:               'varias secciones (documento mixto)',
+  DESCONOCIDO:            'sin determinar',
+};
+
 /**
- * Genera una explicación legible para el costista sobre por qué
- * el sistema clasificó el documento de determinada manera.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * DECISIÓN DE SECCIÓN — la sección y su justificación son UNA sola cosa (CL-03)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Antes, `costSection` y el texto que se le muestra al costista se elegían por
+ * separado: la sección salía de Layer 4 y el `reasoning` seguía saliendo de la
+ * IA. Cuando Layer 4 pisaba a la IA, el costista leía la justificación de una
+ * decisión que el sistema NO tomó (medido en GA-05: leía "…lo que indica un
+ * gasto de comercialización" mientras el sistema imputaba MANO_DE_OBRA).
+ *
+ * Un chequeo posterior que compare ambas no alcanza: lo que hace falta es que
+ * no exista el estado inválido. Por eso las dos viajan juntas en este tipo y
+ * `buildSectionAndExplanation` devuelve el par `{ costSection, explanation }`
+ * ya armado desde el mismo objeto — no hay forma de setear una sin la otra.
  */
-function buildExplanation(params: {
+export interface SectionDecision {
+  readonly section: CostSection;
+  /** El texto que justifica EXACTAMENTE a `section`. Nunca el de otra decisión. */
+  readonly reasoning: string;
+  readonly decidedBy: 'REGLAS' | 'IA';
+  /** true cuando una regla determinista de Layer 4 contradijo a la IA. */
+  readonly ruleDissent: boolean;
+}
+
+/** Decisión tomada por las reglas deterministas (Layer 4), sin IA de por medio. */
+function decisionFromRules(l4: Layer4Result): SectionDecision {
+  return {
+    section:     l4.costSection,
+    reasoning:   l4.reasoning,
+    decidedBy:   'REGLAS',
+    ruleDissent: false,
+  };
+}
+
+/**
+ * Resuelve la sección DESPUÉS de que la IA respondió, devolviendo sección y
+ * justificación como una sola unidad.
+ *
+ * REGLA DE DESEMPATE (ver DECISIONES.md — CL-03): **gana la IA y se lleva su
+ * propia explicación**, y el desacuerdo con una regla determinista de Layer 4
+ * manda el documento a revisión humana en vez de resolverse en silencio.
+ *
+ * Por qué la IA y no Layer 4: cuando llegamos acá el `documentType` que se
+ * guarda YA es el de la IA, sin discusión. Layer 4 corre sobre ESE tipo. Tomarle
+ * la sección a Layer 4 mientras se le acepta el tipo a la IA es incoherente: se
+ * mezclan dos lecturas del documento en un resultado que ninguna de las dos
+ * sostiene. Además, los dos casos medidos de este pisado (GA-05 y MULTI-01) los
+ * ganaba Layer 4 y en los dos Layer 4 estaba equivocada.
+ */
+export function resolveSectionAfterAI(
+  ai: { costSection: CostSection; reasoning: string },
+  l4AfterAI: Layer4Result,
+): SectionDecision {
+  // Layer 4 no tiene una regla determinista para este tipo, o coincide con la
+  // IA: no hay nada que desempatar.
+  if (l4AfterAI.requiresAI || l4AfterAI.costSection === ai.costSection) {
+    return {
+      section:     ai.costSection,
+      reasoning:   ai.reasoning,
+      decidedBy:   'IA',
+      ruleDissent: false,
+    };
+  }
+
+  // Desacuerdo real: una regla determinista dice otra cosa. Se guarda la
+  // lectura de la IA —la misma que se muestra— y se declara la discrepancia en
+  // el mismo texto, para que el costista pueda decidir con las dos a la vista.
+  return {
+    section:   ai.costSection,
+    reasoning:
+      `${ai.reasoning}. ⚠️ La regla de negocio para este tipo de documento apunta a ` +
+      `${SECTION_LABEL[l4AfterAI.costSection]} (${l4AfterAI.reasoning}), que NO coincide ` +
+      `con esta lectura. Se imputa ${SECTION_LABEL[ai.costSection]} —lo que dice esta misma ` +
+      'explicación— y el documento queda para tu confirmación',
+    decidedBy:   'IA',
+    ruleDissent: true,
+  };
+}
+
+/** Agrega una nota al final de la justificación sin desarmar la unidad. */
+function withNote(decision: SectionDecision, note: string | null): SectionDecision {
+  return note ? { ...decision, reasoning: `${decision.reasoning} (${note})` } : decision;
+}
+
+/**
+ * Genera la sección imputada Y la explicación legible para el costista como un
+ * único par. Se devuelven juntas a propósito: los call sites la esparcen con
+ * `...` en el resultado, así que es imposible guardar una sección con la
+ * explicación de otra decisión.
+ */
+function buildSectionAndExplanation(params: {
   intent: InputIntent;
   documentType: DocumentType;
-  costSection: CostSection;
+  decision: SectionDecision;
   confidence: number;
   definitiveSignal: string | null;
-  l4Reasoning: string;
   aiUsed: boolean;
   supplierFingerprintUsed: boolean;
   requiresReview: boolean;
   industryCategory: IndustryCategory;
   industryLabel: string;
   signalCount: number;
-}): string {
+  wasteReviewRequired?: boolean;
+}): { costSection: CostSection; explanation: string } {
+  // `documentType` y `aiUsed` siguen en el tipo de `params` —forman parte del
+  // contrato— pero esta función no los usa para armar el texto.
   const {
-    intent, documentType, costSection, confidence,
-    definitiveSignal, l4Reasoning, aiUsed,
+    intent, confidence,
+    definitiveSignal, decision,
     supplierFingerprintUsed, requiresReview,
     industryCategory, industryLabel, signalCount,
+    wasteReviewRequired,
   } = params;
+  const l4Reasoning = decision.reasoning;
 
   const parts: string[] = [];
 
@@ -58,6 +167,11 @@ function buildExplanation(params: {
     DOCUMENTO_INFORMAL:    'ℹ️ El operario describió un documento con texto libre.',
   };
   if (intentLabels[intent]) parts.push(intentLabels[intent]!);
+
+  // Merma de naturaleza ambigua: aviso explícito de por qué va a revisión.
+  if (wasteReviewRequired) {
+    parts.push('⚠️ Se menciona una merma/pérdida pero no queda claro si es NORMAL (esperada, se absorbe en el costo) o EXTRAORDINARIA (siniestro, es pérdida). No se asume ninguna → requiere tu confirmación.');
+  }
 
   // Qué fue detectado
   if (definitiveSignal) {
@@ -85,10 +199,15 @@ function buildExplanation(params: {
   parts.push(`Confianza: ${confidence}%.`);
 
   if (requiresReview) {
-    parts.push('La confianza es baja → requiere tu revisión antes de aplicar.');
+    // Cuando la revisión viene de una regla que contradice a la IA, decir "la
+    // confianza es baja" sería mentira: la confianza puede ser 97. El motivo
+    // real ya quedó escrito arriba, dentro de la justificación de la decisión.
+    parts.push(decision.ruleDissent
+      ? 'Las reglas y la IA no coinciden → requiere tu revisión antes de aplicar.'
+      : 'La confianza es baja → requiere tu revisión antes de aplicar.');
   }
 
-  return parts.join(' ');
+  return { costSection: decision.section, explanation: parts.join(' ') };
 }
 
 /**
@@ -118,9 +237,21 @@ export async function classifyDocument(input: ClassifierInput & {
     ? input.enrichedText
     : input.text;
 
+  // ── Vínculo de costo de adquisición declarado por el documento ─────────────
+  // Se detecta acá y no dentro del ruteo porque NO depende del tipo de documento
+  // ni de la sección: es un hecho del texto que la capa de aplicación necesita
+  // igual, incluso cuando la IA termina eligiendo otra sección. La misma función
+  // pura la usa layer4-invoice-routing para decidir la sección.
+  const acquisitionLink = detectAcquisitionCostLink(text.toLowerCase());
+
   // ── Layer 0A: Detección de intención ──────────────────────────────────────
   const intentResult = detectIntent(text, sourceType, industryProfile);
   const intent: InputIntent = intentResult.intent;
+
+  // Merma de naturaleza ambigua (ni claramente normal ni extraordinaria):
+  // revisión humana OBLIGATORIA. No se auto-clasifica ni como pérdida ni como
+  // costo. "Cero errores silenciosos".
+  const wasteReviewRequired = intentResult.requiresReview === true;
 
   // ── Layer 0: Quality Gate ──────────────────────────────────────────────────
   const qualityResult = runQualityGate({ quality: input.groqQuality ?? null, text });
@@ -223,10 +354,32 @@ export async function classifyDocument(input: ClassifierInput & {
   // Ambigüedad interna de Layer 2 (dos tipos pegados) cuando no hay señal definitiva.
   const typeAmbiguous = !layer1 && layer2.ambiguous;
 
+  // ── Puesto/cargo extraído por Groq (para distinguir MOD de mano de obra
+  //    indirecta en liquidaciones). Puede venir null si no se pudo extraer. ────
+  const extractedRole = typeof input.extractedData?.role === 'string'
+    ? (input.extractedData.role as string)
+    : null;
+
   // ── Layer 4: routing de sección para la hipótesis elegida ───────────────────
-  const l4 = runLayer4(chosenType, text, industryCategory);
+  const l4 = runLayer4(chosenType, text, industryCategory, extractedRole);
 
   // ── Confianza a partir de la evidencia ──────────────────────────────────────
+  // ⚠️ CAVEAT DE ESCALAS: las dos ramas NO están en la misma unidad, aunque
+  // compartan la variable `confidence` y se comparen luego contra el mismo umbral.
+  //   • definitiveType → layer1.confidence  = probabilidad CALIBRADA (~93-98),
+  //     una señal definitiva ya mapeada a "qué tan probable es este tipo".
+  //   • si no → layer2.totalPts + layer3Delta = SUMA DE PUNTAJES acumulados de
+  //     señales corroborantes independientes. Un documento con 5 señales fuertes
+  //     puede superar 72 puntos con facilidad, pero eso NO es "72% de probabilidad";
+  //     es una suma de pesos, no una probabilidad normalizada 0-100.
+  // Por eso CONFIDENCE_THRESHOLD (72, ver línea 17) actúa como umbral de PUNTOS en
+  // la rama corroborante y como umbral de PROBABILIDAD en la rama definitiva: son
+  // dos criterios distintos que casualmente coinciden en el mismo número. Funciona
+  // hoy y NO es urgente de arreglar, pero NO asumas que ambas ramas producen una
+  // probabilidad calibrada 0-100 al tocar esta lógica.
+  // TODO(future): normalizar Layer 2 a 0-100 antes de comparar contra el umbral,
+  //   p.ej. saturación `100 * (1 - Math.exp(-pts / k))`, para que ambas ramas sean
+  //   comparables de verdad. NO implementado a propósito (cambiaría el comportamiento).
   let confidence = definitiveType
     ? layer1!.confidence
     : layer2.totalPts + layer3Delta;
@@ -244,12 +397,11 @@ export async function classifyDocument(input: ClassifierInput & {
   // ── DECISIÓN ────────────────────────────────────────────────────────────────
   // Auto-clasifica SOLO si todas las fuentes coinciden, no hay ambigüedad de
   // sección, y la confianza alcanza. Cualquier duda → IA y/o revisión humana.
-  const blocked = crossLayerConflict || typeAmbiguous || l4.requiresAI;
+  const blocked = crossLayerConflict || typeAmbiguous || l4.requiresAI || wasteReviewRequired;
 
   if (!blocked && confidence >= EFFECTIVE_THRESHOLD && chosenType !== 'DESCONOCIDO') {
     return {
       documentType: chosenType,
-      costSection:  l4.costSection,
       confidence:   Math.min(confidence, 100),
       requiresReview: false,
       isDuplicate:  false,
@@ -261,10 +413,12 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
-      explanation: buildExplanation({
+      acquisitionLink,
+      // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
+      ...buildSectionAndExplanation({
         intent, documentType: chosenType,
-        costSection: l4.costSection, confidence: Math.min(confidence, 100),
-        definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
+        decision: decisionFromRules(l4), confidence: Math.min(confidence, 100),
+        definitiveSignal: layer1?.label ?? null,
         aiUsed: false, supplierFingerprintUsed, requiresReview: false,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
       }),
@@ -277,6 +431,18 @@ export async function classifyDocument(input: ClassifierInput & {
     : typeAmbiguous && layer2.runnerUpType
       ? `Las reglas dejaron dos tipos empatados: ${layer2.winningType} vs ${layer2.runnerUpType}. Decidí cuál corresponde.`
       : undefined;
+
+  // Prior fuerte para liquidaciones de personal que NO es mano de obra directa:
+  // el puesto (capataz, gerente, administrativo…) sugiere CIP o gasto admin.
+  const payrollHint = (l4.requiresAI && l4.suggestedSection
+    && (chosenType === 'LIQUIDACION_MOD' || chosenType === 'PLANILLA_HORAS'))
+    ? `Liquidación/planilla de un puesto que NO es mano de obra directa. ${l4.reasoning}. Las reglas sugieren ${l4.suggestedSection} como candidato (mano de obra indirecta = Costos Indirectos de Producción; personal administrativo = Gasto de Administración). Confirmá según el puesto.`
+    : undefined;
+
+  // Merma ambigua: la IA debe entender que NO puede asumir pérdida ni costo.
+  const wasteHint = wasteReviewRequired
+    ? 'El texto menciona una merma/pérdida pero no aclara su naturaleza. Merma NORMAL (esperada, dentro de rango, "% habitual", "merma de proceso") se absorbe en el costo de las unidades buenas y NO es pérdida. Merma EXTRAORDINARIA (incendio, robo, inundación, "se pudrió todo", siniestro) es pérdida fuera del costo (PERDIDA_INVENTARIO). No la clasifiques como pérdida ni como costo sin que el costista confirme cuál es.'
+    : undefined;
 
   const correctionExamples = await getCorrectionExamples({
     costistId: input.costistId,
@@ -291,28 +457,33 @@ export async function classifyDocument(input: ClassifierInput & {
     industryLabel: industryProfile.label,
     industryCategory,
     intent,
-    ambiguityHint: conflictHint,
+    ambiguityHint: conflictHint ?? payrollHint ?? wasteHint,
     correctionExamples,
   });
 
   if (aiResult) {
-    const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory);
-    const finalSection: CostSection = (!l4afterAI.requiresAI)
-      ? l4afterAI.costSection
-      : aiResult.costSection as CostSection;
+    const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory, extractedRole);
+
+    // Una sola decisión: la sección que se guarda y el texto que se muestra
+    // salen de acá y no se vuelven a tocar por separado.
+    const decision = withNote(
+      resolveSectionAfterAI(aiResult, l4afterAI),
+      crossLayerConflict ? 'había señales contradictorias → confirmá' : null,
+    );
 
     const finalConf = confidenceCap !== null
       ? Math.min(aiResult.confidence, confidenceCap)
       : aiResult.confidence;
 
     // Garantía de cero errores silenciosos: si hubo conflicto duro entre capas,
-    // la IA pre-llena su mejor hipótesis pero SIEMPRE pasa por revisión humana.
-    // Sin conflicto, vale el umbral normal de confianza.
-    const requiresReview = crossLayerConflict || finalConf < CONFIDENCE_THRESHOLD;
+    // una merma de naturaleza ambigua, o una regla determinista que contradice a
+    // la IA, la IA pre-llena su mejor hipótesis pero SIEMPRE pasa por revisión
+    // humana. Sin conflicto, vale el umbral normal.
+    const requiresReview = crossLayerConflict || wasteReviewRequired
+      || decision.ruleDissent || finalConf < CONFIDENCE_THRESHOLD;
 
     return {
       documentType: aiResult.documentType as DocumentType,
-      costSection:  finalSection,
       confidence:   finalConf,
       requiresReview,
       isDuplicate:  false,
@@ -324,13 +495,15 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
-      explanation: buildExplanation({
+      acquisitionLink,
+      // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
+      ...buildSectionAndExplanation({
         intent, documentType: aiResult.documentType as DocumentType,
-        costSection: finalSection, confidence: finalConf,
+        decision, confidence: finalConf,
         definitiveSignal: layer1?.label ?? null,
-        l4Reasoning: crossLayerConflict ? `${aiResult.reasoning} (había señales contradictorias → confirmá)` : aiResult.reasoning,
         aiUsed: true, supplierFingerprintUsed, requiresReview,
         industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
+        wasteReviewRequired,
       }),
     };
   }
@@ -338,7 +511,6 @@ export async function classifyDocument(input: ClassifierInput & {
   // ── Layer 6: Escalamiento humano (IA no disponible o sin resolución) ────────
   return {
     documentType: chosenType,
-    costSection:  l4.costSection,
     confidence:   Math.min(confidence, 71),
     requiresReview: true,
     isDuplicate:  false,
@@ -350,12 +522,14 @@ export async function classifyDocument(input: ClassifierInput & {
     confidenceCap,
     intent,
     industryCategory,
-    explanation: buildExplanation({
+    // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
+    ...buildSectionAndExplanation({
       intent, documentType: chosenType,
-      costSection: l4.costSection, confidence: Math.min(confidence, 71),
-      definitiveSignal: layer1?.label ?? null, l4Reasoning: l4.reasoning,
+      decision: decisionFromRules(l4), confidence: Math.min(confidence, 71),
+      definitiveSignal: layer1?.label ?? null,
       aiUsed: false, supplierFingerprintUsed, requiresReview: true,
       industryCategory, industryLabel: industryProfile.label, signalCount: allSignals.length,
+      wasteReviewRequired,
     }),
   };
 }

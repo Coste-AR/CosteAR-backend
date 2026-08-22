@@ -9,6 +9,10 @@ import { z } from 'zod';
 const nonNeg = z.number().finite().nonnegative();
 const positive = z.number().finite().positive();
 
+// `periodSchema` (mensual/quincenal/trimestral) se define más abajo, junto a
+// `periodCodeRegex`, para no duplicar la definición: esa versión es un
+// superconjunto de "AAAA-MM" y también rechaza meses inválidos como "1999-13".
+
 // --- Materia Prima (Hoja 1) ---
 
 export const stockMovementSchema = z.object({
@@ -20,6 +24,13 @@ export const stockMovementSchema = z.object({
 });
 
 export const rawMaterialConfigSchema = z.object({
+  // Identidad de mercado (criterio C: "nunca una sola MP genérica"). Opcionales
+  // para no romper la MP única legada, que no las tenía.
+  id: z.string().max(60).optional(),
+  code: z.string().max(60).optional(), // codificación real de mercado
+  name: z.string().max(120).optional(),
+  unit: z.string().max(20).optional(),
+  supplier: z.string().max(160).optional(), // proveedor habitual
   wilson: z.object({
     annualDemand: nonNeg,
     orderCost: nonNeg,
@@ -37,6 +48,26 @@ export const rawMaterialConfigSchema = z.object({
   movements: z.array(stockMovementSchema).max(500),
 });
 export type RawMaterialConfig = z.infer<typeof rawMaterialConfigSchema>;
+
+/**
+ * Sección de Materia Prima con N materias primas por estructura (Parte 3.1).
+ * Acepta y normaliza la forma LEGADA (una sola MP como objeto plano con
+ * `wilson`) envolviéndola en `{ materials: [ ... ] }`. Así las estructuras ya
+ * cargadas siguen funcionando sin migración destructiva: se normalizan al leer
+ * y quedan en la forma nueva al volver a guardar.
+ */
+export const rawMaterialSectionSchema = z.preprocess(
+  (val) => {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const o = val as Record<string, unknown>;
+      if ('materials' in o) return o;
+      if ('wilson' in o) return { materials: [o] }; // MP única legada
+    }
+    return val;
+  },
+  z.object({ materials: z.array(rawMaterialConfigSchema).min(1).max(50) }),
+);
+export type RawMaterialSection = z.infer<typeof rawMaterialSectionSchema>;
 
 // --- Mano de Obra Directa (Hoja 2) ---
 
@@ -74,7 +105,63 @@ export const directLaborConfigSchema = z.object({
       z.object({
         name: z.string().min(1).max(120),
         basicRemuneration: nonNeg,
+        // HORAS PAGADAS — «presencia en fábrica» (cátedra, Clase 10): las horas
+        // por las que se paga, trabaje o no el operario. Es la base sobre la que
+        // se reparte el costo total de MOD. Se sigue llamando `hoursWorked` por
+        // historia (es el único campo de horas de las estructuras ya cargadas);
+        // renombrarlo obligaría a migrar el JSONB de todas ellas.
         hoursWorked: nonNeg,
+        // HORAS NETAS PRODUCTIVAS (cátedra, Clase 10) = presencia en fábrica −
+        // tiempos perdidos informados. Son las únicas horas imputables a las
+        // órdenes: la tarifa se divide por ESTAS. La diferencia contra
+        // `hoursWorked` es la CAPACIDAD OCIOSA, cuyo costo se aísla en su propia
+        // línea y nunca se suma en silencio a las órdenes.
+        //
+        // OPCIONAL A PROPÓSITO — retrocompatibilidad sin migración: las
+        // estructuras ya guardadas solo tienen `hoursWorked`, y sin este campo el
+        // motor asume que toda la presencia fue productiva (horas ociosas = 0) y
+        // calcula EXACTAMENTE igual que antes.
+        //
+        // NO confundir con el ausentismo pago del IAP/ITCS: ese cubre AUSENCIAS
+        // PAGAS (vacaciones, enfermedad, feriados), donde el operario no está en
+        // planta. Acá el operario está presente y cobra, pero no hay trabajo que
+        // asignarle. Los dos modelos conviven.
+        productiveHours: nonNeg.optional(),
+        // TIEMPO ESTÁNDAR DE PRODUCCIÓN (cátedra, Clase 10): las horas que,
+        // según la oficina técnica, debería haber llevado producir lo que se
+        // produjo (horas estándar por unidad × unidades terminadas). Habilita el
+        // segundo tipo de improductividad:
+        //     horas netas productivas − tiempo estándar = IMPRODUCTIVIDAD OCULTA
+        // Opcional: sin el dato la improductividad oculta es cero y el cálculo
+        // queda idéntico al histórico.
+        standardHours: nonNeg.optional(),
+        // Detalle POR MOTIVO de los tiempos perdidos informados (corte de
+        // energía, rotura de máquina, falta de materia prima, mantenimiento
+        // programado, descanso/refrigerio…). Es DESCRIPTIVO: la fuente de verdad
+        // de cuántas horas se perdieron sigue siendo `hoursWorked −
+        // productiveHours`; el motor recorta lo que se pase y completa lo que
+        // falte con un renglón «Sin discriminar».
+        informedLostTime: z
+          .array(z.object({ reason: z.string().min(1).max(120), hours: nonNeg }))
+          .max(50)
+          .optional(),
+        // Dato REAL de fin de mes (horas efectivamente trabajadas). Opcional y
+        // NO usado por el motor: es solo para comparar real vs presupuestado
+        // (Parte 3.2, criterio C). No afecta la tarifa ni el costo.
+        realHours: nonNeg.optional(),
+        // Modelo preparado para operarios individuales (extensión, ver
+        // DECISIONES.md). Opcional; el motor no lo usa todavía.
+        operators: z
+          .array(
+            z.object({
+              name: z.string().max(120),
+              category: z.string().max(80).optional(),
+              bankedHours: nonNeg.optional(),
+              individualAbsenceDays: nonNeg.optional(),
+            }),
+          )
+          .max(500)
+          .optional(),
       }),
     )
     .max(100),
@@ -84,6 +171,98 @@ export type DirectLaborConfig = z.infer<typeof directLaborConfigSchema>;
 // --- Costos Indirectos (Hoja 3) ---
 
 const fixedVariableSchema = z.object({ fixed: nonNeg, variable: nonNeg });
+
+/**
+ * Un PAR EXPLÍCITO del reparto secundario (F01-A): a qué centro DESTINO va y
+ * cuánto (base fija y variable). Reemplaza al array posicional cuyo significado
+ * dependía del índice. El id del destino viaja SIEMPRE con el valor.
+ */
+export const secondaryDistributionPairSchema = z.object({
+  centroDestinoId: z.string().min(1).max(60),
+  fijo: nonNeg,
+  variable: nonNeg,
+});
+export type SecondaryDistributionPair = z.infer<typeof secondaryDistributionPairSchema>;
+
+/** Forma canónica de una entrada de reparto secundario (post-normalización). */
+export interface ServiceDistributionEntry {
+  serviceCenterId: string;
+  distributions: SecondaryDistributionPair[];
+  distributionMode: 'manual' | 'base';
+  baseCode?: string;
+}
+
+/**
+ * Normaliza una entrada de reparto secundario a la forma CANÓNICA por PARES
+ * EXPLÍCITOS `{ centroDestinoId, fijo, variable }[]`.
+ *
+ * - Si viene `distributions` (contrato nuevo), se usa tal cual.
+ * - Si no, se reconstruyen los pares desde la forma LEGADA por Records keyed by
+ *   id (`toProductive` combinado + `toProductiveFixed` / `toProductiveVariable`),
+ *   tomando la unión de sus claves. `fijo`/`variable` salen del Record
+ *   discriminado si existe, con fallback al combinado. Así una config vieja se
+ *   lee sin reescribirse (retrocompat de solo lectura): al volver a guardarla
+ *   desde el frontend nuevo queda en la forma por pares.
+ *
+ * La validación de que cada `centroDestinoId` exista y no sea el propio centro
+ * NO se hace acá (este normalizador no conoce la lista de centros): la hace el
+ * motor con los nombres humanos, para dar un 422 accionable. Una config legada
+ * ambigua (claves posicionales "0"/"1", o el propio centro por el bug de
+ * columnas) se convierte igual y FALLA fuerte y claro al calcular, en vez de
+ * reasignar porcentajes al centro equivocado en silencio.
+ */
+export function normalizeServiceDistribution(d: {
+  serviceCenterId: string;
+  distributions?: SecondaryDistributionPair[];
+  distributionMode?: 'manual' | 'base';
+  baseCode?: string;
+  toProductive?: Record<string, number>;
+  toProductiveFixed?: Record<string, number>;
+  toProductiveVariable?: Record<string, number>;
+}): ServiceDistributionEntry {
+  let distributions: SecondaryDistributionPair[];
+  if (d.distributions) {
+    distributions = d.distributions;
+  } else {
+    const combined = d.toProductive ?? {};
+    const fx = d.toProductiveFixed ?? {};
+    const va = d.toProductiveVariable ?? {};
+    const keys = new Set([...Object.keys(combined), ...Object.keys(fx), ...Object.keys(va)]);
+    distributions = [...keys].map((centroDestinoId) => ({
+      centroDestinoId,
+      fijo: fx[centroDestinoId] ?? combined[centroDestinoId] ?? 0,
+      variable: va[centroDestinoId] ?? combined[centroDestinoId] ?? 0,
+    }));
+  }
+  return {
+    serviceCenterId: d.serviceCenterId,
+    distributions,
+    distributionMode: d.distributionMode ?? 'manual',
+    ...(d.baseCode !== undefined ? { baseCode: d.baseCode } : {}),
+  };
+}
+
+/**
+ * Adaptador de LECTURA no destructivo: deja el JSON de Costos Indirectos
+ * almacenado con sus `serviceDistributions` ya en la forma CANÓNICA por PARES,
+ * para que el frontend reciba SIEMPRE `distributions` (una config vieja por
+ * Records se convierte en memoria, sin reescribir lo guardado). Es tolerante:
+ * si el valor no tiene la forma esperada, lo devuelve tal cual (nunca rompe una
+ * lectura). El almacenamiento recién queda en pares cuando el usuario re-guarda.
+ */
+export function normalizeIndirectConfigForRead(config: unknown): unknown {
+  if (!config || typeof config !== 'object') return config;
+  const c = config as Record<string, unknown>;
+  if (!Array.isArray(c.serviceDistributions)) return config;
+  return {
+    ...c,
+    serviceDistributions: c.serviceDistributions.map((d) =>
+      d && typeof d === 'object'
+        ? normalizeServiceDistribution(d as Parameters<typeof normalizeServiceDistribution>[0])
+        : d,
+    ),
+  };
+}
 
 export const indirectCostConfigSchema = z.object({
   centers: z
@@ -102,19 +281,67 @@ export const indirectCostConfigSchema = z.object({
         name: z.string().min(1).max(120),
         amount: fixedVariableSchema,
         distribution: z.record(z.string(), nonNeg),
+        // Prorrateo PRIMARIO por concepto (Parte 4.3). Tres modos que conviven:
+        //  - 'direct'  : importe ya asignado por centro (distribution = importes).
+        //  - 'percent' : % manual por centro (lo de hoy; distribution = pesos).
+        //  - 'base'    : base física del catálogo; los valores por centro se
+        //                resuelven desde allocation_base_values y se vuelcan a
+        //                `distribution` en la capa de servicio antes de calcular.
+        allocationMode: z.enum(['direct', 'percent', 'base']).optional().default('percent'),
+        baseCode: z.string().max(60).optional(),
       }),
     )
     .max(200),
   serviceDistributions: z
     .array(
-      z.object({
-        serviceCenterId: z.string().min(1),
-        toProductive: z.record(z.string(), nonNeg).optional().default({}),
-        toProductiveFixed: z.record(z.string(), nonNeg).optional().default({}),
-        toProductiveVariable: z.record(z.string(), nonNeg).optional().default({}),
-      }),
+      z
+        .object({
+          serviceCenterId: z.string().min(1),
+          /**
+           * CONTRATO NUEVO (F01-A) — PARES EXPLÍCITOS. Cada valor del reparto
+           * secundario viaja con el id del centro DESTINO al que va. Esto
+           * elimina por completo el mapeo POSICIONAL que confundía columnas
+           * entre el frontend y el backend: un valor ya no puede aterrizar en
+           * el centro equivocado (ni sobre el propio centro de la fila) por un
+           * desfasaje de índices. El significado ya no depende de la posición.
+           */
+          distributions: z
+            .array(secondaryDistributionPairSchema)
+            .max(100)
+            .optional(),
+          // Cómo se arma el reparto secundario de este servicio:
+          //  - 'manual' : el costista tipea fijo/variable por centro destino
+          //               (`distributions`). Es el modo por defecto → todo lo ya
+          //               cargado sigue igual.
+          //  - 'base'   : el motor DERIVA el reparto desde las unidades de una
+          //               base física (`baseCode`); los valores por centro se
+          //               resuelven desde allocation_base_values y se vuelcan a
+          //               `distributions` en la capa de servicio antes de
+          //               calcular. El costista no tipea porcentajes: salen de la
+          //               base (trazable).
+          distributionMode: z.enum(['manual', 'base']).optional().default('manual'),
+          // Base física del secundario. Requerida en modo 'base'; en 'manual' es
+          // opcional (solo etiqueta para mostrar en el árbol).
+          baseCode: z.string().max(60).optional(),
+          // --- LEGADO (retrocompat de LECTURA, F01-A) ---
+          // Forma vieja: tres Records keyed by id (toProductive combinado + los
+          // discriminados fijo/variable). Se sigue ACEPTANDO para no romper
+          // estructuras ya guardadas ni las versiones históricas append-only:
+          // el normalizador de abajo las convierte a `distributions`. NO es la
+          // forma que manda el frontend nuevo. Ver DECISIONES.md (F01-A).
+          toProductive: z.record(z.string(), nonNeg).optional(),
+          toProductiveFixed: z.record(z.string(), nonNeg).optional(),
+          toProductiveVariable: z.record(z.string(), nonNeg).optional(),
+        })
+        .transform(normalizeServiceDistribution),
     )
     .max(100),
+  // ORDEN DE CIERRE del prorrateo secundario escalonado (Parte 4.4, criterio
+  // A.3.c). Lista de `serviceCenterId` en el orden en que cierran. Si está
+  // presente y no vacía, el motor usa el método ESCALONADO (un servicio puede
+  // repartir a otro que aún no cerró). Si falta, se usa la pasada directa
+  // legada (retrocompatible con FX1/FX3 y con estructuras ya cargadas).
+  closureOrder: z.array(z.string().min(1)).max(100).optional().default([]),
   // Por depto productivo: capacidad normal, actividad real y CIP real (datos
   // manuales de fin de mes). El PRESUPUESTO no es manual: se deriva del prorrateo
   // y se persiste automáticamente (solo lectura en la UI).
@@ -123,6 +350,13 @@ export const indirectCostConfigSchema = z.object({
       z.object({
         centerId: z.string().min(1),
         budget: fixedVariableSchema.optional().default({ fixed: 0, variable: 0 }),
+        // bp — capacidad normal. Sigue siendo `nonNeg` (acepta 0) A PROPÓSITO:
+        // este schema NO es solo el de entrada, también es el que RE-PARSEA el
+        // JSONB ya persistido en cada cálculo, export y comparación de períodos.
+        // Hay estructuras guardadas con bp = 0 (el poblador automático de
+        // documentos las crea así, escribiendo directo en Prisma), y volverlas
+        // impersables convertiría un dato viejo en un 500 al leer.
+        // El 0 se rechaza AL GUARDAR, en `indirectCostConfigInputSchema`.
         normalCapacity: nonNeg,
         actualActivity: nonNeg,
         actualCip: nonNeg,
@@ -132,18 +366,121 @@ export const indirectCostConfigSchema = z.object({
 });
 export type IndirectCostConfig = z.infer<typeof indirectCostConfigSchema>;
 
+/**
+ * Capacidad normal (bp) en 0 — mensaje ÚNICO.
+ *
+ * La misma frase sale por los tres caminos posibles (al guardar Costos
+ * Indirectos, al validar los insumos antes de calcular y desde el propio motor
+ * si la estructura ya venía con 0 de antes), para que el costista lea siempre
+ * lo mismo y sepa exactamente qué cargar. Nombra el CENTRO por su nombre
+ * humano — nunca su id interno (F09-4).
+ */
+export function mensajeCapacidadNormalEnCero(centro: string): string {
+  return (
+    `El centro «${centro}» tiene la capacidad normal en 0. Sin capacidad normal no hay cuota de CIF ` +
+    'ni análisis de variaciones: el costo del producto saldría sin carga fabril. Cargá la actividad ' +
+    `normal esperada de «${centro}» (horas máquina, horas hombre o unidades) en Costos Indirectos y ` +
+    'volvé a guardar.'
+  );
+}
+
+/** Nombre humano de un centro por su id. Fallback genérico: nunca se filtra el id. */
+export function nombreDeCentro(
+  centers: { id: string; name: string }[],
+  centerId: string,
+): string {
+  return centers.find((c) => c.id === centerId)?.name?.trim() || 'un centro productivo';
+}
+
+/**
+ * Config de Costos Indirectos tal como llega del `PUT` — el schema de ENTRADA.
+ *
+ * Es `indirectCostConfigSchema` + la regla que el schema de lectura no puede
+ * tener: **capacidad normal en 0 no se guarda**. Un bp = 0 persistido deja la
+ * cuota predeterminada en cero (el producto se costea sin CIF) y hace explotar
+ * el análisis de variaciones por división por cero. Se corta en la puerta.
+ *
+ * El issue viaja con `path = ['productiveSettings', <centerId>, 'normalCapacity']`
+ * para que `parseIndirectCostConfigInput` lo convierta en un 422 accionable con
+ * el mismo `field` que ya usaba `validateCalculationInputs`.
+ */
+export const indirectCostConfigInputSchema = indirectCostConfigSchema.superRefine((cfg, ctx) => {
+  for (const setting of cfg.productiveSettings) {
+    if (setting.normalCapacity === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['productiveSettings', setting.centerId, 'normalCapacity'],
+        message: mensajeCapacidadNormalEnCero(nombreDeCentro(cfg.centers, setting.centerId)),
+      });
+    }
+  }
+});
+
 // --- Estructura de costos (crear / actualizar) ---
+
+/**
+ * Las tres formas de código de período que entiende el calendario
+ * (`domain/periods/period-calendar.ts`): mensual, quincenal y trimestral.
+ * El mes va con rango real (01-12): el \d{2} suelto dejaba pasar "1999-13".
+ */
+const periodCodeRegex = /^\d{4}-((0[1-9]|1[0-2])(-Q[12])?|T[1-4])$/;
+
+export const periodSchema = z.string().regex(periodCodeRegex, 'Código de período inválido');
 
 export const createCostStructureSchema = z.object({
   productName: z.string().min(1).max(160).trim(),
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'Formato de período: YYYY-MM'),
+  /**
+   * El período de arranque. Es OPCIONAL: si no viene, el servicio lo deriva de la fecha
+   * de hoy y del ritmo de la empresa. No se tipea más a mano — pedirle al costista que
+   * invente un código mensual para una empresa que costea por quincena era pedirle que
+   * mienta. Se sigue aceptando si llega (estructuras importadas, compatibilidad).
+   */
+  period: periodSchema.optional(),
   costingSystem: z.enum(['ORDERS', 'PROCESSES']).default('ORDERS'),
 });
 export type CreateCostStructureInput = z.infer<typeof createCostStructureSchema>;
 
+/**
+ * QUÉ HACER CON UN DATO QUE LLEGÓ TARDE (la factura de junio que aparece en
+ * agosto, con junio ya cerrado).
+ *
+ * `late-data-service.ts` respeta los tres modos desde que se construyó, pero el
+ * campo no se escribía en ningún lado: quedaba siempre en `ASK` y el costista
+ * no podía dejar la decisión tomada de antemano ni una sola vez.
+ *
+ * `REOPEN` es el único que cambia números ya dados por buenos —reabre el mes y
+ * repropaga hacia adelante—, así que la pantalla tiene que decirlo antes de que
+ * alguien lo elija, no después.
+ */
+export const updateLateDataPolicySchema = z.object({
+  lateDataPolicy: z.enum(['ASK', 'CURRENT_PERIOD', 'REOPEN']),
+});
+export type UpdateLateDataPolicyInput = z.infer<typeof updateLateDataPolicySchema>;
+
+/**
+ * TRABAJOS DE TERCEROS del período (#90, ADR 0009).
+ *
+ * Endpoint propio y columna propia, igual que los datos de venta. NO viven
+ * dentro de la config de costos indirectos: la cátedra (clase 20) los registra
+ * por separado de los CIP porque no se prorratean entre centros ni generan
+ * cuotas. Si compartieran el JSON con los conceptos, la próxima persona los
+ * sumaría ahí "para simplificar" y se diluirían en las cuotas — el costo total
+ * daría parecido y el de cada centro quedaría mal.
+ */
+export const updateThirdPartyWorkSchema = z.object({
+  thirdPartyWork: nonNeg,
+});
+
 export const updateSalesSchema = z.object({
   salesUnitPrice: nonNeg,
+  /** Unidades VENDIDAS: facturación (precio × cantidad) y margen. */
   salesQuantity: nonNeg,
+  /**
+   * Unidades PRODUCIDAS: con esto sale el COSTO UNITARIO. Opcional para no romper
+   * lo ya cargado (ni el cliente viejo): si no viene, el costo unitario se cae a las
+   * vendidas, que es lo que el sistema hacía antes de tener este campo.
+   */
+  productionQuantity: nonNeg.nullish(),
 });
 
 // Inventarios para el Estado de Costos (Hoja 4).

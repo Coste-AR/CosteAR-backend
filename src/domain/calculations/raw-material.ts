@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { Money } from '../value-objects/money.js';
+import { CalcError } from '../errors/domain-error.js';
 
 /**
  * HOJA 1 · MATERIA PRIMA
@@ -155,7 +156,10 @@ export function calcStockLedgerPPP(
 
     if (m.type === 'purchase') {
       if (m.unitCost === undefined) {
-        throw new Error(`Compra "${m.detail}" sin costo unitario`);
+        // Dato incompleto del costista, no un bug: la ficha de stock no se puede
+        // valuar sin el costo de la factura. 422 con el mensaje tal cual, nunca
+        // un 500 crudo.
+        throw new CalcError(`Compra "${m.detail}" sin costo unitario`);
       }
       const purchaseUnitCost = Money.of(m.unitCost);
       const purchaseTotal = purchaseUnitCost.multiply(qty);
@@ -181,7 +185,11 @@ export function calcStockLedgerPPP(
     } else {
       // Consumo: sale al PPP vigente.
       if (qty.greaterThan(balanceQty)) {
-        throw new Error(
+        // Control de consistencia que pide la cátedra: existencia inicial +
+        // compras − consumos >= 0. Que salte significa que los movimientos que
+        // cargó el costista no cierran, no que el motor esté roto: 422 con el
+        // mensaje y los números intactos para que sepa qué corregir.
+        throw new CalcError(
           `Consumo "${m.detail}" (${qty}) supera el saldo disponible (${balanceQty})`,
         );
       }

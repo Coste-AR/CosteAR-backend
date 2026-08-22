@@ -1,0 +1,7 @@
+# 1. Lint + fix de lo que está staged (rápido: solo los archivos tocados)
+npx lint-staged
+
+# 2. Typecheck del proyecto. Si no compila, el commit no entra.
+#    Es el chequeo que más bugs evita por unidad de segundo invertido.
+echo "→ typecheck"
+npm run typecheck

@@ -8,6 +8,7 @@ import {
   type CostCenter,
   type IndirectCostConcept,
 } from '@/domain/calculations/indirect-costs.js';
+import { MissingInputError } from '@/domain/errors/calculation-errors.js';
 
 describe('Hoja 3 — Costos Indirectos de Producción (CIP)', () => {
   const centers: CostCenter[] = [
@@ -138,6 +139,63 @@ describe('Hoja 3 — Costos Indirectos de Producción (CIP)', () => {
       // Sobre/sub = aplicado − real = 180000 − 195000 = −15000 (subaplicado)
       expect(v.overUnderApplied.toNumber()).toBe(-15000);
       // 3000 + 12000 = 15000 = −(−15000) ✓
+    });
+  });
+
+  /**
+   * CAPACIDAD NORMAL EN 0 — el 500 crudo que se reprodujo en auditoría.
+   *
+   * `PUT` de Costos Indirectos con `normalCapacity: 0` devolvía 200, y el
+   * `POST /calculate` posterior moría con "División por cero en cálculo
+   * monetario" (`Money.divide`) desde `calcVarianceAnalysis`. Ahora el motor
+   * corta antes con un 422 accionable que nombra el centro.
+   */
+  describe('Capacidad normal en 0', () => {
+    const cipBudget = { fixed: Money.of(120000), variable: Money.of(80000) };
+
+    it('la cuota predeterminada sigue devolviendo ceros (comportamiento intacto)', () => {
+      const quota = calcPredeterminedQuota(cipBudget, 0);
+      expect(quota.fixedQuota.toNumber()).toBe(0);
+      expect(quota.variableQuota.toNumber()).toBe(0);
+      expect(quota.totalQuota.toNumber()).toBe(0);
+    });
+
+    it('el análisis de variaciones tira MissingInputError 422, no un Error crudo', () => {
+      const quota = calcPredeterminedQuota(cipBudget, 0);
+      try {
+        calcVarianceAnalysis(quota, cipBudget, 0, 900, Money.of(195000), 'Corte');
+        expect.fail('debía tirar MissingInputError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(MissingInputError);
+        expect((err as MissingInputError).statusCode).toBe(422);
+        expect((err as MissingInputError).code).toBe('MISSING_INPUT');
+        // Nunca el mensaje crudo de Money.
+        expect((err as MissingInputError).message).not.toContain('División por cero');
+      }
+    });
+
+    it('el mensaje nombra el centro y no expone el id interno', () => {
+      const quota = calcPredeterminedQuota(cipBudget, 0);
+      expect(() =>
+        calcVarianceAnalysis(quota, cipBudget, 0, 900, Money.of(195000), 'Corte'),
+      ).toThrow(/«Corte»/);
+      expect(() =>
+        calcVarianceAnalysis(quota, cipBudget, 0, 900, Money.of(195000), 'Corte'),
+      ).toThrow(/capacidad normal/i);
+    });
+
+    it('sin nombre de centro cae a un genérico, nunca a un id', () => {
+      const quota = calcPredeterminedQuota(cipBudget, 0);
+      expect(() => calcVarianceAnalysis(quota, cipBudget, 0, 900, Money.of(195000))).toThrow(
+        /«un centro productivo»/,
+      );
+    });
+
+    it('con capacidad normal > 0 no cambia nada', () => {
+      const quota = calcPredeterminedQuota(cipBudget, 1000);
+      expect(() =>
+        calcVarianceAnalysis(quota, cipBudget, 1000, 900, Money.of(195000), 'Corte'),
+      ).not.toThrow();
     });
   });
 });

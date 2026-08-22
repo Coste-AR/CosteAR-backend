@@ -16,6 +16,7 @@ import {
   type ProposedEntry,
   type ProposedAlert,
 } from '../../infrastructure/ai/groq-costista-chat.js';
+import { VaultQueryService, type VaultQueryResult } from '../vault-query/vault-query-service.js';
 
 const groqChat = new GroqCostitaChat();
 
@@ -31,7 +32,11 @@ export interface ConfirmInput {
 }
 
 export class CostitaChatService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly chat: GroqCostitaChat = groqChat,
+    private readonly vaultQuery: VaultQueryService = new VaultQueryService(),
+  ) {}
 
   /** Obtiene el contexto de la cartera del costista para enviar a la IA. */
   private async buildPortfolioContext(userId: string) {
@@ -99,15 +104,97 @@ export class CostitaChatService {
       confidence: 0,
     };
 
-    if (!groqChat.isConfigured) return fallback;
+    if (!this.chat.isConfigured) return fallback;
 
-    const result = await groqChat.interpret(
-      input.message,
-      portfolio,
-      input.conversationHistory ?? [],
-    );
+    try {
+      const result = await this.chat.interpret(
+        input.message,
+        portfolio,
+        input.conversationHistory ?? [],
+      );
 
-    return result ?? fallback;
+      if (!result) {
+        await this.db.dailySignal.create({
+          data: {
+            type: 'ASSISTANT_MISS',
+            source: 'COSTISTA_CHAT',
+            content: input.message,
+            context: { reason: 'LLM returned empty or invalid response' },
+            userId
+          }
+        });
+        return fallback;
+      }
+
+      if (result.actionType === 'VAULT_QUESTION') {
+        return await this.answerFromVault(userId, input.message);
+      }
+
+      return result;
+    } catch (err: any) {
+      await this.db.dailySignal.create({
+        data: {
+          type: 'ASSISTANT_MISS',
+          source: 'COSTISTA_CHAT',
+          content: input.message,
+          context: { reason: 'Exception during interpret', error: err.message },
+          userId
+        }
+      });
+      return fallback;
+    }
+  }
+
+  /**
+   * Responde una pregunta de metodología de costeo usando el RAG de la bóveda
+   * (VaultQueryService, con anti-alucinación), no el LLM genérico del chat.
+   * Si el RAG falla, cae a un mensaje seguro y registra la falla — nunca
+   * deja que un error de red se propague al costista como un 500.
+   */
+  private async answerFromVault(userId: string, message: string): Promise<CostitaChatResponse> {
+    try {
+      const vaultResult = await this.vaultQuery.query(message);
+      const citationsText = vaultResult.citations.length > 0
+        ? `\n\nFuentes: ${vaultResult.citations.join(', ')}`
+        : '';
+      const confidenceMap: Record<VaultQueryResult['confidence'], number> = {
+        HIGH: 90,
+        LOW: 50,
+        NONE: 0,
+      };
+      return {
+        reply: vaultResult.answer + citationsText,
+        actionType: 'INFO_ONLY',
+        confidence: confidenceMap[vaultResult.confidence],
+      };
+    } catch (err: any) {
+      await this.db.dailySignal.create({
+        data: {
+          type: 'ASSISTANT_MISS',
+          source: 'COSTISTA_CHAT',
+          content: message,
+          context: { reason: 'VaultQueryService threw', error: err.message },
+          userId,
+        },
+      });
+      return {
+        reply: 'No pude consultar la bóveda de costeo en este momento. Probá de nuevo en unos minutos.',
+        actionType: 'INFO_ONLY',
+        confidence: 0,
+      };
+    }
+  }
+
+  async submitFeedback(userId: string, input: { message: string; type: 'ASSISTANT_MISS' | 'IMPROVEMENT_REPORT'; details?: string }) {
+    await this.db.dailySignal.create({
+      data: {
+        type: input.type,
+        source: 'COSTISTA_CHAT',
+        content: input.message,
+        context: input.details ? { details: input.details } : undefined,
+        userId
+      }
+    });
   }
 
   /**

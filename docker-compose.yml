@@ -1,6 +1,11 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # OBLIGATORIO: imagen con pgvector. La migración `add_vault_chunks` corre
+    # `CREATE EXTENSION IF NOT EXISTS vector`; con una imagen `postgres:16` común
+    # falla con `extension "vector" is not available` y bloquea TODA migración
+    # nueva. Si tenés un contenedor viejo creado con otra imagen, recreálo:
+    # `docker compose up -d postgres` (mantiene el volumen `postgres_data`).
+    image: pgvector/pgvector:pg16
     container_name: costear-postgres
     environment:
       POSTGRES_DB: costear

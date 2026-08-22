@@ -14,6 +14,17 @@ import type {
   IndirectCostsSectionData,
   SalesSectionData,
 } from '../../infrastructure/ai/groq-service.js';
+import {
+  classifySocialCharge,
+  normalizeChargeName,
+} from '../../domain/knowledge/social-charges-catalog.js';
+import {
+  requireWritablePeriod,
+  type PeriodMirrorData,
+} from '../cost-structures/period-sync.js';
+import { SystemAlertService } from '../system/system-alert-service.js';
+import { reconcileSectionDataPoints } from '../trazabilidad/datapoint-reconciler.js';
+import { sectionPointsFrom, type OrdersSection } from '../trazabilidad/orders-input-points.js';
 
 // ─── Tipos internos de CostStructure ─────────────────────────────────────────
 
@@ -176,7 +187,7 @@ function populateRawMaterial(
   return cfg;
 }
 
-function populateDirectLabor(
+export function populateDirectLabor(
   current: DirectLaborConfig | null,
   sec: DirectLaborSectionData,
 ): DirectLaborConfig {
@@ -219,18 +230,54 @@ function populateDirectLabor(
     if (sec.itcs.derivationBase != null) cfg.itcs.derivationBase = normPercent(n(sec.itcs.derivationBase, 0.27));
     if (sec.itcs.fixedArt       != null) cfg.itcs.fixedArt       = normPercent(n(sec.itcs.fixedArt, 0.015));
 
-    if (!Array.isArray(cfg.itcs.uncertainRemunerative)) cfg.itcs.uncertainRemunerative = [];
-    for (const item of sec.itcs.uncertainRemunerative ?? []) {
-      const existing = cfg.itcs.uncertainRemunerative.find(
-        (r) => r.name.toLowerCase().startsWith(item.name.slice(0, 3).toLowerCase())
-      );
+    if (!Array.isArray(cfg.itcs.uncertainRemunerative))    cfg.itcs.uncertainRemunerative    = [];
+    if (!Array.isArray(cfg.itcs.uncertainNonRemunerative)) cfg.itcs.uncertainNonRemunerative = [];
+
+    // D-2 — Cargas sociales inciertas: la IA EXTRAE, el SISTEMA CLASIFICA.
+    //
+    // Solo las inciertas REMUNERATIVAS generan cargas derivadas (clase 8). Si una
+    // no remunerativa (uniformes, viandas…) cae como remunerativa, el ITCS se infla
+    // con derivadas que no corresponden. Por eso la clasificación NO se le cree a la
+    // IA: la decide el catálogo de la cátedra.
+    const incoming: { name: string; coefficient: number; aiHint: 'remunerative' | 'nonRemunerative' | null }[] = [
+      // Formato nuevo: la IA no clasifica.
+      ...(sec.itcs.uncertainCharges ?? []).map((i) => ({ ...i, aiHint: null })),
+      // Formato viejo (documentos analizados antes de D-2): su clasificación es
+      // apenas una pista, y solo se usa si el catálogo no reconoce el concepto.
+      ...(sec.itcs.uncertainRemunerative ?? []).map((i) => ({ ...i, aiHint: 'remunerative' as const })),
+      ...(sec.itcs.uncertainNonRemunerative ?? []).map((i) => ({ ...i, aiHint: 'nonRemunerative' as const })),
+    ];
+
+    for (const item of incoming) {
+      const name = String(item.name ?? '').trim();
+      if (!name) continue;
+      // El IAP/ausentismo lo calcula el motor a partir de los días: no se carga acá.
+      if (normalizeChargeName(name).startsWith('iap') || normalizeChargeName(name).startsWith('yap')) continue;
+
+      // Catálogo primero. Si no lo reconoce: la pista de la IA; y si no hay pista,
+      // va a NO remunerativa (la opción que NO infla el costo). El costista lo ve
+      // en el formulario y lo mueve si corresponde.
+      const kind = classifySocialCharge(name) ?? item.aiHint ?? 'nonRemunerative';
+      const coefficient = normPercent(n(item.coefficient));
+
+      // ¿Ya está cargado (en cualquiera de las dos listas)? Se compara el nombre
+      // completo normalizado — nunca por las primeras letras, porque "Premio
+      // Asistencia" y "Premio Productividad" son conceptos distintos.
+      const target = kind === 'remunerative' ? cfg.itcs.uncertainRemunerative : cfg.itcs.uncertainNonRemunerative;
+      const other  = kind === 'remunerative' ? cfg.itcs.uncertainNonRemunerative : cfg.itcs.uncertainRemunerative;
+      const sameName = (r: { name: string }) => normalizeChargeName(r.name) === normalizeChargeName(name);
+
+      const existing = target.find(sameName);
       if (existing) {
-        if (!existing.coefficient) {
-          existing.coefficient = normPercent(n(item.coefficient));
-        }
-      } else {
-        cfg.itcs.uncertainRemunerative.push({ name: item.name, coefficient: normPercent(n(item.coefficient)) });
+        // Nunca se pisa un coeficiente que ya puso el costista.
+        if (!existing.coefficient) existing.coefficient = coefficient;
+        continue;
       }
+      // Si el costista ya lo tenía en la OTRA lista, se respeta su decisión:
+      // no se mueve solo (mover cambiaría el costo sin avisar). El formulario avisa.
+      if (other.some(sameName)) continue;
+
+      target.push({ name, coefficient });
     }
   }
 
@@ -272,31 +319,24 @@ function populateIndirectCosts(
     }
   }
 
-  // Conceptos CIF — construir un mapa de IDs de centros ya existentes para la distribución
+  // Mapa de IDs de centros por nombre (se usa más abajo para matchear los datos
+  // de fin de mes por centro productivo).
   const centerMap: Record<string, string> = {};
   for (const c of cfg.centers) { centerMap[c.name.toLowerCase()] = c.id; }
 
+  // Conceptos CIF — la IA aporta nombre e importes. La DISTRIBUCIÓN (prorrateo)
+  // NUNCA se toma de la IA (E1): el reparto lo pone el costista a mano o lo deriva
+  // una base de asignación. Los conceptos nuevos nacen con distribución vacía.
   for (const concept of sec.concepts ?? []) {
-    const dist: Record<string, number> = {};
-    for (const [k, v] of Object.entries(concept.distribution ?? {})) {
-      const resolvedId = centerMap[k.toLowerCase()] ?? k;
-      dist[resolvedId] = Number(v);
-    }
-
     const existing = cfg.concepts.find((c) => c.name.toLowerCase() === concept.name.toLowerCase());
     if (existing) {
       if (!existing.amount.fixed) existing.amount.fixed = n(concept.amountFixed);
       if (!existing.amount.variable) existing.amount.variable = n(concept.amountVariable);
-      for (const [centerId, val] of Object.entries(dist)) {
-        if (!existing.distribution[centerId]) {
-          existing.distribution[centerId] = val;
-        }
-      }
     } else {
       cfg.concepts.push({
         name: concept.name,
         amount: { fixed: n(concept.amountFixed), variable: n(concept.amountVariable) },
-        distribution: dist,
+        distribution: {},
         fromDocument: true,
       });
     }
@@ -343,9 +383,7 @@ function populateIndirectCosts(
     if (!hasDist) {
       cfg.serviceDistributions.push({
         serviceCenterId: sc.id,
-        toProductive: {},
-        toProductiveFixed: {},
-        toProductiveVariable: {}
+        distributions: []
       });
     }
   }
@@ -354,6 +392,270 @@ function populateIndirectCosts(
 }
 
 // ─── Función principal ────────────────────────────────────────────────────────
+
+/**
+ * Resultado de un intento de población, para que el costista que aprobó el
+ * documento se entere EN EL MOMENTO si el dato no se aplicó — antes esto
+ * solo se sabía revisando /admin/system-alerts, y quien aprobaba no veía
+ * ninguna diferencia entre "se aplicó" y "no se pudo aplicar".
+ */
+export interface PopulateResult {
+  populated: boolean;
+  /** Solo seteado cuando HABÍA algo para aplicar y no se pudo — no para el
+   *  caso normal de "este documento no traía datos estructurados". */
+  skippedReason?: string;
+}
+
+/** Elemento del costo de Procesos al que puede acumularse el monto de un
+ *  documento — solo estos tres tienen un campo $ del período en
+ *  `UnitMovementSchedule` (ver P2 §3.1 Sección B del corpus de cátedra). */
+const SECTION_TO_COST_FIELD: Partial<Record<string, 'periodCostMp' | 'periodCostMo' | 'periodCostCif'>> = {
+  MATERIA_PRIMA: 'periodCostMp',
+  MANO_DE_OBRA: 'periodCostMo',
+  COSTOS_INDIRECTOS: 'periodCostCif',
+};
+
+const COST_FIELD_LABEL: Record<'periodCostMp' | 'periodCostMo' | 'periodCostCif', string> = {
+  periodCostMp: 'Materia Prima',
+  periodCostMo: 'Mano de Obra',
+  periodCostCif: 'Costos Indirectos',
+};
+
+/**
+ * Upsert aditivo — NUNCA pisa un importe ya acumulado, siempre suma.
+ *
+ * NO usa `{ increment }` de Prisma: el campo arranca en NULL (nadie cargó el
+ * cuadro de unidades todavía) y en Postgres `NULL + N` da NULL, no N — el
+ * primer `increment` sobre un `UnitMovementSchedule` recién creado por OTRO
+ * elemento del costo (ej. ya tiene `periodCostMp` pero nunca `periodCostMo`)
+ * quedaba silenciosamente en NULL para siempre. Por eso lee el valor actual y
+ * escribe la suma explícita.
+ */
+async function upsertPeriodCost(
+  db: PrismaClient,
+  departmentId: string,
+  periodId: string,
+  costField: 'periodCostMp' | 'periodCostMo' | 'periodCostCif',
+  amount: number,
+): Promise<void> {
+  const where = { departmentId_periodId: { departmentId, periodId } };
+  const existing = await db.unitMovementSchedule.findUnique({
+    where,
+    select: { periodCostMp: true, periodCostMo: true, periodCostCif: true },
+  });
+  const next = Number(existing?.[costField] ?? 0) + amount;
+
+  if (costField === 'periodCostMp') {
+    await db.unitMovementSchedule.upsert({
+      where, create: { departmentId, periodId, periodCostMp: next }, update: { periodCostMp: next },
+    });
+  } else if (costField === 'periodCostMo') {
+    await db.unitMovementSchedule.upsert({
+      where, create: { departmentId, periodId, periodCostMo: next }, update: { periodCostMo: next },
+    });
+  } else {
+    await db.unitMovementSchedule.upsert({
+      where, create: { departmentId, periodId, periodCostCif: next }, update: { periodCostCif: next },
+    });
+  }
+}
+
+/**
+ * Costeo por Procesos: intenta acumular el monto de UN documento clasificado
+ * (MP/MOD/CIF) en el `UnitMovementSchedule` del departamento+período que le
+ * corresponde. El departamento SIEMPRE lo elige el costista — acá nunca se
+ * infiere ni se adivina (ver DECISIONES). Sin departamento asignado, el
+ * documento queda "pendiente" (lo recoge la cola de Costeo por Procesos).
+ */
+async function accumulateProcessCost(
+  db: PrismaClient,
+  args: {
+    structure: { id: string; productName: string; period: string };
+    costField: 'periodCostMp' | 'periodCostMo' | 'periodCostCif';
+    amount: number | null | undefined;
+    processDepartmentId: string | null | undefined;
+  },
+): Promise<{ applied: boolean; skippedReason: string }> {
+  const { structure, costField, amount, processDepartmentId } = args;
+  const label = COST_FIELD_LABEL[costField];
+
+  if (!processDepartmentId) {
+    return {
+      applied: false,
+      skippedReason:
+        `Es de Costeo por Procesos: falta elegir a qué departamento va este documento de ${label}. ` +
+        `Quedó en la cola de pendientes de Costeo por Procesos.`,
+    };
+  }
+
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) {
+    return {
+      applied: false,
+      skippedReason: `El documento de ${label} no trae un monto neto reconocible — cargalo a mano en el departamento asignado.`,
+    };
+  }
+
+  const department = await db.processDepartment.findFirst({
+    where: { id: processDepartmentId, structureId: structure.id, deletedAt: null },
+  });
+  if (!department) {
+    return { applied: false, skippedReason: 'El departamento asignado no existe o ya no pertenece a esta estructura.' };
+  }
+
+  const period = await requireWritablePeriod(db, structure.id);
+  if (!period) {
+    return {
+      applied: false,
+      skippedReason:
+        `"${structure.productName}" todavía no tiene períodos de costeo creados — abrí uno en Costeo por Procesos ` +
+        `antes de asignar documentos a un departamento.`,
+    };
+  }
+
+  await upsertPeriodCost(db, department.id, period.id, costField, amount);
+
+  console.log(
+    `[populator] Costeo por Procesos: +${amount} en ${costField} de "${department.name}" ` +
+      `(${structure.productName}, período ${period.label}).`,
+  );
+  return { applied: true, skippedReason: '' };
+}
+
+// ─── Trazabilidad de la ingesta (T-06) ────────────────────────────────────────
+
+/**
+ * QUÉ SECCIÓN DE TRAZABILIDAD TOCA CADA CAMPO QUE ESCRIBE EL POPULADOR.
+ *
+ * Los campos de venta son dos y caen en la misma sección, de ahí el mapa y no
+ * un simple `keyof`.
+ */
+const FIELD_TO_SECTION: Record<string, OrdersSection> = {
+  rawMaterialConfig: 'rawMaterial',
+  directLaborConfig: 'directLabor',
+  indirectCostConfig: 'indirectCosts',
+  salesUnitPrice: 'sales',
+  salesQuantity: 'sales',
+};
+
+/** Motivo que queda escrito en la versión del dato que aporta un documento. */
+export const INTAKE_REASON = 'dato tomado de un documento clasificado por la IA';
+
+interface SalesSnapshot {
+  unitPrice: number;
+  quantity: number;
+  productionQuantity: number | null;
+}
+
+/** Foto de venta tal como quedó (o estaba) guardada, para derivar sus insumos. */
+function salesSnapshot(
+  source: Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+): SalesSnapshot | null {
+  const num = (v: unknown): number | null =>
+    v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+  const unitPrice = num(overrides['salesUnitPrice'] ?? source['salesUnitPrice']);
+  const quantity = num(overrides['salesQuantity'] ?? source['salesQuantity']);
+  // Sin ninguno de los dos no hay sección de venta guardada todavía.
+  if (unitPrice === null && quantity === null) return null;
+  return {
+    unitPrice: unitPrice ?? 0,
+    quantity: quantity ?? 0,
+    productionQuantity: num(source['productionQuantity']),
+  };
+}
+
+/**
+ * LA INGESTA TAMBIÉN PRODUCE DATOS TRAZABLES (T-06).
+ *
+ * T-01 hizo que guardar una sección desde el formulario, el Excel o la API
+ * dejara un `DataPoint` por cada número, pasando por `datapoint-reconciler`. La
+ * ingesta de comprobantes se quedó afuera: este módulo escribía el JSON de
+ * config directo contra `CostStructure`, así que un número que la IA leyó de una
+ * factura entraba al costo sin quedar registrado como dato — no se podía abrir,
+ * no tenía autor y no tenía documento. Es el MISMO bug que T-01 arregló para las
+ * otras entradas, sobreviviendo acá.
+ *
+ * Se reusa el reconciliador tal cual (no hay un segundo camino que mantener):
+ * lo único propio de la ingesta es el método —'ia_sugerido'— y el documento del
+ * que salió el número, que es lo que después deja armar el bloque de procedencia
+ * de la ficha.
+ *
+ * NO cambia ningún valor calculado ni toca la clasificación: lee la config que
+ * el populador acaba de guardar y la refleja como datos.
+ */
+async function reconcileIntakeDataPoints(
+  db: PrismaClient,
+  args: {
+    structure: { id: string; period: string } & Record<string, unknown>;
+    /** Lo que el populador escribió recién en la estructura. */
+    updateData: Record<string, unknown>;
+    costistId: string;
+    dataEntryId: string;
+  },
+): Promise<void> {
+  const { structure, updateData, costistId, dataEntryId } = args;
+
+  const sections = [
+    ...new Set(
+      Object.keys(updateData)
+        .map((field) => FIELD_TO_SECTION[field])
+        .filter((s): s is OrdersSection => !!s),
+    ),
+  ];
+  if (sections.length === 0) return;
+
+  const actor = { id: costistId, role: 'COSTISTA', area: 'costista' };
+
+  await db.$transaction(async (tx) => {
+    for (const section of sections) {
+      const desired =
+        section === 'sales'
+          ? sectionPointsFrom('sales', salesSnapshot(structure, updateData), structure.period)
+          : sectionPointsFrom(section, updateData[sectionField(section)], structure.period);
+      const previous =
+        section === 'sales'
+          ? sectionPointsFrom('sales', salesSnapshot(structure), structure.period)
+          : sectionPointsFrom(section, structure[sectionField(section)], structure.period);
+
+      // `null` = la config no parsea. Abstenerse: el reconciliador ANULA todo lo
+      // que esté guardado y no figure en `desired`, así que seguir con una lista
+      // vacía borraría la traza de una sección entera por un error de forma.
+      if (desired === null || previous === null) {
+        console.warn(
+          `[populator] Trazabilidad: la sección ${section} no tiene una forma reconocible — se guarda el dato, no se reconcilia su traza.`,
+        );
+        continue;
+      }
+
+      await reconcileSectionDataPoints(tx, {
+        structureId: structure.id,
+        section,
+        desired,
+        previous,
+        actor,
+        // Es lo que es: lo sugirió la IA leyendo un comprobante. El costista lo
+        // confirmó al aprobar el documento, y eso se lee del audit, no de acá.
+        method: 'ia_sugerido',
+        reason: INTAKE_REASON,
+        dataEntryId,
+      });
+    }
+  });
+}
+
+/** Campo de `CostStructure` que guarda el JSON de cada sección. */
+function sectionField(section: OrdersSection): string {
+  switch (section) {
+    case 'rawMaterial':
+      return 'rawMaterialConfig';
+    case 'directLabor':
+      return 'directLaborConfig';
+    case 'indirectCosts':
+      return 'indirectCostConfig';
+    case 'sales':
+      return 'sales';
+  }
+}
 
 export async function populateCostStructureFromApproval(
   db: PrismaClient,
@@ -366,14 +668,36 @@ export async function populateCostStructureFromApproval(
     /** Producto destino elegido por el cargador. Si viene, la población va
      *  EXACTAMENTE a esa estructura (aislamiento por producto). */
     costStructureId?: string | null;
+    /** Monto NETO del documento (sin IVA — el mismo importe que la línea del
+     *  libro mayor, ver `ledger-builder.ts`). Solo se usa para Costeo por
+     *  Procesos — el resto sigue parseando reviewNote como siempre. */
+    amount?: number | null;
+    /** Departamento de Costeo por Procesos elegido por el costista. Decisión
+     *  siempre humana; si falta, el documento queda en la cola de pendientes. */
+    processDepartmentId?: string | null;
+    /**
+     * EL DOCUMENTO QUE ORIGINÓ ESTA POBLACIÓN (T-06).
+     *
+     * Sin él los números que entran por la ingesta no se pueden atar a la
+     * factura ni a la clasificación que los mandó a esta sección, y la ficha del
+     * dato no tiene con qué mostrar su procedencia. Opcional para no romper a
+     * ningún llamador: si no viene, se puebla como siempre y no se reconcilia
+     * ninguna traza (mejor sin sello que con un sello inventado).
+     */
+    dataEntryId?: string | null;
   },
-): Promise<void> {
+  alerts: SystemAlertService = new SystemAlertService(),
+): Promise<PopulateResult> {
   const { companyId, costistId, reviewNote, costStructureId } = params;
 
+  // Ojo: NO cortar acá si `reviewNote` no parsea. Costeo por Procesos no lo
+  // necesita — la sección y el monto ya llegan explícitos por parámetro (los
+  // mismos que ya se usaron para la línea del libro mayor). Cortar temprano
+  // dejaba `assignDepartment` (que reasigna un documento ya aprobado, sin
+  // volver a tocar reviewNote) sin poder acumular nunca nada.
   const ai = parseReviewNote(reviewNote);
   if (!ai) {
-    console.log('[populator] reviewNote vacío o inválido — nada que poblar.');
-    return;
+    console.log('[populator] reviewNote vacío o inválido — sigue igual para Costeo por Procesos.');
   }
 
   // Si el dato apunta a un producto específico, se usa ESE (aislamiento).
@@ -389,35 +713,104 @@ export async function populateCostStructureFromApproval(
 
   if (!structure) {
     console.log(`[populator] No hay CostStructure destino para company=${companyId}. Crear primero.`);
-    return;
+    return { populated: false };
   }
 
-  const secs = ai.sections ?? {};
+  const secs = ai?.sections ?? {};
   const updateData: Record<string, unknown> = {};
+
+  // Costeo por Procesos guarda MP/MOD/CIP en tablas propias (ProcessDepartment,
+  // UnitMovementSchedule, JointCostAllocation) — NINGÚN servicio de ese motor lee
+  // rawMaterialConfig/directLaborConfig/indirectCostConfig. Un documento
+  // clasificado para una estructura PROCESSES nunca escribe en esos campos:
+  // en vez de eso, si trae la sección que coincide con la clasificación final
+  // (MP/MOD/CIF) y ya tiene un departamento asignado, su monto se acumula en
+  // `UnitMovementSchedule` (ver `accumulateProcessCost`). El departamento
+  // SIEMPRE lo elige el costista (nunca se infiere acá); sin uno asignado el
+  // documento queda en la cola de pendientes de Costeo por Procesos.
+  const skippedSections: string[] = [];
+  const isProcessCosting = structure.costingSystem === 'PROCESSES';
+  // La sección "verdad" (clasificada o corregida por el costista) es la única
+  // que se intenta acumular automáticamente en Procesos — un documento puede
+  // traer varias secciones en su extracción IA (`secs`), pero solo tiene UN
+  // monto total y UNA clasificación final; adivinar cómo repartirlo entre
+  // varias sería el tipo de bug que no rompe: miente.
+  const processCostField = isProcessCosting ? SECTION_TO_COST_FIELD[params.costSection] : undefined;
 
   try {
     // ── Materia Prima ──────────────────────────────────────────────────────────
     if (secs.rawMaterial?.present) {
-      updateData.rawMaterialConfig = populateRawMaterial(
-        structure.rawMaterialConfig as RawMaterialConfig | null,
-        secs.rawMaterial,
-      );
+      if (isProcessCosting) {
+        if (processCostField !== 'periodCostMp') skippedSections.push('Materia Prima');
+      } else {
+        updateData.rawMaterialConfig = populateRawMaterial(
+          structure.rawMaterialConfig as RawMaterialConfig | null,
+          secs.rawMaterial,
+        );
+      }
     }
 
     // ── Mano de Obra ──────────────────────────────────────────────────────────
     if (secs.directLabor?.present) {
-      updateData.directLaborConfig = populateDirectLabor(
-        structure.directLaborConfig as DirectLaborConfig | null,
-        secs.directLabor,
-      );
+      if (isProcessCosting) {
+        if (processCostField !== 'periodCostMo') skippedSections.push('Mano de Obra');
+      } else {
+        updateData.directLaborConfig = populateDirectLabor(
+          structure.directLaborConfig as DirectLaborConfig | null,
+          secs.directLabor,
+        );
+      }
     }
 
     // ── Costos Indirectos ─────────────────────────────────────────────────────
     if (secs.indirectCosts?.present) {
-      updateData.indirectCostConfig = populateIndirectCosts(
-        structure.indirectCostConfig as IndirectCostConfig | null,
-        secs.indirectCosts,
-      );
+      if (isProcessCosting) {
+        if (processCostField !== 'periodCostCif') skippedSections.push('Costos Indirectos');
+      } else {
+        updateData.indirectCostConfig = populateIndirectCosts(
+          structure.indirectCostConfig as IndirectCostConfig | null,
+          secs.indirectCosts,
+        );
+      }
+    }
+
+    let skippedMessage: string | undefined;
+    let processCostApplied = false;
+
+    // ── Costeo por Procesos: acumular el monto en el departamento asignado ──────
+    if (processCostField) {
+      const result = await accumulateProcessCost(db, {
+        structure,
+        costField: processCostField,
+        amount: params.amount,
+        processDepartmentId: params.processDepartmentId,
+      });
+      processCostApplied = result.applied;
+      if (!result.applied) {
+        skippedMessage = result.skippedReason;
+        if (!params.processDepartmentId) {
+          // Sin departamento no hay a quién avisarle con un toast puntual —
+          // el aviso vive en la cola de pendientes; igual queda en system-alerts.
+          await alerts.create({
+            source: 'populator',
+            level: 'warning',
+            message:
+              `Documento (${COST_FIELD_LABEL[processCostField]}) para "${structure.productName}" (${structure.period}): ${result.skippedReason}`,
+          });
+        }
+      }
+    }
+
+    if (skippedSections.length > 0) {
+      const extraMessage =
+        `Es de Costeo por Procesos: la población automática de ${skippedSections.join(', ')} todavía no está ` +
+        `soportada para ese modo. Cargá los datos a mano en el departamento/etapa que corresponda.`;
+      skippedMessage = skippedMessage ? `${skippedMessage} ${extraMessage}` : extraMessage;
+      const alertMessage =
+        `Documento clasificado (${skippedSections.join(', ')}) para la estructura "${structure.productName}" ` +
+        `(${structure.period}), pero ${extraMessage}`;
+      console.warn(`[populator] ${alertMessage}`);
+      await alerts.create({ source: 'populator', level: 'warning', message: alertMessage });
     }
 
     // ── Ventas ────────────────────────────────────────────────────────────────
@@ -431,14 +824,71 @@ export async function populateCostStructureFromApproval(
     }
 
     if (Object.keys(updateData).length === 0) {
+      if (processCostApplied) {
+        // Se acumuló en UnitMovementSchedule (Procesos); no hay nada más que
+        // escribir en CostStructure/CostPeriod para este documento.
+        return { populated: true, skippedReason: skippedMessage };
+      }
       console.log('[populator] El documento no contenía secciones con present:true — nada que poblar.');
-      return;
+      return { populated: false, skippedReason: skippedMessage };
     }
 
+    // C — Fase 3: un documento tampoco entra a un mes cerrado, y lo que entra al
+    // mes abierto tiene que quedar también en el período (es el dueño del mes).
+    const period = await requireWritablePeriod(db, structure.id);
+
     await db.costStructure.update({ where: { id: structure.id }, data: updateData });
+    if (period) {
+      await db.costPeriod.update({
+        where: { id: period.id },
+        data: updateData as PeriodMirrorData,
+      });
+    }
     console.log(`[populator] CostStructure ${structure.id} actualizada. Secciones: ${Object.keys(updateData).join(', ')}`);
 
+    // TRAZABILIDAD (T-06): recién acá, con la config ya guardada, cada número
+    // que aportó el documento queda además como DATO trazable —con su método
+    // 'ia_sugerido' y su link al comprobante— pasando por el MISMO reconciliador
+    // que usa el guardado del formulario. No es fatal: si falla, el costo ya
+    // quedó aplicado y lo que se pierde es la traza, así que se avisa fuerte en
+    // vez de tirar abajo una aprobación que ya es firme.
+    if (params.dataEntryId) {
+      try {
+        await reconcileIntakeDataPoints(db, {
+          structure: structure as unknown as { id: string; period: string } & Record<string, unknown>,
+          updateData,
+          costistId,
+          dataEntryId: params.dataEntryId,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[populator] No se pudo registrar la trazabilidad del documento:', err);
+        await alerts.create({
+          source: 'populator',
+          level: 'warning',
+          message:
+            `El documento se aplicó a "${structure.productName}" (${structure.period}), pero sus datos no quedaron ` +
+            `trazables: ${message}. Los números están en la estructura; no se van a poder abrir hasta su comprobante.`,
+        });
+      }
+    }
+
+    return { populated: true, skippedReason: skippedMessage };
+
   } catch (err) {
+    // No-fatal a propósito (la aprobación del documento ya quedó firme, no
+    // tiene sentido tirarla abajo por un fallo del populador) — pero antes
+    // esto quedaba SOLO en logs de Railway. Un caso real: requireWritablePeriod
+    // tira si el período está cerrado, y una tanda de aprobaciones contra una
+    // empresa recién cerrada perdía sus datos en silencio, una por una, sin
+    // que nadie se enterara. Ahora también genera un SystemAlert.
+    const message = err instanceof Error ? err.message : String(err);
     console.error('[populator] Error al poblar CostStructure:', err);
+    await alerts.create({
+      source: 'populator',
+      level: 'error',
+      message: `No se pudo poblar la estructura "${structure.productName}" (${structure.period}) con el documento aprobado: ${message}`,
+    });
+    return { populated: false, skippedReason: `No se pudo aplicar automáticamente a la estructura: ${message}` };
   }
 }

@@ -3,9 +3,16 @@ import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-const EMAIL = 'operator@costear.com';
-const PASSWORD = 'CosteAR2026!';
+const EMAIL = process.env.OPERATOR_EMAIL;
+const PASSWORD = process.env.OPERATOR_PASSWORD;
+const API_KEY = process.env.OPERATOR_API_KEY;
 const PEPPER = process.env.ARGON2_PEPPER ?? '';
+
+if (!EMAIL || !PASSWORD || !API_KEY) {
+  console.error('Error: OPERATOR_EMAIL, OPERATOR_PASSWORD y OPERATOR_API_KEY son obligatorios.');
+  console.error('Definílos en .env o exportálos antes de correr el script.');
+  process.exit(1);
+}
 
 async function main() {
   // 1. Find costista
@@ -35,7 +42,7 @@ async function main() {
       data: {
         companyId: company.id,
         costistId: costista.id,
-        apiKey: 'wilson-api-key-test',
+        apiKey: API_KEY,
         isActive: true,
       }
     });
@@ -70,7 +77,7 @@ async function main() {
   console.log('✔ Creado/Actualizado usuario operador:', operator.email);
 
   // 6. Ensure membership exists
-  const membership = await prisma.operatorMembership.upsert({
+  await prisma.operatorMembership.upsert({
     where: {
       operatorId_connectionId: {
         operatorId: operator.id,
