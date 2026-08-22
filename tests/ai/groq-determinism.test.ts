@@ -15,6 +15,17 @@
  * suelto en el body de un call site.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { GroqService } from '@/infrastructure/ai/groq-service.js';
+import { GroqCostitaChat } from '@/infrastructure/ai/groq-costista-chat.js';
+import { DETERMINISTIC_SEED } from '@/infrastructure/ai/groq-client.js';
+// La memoria de correcciones va a la base y su fallo es no-fatal, pero cuesta
+// ~4s de timeout por llamada en una máquina sin Docker. Sin base ya devolvía
+// `undefined`: mockearla no cambia lo que se prueba, solo saca la espera.
+// El detalle está en tests/classifier/cascade-section-decision.test.ts.
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
+
 
 const { groqFetchMock } = vi.hoisted(() => ({ groqFetchMock: vi.fn() }));
 
@@ -34,9 +45,6 @@ vi.mock('@/infrastructure/redis/client.js', () => ({
   getRedisClient: () => redisMock,
 }));
 
-import { GroqService } from '@/infrastructure/ai/groq-service.js';
-import { GroqCostitaChat } from '@/infrastructure/ai/groq-costista-chat.js';
-import { DETERMINISTIC_SEED } from '@/infrastructure/ai/groq-client.js';
 
 function ok(content: unknown) {
   const body = typeof content === 'string' ? content : JSON.stringify(content);

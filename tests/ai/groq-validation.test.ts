@@ -1,4 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { GroqService } from '@/infrastructure/ai/groq-service.js';
+import {
+  classifyResponseSchema,
+  documentAnalysisSchema,
+} from '@/infrastructure/ai/groq-schemas.js';
+// La memoria de correcciones va a la base y su fallo es no-fatal, pero cuesta
+// ~4s de timeout por llamada en una máquina sin Docker. Sin base ya devolvía
+// `undefined`: mockearla no cambia lo que se prueba, solo saca la espera.
+// El detalle está en tests/classifier/cascade-section-decision.test.ts.
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
+
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 // groqFetch se mockea para controlar la respuesta cruda de cada intento.
@@ -13,11 +26,6 @@ vi.mock('@/infrastructure/config/env.js', () => ({
   getEnv: () => ({ GROQ_API_KEY: 'test-key-abcdefghij' }),
 }));
 
-import { GroqService } from '@/infrastructure/ai/groq-service.js';
-import {
-  classifyResponseSchema,
-  documentAnalysisSchema,
-} from '@/infrastructure/ai/groq-schemas.js';
 
 // ── Helpers de respuesta ─────────────────────────────────────────────────────
 function ok(content: unknown) {
