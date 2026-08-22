@@ -198,19 +198,13 @@ nada: la rama, si `origin/dev` avanzó, los PRs abiertos, los issues asignados y
 
 ---
 
-## 5. Reglas duras del dominio (no negociables)
+## 5. Reglas duras del dominio de costeo
 
-Vienen de la especificación de Trazabilidad Total v1 y de la auditoría del motor de cálculo.
-
-|ID|Regla|
-|---|---|
-|**DOM-01**|**Nada se pisa.** Los valores de costos se **versionan** (append-only). Borrado = lógico. Jamás un `DELETE` o `UPDATE` destructivo sobre datos ya cargados.|
-|**DOM-02**|**Toda mutación escribe su entrada de bitácora en la misma transacción** (rollback conjunto).|
-|**DOM-03**|Timestamps del **servidor**, en `timestamptz`. Nunca la hora del cliente.|
-|**DOM-04**|**Ningún 500 crudo al usuario.** Errores de cálculo o validación → 422 con `{code, message, field}` en español accionable.|
-|**DOM-05**|**Regresión cero en la matemática.** Los fixtures del caso "Piezas mecánicas de precisión" y los tres casos de ITCS de la cátedra tienen que seguir dando exactamente lo mismo después de cualquier cambio en el motor.|
-|**DOM-06**|Migraciones **siempre aditivas** (`CREATE TABLE`, `ALTER ADD COLUMN`). Nada de `DROP` sobre tablas con datos.|
-|**DOM-07**|El aislamiento entre empresas depende de **RLS en Postgres**, no de TypeScript. Un test con Prisma mockeado no prueba aislamiento — por eso existe la suite de integración con un rol sin `BYPASSRLS`.|
+**DOM-01 a DOM-07** — append-only, bitácora en la misma transacción, timestamps del servidor, sin
+500 crudo, regresión cero, migraciones aditivas, RLS. **Viven en
+`.claude/rules/dominio-costeo.md`**: cargan solo al tocar `prisma/`, `src/domain/` o
+`src/application/`, que es cuando importan. No están en este archivo para no pesar en cada sesión
+que no toca el motor de costeo.
 
 ---
 
@@ -285,6 +279,7 @@ Por eso `/costear-bitacora` al cerrar una sesión (DOC-03) y el ADR en el mismo 
 
 |Fecha|Qué cambió|Fuente|
 |---|---|---|
+|2026-08-22|**Pieza 1 — DOM-01..07 se mudan a `.claude/rules/dominio-costeo.md`**, scoped a `prisma/**`, `src/domain/**` y `src/application/**`. Antes cargaban en TODAS las sesiones (297 líneas del archivo raíz, siempre en contexto); ahora cargan solo cuando el trabajo toca el motor de costeo o el schema, que es cuando importan. La filosofía (0.bis) y los datos de clientes (5.bis) NO se movieron: su riesgo no está atado a una carpeta — un commit o un PR body no son "un archivo que matchea un glob".|Santiago|
 |2026-08-22|**Sección 3.bis — briefing automático de sesión** (`SessionStart` + `ESTADO.md`). El contexto deja de depender de que alguien se acuerde de leer un documento: cada sesión arranca sabiendo qué pasó, qué no tocar y por qué. Es el mismo criterio que la Fase 1 aplicó al flujo de PRs, aplicado a la documentación.|Santiago|
 |2026-08-22|**PR-05 corregida y PR-09**: la regla decía "squash" a secas y era imprecisa. Las ramas de trabajo van squash; **las promociones van merge commit**, porque el squash rompe la identidad compartida entre ramas y hace conflictuar la promoción siguiente (fue la causa del PR #125). Se agrega `docs/manual-de-flujo-de-trabajo.md`, que explica el flujo entero para quien nunca usó draft ni auto-merge.|Santiago|
 |2026-08-22|**Se reordenaron los ambientes**: `staging` pasa a ser **pre-producción** y `main` **producción**. Antes los dos ambientes de Railway servían la rama `staging` y `main` no deployaba a ningún lado. PR-07 reescrita y el runbook documenta cómo verificar que cada ambiente tenga su propia base — con `db:setup` en el `preDeployCommand`, una base compartida haría que cada deploy de prueba migre producción.|Santiago|
