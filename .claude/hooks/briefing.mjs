@@ -33,6 +33,50 @@ import { join } from 'node:path';
 
 const RAIZ = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 
+/**
+ * `--check-settings`: verifica que `.claude/settings.json` tenga la forma que
+ * Claude Code espera. Correr esto antes de commitear un cambio al hook.
+ *
+ * Existe porque la primera versión estaba mal escrita —`type` y `command`
+ * colgando directo de la entrada del evento, sin el array `hooks` intermedio— y
+ * el error recién apareció al abrir una sesión nueva, que es lo único que no se
+ * puede probar desde adentro de una sesión.
+ *
+ * Y el modo de fallar es el que obliga a tener esto: **un settings.json
+ * inválido se descarta ENTERO**, no solo la parte mal escrita. Con más hooks
+ * configurados, uno mal puesto apaga todos los demás.
+ */
+if (process.argv.includes('--check-settings')) {
+  const ruta = join(RAIZ, '.claude', 'settings.json');
+  try {
+    const cfg = JSON.parse(readFileSync(ruta, 'utf8'));
+    const eventos = Object.entries(cfg.hooks ?? {});
+    if (!eventos.length) throw new Error('no hay ningún hook configurado');
+
+    for (const [evento, entradas] of eventos) {
+      if (!Array.isArray(entradas)) throw new Error(`${evento} tiene que ser un array`);
+      for (const [i, entrada] of entradas.entries()) {
+        if (!Array.isArray(entrada.hooks)) {
+          throw new Error(
+            `${evento}[${i}] no tiene el array \`hooks\`. La entrada de un evento no es el hook: ` +
+              'es un objeto que lo contiene — { hooks: [ { type, command } ] }',
+          );
+        }
+        for (const [j, h] of entrada.hooks.entries()) {
+          if (h.type !== 'command' || !h.command) {
+            throw new Error(`${evento}[${i}].hooks[${j}] necesita \`type: "command"\` y \`command\``);
+          }
+        }
+      }
+    }
+    console.log(`✔ ${ruta}\n  ${eventos.length} evento(s) con la forma correcta.`);
+    process.exit(0);
+  } catch (e) {
+    console.error(`✖ ${ruta}\n  ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
+}
+
 /** Corre un comando y devuelve su salida, o `null` si falla por cualquier motivo. */
 function correr(cmd, args, timeout = 5000) {
   try {
