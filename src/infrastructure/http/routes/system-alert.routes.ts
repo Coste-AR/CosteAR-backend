@@ -31,7 +31,40 @@ function toInt(value: unknown): number | undefined {
  * eventos de Sentry con un token que hoy no está configurado). Es todo lo
  * que antes se descartaba, dejando solo message/level/id/url.
  */
-function extractIssueDetails(issue: any) {
+/**
+ * La forma del issue que manda Sentry, en lo que nos sirve.
+ *
+ * Los campos se declaran `unknown` a propósito: **es un payload de un tercero**,
+ * y cada lectura de abajo ya se defiende con su `typeof`. Declarar `string`
+ * sería afirmar algo que nadie verificó; declarar `any` apagaría justamente las
+ * defensas que este archivo tiene escritas.
+ */
+interface SentryIssue {
+  culprit?: unknown;
+  metadata?: { type?: unknown; value?: unknown };
+  count?: unknown;
+  firstSeen?: unknown;
+  lastSeen?: unknown;
+  platform?: unknown;
+  level?: string;
+  title?: string;
+  id?: string | number;
+  web_url?: string;
+}
+
+/** Lo que llega en el cuerpo del webhook. */
+interface SentryWebhookBody {
+  action?: string;
+  data?: { issue?: SentryIssue };
+  // El camino de respaldo, para webhooks de prueba y para eventos con otra
+  // forma: ahí el nivel y el mensaje vienen sueltos en la raíz del cuerpo.
+  level?: string;
+  message?: string;
+  id?: string | number;
+  url?: string;
+}
+
+function extractIssueDetails(issue: SentryIssue | undefined) {
   return {
     culprit: typeof issue?.culprit === 'string' ? issue.culprit : undefined,
     errorType: typeof issue?.metadata?.type === 'string' ? issue.metadata.type : undefined,
@@ -81,7 +114,7 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
         return reply.status(401).send({ error: 'invalid signature' });
       }
 
-      const body = request.body as any;
+      const body = request.body as SentryWebhookBody;
       const action = body?.action;
       const data = body?.data;
 

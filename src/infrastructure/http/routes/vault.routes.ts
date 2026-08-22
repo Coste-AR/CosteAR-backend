@@ -160,8 +160,12 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
       // (rate limit de Voyage, git clone caído, etc.) se ve en el admin como un
       // "Error interno del servidor" genérico y sin ninguna pista de qué pasó.
       let message = err instanceof Error ? err.message : 'Error desconocido al reindexar la bóveda';
-      if (err instanceof Error && 'stderr' in err && err.stderr) {
-        message += `\nStderr: ${(err as any).stderr.toString()}`;
+      // `stderr` no está en `Error`: lo agrega el error de `child_process`
+      // cuando el comando de indexado falla. Se lee con el narrowing que ya
+      // hacía el `if`, sin apagar el tipo del resto del objeto.
+      if (err instanceof Error && 'stderr' in err) {
+        const { stderr } = err as Error & { stderr?: unknown };
+        if (stderr) message += `\nStderr: ${String(stderr)}`;
       }
       
       const token = process.env.VAULT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;

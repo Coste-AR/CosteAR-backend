@@ -131,13 +131,13 @@ export class CostitaChatService {
       }
 
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       await this.db.dailySignal.create({
         data: {
           type: 'ASSISTANT_MISS',
           source: 'COSTISTA_CHAT',
           content: input.message,
-          context: { reason: 'Exception during interpret', error: err.message },
+          context: { reason: 'Exception during interpret', error: err instanceof Error ? err.message : String(err) },
           userId
         }
       });
@@ -167,13 +167,13 @@ export class CostitaChatService {
         actionType: 'INFO_ONLY',
         confidence: confidenceMap[vaultResult.confidence],
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       await this.db.dailySignal.create({
         data: {
           type: 'ASSISTANT_MISS',
           source: 'COSTISTA_CHAT',
           content: message,
-          context: { reason: 'VaultQueryService threw', error: err.message },
+          context: { reason: 'VaultQueryService threw', error: err instanceof Error ? err.message : String(err) },
           userId,
         },
       });

@@ -80,11 +80,33 @@ interface CifCenter {
   fromDocument?: boolean;
 }
 
+/**
+ * Los datos de fin de mes de un centro productivo. Todo opcional: la
+ * configuración viene de un JSON que puede estar a medio cargar, y este archivo
+ * justamente completa lo que falta.
+ */
+interface ProductiveSettingLike {
+  centerId?: string;
+  budget?: { fixed: number; variable: number };
+  normalCapacity?: number;
+  actualActivity?: number;
+  actualCip?: number;
+}
+
+/** El reparto de un centro de servicio hacia los demás. */
+interface ServiceDistributionLike {
+  serviceCenterId?: string;
+  distributions?: unknown[];
+}
+
 interface IndirectCostConfig {
   centers?: CifCenter[];
   concepts?: CifConcept[];
-  serviceDistributions?: unknown[];
-  productiveSettings?: unknown[];
+  // Antes eran `unknown[]`, y por eso cada `.find()` y cada `.some()` de más
+  // abajo necesitaba un `any` para leer el id por el que matchea. La forma
+  // mínima que el código ya asume, declarada.
+  serviceDistributions?: ServiceDistributionLike[];
+  productiveSettings?: ProductiveSettingLike[];
 }
 
 // ─── Parser del reviewNote ────────────────────────────────────────────────────
@@ -346,7 +368,7 @@ function populateIndirectCosts(
   if (!Array.isArray(cfg.productiveSettings)) cfg.productiveSettings = [];
   const productiveCenters = cfg.centers.filter(c => c.type === 'productive');
   for (const pc of productiveCenters) {
-    const hasSetting = cfg.productiveSettings.some((ps: any) => ps?.centerId === pc.id);
+    const hasSetting = cfg.productiveSettings.some((ps) => ps?.centerId === pc.id);
     if (!hasSetting) {
       cfg.productiveSettings.push({
         centerId: pc.id,
@@ -366,9 +388,7 @@ function populateIndirectCosts(
     const ref = String(src.center ?? '').trim().toLowerCase();
     const centerId = centerMap[ref] ?? cfg.centers.find((c) => c.id === src.center)?.id;
     if (!centerId) continue;
-    const setting = cfg.productiveSettings.find((ps: any) => ps?.centerId === centerId) as
-      | { normalCapacity?: number; actualActivity?: number; actualCip?: number }
-      | undefined;
+    const setting = cfg.productiveSettings.find((ps) => ps?.centerId === centerId);
     if (!setting) continue;
     if (!setting.normalCapacity && src.normalCapacity != null) setting.normalCapacity = n(src.normalCapacity);
     if (!setting.actualActivity && src.actualActivity != null) setting.actualActivity = n(src.actualActivity);
@@ -379,7 +399,7 @@ function populateIndirectCosts(
   if (!Array.isArray(cfg.serviceDistributions)) cfg.serviceDistributions = [];
   const serviceCenters = cfg.centers.filter(c => c.type === 'service');
   for (const sc of serviceCenters) {
-    const hasDist = cfg.serviceDistributions.some((sd: any) => sd?.serviceCenterId === sc.id);
+    const hasDist = cfg.serviceDistributions.some((sd) => sd?.serviceCenterId === sc.id);
     if (!hasDist) {
       cfg.serviceDistributions.push({
         serviceCenterId: sc.id,

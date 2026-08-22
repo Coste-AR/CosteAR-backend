@@ -43,7 +43,25 @@ type TipoMensaje = 'texto' | 'imagen' | 'audio' | 'documento' | 'video' | 'ubica
 
 const TIPOS_SOPORTADOS: TipoMensaje[] = ['texto'];
 
-function detectarTipo(message: any): TipoMensaje {
+/**
+ * Lo que este servicio necesita del payload de Meta.
+ *
+ * Todos los campos son opcionales a propósito: **el webhook manda lo que
+ * manda**, y de eso justamente trata este servicio — reconocer qué llegó en vez
+ * de asumir que llegó lo esperado. El contenido de cada tipo que todavía no se
+ * procesa queda como `unknown`: alcanza con saber que vino.
+ */
+export interface MensajeEntrante {
+  text?: { body?: string };
+  image?: unknown;
+  audio?: unknown;
+  voice?: unknown;
+  document?: unknown;
+  video?: unknown;
+  location?: unknown;
+}
+
+function detectarTipo(message: MensajeEntrante | null | undefined): TipoMensaje {
   if (message?.text?.body) return 'texto';
   if (message?.image) return 'imagen';
   if (message?.audio || message?.voice) return 'audio';
@@ -78,7 +96,7 @@ export class WhatsappWebhookService {
    * Nunca devuelve sin dejar rastro: cada camino que no termina en una ingesta
    * deja una alerta con el motivo.
    */
-  async handleMessage(from: string, message: any): Promise<void> {
+  async handleMessage(from: string, message: MensajeEntrante | null | undefined): Promise<void> {
     const tipo = detectarTipo(message);
     const numero = ofuscarNumero(from);
 
@@ -129,7 +147,10 @@ export class WhatsappWebhookService {
         connectionId: conn.id,
         costistId: conn.costistId,
         companyId: conn.companyId,
-        rawContent: message.text.body,
+        // `tipo === 'texto'` sale de `detectarTipo`, que devuelve eso solo si
+        // `text.body` tiene contenido. El compilador no puede seguir esa
+        // implicación, y el `?? ''` no llega a ejecutarse nunca.
+        rawContent: message?.text?.body ?? '',
         sourceType: 'WHATSAPP',
         rejectIllegible: false,
       },
