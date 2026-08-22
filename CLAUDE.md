@@ -156,9 +156,32 @@ Se abren con `/costear-pr`. La plantilla de `.github/pull_request_template.md` s
 |**PR-02**|Antes de pedir review: tests, lint y typecheck en verde localmente.|
 |**PR-03**|PR gigante = PR que no se revisa. Si no lo describís en 3 bullets, es más de un PR.|
 |**PR-04**|**Todo PR nace en DRAFT.** GitHub **impide mergear un borrador**: mientras el trabajo crece, nadie lo mergea por error. Se marca `gh pr ready` cuando está listo de verdad — y se dice **«terminé de pushear»**. Entre el 20 y el 22-08 se perdieron 4 PRs de trabajo por mergear PRs que todavía estaban creciendo; en un caso, 12 minutos antes del commit que faltaba.|
-|**PR-05**|**Para mergear se usa `gh pr merge --auto --squash`**, no el botón a mano. GitHub mergea solo cuando el CI pasa: nadie espera mirando la pantalla y nadie mergea en el medio. *(En `CosteAR-admin` no está disponible: es privado y el plan Free no lo incluye.)*|
+|**PR-05**|**Una rama de trabajo se mergea a `dev` con SQUASH** (`gh pr merge --auto --squash`, o el botón). Un PR = un commit: `dev` se lee como una lista de cambios y deshacerlo es un `git revert` de un commit. **Las PROMOCIONES (`dev→staging`, `staging→main`) van con MERGE COMMIT, nunca squash**: el squash crea una identidad nueva y git deja de reconocer la historia compartida — el PR #125 existió solo para resolver un conflicto fantasma causado por eso. Con `--auto`, GitHub mergea cuando el CI pasa y nadie mergea a mano en el medio. *(En `CosteAR-admin` no hay auto-merge: es privado y el plan Free no lo incluye.)*|
 |**PR-06**|**Después de mergear, verificar que el trabajo LLEGÓ** (`git log origin/dev`), no que el PR figura en verde. Un PR apilado mergeado contra su rama de abajo aparece como `MERGED` y el trabajo no llega. Pasó 3 veces entre el 20 y el 21-08.|
-|**PR-07**|**Mergear a `staging` es publicar al cliente, por duplicado.** Los ambientes `staging` **y** `production` de Railway tienen conectada la misma rama `staging`; `main` no deploya a ningún lado. La verificación la hace el CI: el workflow *Smoke post-deploy* consulta `/health` de **los dos** ambientes y falla si alguno no termina sirviendo el commit mergeado. No se anota el SHA a mano ni se mira Railway: si el job está verde, el deploy llegó.|
+|**PR-07**|**`main` es el único que publica.** `staging` → ambiente *staging* (**pre-producción**, acá se prueba); `main` → ambiente *production* (**producción**). Promover a `staging` es probar, promover a `main` es publicar. La verificación la hace el CI: el workflow *Smoke post-deploy* consulta `/health` del ambiente que le toca a la rama y **falla si no termina sirviendo el commit mergeado**. No se anota el SHA a mano ni se mira Railway: si el job está verde, el deploy llegó.|
+|**PR-08**|**Lo que cambió el 22-08 y por qué está en `docs/2026-08-22-cambios-de-flujo-y-ambientes.md`.** Leerlo antes de abrir el primer PR o tocar un ambiente: explica el flujo nuevo, el mapa de ambientes y las alternativas que ya se descartaron, para no rediscutirlas.|
+|**PR-09**|**El manual del flujo está en `docs/manual-de-flujo-de-trabajo.md`.** Explica qué es un draft, por qué squash en las ramas y merge commit en las promociones, y qué pasó por no tenerlo. La web de GitHub y `gh` hacen exactamente lo mismo: usar la que resulte cómoda.|
+
+---
+
+## 3.bis El briefing automático y `ESTADO.md`
+
+Al abrir cualquier sesión de Claude en este repo, un hook (`SessionStart`) corre
+`.claude/hooks/briefing.mjs` e **inyecta el estado real del proyecto** antes de que nadie escriba
+nada: la rama, si `origin/dev` avanzó, los PRs abiertos, los issues asignados y el contenido de
+`ESTADO.md`.
+
+|ID|Regla|
+|---|---|
+|**EST-01**|**`ESTADO.md` es el mensaje del orquestador**: qué se está haciendo ahora, qué **no** tocar y por qué. Se inyecta entero en cada sesión, así que vale más **corto que completo** — máximo 20 líneas, solo lo que cambia lo que alguien va a hacer hoy. Lo histórico va a `docs/`.|
+|**EST-02**|**Actualizar `ESTADO.md` al abrir y al cerrar un bloque de trabajo.** Un estado viejo es peor que ninguno: enseña a ignorarlo, igual que un semáforo que siempre está en rojo.|
+|**EST-03**|**El briefing nunca puede romper una sesión.** Si `git` o `gh` fallan, imprime lo que pudo y sigue. Cualquier cambio al script mantiene esa garantía, y se prueba con `node .claude/hooks/briefing.mjs`.|
+|**EST-04**|**Cada línea del briefing ocupa contexto de la conversación real.** Antes de agregarle algo, la pregunta es si cambia lo que la persona va a hacer. Si no, no va.|
+
+> **Por qué existe.** La trazabilidad estaba escrita en documentos, y un documento depende de que
+> alguien se acuerde de leerlo — el mismo modo de fallar que el diagnóstico del 22-08 encontró en el
+> flujo de PRs. Además envejece: dice qué pasó el 22 de agosto, no qué pasó ayer. Esto no reemplaza
+> la documentación; la vuelve innecesaria de buscar.
 
 ---
 
@@ -261,6 +284,9 @@ Por eso `/costear-bitacora` al cerrar una sesión (DOC-03) y el ADR en el mismo 
 
 |Fecha|Qué cambió|Fuente|
 |---|---|---|
+|2026-08-22|**Sección 3.bis — briefing automático de sesión** (`SessionStart` + `ESTADO.md`). El contexto deja de depender de que alguien se acuerde de leer un documento: cada sesión arranca sabiendo qué pasó, qué no tocar y por qué. Es el mismo criterio que la Fase 1 aplicó al flujo de PRs, aplicado a la documentación.|Santiago|
+|2026-08-22|**PR-05 corregida y PR-09**: la regla decía "squash" a secas y era imprecisa. Las ramas de trabajo van squash; **las promociones van merge commit**, porque el squash rompe la identidad compartida entre ramas y hace conflictuar la promoción siguiente (fue la causa del PR #125). Se agrega `docs/manual-de-flujo-de-trabajo.md`, que explica el flujo entero para quien nunca usó draft ni auto-merge.|Santiago|
+|2026-08-22|**Se reordenaron los ambientes**: `staging` pasa a ser **pre-producción** y `main` **producción**. Antes los dos ambientes de Railway servían la rama `staging` y `main` no deployaba a ningún lado. PR-07 reescrita y el runbook documenta cómo verificar que cada ambiente tenga su propia base — con `db:setup` en el `preDeployCommand`, una base compartida haría que cada deploy de prueba migre producción.|Santiago|
 |2026-08-22|**Corrección de PR-07**: al cargar las URLs se descubrió que los ambientes `staging` y `production` sirven **la misma rama** `staging`, y que `main` no deploya a ningún lado. El runbook decía lo contrario. El smoke verifica los dos ambientes y `main` deja de dispararlo.|Santiago|
 |2026-08-22|**PR-07** + `.github/workflows/post-deploy-smoke.yml` + `scripts/smoke-deploy.mjs`: el CI verifica solo que el ambiente esté sirviendo el commit que se mergeó. Cierra el paso manual «anotá el SHA» del runbook, que nunca se ejecutó y dejó tres preguntas sin responder en la auditoría del 20-08. Fase 2 del plan del §11.4.|Santiago|
 |2026-08-22|**PR-04/05/06**: el PR nace en draft, se mergea con `--auto`, y después se verifica que el trabajo llegó. Reemplazan por mecanismo lo que REV-08 pedía recordar. La skill `/costear-pr` ya crea los PRs en borrador.|Santiago|

@@ -1,7 +1,26 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { getEnv } from '../../config/env.js';
-import { WhatsappWebhookService } from '../../../application/empresa/whatsapp-webhook-service.js';
+import { WhatsappWebhookService, type MensajeEntrante } from '../../../application/empresa/whatsapp-webhook-service.js';
+
+/**
+ * El sobre con el que Meta envuelve cada mensaje.
+ *
+ * Se declara solo hasta donde el handler navega. Todo opcional: la ruta ya
+ * comprueba cada nivel antes de bajar al siguiente, y ese encadenado de `if` es
+ * la validación real — el tipo la acompaña en vez de reemplazarla.
+ */
+interface WebhookMetaBody {
+  object?: unknown;
+  entry?: Array<{
+    changes?: Array<{
+      value?: {
+        messages?: Array<MensajeEntrante & { from?: string }>;
+      };
+    }>;
+  }>;
+}
+
 
 interface WebhookRequest extends FastifyRequest {
   rawBody?: Buffer;
@@ -59,12 +78,21 @@ export async function registerWhatsappRoutes(app: FastifyInstance): Promise<void
         return reply.status(401).send('invalid signature');
       }
 
-      const body = request.body as any;
+      const body = request.body as WebhookMetaBody;
 
       if (body.object) {
-        if (body.entry && body.entry[0].changes && body.entry[0].changes[0] && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
-          const from = body.entry[0].changes[0].value.messages[0].from;
-          const msg = body.entry[0].changes[0].value.messages[0];
+        // El primer mensaje del sobre, si vino alguno.
+        //
+        // Antes esto era un encadenado de `&&` que verificaba `changes[0]` y
+        // acto seguido leía `changes[0].value.messages` SIN verificar `value`:
+        // un sobre sin `value` —Meta manda varios tipos de notificación por el
+        // mismo webhook— tiraba un TypeError y le devolvía 500 a Meta, que lo
+        // reintenta. Con `?.` ese caso cae en el 200 de más abajo, que es lo
+        // que el `if` original ya quería decir.
+        const msg = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+
+        if (msg?.from) {
+          const from = msg.from;
 
           // Respondemos 200 rápido a Meta
           reply.status(200).send('EVENT_RECEIVED');

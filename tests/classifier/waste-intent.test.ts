@@ -5,6 +5,15 @@ import {
 } from '@/infrastructure/classifier/layers/layer0a-intent-detection.js';
 import { classifyDocument } from '@/infrastructure/classifier/cascade-classifier.js';
 
+
+// La memoria de correcciones va a la base y su fallo es no-fatal, pero cuesta
+// ~4s de timeout por llamada en una máquina sin Docker. Sin base ya devolvía
+// `undefined`: mockearla no cambia lo que se prueba, solo saca la espera.
+// El detalle está en tests/classifier/cascade-section-decision.test.ts.
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
+
 // Los tests de `classifyDocument` de este archivo llegan a la API de Groq. El
 // timeout por defecto de vitest son 5000ms y una llamada normal tarda ~4,9s:
 // quedan justo en el borde, y cuando la cuota del free tier aprieta —o cuando
