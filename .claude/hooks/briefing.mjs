@@ -196,9 +196,18 @@ if (existsSync(estadoPath)) {
 }
 
 agregar();
+// El manual y la filosofía viven en repos que pueden no estar clonados en esta
+// máquina — por eso son URLs absolutas, no rutas relativas. La filosofía ya
+// tiene su resumen operativo en el CLAUDE.md de este repo: esto es la versión
+// completa, no la única fuente de los tres pasos.
 agregar(
-  'Recordá: el PR nace en draft (`gh pr create --draft`) y se mergea con squash. ' +
-    'El manual completo está en `docs/manual-de-flujo-de-trabajo.md`.',
+  'Recordá: el PR nace en draft (`gh pr create --draft`) y se mergea con squash; ' +
+    'las promociones van con merge commit. Manual completo: ' +
+    'https://github.com/Coste-AR/CosteAR-backend/blob/dev/docs/manual-de-flujo-de-trabajo.md',
+);
+agregar(
+  'Cómo trabajamos (diagnosticar → planificar → implementar), versión completa: ' +
+    'https://github.com/Coste-AR/CosteAR-admin/blob/dev/docs/2026-08-22-filosofia-diagnosticar-planificar-implementar.md',
 );
 agregar('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
