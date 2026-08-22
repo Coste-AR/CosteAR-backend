@@ -158,7 +158,7 @@ Se abren con `/costear-pr`. La plantilla de `.github/pull_request_template.md` s
 |**PR-04**|**Todo PR nace en DRAFT.** GitHub **impide mergear un borrador**: mientras el trabajo crece, nadie lo mergea por error. Se marca `gh pr ready` cuando está listo de verdad — y se dice **«terminé de pushear»**. Entre el 20 y el 22-08 se perdieron 4 PRs de trabajo por mergear PRs que todavía estaban creciendo; en un caso, 12 minutos antes del commit que faltaba.|
 |**PR-05**|**Para mergear se usa `gh pr merge --auto --squash`**, no el botón a mano. GitHub mergea solo cuando el CI pasa: nadie espera mirando la pantalla y nadie mergea en el medio. *(En `CosteAR-admin` no está disponible: es privado y el plan Free no lo incluye.)*|
 |**PR-06**|**Después de mergear, verificar que el trabajo LLEGÓ** (`git log origin/dev`), no que el PR figura en verde. Un PR apilado mergeado contra su rama de abajo aparece como `MERGED` y el trabajo no llega. Pasó 3 veces entre el 20 y el 21-08.|
-|**PR-07**|**Después de promover a `staging` o `main`, la verificación la hace el CI.** El workflow *Smoke post-deploy* consulta `/health` del ambiente y **falla si no termina sirviendo el commit mergeado**. No se anota el SHA a mano ni se mira Railway: si el job está verde, el deploy llegó. *(Necesita cargadas las variables `STAGING_HEALTH_URL` y `MAIN_HEALTH_URL`.)*|
+|**PR-07**|**Mergear a `staging` es publicar al cliente, por duplicado.** Los ambientes `staging` **y** `production` de Railway tienen conectada la misma rama `staging`; `main` no deploya a ningún lado. La verificación la hace el CI: el workflow *Smoke post-deploy* consulta `/health` de **los dos** ambientes y falla si alguno no termina sirviendo el commit mergeado. No se anota el SHA a mano ni se mira Railway: si el job está verde, el deploy llegó.|
 
 ---
 
@@ -261,6 +261,7 @@ Por eso `/costear-bitacora` al cerrar una sesión (DOC-03) y el ADR en el mismo 
 
 |Fecha|Qué cambió|Fuente|
 |---|---|---|
+|2026-08-22|**Corrección de PR-07**: al cargar las URLs se descubrió que los ambientes `staging` y `production` sirven **la misma rama** `staging`, y que `main` no deploya a ningún lado. El runbook decía lo contrario. El smoke verifica los dos ambientes y `main` deja de dispararlo.|Santiago|
 |2026-08-22|**PR-07** + `.github/workflows/post-deploy-smoke.yml` + `scripts/smoke-deploy.mjs`: el CI verifica solo que el ambiente esté sirviendo el commit que se mergeó. Cierra el paso manual «anotá el SHA» del runbook, que nunca se ejecutó y dejó tres preguntas sin responder en la auditoría del 20-08. Fase 2 del plan del §11.4.|Santiago|
 |2026-08-22|**PR-04/05/06**: el PR nace en draft, se mergea con `--auto`, y después se verifica que el trabajo llegó. Reemplazan por mecanismo lo que REV-08 pedía recordar. La skill `/costear-pr` ya crea los PRs en borrador.|Santiago|
 |2026-08-22|**Sección 0.bis — la filosofía: diagnosticar, planificar, recién ahí implementar.** Se escribió después de que aplicarla encontrara, en una tarde, la causa de tres días de re-trabajo: cuatro casillas de configuración apagadas, no falta de disciplina. Incluye las tres trampas que el orden evita.|Santiago|

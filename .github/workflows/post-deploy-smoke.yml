@@ -1,37 +1,52 @@
-# ¿EL DEPLOY LLEGÓ DE VERDAD?
+# ¿EL DEPLOY LLEGÓ DE VERDAD, A LOS DOS AMBIENTES?
 #
-# Después de cada push a `staging` o `main`, Railway deploya solo. Este job
-# espera a que el ambiente sirva EXACTAMENTE el commit que se acaba de mergear
-# y, si no aparece, falla en rojo.
+# Un push a `staging` deploya a DOS ambientes de Railway, no a uno:
 #
-# Reemplaza el paso manual del runbook —«anotá el SHA después de cada deploy»—
-# que nunca se ejecutó. Durante la auditoría del 20-08 la pregunta «¿esto está
-# afectando al cliente?» quedó sin respuesta TRES veces por no saber qué versión
-# corría dónde.
+#   rama `staging` ──┬──> ambiente "staging"     (costear-backend-staging-staging)
+#                    └──> ambiente "production"  (costear-backend-production)
 #
-# ⚠️ Necesita las variables de repositorio STAGING_HEALTH_URL y MAIN_HEALTH_URL
-#    (Settings → Secrets and variables → Actions → Variables). Son las URLs
-#    PÚBLICAS de Railway: la interna `.railway.internal` no resuelve desde acá.
-#    Si faltan, el job lo dice y falla — no da un verde vacío.
+# Los dos tienen la rama `staging` conectada en Railway → Settings → Source.
+# Verificado en vivo el 22-08: los dos servían el mismo commit, `cdce3171`, que
+# es el HEAD de `staging` y no el de `main`.
+#
+# Por eso `main` NO dispara este workflow: **la rama `main` no deploya a ningún
+# lado**. Está 449 commits atrás (issue #94) no por desatención, sino porque no
+# la usa nadie. Verificar un ambiente contra un commit que nunca va a llegar ahí
+# sería un rojo permanente que no significa nada.
+#
+# Este job espera a que cada ambiente sirva EXACTAMENTE el commit mergeado y, si
+# no aparece, falla. Reemplaza el paso manual del runbook —«anotá el SHA después
+# de cada deploy»— que nunca se ejecutó: durante la auditoría del 20-08 la
+# pregunta «¿esto está afectando al cliente?» quedó sin respuesta TRES veces por
+# no saber qué versión corría dónde.
 name: Smoke post-deploy
 
 on:
   push:
-    branches: [ "staging", "main" ]
-  # Para poder re-verificar un ambiente sin pushear nada.
+    branches: [ "staging" ]
+  # Para re-verificar los ambientes sin pushear nada. Lanzalo desde la rama
+  # `staging`: el SHA que se compara es el HEAD de la rama que elijas acá.
   workflow_dispatch:
-    inputs:
-      ambiente:
-        description: Ambiente a verificar
-        type: choice
-        options: [ staging, main ]
-        default: staging
 
 jobs:
   verificar-version-deployada:
     runs-on: ubuntu-latest
     # `staging` tiene un cliente real: si el deploy no llegó, hay que enterarse.
     timeout-minutes: 10
+
+    strategy:
+      # Sin fail-fast: si un ambiente quedó atrás queremos ver también cómo está
+      # el otro. Saber si falló uno o los dos es la diferencia entre «se cayó un
+      # servicio» y «el build ni salió».
+      fail-fast: false
+      matrix:
+        include:
+          - ambiente: staging
+            url: ${{ vars.STAGING_HEALTH_URL }}
+          - ambiente: production
+            url: ${{ vars.PRODUCTION_HEALTH_URL }}
+
+    name: ${{ matrix.ambiente }} tiene que estar sirviendo este commit
 
     steps:
       - uses: actions/checkout@v4
@@ -40,23 +55,16 @@ jobs:
         with:
           node-version: 22.x
 
-      - name: Elegir la URL del ambiente
-        id: ambiente
+      - name: La URL del ambiente tiene que estar cargada
         env:
-          RAMA: ${{ github.event.inputs.ambiente || github.ref_name }}
-          STAGING_URL: ${{ vars.STAGING_HEALTH_URL }}
-          MAIN_URL: ${{ vars.MAIN_HEALTH_URL }}
+          URL: ${{ matrix.url }}
+          AMBIENTE: ${{ matrix.ambiente }}
         run: |
-          if [ "$RAMA" = "main" ]; then URL="$MAIN_URL"; else URL="$STAGING_URL"; fi
-
           if [ -z "$URL" ]; then
-            if [ "$RAMA" = "main" ]; then VAR=MAIN_HEALTH_URL; else VAR=STAGING_HEALTH_URL; fi
-            echo "::error::Falta la URL pública de '$RAMA'. Cargar la variable de repositorio $VAR en Settings > Secrets and variables > Actions > Variables."
+            VAR=$(echo "$AMBIENTE" | tr '[:lower:]' '[:upper:]')_HEALTH_URL
+            echo "::error::Falta la URL publica de '$AMBIENTE'. Cargar la variable de repositorio $VAR en Settings > Secrets and variables > Actions > Variables. Tiene que ser el dominio PUBLICO de Railway: el interno .railway.internal no resuelve desde Actions."
             exit 1
           fi
-
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "Verificando el ambiente de '$RAMA'."
 
       # Railway recién arranca el build cuando GitHub le avisa del push, y antes
       # de servir corre `db:setup` (migraciones + políticas RLS). Preguntar de
@@ -64,14 +72,16 @@ jobs:
       - name: Darle tiempo al build de Railway
         run: sleep 45
 
-      - name: El ambiente tiene que estar sirviendo este commit
-        run: node scripts/smoke-deploy.mjs --url "${{ steps.ambiente.outputs.url }}" --sha "${{ github.sha }}" --intentos 12 --espera 15
+      - name: Verificar el commit que está sirviendo
+        run: node scripts/smoke-deploy.mjs --url "${{ matrix.url }}" --sha "${{ github.sha }}" --intentos 12 --espera 15
 
       - name: Qué mirar si esto falló
         if: failure()
         run: |
-          echo "::notice::El ambiente no está sirviendo ${{ github.sha }}."
-          echo "1. Logs de deploy en Railway: ¿falló el build o el preDeployCommand?"
+          echo "::notice::El ambiente '${{ matrix.ambiente }}' no está sirviendo ${{ github.sha }}."
+          echo "1. Logs de deploy en Railway, ambiente '${{ matrix.ambiente }}': ¿falló el build o el preDeployCommand?"
           echo "2. Una migración a medio aplicar bloquea CUALQUIER deploy (P3009):"
           echo "   ver docs/runbook-deploy.md, Paso 0."
-          echo "3. Si el ambiente responde 'desconocido', falta RAILWAY_GIT_COMMIT_SHA."
+          echo "3. Si el ambiente responde 'desconocido', falta RAILWAY_GIT_COMMIT_SHA en ese ambiente."
+          echo "4. Si falló SOLO uno de los dos, revisar que los dos tengan la rama 'staging'"
+          echo "   conectada en Railway > Settings > Source."

@@ -7,26 +7,42 @@
 
 ## Contexto de ambientes
 
-| Ambiente | Rama git | Plataforma | Qué sirve |
+| Ambiente Railway | Rama conectada | URL pública | Qué sirve |
 |---|---|---|---|
-| Desarrollo | `feature/*` | local | Trabajo individual |
-| Dev | `dev` | Railway (dev) | Integración continua |
-| Staging | `staging` | Railway (staging) | **Producción actual** — hay un cliente real |
-| Main | `main` | Railway (main) | Ambiente de referencia — hoy 39 días atrás |
+| Desarrollo | `feature/*` | — (local) | Trabajo individual |
+| `staging` | **`staging`** | `costear-backend-staging-staging.up.railway.app` | **Producción** — hay un cliente real |
+| `production` | **`staging`** | `costear-backend-production.up.railway.app` | **También producción, mismo código** |
 
-> ⚠️ **`staging` es producción**: hay un cliente real usándolo.
-> *(Los issues #88, #89 y #90 que esta nota mencionaba quedaron resueltos el 21-08.)*  
-> Promover a `main` es el objetivo, no el estado actual.
+> 🚨 **La rama `main` no está conectada a ningún ambiente.** Verificado el 22-08 en Railway →
+> Settings → Source: **los dos ambientes tienen conectada la rama `staging`**. Un push a `staging`
+> deploya a los dos a la vez.
+>
+> Se confirmó en vivo consultando `/health`: los dos informaban `cdce3171`, que es el HEAD de
+> `staging`. El de `main` es otro commit.
+>
+> ⚠️ Esto reescribe lo que este runbook decía antes (*«Main → Railway (main)»*), que era falso.
+> **`main` no lleva 449 commits de atraso por desatención: no la usa nadie.** Mientras siga así,
+> promover a `main` no cambia nada de lo que ve el cliente — es higiene del repositorio, no un
+> deploy (issue #94).
+>
+> ⚠️ **Y tiene una consecuencia que hay que tener presente**: no existe hoy un ambiente donde
+> probar algo antes de que lo vea el cliente. Un merge a `staging` va derecho a producción, por
+> duplicado.
 
 ---
 
 ## Flujo de promoción
 
 ```
-feature-branch → dev → staging → main
+feature-branch → dev → staging ──┬──> ambiente "staging"      ← el cliente
+                                 └──> ambiente "production"   ← el cliente
+                          main  ──> (no deploya a ningún lado)
 ```
 
 Cada flecha es un PR revisado. **No se saltean pasos.** GitHub bloquea push directo a `dev`, `staging` y `main`.
+
+**El merge a `staging` es el momento en que el cambio llega al cliente.** No hay un paso posterior
+que lo frene.
 
 ---
 
@@ -225,13 +241,13 @@ Devuelve:
 >
 > Para re-verificar un ambiente sin pushear nada: Actions → *Smoke post-deploy* → **Run workflow**.
 >
-> ⚠️ **Hueco de infra que queda** — el workflow necesita las URLs **públicas** de Railway, cargadas
-> como variables de repositorio en *Settings → Secrets and variables → Actions → Variables*:
-> - `STAGING_HEALTH_URL`: `_______________`
-> - `MAIN_HEALTH_URL`: `_______________`
+> ✅ **Hueco de infra cerrado el 22-08.** Las URLs están cargadas como variables de repositorio
+> (*Settings → Secrets and variables → Actions → Variables*):
+> - `STAGING_HEALTH_URL` = `https://costear-backend-staging-staging.up.railway.app`
+> - `PRODUCTION_HEALTH_URL` = `https://costear-backend-production.up.railway.app`
 >
-> La URL **interna** (`.railway.internal`) no sirve: no resuelve desde afuera de Railway. Mientras
-> falten, el workflow **falla diciendo cuál falta** en vez de dar un verde vacío.
+> **El workflow verifica los dos ambientes en cada push a `staging`**, porque los dos deployan de
+> esa rama. La URL **interna** (`.railway.internal`) no sirve: no resuelve desde afuera de Railway.
 
 ### Verificar el SHA que quedó corriendo
 
