@@ -1,0 +1,281 @@
+# Manual del flujo de trabajo
+
+> Para cualquiera que trabaje en los repos de CosteAR — y para la IA que trabaje con él.
+>
+> Explica **qué** hacer, **por qué**, y **qué pasa si no**. Las reglas cortas y vinculantes viven
+> en `CLAUDE.md`; esto es el manual que las explica.
+
+---
+
+## Lo primero: tu flujo de siempre está bien
+
+Si venís haciendo esto:
+
+```
+git add .  →  git commit -m "..."  →  git push origin mi-rama  →  ir a github  →  crear PR  →  mergear
+```
+
+**Seguí haciéndolo.** Solo cambian dos momentos:
+
+```
+git add .  →  git commit  →  git push origin mi-rama  →  github  →  crear PR  →  mergear
+                                                                        ↓             ↓
+                                                                 elegí DRAFT     elegí SQUASH
+```
+
+### La web y la terminal hacen exactamente lo mismo
+
+No hay ninguna diferencia técnica entre crear un PR desde github.com o desde `gh pr create`. Draft,
+squash y auto-merge son botones que están en los dos lados. **Usá el que te resulte cómodo.**
+
+Los comandos de este manual son el equivalente en terminal, por si preferís no salir de ahí — no
+una obligación.
+
+> ⚠️ Una cosa que sí está prohibida: **`git push` directo a `dev`, `staging` o `main`**. GitHub lo
+> bloquea (GIT-01). A esas ramas se entra siempre por PR.
+
+---
+
+## Parte 1 — El PR nace en borrador
+
+### Qué es un draft
+
+Un PR marcado como **borrador**. GitHub le **desactiva el botón de merge**: nadie puede mergearlo,
+ni queriendo.
+
+| Dónde | Cómo se hace |
+|---|---|
+| **Web** | Al crear el PR, el botón verde tiene una flechita ▾ → *Create draft pull request* |
+| **Terminal** | `gh pr create --base dev --draft --title "..." --body "..."` |
+
+Cuando terminaste de verdad:
+
+| Dónde | Cómo se hace |
+|---|---|
+| **Web** | Botón **Ready for review**, arriba del PR |
+| **Terminal** | `gh pr ready` |
+
+### Por qué
+
+Cuando abrís un PR y seguís pusheando —una corrección, los tests que faltaban, el ADR— desde afuera
+**no hay forma de distinguir dos situaciones muy distintas**:
+
+- "Esto está terminado, revisalo."
+- "Esto todavía está creciendo, no lo toques."
+
+Las dos se ven igual: **PR abierto, CI en verde**. Quien pasa y quiere ayudar, mergea.
+
+### Qué pasó por no tener esto
+
+Entre el 20 y el 22-08-2026 se abrieron **24 PRs** en el backend. **Cuatro no agregaron nada**:
+existieron solo para recuperar trabajo que ya estaba hecho y se había quedado afuera.
+
+| PR | Se mergeó | El commit que faltaba llegó | Diferencia |
+|---|---|---|---|
+| #119 | 15:09:49 | 15:21:32 | **12 minutos después** |
+| #122 | 16:12:25 | 18:04:01 | ~2 horas después |
+
+Ese 17 % de los PRs fue **re-trabajo puro**.
+
+Y el dato que decidió todo: **ya existía una regla escrita** pidiendo verificar antes de mergear
+(REV-08, del 18-08). Volvió a pasar tres veces en los tres días siguientes.
+
+> **Una regla que hay que recordar en el momento exacto no es un control: es una intención.**
+>
+> El draft no depende de que nadie se acuerde. GitHub no deja, y listo.
+
+### Cuándo marcar "Ready"
+
+Cuando puedas tildar **todas**:
+
+- [ ] `npm test`, `npm run lint` y `npm run typecheck` en verde **en tu máquina**
+- [ ] **`git status` limpio y `git push` hecho** — no falta ningún commit
+- [ ] El ADR, si la decisión lo amerita, ya está en el PR
+- [ ] El cuerpo del PR dice qué, por qué y cómo probarlo
+
+Y decilo en voz alta: **«terminé de pushear»**. El estado del PR ya lo dice, pero decirlo cierra el
+circuito con quien esté esperando.
+
+---
+
+## Parte 2 — Cómo se mergea
+
+### Las tres formas, y qué deja cada una
+
+Supongamos que tu rama tiene cuatro commits: `wip`, `arreglo el typo`, `ahora sí`, `falta un test`.
+
+| Forma | Qué queda en `dev` |
+|---|---|
+| **Merge commit** | Los cuatro commits + uno de merge. **Cinco líneas nuevas** en el historial |
+| **Squash** ⭐ | **Un solo commit**, con el título del PR |
+| **Rebase** | Los cuatro, reescritos, sin commit de merge |
+
+### Para ramas de trabajo: SQUASH
+
+Tres razones concretas:
+
+1. **`dev` se lee como una lista de cambios**, no como el diario de tu tarde. El que viene mañana
+   entiende qué pasó leyendo diez líneas.
+2. **Deshacer un PR es un `git revert` de un commit.** Con merge commit hay que revertir varios, en
+   orden, y es fácil equivocarse.
+3. **`git bisect`** —buscar cuál commit rompió algo— funciona mucho mejor cuando cada commit es un
+   cambio completo y andando. Con `wip` en el medio, la búsqueda se ensucia.
+
+**¿Se pierden tus commits?** No. Quedan en el PR de GitHub, visibles para siempre. Lo que cambia es
+qué se ve en el historial de `dev`.
+
+```bash
+gh pr merge --auto --squash          # terminal
+```
+o en la web: desplegable del botón verde → **Squash and merge**.
+
+### Para promociones (`dev → staging → main`): MERGE COMMIT
+
+**Acá NO va squash**, y el motivo es importante.
+
+El squash crea un commit **nuevo, con otra identidad**, aunque el contenido sea idéntico. Si aplastás
+una promoción, git deja de reconocer que `staging` y `dev` comparten historia — y **la próxima
+promoción da conflicto sobre trabajo que ya está ahí.**
+
+Ya pasó: el PR #120 entró como squash, y el #125 tuvo que existir **solo** para resolver ese
+conflicto fantasma.
+
+Es la misma razón por la que `git branch --merged dev` **no detecta las ramas mergeadas con squash**:
+diez ramas quedaron dando vueltas en la poda del 22-08 por eso, y hubo que verificarlas PR por PR.
+
+En la web es el botón por defecto (**Create a merge commit**), así que alcanza con no cambiarlo.
+
+### Resumen
+
+| De → a | Forma | Por qué |
+|---|---|---|
+| `mi-rama` → `dev` | **Squash** | Historial limpio, revert de un solo commit |
+| `dev` → `staging` | **Merge commit** | Preserva la identidad; si no, la próxima promoción conflictúa |
+| `staging` → `main` | **Merge commit** | Ídem |
+
+---
+
+## Parte 3 — `--auto`, la parte opcional
+
+`gh pr merge --auto` (o **Enable auto-merge** en la web) le dice a GitHub:
+
+> *"Mergealo vos cuando el CI termine en verde."*
+
+Para qué sirve:
+
+- No te quedás mirando la pantalla dos minutos esperando el CI.
+- **Nadie mergea a mano en el medio**, porque el PR ya tiene dueño.
+
+Es comodidad, no una regla. Si preferís esperar y apretar el botón, es igual de válido.
+
+> `CosteAR-admin` **no tiene auto-merge**: es privado y el plan Free no lo incluye. Ahí el draft
+> funciona igual, y el merge se hace a mano con el CI en verde.
+
+---
+
+## Parte 4 — Después de mergear, verificá que llegó
+
+```bash
+git log origin/dev --oneline -3
+```
+
+**No alcanza con que el PR figure en verde.** Un PR apilado —uno que apunta a otra rama en vez de a
+`dev`— se mergea contra esa rama de abajo, GitHub lo marca `MERGED` en verde, **y el trabajo no
+llega a `dev`**.
+
+Pasó tres veces entre el 20 y el 21-08.
+
+Lo que sí se borra solo: **la rama remota**. `delete_branch_on_merge` está activo en los tres repos
+desde el 22-08. La local se limpia con:
+
+```bash
+git checkout dev && git pull
+git branch -d mi-rama
+```
+
+---
+
+## Parte 5 — Y si promovés a `staging` o `main`
+
+No hay que anotar nada ni mirar Railway. **El CI verifica solo** que el ambiente esté sirviendo el
+commit que mergeaste, y **falla en rojo si no llegó**.
+
+```
+rama `staging` → ambiente "staging"     = PRE-PRODUCCIÓN (acá se prueba)
+rama `main`    → ambiente "production"  = PRODUCCIÓN
+```
+
+**Mergear a `main` es publicar.** No hay ningún paso posterior que lo frene.
+
+Para verificar un ambiente sin pushear nada: Actions → *Smoke post-deploy* → **Run workflow** → y en
+*Use workflow from* elegí **`staging`** o **`main`** (no `dev`: no deploya a ningún lado, y daría un
+rojo sin sentido).
+
+---
+
+## El flujo completo, de una
+
+```bash
+# 1. Rama nueva, siempre desde dev actualizado
+git checkout dev && git pull
+git checkout -b feat/lo-que-sea
+
+# 2. Trabajás normal
+git add .
+git commit -m "feat(scope): lo que hiciste"
+git push -u origin feat/lo-que-sea
+
+# 3. PR en BORRADOR (o el botón ▾ → Create draft pull request en la web)
+gh pr create --base dev --draft --title "feat(scope): ..." --body "..."
+
+# 4. Seguís pusheando tranquilo: nadie te lo puede mergear en el medio
+git commit -m "test(scope): el caso que faltaba"
+git push
+
+# 5. Cuando terminaste de verdad (checklist de la Parte 1)
+gh pr ready
+
+# 6. Mergear con SQUASH
+gh pr merge --auto --squash
+
+# 7. Verificar que el trabajo LLEGÓ, no que el PR está verde
+git log origin/dev --oneline -3
+
+# 8. Limpiar la rama local (la remota se borra sola)
+git checkout dev && git pull
+git branch -d feat/lo-que-sea
+```
+
+---
+
+## Preguntas frecuentes
+
+**¿Tengo que usar la terminal?**
+No. Todo esto son botones en github.com. Usá lo que te resulte cómodo.
+
+**¿Y si me olvido del draft?**
+No pasa nada grave: convertí el PR a borrador con *Convert to draft* (web) o `gh pr ready --undo`.
+
+**¿Y si mi PR ya está mergeado y me faltó un commit?**
+Abrí otro PR con lo que falta. Es lo que pasó cuatro veces en agosto — el draft existe justamente
+para que no vuelva a hacer falta.
+
+**¿Puedo mergear el mismo día que abro el PR?**
+REV-07 pide esperar 24 horas salvo que haya algo roto en producción. La mitad de los problemas del
+18-08 salieron de mergear rápido y en cadena.
+
+**¿Por qué tanto cuidado con esto?**
+Porque se midió. En tres días, el 17 % de los PRs no agregó nada: existieron solo para mover trabajo
+que ya estaba hecho. No fue falta de disciplina — fue que **todo lo que dependía de que alguien se
+acordara, falló; y todo lo que estaba automatizado, funcionó.**
+
+---
+
+## Dónde está el resto
+
+| Qué | Dónde |
+|---|---|
+| Las reglas cortas y vinculantes | `CLAUDE.md` §3 |
+| Qué cambió el 22-08 y por qué | `docs/2026-08-22-cambios-de-flujo-y-ambientes.md` |
+| Cómo promover y deployar | `docs/runbook-deploy.md` |
+| El diagnóstico completo con los números | `Auditorias/2026-08-20 auditoria consolidada y reparto.md`, §10 y §11 |
