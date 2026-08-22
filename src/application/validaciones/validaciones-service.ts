@@ -1,4 +1,4 @@
-import type { PrismaClient, DataEntryStatus } from '@prisma/client';
+import type { Prisma, PrismaClient, DataEntryStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 import { NotFoundError, ForbiddenError, UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
@@ -107,7 +107,7 @@ export class ValidacionesService {
    */
   async listHistorial(costistId: string, page = 1, limit = 20, companyId?: string) {
     const skip = (page - 1) * limit;
-    const whereClause: any = {
+    const whereClause: Prisma.DataEntryWhereInput = {
       costistId,
       status: { in: ['APPROVED', 'REJECTED', 'CORRECTED'] },
     };

@@ -106,7 +106,21 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
     const vectorLiteral = `[${queryEmbedding.join(',')}]`;
     
     // Usamos el operador <=> para distancia coseno en pgvector
-    const result = await this.db.$queryRawUnsafe<any[]>(`
+    /**
+     * La forma de la fila cruda. `distance` se declara `number | string`
+     * porque el driver puede devolver el numérico de Postgres como texto —
+     * de ahí el `Number(...)` de más abajo, que ya estaba y ahora se explica.
+     */
+    type FilaVecina = {
+      id: string;
+      sourceFile: string;
+      sourceTitle: string;
+      headingPath: string | null;
+      content: string;
+      distance: number | string;
+    };
+
+    const result = await this.db.$queryRawUnsafe<FilaVecina[]>(`
       SELECT 
         "id", 
         "sourceFile", 
