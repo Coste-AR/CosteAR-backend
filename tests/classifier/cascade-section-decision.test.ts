@@ -31,9 +31,31 @@ vi.mock('@/infrastructure/classifier/layers/layer5-ai-fallback.js', () => ({
   runLayer5: vi.fn(async () => h.ai),
 }));
 
+/**
+ * LA MEMORIA DE CORRECCIONES NO SE CONSULTA ACÁ.
+ *
+ * `classifyDocument()` le pide a `getCorrectionExamples()` los casos que el
+ * costista ya validó, para dárselos a la IA como ejemplos. Esa consulta va a la
+ * base y **su fallo es no-fatal por diseño** (devuelve `undefined` y la cascada
+ * sigue). Correcto en producción; caro acá.
+ *
+ * Medido el 22-08: sin Docker levantado, cada llamada **espera el timeout de
+ * conexión, ~4.100 ms**. En el CI unitario no hay `DATABASE_URL`, así que Prisma
+ * falla al validar, al instante — el CI quedaba verde mientras la máquina del
+ * dev tardaba 4 segundos por llamada. **No era otro fallo: era el mismo fallo a
+ * otra velocidad.** La suite entera hacía 22 de estas llamadas: ~88 segundos.
+ *
+ * Mockearla no cambia nada de lo que estos tests prueban: sin base, ya venía
+ * devolviendo `undefined`. Lo único que se saca es la espera.
+ */
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
+
 const { classifyDocument, resolveSectionAfterAI } =
   await import('@/infrastructure/classifier/cascade-classifier.js');
 const { runLayer4 } = await import('@/infrastructure/classifier/layers/layer4-business-routing.js');
+
 
 /** Corre el Layer 4 real: documenta la premisa de cada test en vez de asumirla. */
 const runLayer4Real = (documentType: DocumentType): Layer4Result =>

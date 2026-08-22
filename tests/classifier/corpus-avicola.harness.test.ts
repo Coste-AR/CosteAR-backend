@@ -45,11 +45,20 @@
  * Para la comparación de perfiles de CL-04 (AGRO vs DEFAULT vs AVICULTURA):
  *   CORPUS_PERFILES=1 npx vitest run tests/classifier/corpus-avicola.harness.test.ts
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { classifyDocument } from '@/infrastructure/classifier/cascade-classifier.js';
 import type { CostSection } from '@/infrastructure/classifier/types.js';
+
+
+// La memoria de correcciones va a la base y su fallo es no-fatal, pero cuesta
+// ~4s de timeout por llamada en una máquina sin Docker. Sin base ya devolvía
+// `undefined`: mockearla no cambia lo que se prueba, solo saca la espera.
+// El detalle está en tests/classifier/cascade-section-decision.test.ts.
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
 
 // UUIDs válidos → evita el ruido de prisma en getCorrectionExamples.
 const BASE = {

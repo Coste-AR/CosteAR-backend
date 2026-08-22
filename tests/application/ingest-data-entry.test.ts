@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // vez de tocar el default global.
 vi.setConfig({ testTimeout: 15000 });
 
+
 const { mockTx, mockDb, mockClassify } = vi.hoisted(() => {
   const tx = {
     dataEntry: { create: vi.fn() },
@@ -82,8 +83,17 @@ beforeEach(() => {
 });
 
 describe('ingestDataEntry', () => {
+// La memoria de correcciones va a la base y su fallo es no-fatal, pero cuesta
+// ~4s de timeout por llamada en una máquina sin Docker. Sin base ya devolvía
+// `undefined`: mockearla no cambia lo que se prueba, solo saca la espera.
+// El detalle está en tests/classifier/cascade-section-decision.test.ts.
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
+
   it('persiste el ClassificationAudit junto con la DataEntry', async () => {
     const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry.js');
+
 
     const res = await ingestDataEntry(baseInput, { db: mockDb as never, groq: fakeGroq as never });
 
