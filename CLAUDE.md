@@ -177,6 +177,7 @@ nada: la rama, si `origin/dev` avanzó, los PRs abiertos, los issues asignados y
 |**EST-02**|**Actualizar `ESTADO.md` al abrir y al cerrar un bloque de trabajo.** Un estado viejo es peor que ninguno: enseña a ignorarlo, igual que un semáforo que siempre está en rojo.|
 |**EST-03**|**El briefing nunca puede romper una sesión.** Si `git` o `gh` fallan, imprime lo que pudo y sigue. Cualquier cambio al script mantiene esa garantía, y se prueba con `node .claude/hooks/briefing.mjs`.|
 |**EST-04**|**Cada línea del briefing ocupa contexto de la conversación real.** Antes de agregarle algo, la pregunta es si cambia lo que la persona va a hacer. Si no, no va.|
+|**EST-05**|**Antes de commitear un cambio en `.claude/settings.json`, correr `node .claude/hooks/briefing.mjs --check-settings`.** Un `settings.json` inválido **se descarta entero**, no solo la parte mal escrita: un hook mal puesto apaga todos los demás. Y el error recién aparece al abrir una sesión nueva, que es lo único que no se puede probar desde adentro de una sesión.|
 
 > **Por qué existe.** La trazabilidad estaba escrita en documentos, y un documento depende de que
 > alguien se acuerde de leerlo — el mismo modo de fallar que el diagnóstico del 22-08 encontró en el
