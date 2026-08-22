@@ -119,15 +119,30 @@ const extended = base.$extends({
 // Este parche envuelve el callback de toda transacción interactiva en
 // enterExplicitTransaction para que la extensión se quede quieta.
 // Las batch transactions (array de operaciones) no tienen este problema.
-const _origTx = (extended as any).$transaction.bind(extended);
-(extended as any).$transaction = function (arg: any, options?: any) {
+/**
+ * `$transaction` tiene dos firmas —callback interactivo y array de operaciones—
+ * y sobre el cliente EXTENDIDO sus tipos no son expresables sin repetir media
+ * declaración de Prisma. Se describe acá solo lo que este parche necesita
+ * saber: que recibe una cosa u otra y devuelve una promesa.
+ *
+ * El `tx` va como `unknown` a propósito: este envoltorio no lo toca, solo lo
+ * pasa. Tiparlo de más sería afirmar algo sobre el cliente de transacción que
+ * este código no usa ni verifica.
+ */
+type CallbackDeTransaccion = (tx: unknown) => Promise<unknown>;
+type FirmaTransaccion = (
+  arg: CallbackDeTransaccion | readonly unknown[],
+  options?: unknown,
+) => Promise<unknown>;
+
+const conTransaccion = extended as unknown as { $transaction: FirmaTransaccion };
+const origTx = conTransaccion.$transaction.bind(conTransaccion);
+
+conTransaccion.$transaction = function (arg, options) {
   if (typeof arg === 'function') {
-    return _origTx(
-      (tx: any) => enterExplicitTransaction(() => (arg as (tx: any) => Promise<unknown>)(tx)),
-      options,
-    );
+    return origTx((tx) => enterExplicitTransaction(() => arg(tx)), options);
   }
-  return _origTx(arg as any, options);
+  return origTx(arg, options);
 };
 
 /**

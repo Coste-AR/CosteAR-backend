@@ -42,7 +42,22 @@ export function evaluarSalud({ shaEsperado, respuesta }) {
   const version = respuesta.version;
 
   if (!version) {
-    return { estado: 'abortar', motivo: '/health respondió sin campo `version`' };
+    // Mientras el contenedor arranca, Railway responde 200 con un cuerpo suyo
+    // —`{"status":"starting"}`— que no es nuestro `/health`. Visto en vivo el
+    // 22-08 durante el primer deploy de `production` a `main`.
+    //
+    // Eso es esperar, no abortar: el que contesta todavía no es nuestro
+    // servidor. Abortar ahí haría fallar el chequeo justo en el momento en que
+    // su trabajo es tener paciencia.
+    //
+    // Si en cambio el cuerpo dice `status: 'ok'` y aun así no trae `version`,
+    // el que responde SÍ es nuestro endpoint y le falta el campo: eso es un
+    // contrato roto y no lo arregla esperar.
+    if (respuesta.status_body === 'ok') {
+      return { estado: 'abortar', motivo: '/health respondió `status: ok` pero sin campo `version`' };
+    }
+    const que = respuesta.status_body ? `\`status: ${respuesta.status_body}\`` : 'un cuerpo sin `version`';
+    return { estado: 'esperar', motivo: `el ambiente todavía está arrancando (${que})` };
   }
 
   // `desconocido` NO se reintenta. No es una condición que el tiempo arregle:
@@ -89,7 +104,16 @@ async function consultarSalud(url, timeoutMs = 10_000) {
     const r = await fetch(url, { signal: corte, headers: { accept: 'application/json' } });
     if (!r.ok) return { ok: false, status: r.status };
     const cuerpo = await r.json();
-    return { ok: true, status: r.status, version: cuerpo?.version, environment: cuerpo?.environment };
+    // `status_body` es el `status` del CUERPO, no el HTTP: sirve para distinguir
+    // nuestro `/health` (`ok`) del cuerpo que Railway sirve mientras arranca
+    // (`starting`).
+    return {
+      ok: true,
+      status: r.status,
+      status_body: cuerpo?.status,
+      version: cuerpo?.version,
+      environment: cuerpo?.environment,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

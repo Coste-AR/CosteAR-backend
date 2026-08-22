@@ -52,8 +52,41 @@ describe('smoke post-deploy — qué hacer con lo que responde el ambiente', () 
     expect(r.motivo).toContain('RAILWAY_GIT_COMMIT_SHA');
   });
 
-  it('aborta si /health responde sin el campo version', () => {
-    expect(evaluarSalud({ shaEsperado: SHA, respuesta: { ok: true } }).estado).toBe('abortar');
+  /**
+   * Visto en vivo el 22-08, durante el primer deploy de `production` a `main`:
+   * mientras el contenedor arranca, Railway responde 200 con un cuerpo SUYO,
+   * `{"status":"starting"}`, que no es nuestro `/health`.
+   *
+   * Abortar ahí haría fallar el chequeo justo en el momento en que su trabajo
+   * es tener paciencia.
+   */
+  it('espera mientras Railway sirve su propio cuerpo de arranque', () => {
+    const r = evaluarSalud({
+      shaEsperado: SHA,
+      respuesta: { ok: true, status: 200, status_body: 'starting' },
+    });
+    expect(r.estado).toBe('esperar');
+    expect(r.motivo).toContain('arrancando');
+  });
+
+  it('espera ante cualquier cuerpo que no traiga version', () => {
+    expect(evaluarSalud({ shaEsperado: SHA, respuesta: { ok: true, status: 200 } }).estado).toBe(
+      'esperar',
+    );
+  });
+
+  /**
+   * Distinto caso: acá el que responde SÍ es nuestro endpoint —lo dice
+   * `status: 'ok'`— y le falta el campo. Eso es un contrato roto, y esperar no
+   * lo arregla.
+   */
+  it('aborta si es NUESTRO health el que responde sin version', () => {
+    const r = evaluarSalud({
+      shaEsperado: SHA,
+      respuesta: { ok: true, status: 200, status_body: 'ok' },
+    });
+    expect(r.estado).toBe('abortar');
+    expect(r.motivo).toContain('sin campo `version`');
   });
 
   it('aborta si el SHA esperado no alcanza para comparar nada', () => {

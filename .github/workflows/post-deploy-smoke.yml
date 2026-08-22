@@ -1,52 +1,36 @@
-# ¿EL DEPLOY LLEGÓ DE VERDAD, A LOS DOS AMBIENTES?
+# ¿EL DEPLOY LLEGÓ DE VERDAD?
 #
-# Un push a `staging` deploya a DOS ambientes de Railway, no a uno:
+# Cada rama promovible tiene UN ambiente, y este job verifica que ese ambiente
+# esté sirviendo exactamente el commit que se mergeó:
 #
-#   rama `staging` ──┬──> ambiente "staging"     (costear-backend-staging-staging)
-#                    └──> ambiente "production"  (costear-backend-production)
+#   rama `staging` ──> ambiente "staging"     = PRE-PRODUCCIÓN
+#   rama `main`    ──> ambiente "production"  = PRODUCCIÓN
 #
-# Los dos tienen la rama `staging` conectada en Railway → Settings → Source.
-# Verificado en vivo el 22-08: los dos servían el mismo commit, `cdce3171`, que
-# es el HEAD de `staging` y no el de `main`.
+# No siempre fue así. Hasta el 22-08 los DOS ambientes tenían conectada la rama
+# `staging`, con lo cual un merge a `staging` publicaba dos veces y `main` no
+# deployaba a ningún lado (por eso llevaba 449 commits de atraso: no la usaba
+# nadie, issue #94). Se reordenó a propósito, y el orden importó: reconectar
+# `production` a `main` ANTES de que `main` alcanzara a `staging` habría
+# deployado código de 39 días atrás contra una base ya migrada.
 #
-# Por eso `main` NO dispara este workflow: **la rama `main` no deploya a ningún
-# lado**. Está 449 commits atrás (issue #94) no por desatención, sino porque no
-# la usa nadie. Verificar un ambiente contra un commit que nunca va a llegar ahí
-# sería un rojo permanente que no significa nada.
-#
-# Este job espera a que cada ambiente sirva EXACTAMENTE el commit mergeado y, si
-# no aparece, falla. Reemplaza el paso manual del runbook —«anotá el SHA después
-# de cada deploy»— que nunca se ejecutó: durante la auditoría del 20-08 la
-# pregunta «¿esto está afectando al cliente?» quedó sin respuesta TRES veces por
-# no saber qué versión corría dónde.
+# Reemplaza el paso manual del runbook —«anotá el SHA después de cada deploy»—
+# que nunca se ejecutó: durante la auditoría del 20-08 la pregunta «¿esto está
+# afectando al cliente?» quedó sin respuesta TRES veces por no saber qué versión
+# corría dónde.
 name: Smoke post-deploy
 
 on:
   push:
-    branches: [ "staging" ]
-  # Para re-verificar los ambientes sin pushear nada. Lanzalo desde la rama
-  # `staging`: el SHA que se compara es el HEAD de la rama que elijas acá.
+    branches: [ "staging", "main" ]
+  # Para re-verificar un ambiente sin pushear nada. El SHA que se compara es el
+  # HEAD de la rama que elijas en "Use workflow from": elegí `staging` o `main`,
+  # no `dev` — `dev` no deploya a ningún lado y daría un rojo sin sentido.
   workflow_dispatch:
 
 jobs:
   verificar-version-deployada:
     runs-on: ubuntu-latest
-    # `staging` tiene un cliente real: si el deploy no llegó, hay que enterarse.
     timeout-minutes: 10
-
-    strategy:
-      # Sin fail-fast: si un ambiente quedó atrás queremos ver también cómo está
-      # el otro. Saber si falló uno o los dos es la diferencia entre «se cayó un
-      # servicio» y «el build ni salió».
-      fail-fast: false
-      matrix:
-        include:
-          - ambiente: staging
-            url: ${{ vars.STAGING_HEALTH_URL }}
-          - ambiente: production
-            url: ${{ vars.PRODUCTION_HEALTH_URL }}
-
-    name: ${{ matrix.ambiente }} tiene que estar sirviendo este commit
 
     steps:
       - uses: actions/checkout@v4
@@ -55,16 +39,30 @@ jobs:
         with:
           node-version: 22.x
 
-      - name: La URL del ambiente tiene que estar cargada
+      - name: Qué ambiente le corresponde a esta rama
+        id: ambiente
         env:
-          URL: ${{ matrix.url }}
-          AMBIENTE: ${{ matrix.ambiente }}
+          RAMA: ${{ github.ref_name }}
+          STAGING_URL: ${{ vars.STAGING_HEALTH_URL }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
         run: |
+          case "$RAMA" in
+            main)    NOMBRE=production; URL="$PRODUCTION_URL"; VAR=PRODUCTION_HEALTH_URL ;;
+            staging) NOMBRE=staging;    URL="$STAGING_URL";    VAR=STAGING_HEALTH_URL ;;
+            *)
+              echo "::error::La rama '$RAMA' no deploya a ningún ambiente. Solo 'staging' (pre-produccion) y 'main' (produccion) tienen un ambiente de Railway conectado. Si lanzaste esto a mano, elegi una de esas dos en 'Use workflow from'."
+              exit 1
+              ;;
+          esac
+
           if [ -z "$URL" ]; then
-            VAR=$(echo "$AMBIENTE" | tr '[:lower:]' '[:upper:]')_HEALTH_URL
-            echo "::error::Falta la URL publica de '$AMBIENTE'. Cargar la variable de repositorio $VAR en Settings > Secrets and variables > Actions > Variables. Tiene que ser el dominio PUBLICO de Railway: el interno .railway.internal no resuelve desde Actions."
+            echo "::error::Falta la URL publica del ambiente '$NOMBRE'. Cargar la variable de repositorio $VAR en Settings > Secrets and variables > Actions > Variables. Tiene que ser el dominio PUBLICO de Railway: el interno .railway.internal no resuelve desde Actions."
             exit 1
           fi
+
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "nombre=$NOMBRE" >> "$GITHUB_OUTPUT"
+          echo "La rama '$RAMA' deploya al ambiente '$NOMBRE'."
 
       # Railway recién arranca el build cuando GitHub le avisa del push, y antes
       # de servir corre `db:setup` (migraciones + políticas RLS). Preguntar de
@@ -72,16 +70,17 @@ jobs:
       - name: Darle tiempo al build de Railway
         run: sleep 45
 
-      - name: Verificar el commit que está sirviendo
-        run: node scripts/smoke-deploy.mjs --url "${{ matrix.url }}" --sha "${{ github.sha }}" --intentos 12 --espera 15
+      - name: El ambiente ${{ steps.ambiente.outputs.nombre }} tiene que estar sirviendo este commit
+        run: node scripts/smoke-deploy.mjs --url "${{ steps.ambiente.outputs.url }}" --sha "${{ github.sha }}" --intentos 12 --espera 15
 
       - name: Qué mirar si esto falló
         if: failure()
         run: |
-          echo "::notice::El ambiente '${{ matrix.ambiente }}' no está sirviendo ${{ github.sha }}."
-          echo "1. Logs de deploy en Railway, ambiente '${{ matrix.ambiente }}': ¿falló el build o el preDeployCommand?"
+          echo "::notice::El ambiente '${{ steps.ambiente.outputs.nombre }}' no está sirviendo ${{ github.sha }}."
+          echo "1. Logs de deploy en Railway, ambiente '${{ steps.ambiente.outputs.nombre }}':"
+          echo "   ¿falló el build o el preDeployCommand?"
           echo "2. Una migración a medio aplicar bloquea CUALQUIER deploy (P3009):"
           echo "   ver docs/runbook-deploy.md, Paso 0."
-          echo "3. Si el ambiente responde 'desconocido', falta RAILWAY_GIT_COMMIT_SHA en ese ambiente."
-          echo "4. Si falló SOLO uno de los dos, revisar que los dos tengan la rama 'staging'"
-          echo "   conectada en Railway > Settings > Source."
+          echo "3. Si el ambiente responde 'desconocido', falta RAILWAY_GIT_COMMIT_SHA ahí."
+          echo "4. Verificar en Railway > Settings > Source que ese ambiente tenga conectada"
+          echo "   la rama correcta: staging->staging, main->production."
