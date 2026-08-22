@@ -7,42 +7,70 @@
 
 ## Contexto de ambientes
 
-| Ambiente Railway | Rama conectada | URL pública | Qué sirve |
+| Ambiente Railway | Rama conectada | URL pública | Qué es |
 |---|---|---|---|
 | Desarrollo | `feature/*` | — (local) | Trabajo individual |
-| `staging` | **`staging`** | `costear-backend-staging-staging.up.railway.app` | **Producción** — hay un cliente real |
-| `production` | **`staging`** | `costear-backend-production.up.railway.app` | **También producción, mismo código** |
+| `staging` | **`staging`** | `costear-backend-staging-staging.up.railway.app` | **Pre-producción** — acá se prueba |
+| `production` | **`main`** | `costear-backend-production.up.railway.app` | **Producción** |
 
-> 🚨 **La rama `main` no está conectada a ningún ambiente.** Verificado el 22-08 en Railway →
-> Settings → Source: **los dos ambientes tienen conectada la rama `staging`**. Un push a `staging`
-> deploya a los dos a la vez.
+> 📌 **Este mapa se estableció el 22-08-2026.** Antes los **dos** ambientes tenían conectada la rama
+> `staging`: un merge a `staging` publicaba por duplicado y `main` no deployaba a ningún lado —de
+> ahí sus 449 commits de atraso (#94), que nunca fueron desatención sino desuso—. Se descubrió al
+> cargar las URLs para el smoke post-deploy: los dos ambientes informaban el mismo commit.
 >
-> Se confirmó en vivo consultando `/health`: los dos informaban `cdce3171`, que es el HEAD de
-> `staging`. El de `main` es otro commit.
->
-> ⚠️ Esto reescribe lo que este runbook decía antes (*«Main → Railway (main)»*), que era falso.
-> **`main` no lleva 449 commits de atraso por desatención: no la usa nadie.** Mientras siga así,
-> promover a `main` no cambia nada de lo que ve el cliente — es higiene del repositorio, no un
-> deploy (issue #94).
->
-> ⚠️ **Y tiene una consecuencia que hay que tener presente**: no existe hoy un ambiente donde
-> probar algo antes de que lo vea el cliente. Un merge a `staging` va derecho a producción, por
-> duplicado.
+> ⚠️ **El orden del cambio importó, y vuelve a importar si algún día se rehace**: `main` alcanzó a
+> `staging` **antes** de reconectar el ambiente. Al revés, Railway habría deployado código de 39
+> días atrás contra una base ya migrada. Prisma no revierte migraciones: la base queda adelante y el
+> código viejo choca con columnas que no conoce.
+
+### Aislamiento entre ambientes
+
+**Cada ambiente tiene que tener su propia base.** En Railway viene así de fábrica: cada ambiente
+recibe su instancia aislada de cada servicio, con su propio volumen y sus propios datos, y al
+duplicar un ambiente se copian servicios, variables y configuración **pero no los datos**.
+
+Lo que sí puede romperlo es la configuración. Cómo verificar, por ambiente:
+
+> Railway → ambiente → servicio backend → **Variables** → mirar `DATABASE_URL`.
+
+| Lo que dice | Veredicto |
+|---|---|
+| `${{Postgres.DATABASE_URL}}`, o el host `postgres.railway.internal` | ✅ Aislado — el nombre DNS es el mismo en los dos ambientes y resuelve distinto en cada uno |
+| Una URL literal con un host público (`…proxy.rlwy.net`) | 🚨 Los ambientes pueden estar sobre la **misma base** |
+
+> 🚨 **Por qué acá no es teórico:** `railway.toml` corre `npm run db:setup` como `preDeployCommand`
+> —migraciones **y** políticas RLS— en cada deploy. Con bases separadas es exactamente lo correcto.
+> Con base compartida, **cada deploy a pre-producción migraría la base de producción**.
+
+Los otros tres errores que rompen el aislamiento, en orden de probabilidad:
+
+1. **Claves de terceros reales en pre-producción** (WhatsApp, mail, pagos): staging manda mensajes
+   de verdad a gente de verdad.
+2. **No sellar los secretos de producción** antes de duplicar un ambiente.
+3. **Ramificar por ambiente dentro del código** (`if (env === 'production')`) en vez de dejar que la
+   variable cambie sola. La configuración va afuera; el código es el mismo en los dos lados.
+
+Y cuando haya clientes: **sembrar pre-producción con datos realistas, nunca con datos reales de
+producción** — conecta con el issue #18 de `CosteAR-admin`.
+
+*Fuentes: [Railway — Isolate Staging from Production](https://docs.railway.com/guides/isolate-staging-production),
+[Railway — Environments](https://docs.railway.com/environments).*
 
 ---
 
 ## Flujo de promoción
 
 ```
-feature-branch → dev → staging ──┬──> ambiente "staging"      ← el cliente
-                                 └──> ambiente "production"   ← el cliente
-                          main  ──> (no deploya a ningún lado)
+feature-branch → dev → staging → main
+                        │        │
+                        │        └──> ambiente "production"  = PRODUCCIÓN
+                        └──> ambiente "staging"  = PRE-PRODUCCIÓN
 ```
 
-Cada flecha es un PR revisado. **No se saltean pasos.** GitHub bloquea push directo a `dev`, `staging` y `main`.
+Cada flecha es un PR revisado. **No se saltean pasos.** GitHub bloquea push directo a `dev`,
+`staging` y `main`.
 
-**El merge a `staging` es el momento en que el cambio llega al cliente.** No hay un paso posterior
-que lo frene.
+**`main` es el único que publica.** Promover a `staging` es probar; promover a `main` es publicar.
 
 ---
 
@@ -246,8 +274,8 @@ Devuelve:
 > - `STAGING_HEALTH_URL` = `https://costear-backend-staging-staging.up.railway.app`
 > - `PRODUCTION_HEALTH_URL` = `https://costear-backend-production.up.railway.app`
 >
-> **El workflow verifica los dos ambientes en cada push a `staging`**, porque los dos deployan de
-> esa rama. La URL **interna** (`.railway.internal`) no sirve: no resuelve desde afuera de Railway.
+> **Cada rama verifica su ambiente**: un push a `staging` verifica pre-producción, uno a `main`
+> verifica producción. La URL **interna** (`.railway.internal`) no sirve: no resuelve desde afuera de Railway.
 
 ### Verificar el SHA que quedó corriendo
 
