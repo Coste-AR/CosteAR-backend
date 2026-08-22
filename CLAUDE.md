@@ -22,6 +22,56 @@ Si solo leés una sección, que sea esta.
 
 ---
 
+## 0.bis La filosofía: diagnosticar, planificar, recién ahí implementar
+
+> **Esta es la forma de trabajar, no una recomendación.** Vale para código, para infraestructura,
+> para procesos y para cualquier problema que aparezca. Se escribió el 22-08-2026, después de que
+> aplicarla encontrara en una tarde la causa de tres días de re-trabajo.
+
+**Los tres pasos, en orden, siempre:**
+
+| Paso | Qué significa | Qué NO es |
+|---|---|---|
+| **1. Diagnosticar** | Medir qué está pasando, con números y comandos reproducibles. Descartar primero lo que **no** es el problema. | No es opinar, ni suponer, ni empezar a arreglar lo primero que se ve |
+| **2. Planificar** | Escribir el plan **antes** de ejecutarlo: fases independientes, con su costo y lo que cierra cada una. Y las **alternativas descartadas, con el motivo**. | No es una lista de tareas: si no dice por qué se eligió eso y no otra cosa, no es un plan |
+| **3. Implementar** | Recién acá se toca algo. Y se verifica **en el entorno donde el trabajo va a vivir**, no donde uno está parado. | No es "empiezo y veo" |
+
+**Por qué importa, con el caso que lo probó:** el 20 y 21-08 se arreglaron cinco defectos del motor
+de costeo, y en el medio se perdieron horas en re-trabajo. La reacción natural era escribir otra
+regla. En vez de eso se midió: **de 24 PRs en tres días, 4 no agregaron nada** — existían solo para
+recuperar trabajo ya hecho. Con ese número, la causa apareció sola, y resultó ser **cuatro casillas
+de configuración apagadas**, no una falta de disciplina.
+
+**Sin el diagnóstico, se habría arreglado el problema equivocado.**
+
+### Las tres trampas que este orden evita
+
+1. **Arreglar el síntoma.** Los tres primeros incidentes parecían culpa de los PRs apilados. El
+   cuarto fue un PR simple: el apilamiento agravaba, no causaba. Prohibir los apilados habría
+   costado trabajo y no habría arreglado nada.
+2. **Escribir una regla en vez de un control.** REV-08 se escribió el 18-08 por un accidente
+   concreto y volvió a pasar tres veces en tres días. **Una regla que hay que recordar en el momento
+   exacto no es un control: es una intención.** Si algo tiene que pasar siempre, se automatiza o se
+   configura; escribirlo es el último recurso, no el primero.
+3. **Verificar donde uno está parado.** Un test que pasaba en la máquina del dev no cargaba en el
+   CI. Un instructivo escrito en sintaxis de bash para alguien que usa PowerShell. **Verificar es
+   verificar allá, no acá.**
+
+### Cómo se aplica en el día a día
+
+- **Antes de escribir código para un problema nuevo:** medir primero. Un comando que devuelva un
+  número vale más que un párrafo de análisis.
+- **Todo diagnóstico y todo plan quedan escritos** en el documento consolidado de `CosteAR-admin`
+  (`docs/`), no en un `.md` nuevo. Con las alternativas descartadas.
+- **Lo que salió mal se escribe igual**, y con el mismo detalle que lo que salió bien: es de donde
+  sale el diagnóstico siguiente.
+- **Al terminar, se anota en la bitácora** (`/costear-bitacora`), en castellano llano.
+
+> Si el trabajo empieza por el paso 3, en algún momento se vuelve al 1 — pero habiendo gastado el
+> tiempo dos veces.
+
+---
+
 ## 1. Contexto del proyecto
 
 CosteAR es un SaaS de costeo para profesionales de costos en PyMEs. Este repo es la **API**.
@@ -211,6 +261,7 @@ Por eso `/costear-bitacora` al cerrar una sesión (DOC-03) y el ADR en el mismo 
 |Fecha|Qué cambió|Fuente|
 |---|---|---|
 |2026-08-22|**PR-04/05/06**: el PR nace en draft, se mergea con `--auto`, y después se verifica que el trabajo llegó. Reemplazan por mecanismo lo que REV-08 pedía recordar. La skill `/costear-pr` ya crea los PRs en borrador.|Santiago|
+|2026-08-22|**Sección 0.bis — la filosofía: diagnosticar, planificar, recién ahí implementar.** Se escribió después de que aplicarla encontrara, en una tarde, la causa de tres días de re-trabajo: cuatro casillas de configuración apagadas, no falta de disciplina. Incluye las tres trampas que el orden evita.|Santiago|
 |2026-08-21|**CMD-04** + `scripts/migrate-dev.mjs`: automatiza el filtrado de deriva de `vault_chunks` que antes se hacía a mano en cada migración (issue #72). `npm run prisma:migrate` ahora llama al script en lugar de `prisma migrate dev` directo.|Giuliana|
 |2026-08-18|Secciones **5.bis** (datos de clientes en repos públicos, CLI-01 a CLI-04) y **6.bis** (protocolo de revisión, REV-01 a REV-08). Las dos salen de cosas que pasaron ese día: se publicó la estructura de costos de un betatester en un repo público, y ocho PRs se mergearon el mismo día que se abrieron.|Santiago|
 |2026-08-15|Creación. Reglas destiladas del repo `asomelab/de-wall`, de la spec de Trazabilidad Total v1 y de la auditoría del motor.|Santiago|
