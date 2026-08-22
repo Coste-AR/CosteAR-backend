@@ -7,26 +7,42 @@
 
 ## Contexto de ambientes
 
-| Ambiente | Rama git | Plataforma | Qué sirve |
+| Ambiente Railway | Rama conectada | URL pública | Qué sirve |
 |---|---|---|---|
-| Desarrollo | `feature/*` | local | Trabajo individual |
-| Dev | `dev` | Railway (dev) | Integración continua |
-| Staging | `staging` | Railway (staging) | **Producción actual** — hay un cliente real |
-| Main | `main` | Railway (main) | Ambiente de referencia — hoy 39 días atrás |
+| Desarrollo | `feature/*` | — (local) | Trabajo individual |
+| `staging` | **`staging`** | `costear-backend-staging-staging.up.railway.app` | **Producción** — hay un cliente real |
+| `production` | **`staging`** | `costear-backend-production.up.railway.app` | **También producción, mismo código** |
 
-> ⚠️ **`staging` es producción**: hay un cliente real usándolo.
-> *(Los issues #88, #89 y #90 que esta nota mencionaba quedaron resueltos el 21-08.)*  
-> Promover a `main` es el objetivo, no el estado actual.
+> 🚨 **La rama `main` no está conectada a ningún ambiente.** Verificado el 22-08 en Railway →
+> Settings → Source: **los dos ambientes tienen conectada la rama `staging`**. Un push a `staging`
+> deploya a los dos a la vez.
+>
+> Se confirmó en vivo consultando `/health`: los dos informaban `cdce3171`, que es el HEAD de
+> `staging`. El de `main` es otro commit.
+>
+> ⚠️ Esto reescribe lo que este runbook decía antes (*«Main → Railway (main)»*), que era falso.
+> **`main` no lleva 449 commits de atraso por desatención: no la usa nadie.** Mientras siga así,
+> promover a `main` no cambia nada de lo que ve el cliente — es higiene del repositorio, no un
+> deploy (issue #94).
+>
+> ⚠️ **Y tiene una consecuencia que hay que tener presente**: no existe hoy un ambiente donde
+> probar algo antes de que lo vea el cliente. Un merge a `staging` va derecho a producción, por
+> duplicado.
 
 ---
 
 ## Flujo de promoción
 
 ```
-feature-branch → dev → staging → main
+feature-branch → dev → staging ──┬──> ambiente "staging"      ← el cliente
+                                 └──> ambiente "production"   ← el cliente
+                          main  ──> (no deploya a ningún lado)
 ```
 
 Cada flecha es un PR revisado. **No se saltean pasos.** GitHub bloquea push directo a `dev`, `staging` y `main`.
+
+**El merge a `staging` es el momento en que el cambio llega al cliente.** No hay un paso posterior
+que lo frene.
 
 ---
 
@@ -218,19 +234,37 @@ Devuelve:
 > Si dice `"desconocido"`, es que la variable no está: el endpoint **no inventa** un valor, porque
 > un SHA plausible pero falso es peor que ninguno.
 
-> ⚠️ **Hueco de infra** — completar:
-> - URL de Railway para staging: `_______________`
-> - URL de Railway para main: `_______________`
-> - ¿El endpoint `/health` expone el SHA del commit? Si no, agregar `git rev-parse --short HEAD` al response.
+> ✅ **Desde el 22-08 esto lo verifica el CI solo.** El workflow **Smoke post-deploy**
+> (`.github/workflows/post-deploy-smoke.yml`) corre después de cada push a `staging` o `main`,
+> consulta `/health` hasta 12 veces y **falla en rojo si el ambiente no termina sirviendo el commit
+> que se mergeó**. Ya no hay que acordarse de mirar: si no aparece en Actions, el deploy no llegó.
+>
+> Para re-verificar un ambiente sin pushear nada: Actions → *Smoke post-deploy* → **Run workflow**.
+>
+> ✅ **Hueco de infra cerrado el 22-08.** Las URLs están cargadas como variables de repositorio
+> (*Settings → Secrets and variables → Actions → Variables*):
+> - `STAGING_HEALTH_URL` = `https://costear-backend-staging-staging.up.railway.app`
+> - `PRODUCTION_HEALTH_URL` = `https://costear-backend-production.up.railway.app`
+>
+> **El workflow verifica los dos ambientes en cada push a `staging`**, porque los dos deployan de
+> esa rama. La URL **interna** (`.railway.internal`) no sirve: no resuelve desde afuera de Railway.
 
 ### Verificar el SHA que quedó corriendo
 
+Lo hace el CI. A mano, si hace falta:
+
 ```bash
-# Desde el repo local, el SHA de staging después del deploy debería ser:
+# El SHA que debería estar corriendo:
 git rev-parse origin/staging
 
-# Comparar con lo que reporta el health check o los logs de Railway.
+# Y el mismo chequeo que corre el workflow, desde cualquier máquina:
+node scripts/smoke-deploy.mjs --url https://<URL_RAILWAY_STAGING> --sha $(git rev-parse origin/staging)
 ```
+
+> El script distingue tres situaciones que a ojo se confunden: **el ambiente todavía sirve la
+> versión anterior** (sigue esperando), **no responde** (reiniciando o caído, sigue esperando) y
+> **dice `desconocido`** (falta `RAILWAY_GIT_COMMIT_SHA`, aborta enseguida porque esperar no lo
+> arregla).
 
 ### Qué mirar en Sentry
 
