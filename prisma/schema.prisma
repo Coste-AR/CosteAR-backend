@@ -390,7 +390,8 @@ model LateDataDecision {
 model CostPeriod {
   desperdicioRegistros DesperdicioRegistro[]
   parametrosCosteo     ParametroCosteo[]
-  id                   String                @id @default(uuid()) @db.Uuid
+  // DEFAULT gen_random_uuid() a nivel SQL (migración 20260712000000) — ver AllocationBase.id.
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   structureId          String                @db.Uuid
   structure            CostStructure         @relation(fields: [structureId], references: [id], onDelete: Cascade)
   companyId            String                @db.Uuid // denormalizado para queries y RLS
@@ -475,7 +476,9 @@ model CostPeriod {
   reopenReason String?
 
   createdAt DateTime  @default(now()) @db.Timestamptz
-  updatedAt DateTime  @updatedAt
+  // La columna tiene DEFAULT CURRENT_TIMESTAMP a nivel SQL (migración 20260712000000).
+  // Sin declararlo, Prisma lo leía como deriva y generaba un DROP DEFAULT.
+  updatedAt DateTime  @default(now()) @updatedAt
   deletedAt DateTime? // Soft delete
 
   // Costeo por Procesos (B04): cuadros de movimiento de unidades del período.
@@ -495,6 +498,8 @@ model CostStructure {
   reglasAlerta        ReglaAlerta[]
   activosAmortizables ActivoAmortizable[]
   parametrosCosteo    ParametroCosteo[]
+  // Lado inverso de la FK que ya existía en la base — ver CostConfigVersion.structure.
+  configVersions      CostConfigVersion[]
   id                  String              @id @default(uuid()) @db.Uuid
   companyId           String              @db.Uuid
   company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -925,6 +930,10 @@ model DataEntry {
   @@index([connectionId, dedupeKey])
   @@index([costStructureId])
   @@index([processDepartmentId])
+  // El índice data_entries_uploadedBy_idx existe en la base desde la migración
+  // 20260806140000; el schema no lo declaraba y Prisma generaba un DROP INDEX
+  // en cada migración nueva. Declararlo no crea nada: lo deja dicho.
+  @@index([uploadedBy])
   @@map("data_entries")
 }
 
@@ -1373,16 +1382,22 @@ model CalculationNode {
 // se destruye (trigger append-only, R1). Relaciones por scalar UUID (FK en la
 // migración) para no tocar los modelos existentes.
 model CostConfigVersion {
-  id          String   @id @default(uuid()) @db.Uuid
-  structureId String   @db.Uuid
+  // DEFAULT gen_random_uuid() a nivel SQL (migración 20260711220000) — ver AllocationBase.id.
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  structureId String        @db.Uuid
+  // La FK cost_config_versions_structureId_fkey existe en la base desde la
+  // migración 20260711220000, pero el schema declaraba `structureId` como escalar
+  // suelto: Prisma no la veía y generaba un DROP CONSTRAINT en cada migración.
+  // Declararla acá no cambia la base — la deja dicha.
+  structure   CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
   section     String // 'rawMaterial' | 'directLabor' | 'indirectCosts' | 'sales'
   versionN    Int
   value       Json
   reason      String?
-  createdBy   String?  @db.Uuid
+  createdBy   String?       @db.Uuid
   actorRole   String?
   actorArea   String?
-  createdAt   DateTime @default(now()) @db.Timestamptz
+  createdAt   DateTime      @default(now()) @db.Timestamptz
 
   @@unique([structureId, section, versionN])
   @@index([structureId, section])
@@ -1398,7 +1413,10 @@ model CostConfigVersion {
 // `companyId` = base personalizada de esa empresa. Relaciones por scalar UUID
 // (FK a nivel DB en la migración) para no tocar los modelos existentes.
 model AllocationBase {
-  id          String   @id @default(uuid()) @db.Uuid
+  // La base tiene DEFAULT gen_random_uuid() a nivel SQL (migración 20260711150000).
+  // Se declara con `dbgenerated` para que el schema diga lo que la base tiene: con
+  // `@default(uuid())` Prisma veía el default como deriva y generaba un DROP DEFAULT.
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId   String?  @db.Uuid // NULL = base del sistema
   code        String // 'superficie_m2', 'hs_maquina', 'focos'...
   name        String // 'Superficie en m²'
@@ -1417,7 +1435,8 @@ model AllocationBase {
 // Valor de una base para un centro dentro de una estructura/período. Es un
 // dato TRAZABLE: puede enlazar a su DataPoint (autor, versión, evidencia).
 model AllocationBaseValue {
-  id          String         @id @default(uuid()) @db.Uuid
+  // DEFAULT gen_random_uuid() a nivel SQL (migración 20260711150000) — ver AllocationBase.id.
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   baseId      String         @db.Uuid
   base        AllocationBase @relation(fields: [baseId], references: [id], onDelete: Cascade)
   structureId String         @db.Uuid
