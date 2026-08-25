@@ -10,6 +10,11 @@
  * objetos que romperían el RAG si se aplicaran. Desde agosto 2026 se venía filtrando a mano.
  * Este script automatiza ese paso. Ver issue #72.
  *
+ * FASE 3 (issue #72): de las 10 sentencias que se filtraban, 7 no eran un límite de Prisma
+ * sino schema desactualizado — la base tenía DEFAULTs, un índice y una FK que el schema no
+ * declaraba. Se cerraron declarándolos. Quedan las 3 de vault_chunks, que sí son estructurales.
+ * Las 7 cerradas ya no se filtran: si reaparecen, el script ABORTA (ver scripts/lib/filtrar-deriva.mjs).
+ *
  * Uso:
  *   node scripts/migrate-dev.mjs <nombre-de-migración>
  *   npm run prisma:migrate <nombre>          ← alias en package.json
@@ -27,55 +32,10 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { filtrarDeriva } from './lib/filtrar-deriva.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, '..', 'prisma', 'migrations');
-
-// Deriva preexistente conocida (issue #72): sentencias que Prisma genera SIEMPRE por no poder
-// modelar columnas generadas ni índices sobre tipos Unsupported.
-// Cada objeto tiene: { pattern: RegExp, reason: string }
-// El pattern se evalúa contra el bloque completo (puede ser multi-línea con flag 's').
-const DRIFT_PATTERNS = [
-  {
-    pattern: /DROP INDEX "vault_chunks_embedding_idx"/s,
-    reason: 'índice HNSW de embedding semántico (vault_chunks_embedding_idx)',
-  },
-  {
-    pattern: /DROP INDEX "vault_chunks_content_tsv_idx"/s,
-    reason: 'índice GIN full-text de la bóveda (vault_chunks_content_tsv_idx)',
-  },
-  {
-    pattern: /DROP INDEX "data_entries_uploadedBy_idx"/s,
-    reason: 'índice data_entries_uploadedBy_idx (deriva preexistente)',
-  },
-  {
-    pattern: /ALTER TABLE "vault_chunks"[\s\S]*?"contentTsv"/s,
-    reason: 'ALTER sobre columna generada vault_chunks.contentTsv',
-  },
-  {
-    pattern: /ALTER TABLE "cost_config_versions" DROP CONSTRAINT "cost_config_versions_structureId_fkey"/s,
-    reason: 'DROP CONSTRAINT cost_config_versions_structureId_fkey (deriva preexistente)',
-  },
-  {
-    pattern: /ALTER TABLE "allocation_base_values"[\s\S]*?"id" DROP DEFAULT/s,
-    reason: 'DROP DEFAULT en allocation_base_values.id (deriva preexistente)',
-  },
-  {
-    pattern: /ALTER TABLE "allocation_bases"[\s\S]*?"id" DROP DEFAULT/s,
-    reason: 'DROP DEFAULT en allocation_bases.id (deriva preexistente)',
-  },
-  {
-    pattern: /ALTER TABLE "cost_config_versions"[\s\S]*?"id" DROP DEFAULT/s,
-    reason: 'DROP DEFAULT en cost_config_versions.id (deriva preexistente)',
-  },
-  {
-    pattern: /ALTER TABLE "cost_periods"[\s\S]*?"id" DROP DEFAULT/s,
-    reason: 'DROP DEFAULT en cost_periods.id (deriva preexistente)',
-  },
-  {
-    pattern: /ALTER TABLE "cost_periods"[\s\S]*?"updatedAt" DROP DEFAULT/s,
-    reason: 'DROP DEFAULT en cost_periods.updatedAt (deriva preexistente)',
-  },
-];
 
 function run(cmd) {
   console.log(`\n▶ ${cmd}`);
@@ -112,38 +72,38 @@ if (!migDir) {
 const sqlPath = join(MIGRATIONS_DIR, migDir, 'migration.sql');
 const original = readFileSync(sqlPath, 'utf8');
 
-// 3. Filtrar deriva: separar en bloques por líneas en blanco, filtrar los que
-//    coincidan con patrones de deriva, reconstruir el SQL limpio.
-const rawBlocks = original.split(/\n\n+/);
-const cleanBlocks = [];
-const warnings = [];
+// 3. Decidir qué se filtra y qué aborta (lógica pura, testeada sin base ni red)
+const { sql: limpio, filtradas, reabiertas } = filtrarDeriva(original);
 
-for (const block of rawBlocks) {
-  const trimmed = block.trim();
-  if (!trimmed) continue;
-
-  const matched = DRIFT_PATTERNS.find(({ pattern }) => pattern.test(trimmed));
-  if (matched) {
-    warnings.push(matched.reason);
-  } else {
-    cleanBlocks.push(block);
-  }
+// 3.bis Deriva que la Fase 3 cerró y volvió a aparecer: se para acá.
+//       Filtrarla en silencio es lo que la mantuvo viva durante meses.
+if (reabiertas.length > 0) {
+  console.error(`\n⛔ Reapareció deriva que estaba cerrada (${reabiertas.length}):\n`);
+  reabiertas.forEach(({ reason, cerradaCon }) => {
+    console.error(`   · ${reason}`);
+    console.error(`     se había cerrado con: ${cerradaCon}`);
+  });
+  console.error(`\n   Significa que el schema volvió a separarse de la base.`);
+  console.error(`   La migración quedó SIN aplicar en:`);
+  console.error(`   ${sqlPath}`);
+  console.error(`\n   Arreglá el schema y volvé a correr. No filtres esto a mano.\n`);
+  process.exit(1);
 }
 
-// 4. Si se filtró algo, guardar el SQL limpio con encabezado explicativo
-if (warnings.length > 0) {
+// 4. Si se filtró deriva estructural, guardar el SQL limpio con encabezado explicativo
+if (filtradas.length > 0) {
   const header = [
     `-- Generado por scripts/migrate-dev.mjs — issue #72`,
-    `-- Se filtraron ${warnings.length} sentencia(s) de deriva preexistente:`,
-    ...warnings.map((r) => `--   · ${r}`),
+    `-- Se filtraron ${filtradas.length} sentencia(s) de deriva ESTRUCTURAL (Prisma no las modela):`,
+    ...filtradas.map((r) => `--   · ${r}`),
     `-- ADITIVA (DOM-06): solo CREATE/ALTER ADD. Sin DROPs sobre tablas con datos.`,
     '',
   ].join('\n');
 
-  writeFileSync(sqlPath, header + cleanBlocks.join('\n\n'), 'utf8');
+  writeFileSync(sqlPath, header + limpio, 'utf8');
 
-  console.log(`\n⚠  Deriva filtrada (${warnings.length} sentencia(s)):`);
-  warnings.forEach((r) => console.log(`   · ${r}`));
+  console.log(`\n⚠  Deriva estructural filtrada (${filtradas.length} sentencia(s)):`);
+  filtradas.forEach((r) => console.log(`   · ${r}`));
   console.log(`\n   SQL limpio guardado en:`);
   console.log(`   ${sqlPath}`);
   console.log(`\n   Revisalo antes de continuar. Si algo no tiene sentido, no mergees.\n`);
