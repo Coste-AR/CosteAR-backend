@@ -30,6 +30,7 @@ import { registerJointCostRoutes } from './routes/joint-cost.routes.js';
 import { registerProcessCalculationRoutes } from './routes/process-calculation.routes.js';
 import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
+import { registerParametrosCosteoRoutes } from './routes/parametros-costeo.routes.js';
 import { healthPayload } from './health.js';
 import { registerVaultRoutes } from './routes/vault.routes.js';
 import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
@@ -195,6 +196,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerProcessCalculationRoutes(api);
       await registerCostPeriodRoutes(api);
       await registerDesperdicioRoutes(api);
+      await registerParametrosCosteoRoutes(api);
       await registerVaultRoutes(api);
       await registerVaultProposalRoutes(api);
       await registerAdminRoutes(api);

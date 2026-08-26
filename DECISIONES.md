@@ -2985,3 +2985,62 @@ responde lo contrario, el cambio es chico y está localizado.
 sin límite de palabra. La primera versión de este perfil tenía `'ración'` en `mpKeywords` y le
 sumaba un punto de Materia Prima a toda factura que dijera **repa-ración**. Se detectó midiendo
 `CIP-MANT-GALPON`, no leyendo. Está comentado en el código para que no vuelva.
+
+---
+
+## CIP-AD — `allocationMode: "direct"` se implementa, no se saca
+
+**La decisión.** Se implementa la asignación directa (opción **(a)** del issue #93). Se descartó
+sacarla del schema.
+
+**El hueco.** El schema documentaba `allocationMode: "direct"` como *"importe ya asignado por
+centro"*, pero `primaryProration` ignoraba `allocationMode` por completo y siempre renormalizaba
+por el total. Los importes declarados se reescribían sin aviso:
+
+```
+Alquiler $600.000, importes cargados 250.000 / 200.000 / 50.000 (suman 500.000)
+  → Corte recibía 300.000, no los 250.000 declarados.
+    Sin ningún aviso de la diferencia de 100.000.
+```
+
+Ningún llamador mandaba `direct` —el frontend fuerza `base`/`percent`—, así que nadie estaba
+viendo un número mal. Era un modo **documentado y no implementado**: cualquiera que leyera el
+schema y mandara `direct` recibía números reescritos en silencio.
+
+**Por qué (a) y no (b).** Lo dice la cátedra, no nuestro criterio. Clase 12, *"Prorrateo Primario:
+Asignación Directa a Departamentos"*: **«el importe ya viene asignado por departamento; no se
+busca base ni se calcula cuota»**. La asignación directa no es una variante cómoda del prorrateo:
+es un caso distinto, con su propio control. Sacarla del schema habría dejado al sistema sin poder
+representar lo primero que hace un costista cuando el dato ya viene repartido.
+
+**Las dos reglas son una sola.** La clase enuncia, dos líneas después: **«la suma de los cinco
+departamentos debe dar $4.538»**. Esa verificación es lo que hace segura a la primera regla. Al
+renormalizar, un descuadre se disimulaba solo —el total siempre cerraba, porque se lo forzaba a
+cerrar—. Sin renormalización el descuadre se propagaría, así que **el control tiene que correr
+antes de repartir**: si Σ importes ≠ total de la cuenta, sale un `CalcError` (422) con la
+diferencia en el mensaje. Nunca se ajusta por las nuestras.
+
+**Fijo/variable.** El importe de cada centro se abre con la misma proporción fijo/variable que el
+concepto. En el caso normal —una cuenta clasificada entera como fija o entera como variable, que
+es lo que enseña la cátedra— la proporción es 1 y 0 y el importe cae completo del lado que
+corresponde. Una cuenta semifija se carga como dos conceptos separados (clase 12: *"tienen una
+porción fija y una porción variable que deben separarse obligatoriamente"*), así que tampoco pasa
+por acá mezclada.
+
+**Regresión cero.** `percent` y `base` no cambian: siguen renormalizando por el total, y el
+default sigue siendo `percent`. Hay un test que fija los tres modos sobre el mismo reparto.
+
+**Hallazgo lateral: la clase 12 tiene un descuadre propio.** Al escribir el test del caso de la
+cátedra apareció que los importes de *"Mano de Obra Indirecta y Cargas Sociales"* no satisfacen
+la verificación que la propia clase enuncia:
+
+```
+Declarado $4.538
+493 + 493 + 592 + 1.480 + 1.080 = 4.138   →  faltan exactamente 400
+```
+
+El $4.538 aparece dos veces en la clase (también como presupuesto en el análisis de variaciones),
+así que lo que está mal es alguno de los cinco importes, no el total. **Lo encontró el control que
+acabamos de escribir, corriendo contra el material que le dio origen.** Queda fijado como test
+(`el control caza el descuadre de la propia clase 12`) para que el día que se corrija la nota de
+la bóveda el test avise que hay que actualizarlo.

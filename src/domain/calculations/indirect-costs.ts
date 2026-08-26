@@ -47,15 +47,34 @@ export interface CostCenter {
   type: CostCenterType;
 }
 
+/**
+ * Modo de reparto primario de un concepto (Parte 4.3).
+ *
+ *  - 'direct'  : ASIGNACIÓN DIRECTA. El importe ya viene asignado por centro;
+ *                `distribution` son IMPORTES, no unidades de base. No se busca
+ *                base ni se calcula cuota (clase 12 de la cátedra).
+ *  - 'percent' : % manual por centro; `distribution` son pesos relativos.
+ *  - 'base'    : base física del catálogo; la capa de servicio vuelca las
+ *                unidades a `distribution` antes de llegar acá.
+ *
+ * `percent` y `base` se comportan igual en el motor —los dos renormalizan por
+ * el total—; la diferencia entre ellos está aguas arriba, en de dónde salen los
+ * valores. `direct` es el único que cambia la aritmética.
+ */
+export type AllocationMode = 'direct' | 'percent' | 'base';
+
 /** Un concepto de CIF a repartir (alquiler, energía, etc.) con su base. */
 export interface IndirectCostConcept {
   name: string;
   amount: FixedVariable;
   /**
-   * Proporción de la base asignada a cada centro (centerId → unidades de base).
-   * Ej. m² para alquiler, kWh para energía. Se reparte proporcionalmente.
+   * Reparto por centro (centerId → valor). Qué significa el valor depende de
+   * `allocationMode`: unidades de base o pesos relativos en 'base'/'percent'
+   * (ej. m² para alquiler, kWh para energía), IMPORTES en 'direct'.
    */
   distribution: Record<string, Decimal.Value>;
+  /** Default 'percent' — el comportamiento histórico. */
+  allocationMode?: AllocationMode;
 }
 
 /** Resultado del prorrateo primario: CIF acumulado por centro. */
@@ -65,6 +84,66 @@ export type PrimaryProrationResult = Record<string, FixedVariable>;
  * Reparte cada concepto entre los centros según su base de distribución.
  * La suma repartida de cada concepto iguala su monto original (sin pérdida).
  */
+/**
+ * Reparte un concepto en modo 'direct': los valores de `distribution` son los
+ * importes finales de cada centro, no unidades de base.
+ *
+ * Control obligatorio de la cátedra (clase 12): Σ importes por centro debe dar
+ * el total de la cuenta. Si no cierra, 422 con la diferencia en el mensaje —
+ * nunca se ajusta por las nuestras.
+ *
+ * El importe de cada centro se abre en fijo/variable con la misma proporción
+ * que el concepto. En el caso normal —una cuenta clasificada entera como fija o
+ * entera como variable, que es lo que enseña la cátedra— la proporción es 1 y 0,
+ * y el importe cae completo del lado que corresponde. Una cuenta semifija se
+ * carga como dos conceptos separados, así que tampoco pasa por acá mezclada.
+ */
+function applyDirectAllocation(
+  result: PrimaryProrationResult,
+  concept: IndirectCostConcept,
+): void {
+  const total = concept.amount.fixed.toDecimal().plus(concept.amount.variable.toDecimal());
+
+  const asignado = Object.values(concept.distribution).reduce(
+    (acc: Decimal, v) => acc.plus(v),
+    new Decimal(0),
+  );
+
+  // Comparación al centavo: los importes son plata, no proporciones. Un desvío
+  // de centavos es un error de carga igual que uno de miles.
+  const diferencia = asignado.minus(total).toDecimalPlaces(2);
+  if (!diferencia.isZero()) {
+    const signo = diferencia.isPositive() ? 'de más' : 'de menos';
+    throw new CalcError(
+      `Concepto "${concept.name}" en asignación directa: los importes por centro suman ` +
+        `${asignado.toFixed(2)} y el total de la cuenta es ${total.toFixed(2)} ` +
+        `(${diferencia.abs().toFixed(2)} ${signo}). En asignación directa la suma de los ` +
+        `centros tiene que dar el total de la cuenta.`,
+    );
+  }
+
+  // Con total = 0 no hay proporción que calcular: el control de arriba ya
+  // garantizó que los importes también suman 0, así que no hay nada que repartir.
+  const proporcionFija = total.isZero()
+    ? new Decimal(0)
+    : concept.amount.fixed.toDecimal().dividedBy(total);
+
+  for (const [centerId, importe] of Object.entries(concept.distribution)) {
+    const current = result[centerId];
+    if (!current) {
+      throw new CalcError(
+        `Concepto "${concept.name}" referencia un centro inexistente: ${centerId}`,
+      );
+    }
+    const monto = new Decimal(importe);
+    const fixed = monto.times(proporcionFija);
+    result[centerId] = fvAdd(current, {
+      fixed: Money.of(fixed),
+      variable: Money.of(monto.minus(fixed)),
+    });
+  }
+}
+
 export function primaryProration(
   centers: CostCenter[],
   concepts: IndirectCostConcept[],
@@ -73,6 +152,22 @@ export function primaryProration(
   for (const c of centers) result[c.id] = fvZero();
 
   for (const concept of concepts) {
+    // ── ASIGNACIÓN DIRECTA ──────────────────────────────────────────────────
+    //
+    // El importe ya viene asignado por centro: se usa TAL CUAL, sin renormalizar.
+    // Renormalizar acá sería reescribir en silencio lo que el costista declaró
+    // (un Alquiler de $600.000 con importes que suman $500.000 le daría $300.000
+    // a Corte en vez de los $250.000 cargados, sin avisar de la diferencia).
+    //
+    // Por eso el control de la cátedra —"la suma de los departamentos debe dar
+    // el total de la cuenta"— corre ANTES de repartir y corta con un 422. Es la
+    // única defensa del modo: sin renormalización, un descuadre no se disimula
+    // solo, se propaga.
+    if (concept.allocationMode === 'direct') {
+      applyDirectAllocation(result, concept);
+      continue;
+    }
+
     const totalBase = Object.values(concept.distribution).reduce(
       (acc: Decimal, v) => acc.plus(v),
       new Decimal(0),
