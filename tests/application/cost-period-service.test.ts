@@ -488,6 +488,128 @@ describe('CERRAR período', () => {
     const svc = new CostPeriodService(db as never);
     await expect(svc.close(USER, 'per-junio', null, ctx)).rejects.toThrow(ValidationError);
   });
+
+  describe('#116 — amortización de activos al cerrar', () => {
+    const conActivos = (activosAmortizables: unknown[], parametrosCosteo: unknown[] = []) => ({
+      ...junio,
+      status: 'OPEN',
+      startDate: new Date('2026-06-01'),
+      endDate: new Date('2026-06-30'),
+      company: { activosAmortizables, parametrosCosteo },
+    });
+
+    it('suma la cuota de un activo dado de alta antes del período', async () => {
+      const db = makeDb();
+      db.costPeriod.findFirst = vi.fn(async () =>
+        conActivos([
+          {
+            structureId: null,
+            costoAdquisicion: 1_200_000,
+            valorResidual: 0,
+            vidaUtilMeses: 12,
+            fechaAlta: new Date('2026-01-01'),
+          },
+        ]),
+      );
+
+      const svc = new CostPeriodService(db as never);
+      await svc.close(USER, 'per-x', null, ctx);
+
+      const snap = (db.costPeriod.update as ReturnType<typeof vi.fn>).mock.calls[0][0].data
+        .resultSnapshot;
+      expect(snap.assetDepreciation).toBe(100_000); // 1.200.000 / 12
+      expect(snap.realProductionCost).toBeGreaterThanOrEqual(snap.productionCost + 100_000);
+    });
+
+    it('un activo dado de alta ESTE período no aporta cuota (comprar no es costear)', async () => {
+      const db = makeDb();
+      db.costPeriod.findFirst = vi.fn(async () =>
+        conActivos([
+          {
+            structureId: null,
+            costoAdquisicion: 1_200_000,
+            valorResidual: 0,
+            vidaUtilMeses: 12,
+            fechaAlta: new Date('2026-06-15'),
+          },
+        ]),
+      );
+
+      const svc = new CostPeriodService(db as never);
+      await svc.close(USER, 'per-x', null, ctx);
+
+      const snap = (db.costPeriod.update as ReturnType<typeof vi.fn>).mock.calls[0][0].data
+        .resultSnapshot;
+      expect(snap.assetDepreciation).toBe(0);
+    });
+
+    it('sin vida útil propia, la resuelve del catálogo de parámetros de costeo (#115)', async () => {
+      const db = makeDb();
+      db.costPeriod.findFirst = vi.fn(async () =>
+        conActivos(
+          [
+            {
+              structureId: null,
+              costoAdquisicion: 1_800_000,
+              valorResidual: 0,
+              vidaUtilMeses: null, // sin override: viene del catálogo
+              fechaAlta: new Date('2026-01-01'),
+            },
+          ],
+          [
+            {
+              clave: 'vida_util_lote_meses',
+              valorNum: 18,
+              periodId: null,
+              structureId: null,
+              confirmado: true,
+            },
+          ],
+        ),
+      );
+
+      const svc = new CostPeriodService(db as never);
+      await svc.close(USER, 'per-x', null, ctx);
+
+      const snap = (db.costPeriod.update as ReturnType<typeof vi.fn>).mock.calls[0][0].data
+        .resultSnapshot;
+      expect(snap.assetDepreciation).toBe(100_000); // 1.800.000 / 18
+    });
+
+    it('un activo de OTRA estructura no aporta cuota acá', async () => {
+      const db = makeDb();
+      db.costPeriod.findFirst = vi.fn(async () =>
+        conActivos([
+          {
+            structureId: 'otra-estructura',
+            costoAdquisicion: 1_200_000,
+            valorResidual: 0,
+            vidaUtilMeses: 12,
+            fechaAlta: new Date('2026-01-01'),
+          },
+        ]),
+      );
+
+      const svc = new CostPeriodService(db as never);
+      await svc.close(USER, 'per-x', null, ctx);
+
+      const snap = (db.costPeriod.update as ReturnType<typeof vi.fn>).mock.calls[0][0].data
+        .resultSnapshot;
+      expect(snap.assetDepreciation).toBe(0);
+    });
+
+    it('sin activos amortizables, da cero y el costo no cambia (DOM-05)', async () => {
+      const db = makeDb();
+      db.costPeriod.findFirst = vi.fn(async () => ({ ...junio, status: 'OPEN' }));
+
+      const svc = new CostPeriodService(db as never);
+      await svc.close(USER, 'per-x', null, ctx);
+
+      const snap = (db.costPeriod.update as ReturnType<typeof vi.fn>).mock.calls[0][0].data
+        .resultSnapshot;
+      expect(snap.assetDepreciation).toBe(0);
+    });
+  });
 });
 
 describe('REABRIR período', () => {

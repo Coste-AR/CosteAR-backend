@@ -84,6 +84,17 @@ export interface CalculationInput {
    * conceptos "para simplificar" y se diluiría en las cuotas.
    */
   thirdPartyWork?: number | null;
+  /**
+   * AMORTIZACIÓN DE ACTIVOS del período (#116): la cuota de los activos que
+   * amortizan (el plantel de ponedoras, por ejemplo), ya sumada por
+   * `totalAmortizacionDelPeriodo`.
+   *
+   * Mismo motivo que `thirdPartyWork`: es un costo fijo del período que no se
+   * prorratea entre centros ni genera cuotas de CIF, así que entra acá y no
+   * dentro de `indirectCosts`. Opcional: sin activos amortizables el cálculo da
+   * exactamente lo mismo que antes.
+   */
+  assetDepreciation?: number | null;
   inventory: InventoryInput;
   sales: {
     unitPrice: number;
@@ -130,7 +141,12 @@ export interface CalculationOutput {
    * renglón propio del estado de costos, no un CIP más.
    */
   thirdPartyWork?: number;
-  /** Costo REAL = normal + trabajos de terceros + variación presupuesto (#90). */
+  /**
+   * Amortización de activos del período (#116). Se expone aparte porque, igual
+   * que los trabajos de terceros, es un renglón propio del estado de costos.
+   */
+  assetDepreciation?: number;
+  /** Costo REAL = normal + trabajos de terceros + amortización + variación presupuesto (#90, #116). */
   realProductionCost?: number;
   /**
    * Desperdicio del período imputado según R5 (#92). Las dos cifras van
@@ -812,6 +828,9 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     // hubieran tratado como un concepto de CIF, ya estarían repartidos entre los
     // centros y sumarlos otra vez sería contarlos dos veces.
     thirdPartyWork: Money.of(input.thirdPartyWork ?? 0),
+    // #116 — Amortización de activos. Mismo motivo que trabajos de terceros:
+    // no pasa por el prorrateo ni genera cuotas de CIF.
+    assetDepreciation: Money.of(input.assetDepreciation ?? 0),
     budgetVariance: budgetVarianceTotal,
     // R5 (#92). La merma NORMAL no se pasa a propósito: ya está adentro del
     // costo —se consumió— y las unidades buenas la absorben sin cálculo
@@ -895,6 +914,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     indirectCostsApplied: indirectCostsApplied.toNumber(),
     productionCost: statement.productionCost.toNumber(),
     thirdPartyWork: statement.thirdPartyWork.toNumber(),
+    assetDepreciation: statement.assetDepreciation.toNumber(),
     budgetVariance: statement.budgetVariance.toNumber(),
     realProductionCost: statement.realProductionCost.toNumber(),
     desperdicio,

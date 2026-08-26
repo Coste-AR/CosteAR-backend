@@ -59,6 +59,32 @@ export interface PeriodLike {
     naturaleza: NaturalezaDb | null;
     valorRecupero: Prisma.Decimal;
   }>;
+  /** Límites reales del período (#116): sin esto no se puede decidir qué activo amortiza. */
+  structureId?: string;
+  startDate?: Date;
+  endDate?: Date;
+  /**
+   * De la EMPRESA del período (#115, #116), no de la estructura: los activos
+   * amortizables y los parámetros de costeo viven a nivel empresa. Opcional,
+   * mismo motivo que `desperdicioRegistros` — sin `include` no llegan y el
+   * motor no suma ninguna amortización, que es el comportamiento de antes.
+   */
+  company?: {
+    activosAmortizables?: Array<{
+      structureId: string | null;
+      costoAdquisicion: Prisma.Decimal;
+      valorResidual: Prisma.Decimal;
+      vidaUtilMeses: number | null;
+      fechaAlta: Date;
+    }>;
+    parametrosCosteo?: Array<{
+      clave: string;
+      valorNum: Prisma.Decimal | null;
+      periodId: string | null;
+      structureId: string | null;
+      confirmado: boolean;
+    }>;
+  };
 }
 
 /**
