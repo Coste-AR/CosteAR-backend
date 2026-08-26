@@ -12,6 +12,14 @@ import {
 import { type PeriodLike, type ProductiveSetting } from './cost-period-propagation-service.js';
 import { naturalezaADominio } from './desperdicio-service.js';
 import {
+  totalAmortizacionDelPeriodo,
+  type ActivoAmortizableDelPeriodo,
+} from '../../domain/parametros/activo-amortizable.js';
+import {
+  resolverParametro,
+  type FilaParametro,
+} from '../../domain/parametros/parametros-costeo.js';
+import {
   rawMaterialSectionSchema,
   directLaborConfigSchema,
   indirectCostConfigSchema,
@@ -137,7 +145,19 @@ export class CostPeriodService {
       // necesita para aplicar R5 al cerrar y al comparar. Sin el `include` la
       // lista llega vacía y el desperdicio no se imputa, que es justamente el
       // agujero que este trabajo viene a tapar.
-      include: { desperdicioRegistros: { where: { deletedAt: null } } },
+      //
+      // #116 — mismo motivo para los activos amortizables y los parámetros de
+      // costeo: viven a nivel EMPRESA (no de la estructura), así que viajan
+      // colgados de `company`.
+      include: {
+        desperdicioRegistros: { where: { deletedAt: null } },
+        company: {
+          select: {
+            activosAmortizables: { where: { deletedAt: null } },
+            parametrosCosteo: { where: { deletedAt: null } },
+          },
+        },
+      },
     });
     if (!p) throw new NotFoundError('Período no encontrado');
     return p;
@@ -400,6 +420,46 @@ export class CostPeriodService {
   }
 
   /**
+   * Cuánto amortizan del período los activos de la empresa (#116).
+   *
+   * Sin `startDate`/`endDate` (período cargado sin el `include` que los trae)
+   * no hay cómo decidir qué activo corresponde: da cero, el mismo
+   * comportamiento que antes de que este dato existiera. La vida útil sale del
+   * propio activo si la tiene, o si no, del catálogo de parámetros de costeo
+   * (#115) — nunca de una constante.
+   */
+  private amortizacionDelPeriodo(period: PeriodLike): number {
+    if (!period.startDate || !period.endDate) return 0;
+    const activos = period.company?.activosAmortizables ?? [];
+    if (activos.length === 0) return 0;
+
+    const filasParametros: FilaParametro[] = (period.company?.parametrosCosteo ?? []).map((p) => ({
+      clave: p.clave,
+      valorNum: p.valorNum === null ? null : Number(p.valorNum),
+      periodId: p.periodId,
+      structureId: p.structureId,
+      confirmado: p.confirmado,
+    }));
+
+    const paraElMotor: ActivoAmortizableDelPeriodo[] = activos
+      // `structureId: null` en el activo = vale para toda la empresa.
+      .filter((a) => a.structureId === null || a.structureId === period.structureId)
+      .map((a) => ({
+        costoAdquisicion: Number(a.costoAdquisicion),
+        valorResidual: Number(a.valorResidual),
+        vidaUtilMeses:
+          a.vidaUtilMeses ??
+          resolverParametro('vida_util_lote_meses', filasParametros, {
+            structureId: period.structureId,
+            periodId: period.id,
+          }).valor,
+        fechaAlta: a.fechaAlta,
+      }));
+
+    return totalAmortizacionDelPeriodo(paraElMotor, period.startDate, period.endDate);
+  }
+
+  /**
    * Corre el motor sobre los datos del propio período. Usa `runCalculation` — la
    * misma función que el cálculo de la app — así el número del mes cerrado y el que
    * ve el costista en pantalla son, por construcción, el mismo número.
@@ -429,6 +489,9 @@ export class CostPeriodService {
         })),
         // #90 — trabajos de terceros del período: columna propia, no CIP.
         thirdPartyWork: Number(period.thirdPartyWork ?? 0),
+        // #116 — amortización de los activos de la empresa que corresponden a
+        // este período, derivada del catálogo de parámetros de costeo (#115).
+        assetDepreciation: this.amortizacionDelPeriodo(period),
         inventory: inventorySchema.parse({}),
         sales: {
           unitPrice: period.salesUnitPrice ? Number(period.salesUnitPrice) : 0,

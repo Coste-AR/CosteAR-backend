@@ -160,6 +160,21 @@ nada: la rama, si `origin/dev` avanzó, los PRs abiertos, los issues asignados y
 
 ---
 
+## 4.bis Definition of Done
+
+**Cuándo algo está "terminado", no solo "andando en mi máquina".** Resumen operativo (Nivel 1):
+probado en `staging` —no alcanza tu máquina—, PR con la plantilla completa, `lint` + `typecheck` +
+`test` en verde, sin `console.log` de debug, commits atómicos, migraciones aditivas. Si tocó el
+motor de cálculo: los fixtures de "Piezas mecánicas de precisión" y los tres casos de ITCS dan
+**exactamente** lo mismo que antes.
+
+Los tres niveles completos —por tarea, por tanda de trabajo (cada promoción a `staging`) y por
+entrega al cliente— viven en
+[`DEFINITION-OF-DONE.md`](https://github.com/Coste-AR/CosteAR-admin/blob/dev/DEFINITION-OF-DONE.md)
+(`CosteAR-admin`, privado). Es la **fuente única**: no se duplica acá, se referencia.
+
+---
+
 ## 5. Reglas duras del dominio de costeo
 
 **DOM-01 a DOM-07** — append-only, bitácora en la misma transacción, timestamps del servidor, sin

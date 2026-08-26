@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   calcularAmortizacionMensual,
   amortizaEnPeriodo,
+  totalAmortizacionDelPeriodo,
+  type ActivoAmortizableDelPeriodo,
 } from '@/domain/parametros/activo-amortizable.js';
 import {
   imputarDesperdicios,
@@ -111,6 +113,41 @@ describe('S-03 — el plantel es un activo amortizable, no un insumo del períod
     expect(amortizaEnPeriodo(new Date('2026-05-10'), inicio, fin)).toBe(true);
     // Alta posterior: todavía no existe.
     expect(amortizaEnPeriodo(new Date('2026-09-02'), inicio, fin)).toBe(false);
+  });
+
+  describe('totalAmortizacionDelPeriodo (#116) — el CIP suma solo lo que corresponde', () => {
+    const inicio = new Date('2026-08-01');
+    const fin = new Date('2026-08-31');
+
+    it('suma la cuota de los activos que ya venían amortizando', () => {
+      const activos: ActivoAmortizableDelPeriodo[] = [
+        { costoAdquisicion: 1_200_000, valorResidual: 0, vidaUtilMeses: 12, fechaAlta: new Date('2026-01-01') },
+        { costoAdquisicion: 600_000, valorResidual: 0, vidaUtilMeses: 6, fechaAlta: new Date('2026-02-01') },
+      ];
+
+      // 1.200.000/12 = 100.000  +  600.000/6 = 100.000  →  200.000
+      expect(totalAmortizacionDelPeriodo(activos, inicio, fin)).toBe(200_000);
+    });
+
+    it('un activo dado de alta ESTE período no aporta cuota todavía', () => {
+      const activos: ActivoAmortizableDelPeriodo[] = [
+        { costoAdquisicion: 1_200_000, valorResidual: 0, vidaUtilMeses: 12, fechaAlta: new Date('2026-08-15') },
+      ];
+
+      expect(totalAmortizacionDelPeriodo(activos, inicio, fin)).toBe(0);
+    });
+
+    it('un activo dado de alta DESPUÉS del período no existe todavía', () => {
+      const activos: ActivoAmortizableDelPeriodo[] = [
+        { costoAdquisicion: 1_200_000, valorResidual: 0, vidaUtilMeses: 12, fechaAlta: new Date('2026-09-02') },
+      ];
+
+      expect(totalAmortizacionDelPeriodo(activos, inicio, fin)).toBe(0);
+    });
+
+    it('sin activos amortizables, el total es cero y el cálculo no cambia', () => {
+      expect(totalAmortizacionDelPeriodo([], inicio, fin)).toBe(0);
+    });
   });
 });
 

@@ -76,6 +76,16 @@ export interface CostStatementInput {
    */
   thirdPartyWork?: Money;
 
+  /**
+   * AMORTIZACIÓN DE ACTIVOS del período (#116).
+   *
+   * Mismo tratamiento que `thirdPartyWork`: SUMA por separado de los CIP. Un
+   * activo (el plantel de ponedoras, por ejemplo) no se prorratea entre centros
+   * ni genera cuotas — es un costo fijo del período que se deriva de comprarlo
+   * una vez. Opcional: sin activos amortizables el costo real es el de siempre.
+   */
+  assetDepreciation?: Money;
+
   budgetVariance?: Money;
 
   /**
@@ -123,6 +133,8 @@ export interface CostStatementResult {
   budgetVariance: Money;
   /** (7a) Trabajos de terceros incorporados al costo. Cero si no se pasaron. */
   thirdPartyWork: Money;
+  /** (7a-bis) Amortización de activos incorporada al costo. Cero si no se pasó. */
+  assetDepreciation: Money;
   /** (7c) Costo REAL de producción = normal + trabajos de terceros + variación presupuesto. */
   realProductionCost: Money;
   /** (7d) Recupero de la merma normal, restado del costo. Cero si no se pasó. */
@@ -155,10 +167,14 @@ export function calcCostStatement(input: CostStatementInput): CostStatementResul
     .add(input.directLabor)
     .add(input.indirectCostsApplied);
 
-  // (7a–7c) Costo REAL = normal + trabajos de terceros ± variación presupuesto.
+  // (7a–7c) Costo REAL = normal + trabajos de terceros + amortización ± variación presupuesto.
   const thirdPartyWork = input.thirdPartyWork ?? Money.zero();
+  const assetDepreciation = input.assetDepreciation ?? Money.zero();
   const budgetVariance = input.budgetVariance ?? Money.zero();
-  const realProductionCost = productionCost.add(thirdPartyWork).add(budgetVariance);
+  const realProductionCost = productionCost
+    .add(thirdPartyWork)
+    .add(assetDepreciation)
+    .add(budgetVariance);
 
   // (7d–7e) Desperdicio (R5). Los dos renglones RESTAN:
   //   · el recupero, porque reduce el costo de los materiales (clase 4);
@@ -187,6 +203,7 @@ export function calcCostStatement(input: CostStatementInput): CostStatementResul
     rawMaterialConsumed,
     productionCost,
     thirdPartyWork,
+    assetDepreciation,
     budgetVariance,
     realProductionCost,
     wasteRecovery,
