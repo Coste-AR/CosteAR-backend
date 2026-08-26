@@ -88,3 +88,29 @@ export function amortizaEnPeriodo(fechaAlta: Date, inicioPeriodo: Date, finPerio
   if (fechaAlta >= inicioPeriodo && fechaAlta <= finPeriodo) return false;
   return fechaAlta < inicioPeriodo;
 }
+
+/** Un activo amortizable con su fecha de alta, para decidir si corresponde al período. */
+export interface ActivoAmortizableDelPeriodo extends ActivoParaAmortizar {
+  fechaAlta: Date;
+}
+
+/**
+ * Suma la cuota de todos los activos que amortizan en el período (issue #116).
+ *
+ * Es la mitad que le faltaba al módulo: `calcularAmortizacionMensual` y
+ * `amortizaEnPeriodo` existían hace semanas, y nada los combinaba para dar un
+ * número que el Estado de Costos pudiera sumar. Un activo dado de alta DENTRO
+ * del período, o después, no aporta cuota todavía.
+ */
+export function totalAmortizacionDelPeriodo(
+  activos: ActivoAmortizableDelPeriodo[],
+  inicioPeriodo: Date,
+  finPeriodo: Date,
+): number {
+  let total = 0;
+  for (const activo of activos) {
+    if (!amortizaEnPeriodo(activo.fechaAlta, inicioPeriodo, finPeriodo)) continue;
+    total += calcularAmortizacionMensual(activo).cuota;
+  }
+  return total;
+}

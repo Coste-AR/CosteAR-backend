@@ -59,6 +59,44 @@ describe('Hoja 4 — Estado de Costos', () => {
     expect(bad.matches).toBe(false);
     expect(bad.difference.toNumber()).toBe(43250);
   });
+
+  it('#116 — la amortización de activos suma al costo real, separada de los CIP', () => {
+    const r = calcCostStatement({
+      initialRawMaterial: Money.of(0),
+      rawMaterialPurchases: Money.of(0),
+      finalRawMaterial: Money.of(0),
+      directLabor: Money.of(0),
+      indirectCostsApplied: Money.of(100000),
+      assetDepreciation: Money.of(200000),
+      initialWorkInProcess: Money.of(0),
+      finalWorkInProcess: Money.of(0),
+      initialFinishedGoods: Money.of(0),
+      finalFinishedGoods: Money.of(0),
+    });
+
+    // No entra al costo NORMAL (que sigue siendo solo MP+MOD+CIP)...
+    expect(r.productionCost.toNumber()).toBe(100000);
+    expect(r.assetDepreciation.toNumber()).toBe(200000);
+    // ...pero sí al REAL, igual que trabajos de terceros.
+    expect(r.realProductionCost.toNumber()).toBe(300000);
+  });
+
+  it('sin activos amortizables, `assetDepreciation` da cero y el costo no cambia (DOM-05)', () => {
+    const r = calcCostStatement({
+      initialRawMaterial: Money.of(0),
+      rawMaterialPurchases: Money.of(0),
+      finalRawMaterial: Money.of(0),
+      directLabor: Money.of(0),
+      indirectCostsApplied: Money.of(100000),
+      initialWorkInProcess: Money.of(0),
+      finalWorkInProcess: Money.of(0),
+      initialFinishedGoods: Money.of(0),
+      finalFinishedGoods: Money.of(0),
+    });
+
+    expect(r.assetDepreciation.toNumber()).toBe(0);
+    expect(r.realProductionCost.toNumber()).toBe(100000);
+  });
 });
 
 describe('Margen bruto (motor de alertas)', () => {
