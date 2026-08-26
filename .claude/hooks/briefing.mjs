@@ -210,6 +210,20 @@ agregar(
   'Cómo trabajamos (diagnosticar → planificar → implementar), versión completa: ' +
     'https://github.com/Coste-AR/CosteAR-admin/blob/dev/docs/2026-08-22-filosofia-diagnosticar-planificar-implementar.md',
 );
+// #39 — el DoD vive en el único repo privado y el código en los otros tres.
+// Va acá y no solo en el CLAUDE.md por el mismo motivo que el resto de esta
+// sección: es lo que se lee cuando nadie fue a buscarlo.
+//
+// Contra EST-04 (cada línea cuesta contexto real): se decidió UNA línea con el
+// resumen Nivel 1 + link, no el DoD completo (~100 líneas). El completo cambia
+// lo que se hace solo en casos puntuales (migraciones, motor de cálculo,
+// entrega al cliente) que ya tienen su propia regla más específica en este
+// archivo (DOM-*, DOC-05); el resumen de acá cubre el caso común.
+agregar(
+  'Definition of Done (Nivel 1, resumen): probado en staging, PR con plantilla, ' +
+    'lint/typecheck/test en verde, sin console.log de debug. Completo: ' +
+    'https://github.com/Coste-AR/CosteAR-admin/blob/dev/DEFINITION-OF-DONE.md',
+);
 // El reparto de tareas con git. Va en el briefing y no solo en el CLAUDE.md
 // porque es lo primero que se rompe: el briefing avisa que la copia quedó
 // atrás, y si la línea está escrita en segunda persona, Claude le pasa el
