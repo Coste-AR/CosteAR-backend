@@ -584,6 +584,9 @@ export function resolveProductiveCip(
     name: c.name,
     amount: { fixed: Money.of(c.amount.fixed), variable: Money.of(c.amount.variable) },
     distribution: c.distribution,
+    // Sin esto el motor no distingue 'direct' y renormaliza los importes ya
+    // asignados, reescribiendo en silencio lo que el costista declaró.
+    allocationMode: c.allocationMode,
   }));
   const primary = primaryProration(centers, concepts);
 
