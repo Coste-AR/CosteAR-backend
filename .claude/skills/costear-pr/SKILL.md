@@ -173,6 +173,9 @@ alta cierra el circuito.
 
 ## Después del merge
 
+Esto lo corrés **vos, Claude**, apenas la persona avisa que mergeó. No se lo pidas a ella: los
+socios no hacen pulls a mano, y una copia local atrasada es de dónde salen las ramas fantasma.
+
 ```bash
 git checkout dev && git pull
 git branch -d <tipo>/<slug>
