@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import type { FastifyInstance } from 'fastify';
 
 /**
  * CAPACIDAD NORMAL EN 0 — el 500 crudo reproducido en auditoría.
@@ -114,6 +115,29 @@ function structureRow(indirectCostConfig: unknown = null) {
   };
 }
 
+/**
+ * Una sola app para los 4 tests del archivo (issue #145).
+ *
+ * `buildTestApp()` paga el costo de importar `cost-structure.routes.ts` (y
+ * compilar los schemas Ajv de sus 18 rutas) la primera vez que corre. Con
+ * `buildTestApp()` adentro de cada `it()`, ese costo caía DENTRO de la ventana
+ * de 5000ms del test — y con 3900ms medidos contra ese límite, cualquier
+ * corrida en una máquina cargada lo superaba. Acá se paga UNA vez, en
+ * `beforeAll`, que tiene el doble de margen (`hookTimeout` por default es
+ * 10000ms contra los 5000ms de `testTimeout`). Los mocks de Prisma siguen
+ * reseteándose en cada test (`beforeEach` de más abajo): lo único que se
+ * comparte es la instancia de Fastify, no el estado.
+ */
+let app: FastifyInstance;
+
+beforeAll(async () => {
+  app = await buildTestApp();
+});
+
+afterAll(async () => {
+  await app.close();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   db.costStructure.findFirst.mockResolvedValue(structureRow());
@@ -128,7 +152,6 @@ beforeEach(() => {
 
 describe('PUT /cost-structures/:id/indirect-costs con capacidad normal en 0', () => {
   it('devuelve 422 (no 200) y nombra el centro, sin exponer el id interno', async () => {
-    const app = await buildTestApp();
     const res = await app.inject({
       method: 'PUT',
       url: `/cost-structures/${STRUCTURE}/indirect-costs`,
@@ -148,12 +171,9 @@ describe('PUT /cost-structures/:id/indirect-costs con capacidad normal en 0', ()
     // Y no se guardó NADA: ni la estructura, ni la versión append-only.
     expect(db.costStructure.update).not.toHaveBeenCalled();
     expect(db.costConfigVersion.create).not.toHaveBeenCalled();
-
-    await app.close();
   });
 
   it('con capacidad normal cargada guarda normal (200)', async () => {
-    const app = await buildTestApp();
     const res = await app.inject({
       method: 'PUT',
       url: `/cost-structures/${STRUCTURE}/indirect-costs`,
@@ -163,8 +183,6 @@ describe('PUT /cost-structures/:id/indirect-costs con capacidad normal en 0', ()
 
     expect(res.statusCode).toBe(200);
     expect(db.costStructure.update).toHaveBeenCalledTimes(1);
-
-    await app.close();
   });
 });
 
@@ -174,7 +192,6 @@ describe('POST /cost-structures/:id/calculate sobre una estructura ya guardada c
     // automático de documentos (que no pasa por el PUT).
     db.costStructure.findFirst.mockResolvedValue(structureRow(configCIF(0)));
 
-    const app = await buildTestApp();
     const res = await app.inject({
       method: 'POST',
       url: `/cost-structures/${STRUCTURE}/calculate`,
@@ -191,14 +208,11 @@ describe('POST /cost-structures/:id/calculate sobre una estructura ya guardada c
 
     // No se persistió ningún cálculo con CIF fantasma.
     expect(db.costCalculation.create).not.toHaveBeenCalled();
-
-    await app.close();
   });
 
   it('la misma estructura con capacidad normal cargada calcula y persiste (200)', async () => {
     db.costStructure.findFirst.mockResolvedValue(structureRow(configCIF(1000)));
 
-    const app = await buildTestApp();
     const res = await app.inject({
       method: 'POST',
       url: `/cost-structures/${STRUCTURE}/calculate`,
@@ -208,7 +222,5 @@ describe('POST /cost-structures/:id/calculate sobre una estructura ya guardada c
 
     expect(res.statusCode).toBe(200);
     expect(db.costCalculation.create).toHaveBeenCalledTimes(1);
-
-    await app.close();
   });
 });
