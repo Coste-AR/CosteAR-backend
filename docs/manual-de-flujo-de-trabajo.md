@@ -155,21 +155,48 @@ En la web es el botón por defecto (**Create a merge commit**), así que alcanza
 
 ---
 
-## Parte 3 — `--auto`, la parte opcional
+## Parte 3 — El merge es automático. La decisión no.
 
-`gh pr merge --auto` (o **Enable auto-merge** en la web) le dice a GitHub:
+**Actualizado el 30-08-2026.** Hasta esa fecha esta parte decía que el auto-merge era "opcional,
+comodidad, no una regla", y que `CosteAR-admin` no podía tenerlo. Las dos cosas cambiaron.
 
-> *"Mergealo vos cuando el CI termine en verde."*
+Ahora **nadie mergea a mano**. Un PR entra cuando pasan las dos:
 
-Para qué sirve:
+1. **Todos sus checks están en verde** — y cero checks *no* cuenta como verde.
+2. **Alguien le puso la etiqueta `auto-merge`.**
 
-- No te quedás mirando la pantalla dos minutos esperando el CI.
-- **Nadie mergea a mano en el medio**, porque el PR ya tiene dueño.
+```bash
+gh pr ready 123                      # sale de draft
+gh pr edit 123 --add-label auto-merge   # y ahí entra solo
+```
 
-Es comodidad, no una regla. Si preferís esperar y apretar el botón, es igual de válido.
+### Por qué una etiqueta y no el verde a secas
 
-> `CosteAR-admin` **no tiene auto-merge**: es privado y el plan Free no lo incluye. Ahí el draft
-> funciona igual, y el merge se hace a mano con el CI en verde.
+**No hay reviews requeridos en ningún repo.** Sin ese freno, cualquier PR entraría a `dev` en
+cuanto el semáforo se pusiera verde, sin que nadie lo haya mirado — y ahora quien abre la mayoría
+de los PRs es un agente. **La etiqueta reemplaza al review, no es un trámite.**
+
+El draft sigue cumpliendo su función y se lleva bien con esto: un PR en borrador **nunca** se
+auto-mergea. Trabajás tranquilo, y cuando terminaste lo marcás listo.
+
+### Por qué un workflow nuestro y no el `--auto` de GitHub
+
+El nativo sólo actúa cuando **algo bloquea** el PR: checks requeridos por la protección de rama.
+`CosteAR-admin` es privado y en plan Free no admite protección, así que ahí el nativo no gatea
+nada — mergearía al instante, con el CI en rojo o sin haber corrido.
+
+`.github/workflows/auto-merge.yml` **verifica los checks él mismo**, y por eso se comporta igual
+en los tres repos. En admin es literalmente lo único que separa un merge bueno de uno en rojo.
+
+### Lo que hace por vos sin que se lo pidas
+
+- **Si el PR quedó atrás de su base, lo actualiza y espera.** No lo mergea. Los checks tienen que
+  volver a correr sobre el código integrado con la base de *ahora*: sin eso, dos PR verdes contra
+  el mismo `dev` viejo entran los dos y el segundo rompe.
+- **Borra la rama** después de mergear.
+- **Registra por qué no mergeó**, cuando no mergea. Está en la pestaña Actions, un grupo por PR.
+
+> **`main` sigue siendo a mano.** Es producción y hay un cliente real del otro lado.
 
 ---
 
