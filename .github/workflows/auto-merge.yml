@@ -57,6 +57,9 @@ concurrency:
 
 jobs:
   merge:
+    # El nombre importa: este job aparece como un check MAS en la lista del PR,
+    # y hay que poder distinguirlo de los checks de verdad. Ver abajo.
+    name: auto-merge (este mismo workflow)
     runs-on: ubuntu-latest
     steps:
       - name: Mergear lo que ya verifico todo
@@ -119,12 +122,20 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
+            # ESTE WORKFLOW NO SE CUENTA A SI MISMO.
+            #
+            # Al dispararse por `pull_request`, este job aparece en la lista de
+            # checks del PR — y siempre pasa, porque su trabajo es decidir, no
+            # verificar. Contandolo, un PR que no dispara NINGUN CI tendria
+            # igual un check en verde: el mio. La guarda de "cero checks no es
+            # verde" quedaba anulada justamente por la cosa que la ejecuta.
+            checks=$(jq -c '[.[] | select(.name != "auto-merge (este mismo workflow)")]' <<<"$checks")
             total=$(jq 'length' <<<"$checks")
 
             # Cero checks no es "todo bien": es que no corrio nada. Sin esta
             # linea, un PR que no dispara ningun workflow entraria derecho.
             if [ "$total" -eq 0 ]; then
-              echo "SALTEADO: el PR no tiene ningun check. Cero checks no es verde."
+              echo "SALTEADO: el PR no tiene ningun check propio. Cero checks no es verde."
               echo "::endgroup::"; continue
             fi
 
