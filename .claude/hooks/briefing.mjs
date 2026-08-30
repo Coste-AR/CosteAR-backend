@@ -202,8 +202,10 @@ agregar();
 // tiene su resumen operativo en el CLAUDE.md de este repo: esto es la versión
 // completa, no la única fuente de los tres pasos.
 agregar(
-  'Recordá: el PR nace en draft (`gh pr create --draft`) y se mergea con squash; ' +
-    'las promociones van con merge commit. Manual completo: ' +
+  'Recordá: el PR nace en draft (`gh pr create --draft`). Cuando está terminado y en ' +
+    'verde se marca listo (`gh pr ready`) y se le pone la etiqueta `auto-merge`: de ahí ' +
+    'lo mergea el workflow, con squash a `dev` y merge commit en las promociones. ' +
+    'Manual completo: ' +
     'https://github.com/Coste-AR/CosteAR-backend/blob/dev/docs/manual-de-flujo-de-trabajo.md',
 );
 agregar(
@@ -228,9 +230,15 @@ agregar(
 // porque es lo primero que se rompe: el briefing avisa que la copia quedó
 // atrás, y si la línea está escrita en segunda persona, Claude le pasa el
 // comando a la persona en vez de correrlo. Los socios no hacen pulls a mano.
+//
+// Actualizado el 30-08-2026: hasta ese día esta línea decía «la persona solo
+// mergea, desde la web». Ya no es cierto — nadie mergea a mano. Lo hace
+// `.github/workflows/auto-merge.yml` cuando el PR está en verde Y etiquetado.
 agregar(
   'Reparto con git: **Claude corre git** — pull, fetch, checkout, push, prune y ' +
-    'limpieza de ramas — y abre los PRs. **La persona solo mergea**, desde la web. ' +
+    'limpieza de ramas — y abre los PRs. **Nadie mergea a mano**: el PR se marca listo, ' +
+    'se etiqueta `auto-merge` y entra solo cuando el CI está en verde. La etiqueta es ' +
+    'la decisión; el merge es del workflow. ' +
     'Nunca le pases un comando de git para que lo copie: corrélo vos y contale qué quedó.',
 );
 agregar('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
