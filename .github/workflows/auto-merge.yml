@@ -137,9 +137,49 @@ jobs:
             atras=$(gh api "repos/$REPO/compare/$base...$head_sha" --jq .behind_by 2>/dev/null || echo 0)
 
             if [ "${atras:-0}" -gt 0 ]; then
-              echo "Atrasado $atras commit(s) respecto de $base. Se actualiza la rama; se mergea"
-              echo "cuando los checks vuelvan a correr sobre el codigo ya integrado con la base de ahora."
-              gh pr update-branch "$n" --repo "$REPO" || echo "No se pudo actualizar (conflicto?). Queda para una persona."
+              echo "SALTEADO: atrasado $atras commit(s) respecto de $base."
+              echo "Lo actualiza quien abrio el PR, no este workflow."
+
+              # POR QUE EL WORKFLOW NO ACTUALIZA LA RAMA EL MISMO.
+              #
+              # Lo hacia, y no funcionaba. El commit que genera `update-branch`
+              # lo firma `github-actions[bot]`, y GitHub deja las corridas de CI
+              # de un bot en `action_required` esperando aprobacion manual. O
+              # sea: la rama se actualizaba, el CI no corria nunca, y el PR
+              # quedaba trabado en silencio para siempre. Peor que no hacer nada,
+              # porque parecia que algo estaba pasando.
+              #
+              # La alternativa era un PAT de larga vida como secret en los tres
+              # repos, para que el push quede a nombre de un usuario real. No
+              # vale un token permanente ahorrar un comando.
+              #
+              # UN COMENTARIO POR SHA, NO UNO POR CORRIDA. Este workflow se
+              # despierta con cada tanda de checks y ademas cada 15 minutos.
+              # Sin guarda, un PR que pasa la noche atrasado amanece con
+              # cuarenta comentarios iguales y el aviso deja de leerse.
+              marca="<!-- auto-merge:atrasado:$head_sha -->"
+              if gh pr view "$n" --repo "$REPO" --json comments --jq '.comments[].body' 2>/dev/null | grep -qF "$marca"; then
+                echo "Ya estaba avisado para este SHA; no se repite el comentario."
+              else
+                cuerpo="$marca
+**Este PR esta atrasado $atras commit(s) respecto de \`$base\`, asi que todavia no se puede mergear.**
+
+Actualizalo y el auto-merge sigue solo:
+
+\`\`\`bash
+gh pr update-branch $n
+\`\`\`
+
+**Por que no alcanza el verde que ya tenias:** se calculo contra una version anterior de \`$base\`. Dos PR verdes contra el mismo \`$base\` viejo entran los dos, y el segundo puede romperlo.
+
+**Por que no lo actualiza el workflow:** el commit que genera lo firma \`github-actions[bot]\`, y GitHub deja el CI de un bot esperando aprobacion manual. La rama se actualizaba, el CI no corria, y el PR quedaba trabado en silencio."
+                if gh pr comment "$n" --repo "$REPO" --body "$cuerpo" >/dev/null 2>&1; then
+                  echo "Avisado en el PR."
+                else
+                  echo "No se pudo comentar. Queda solo en este log."
+                fi
+              fi
+
               echo "::endgroup::"; continue
             fi
 
