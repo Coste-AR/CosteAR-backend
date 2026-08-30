@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch --env-file=.env src/infrastructure/http/server.ts",
+    "briefing": "node .claude/hooks/briefing.mjs",
     "build": "prisma generate && tsc",
     "start": "node dist/infrastructure/http/entry.js",
     "start:worker": "node dist/infrastructure/workers/index.js",
