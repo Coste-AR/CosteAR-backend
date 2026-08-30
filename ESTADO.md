@@ -28,8 +28,13 @@
   diagnosticado** — si lo ves en rojo no re-corras la suite, está todo en el issue.
 - ⚠️ **`main` es producción y `staging` es pre-producción.** Mergear a `main` publica. Hoy hay
   **5 commits en `staging` sin promover a `main`**.
-- ✅ **El flujo**: el PR nace en draft y se mergea con squash. Las promociones
-  (`dev→staging→main`) van con merge commit, **no** squash. Ver `docs/manual-de-flujo-de-trabajo.md`.
+- ✅ **El flujo, desde el 30-08-2026: nadie mergea a mano.** El PR nace en draft; cuando está
+  terminado y en verde se marca listo (`gh pr ready`) y se le pone la etiqueta **`auto-merge`**.
+  De ahí lo mergea `.github/workflows/auto-merge.yml`: **squash** a `dev`, **merge commit** en las
+  promociones a `staging`, y `main` sigue siendo a mano — es producción.
+  **La etiqueta es la decisión, el merge es del workflow.** No hay reviews requeridos en ningún
+  repo, así que esa etiqueta es lo que reemplaza al review: sin ella, cualquier PR entraría solo
+  con que el semáforo se ponga verde. Ver `docs/manual-de-flujo-de-trabajo.md`.
 - 📌 **#115 y #116 son el mismo patrón**: el dominio, la tabla y la RLS ya existen; falta el
   servicio o la ruta que los use. Ahora que la Fase 3 cerró, **no hay nada bloqueándolos**.
 
