@@ -114,18 +114,32 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
-            # `strict: true` en la proteccion de dev exige estar al dia con la
-            # base. Se actualiza y se sale: los checks tienen que volver a
-            # correr sobre el codigo ya integrado, que es justamente el punto
-            # de strict. La proxima corrida lo agarra.
-            if [ "$estado" = "BEHIND" ]; then
-              echo "Atrasado respecto de $base. Actualizando la rama; se mergea cuando vuelvan los checks."
-              gh pr update-branch "$n" --repo "$REPO" || echo "No se pudo actualizar (conflicto?). Queda para una persona."
+            if [ "$estado" = "DIRTY" ]; then
+              echo "SALTEADO: tiene conflictos. Los resuelve quien abrio el PR."
               echo "::endgroup::"; continue
             fi
 
-            if [ "$estado" = "DIRTY" ]; then
-              echo "SALTEADO: tiene conflictos. Los resuelve quien abrio el PR."
+            # EL PR TIENE QUE ESTAR AL DIA CON SU BASE.
+            #
+            # Los checks de un PR YA corren sobre el codigo integrado: GitHub
+            # dispara `pull_request` sobre refs/pull/N/merge, que es la rama
+            # mezclada con la base. Lo que falta garantizar es que esa mezcla
+            # sea contra la base de AHORA. Si no: dos PR verdes contra dev@X, se
+            # mergea el primero, dev pasa a Y, y el segundo sigue mostrando un
+            # verde que se calculo contra X. Entra y rompe dev.
+            #
+            # No se usa `mergeStateStatus == BEHIND` porque GitHub solo lo
+            # reporta cuando una regla de proteccion exige estar al dia. Admin
+            # no tiene proteccion: ahi devuelve CLEAN aunque el PR este viejo y
+            # la guarda no dispararia nunca. Comparar las ramas anda igual en
+            # los tres repos, con proteccion y sin ella.
+            head_sha=$(gh pr view "$n" --repo "$REPO" --json headRefOid --jq .headRefOid)
+            atras=$(gh api "repos/$REPO/compare/$base...$head_sha" --jq .behind_by 2>/dev/null || echo 0)
+
+            if [ "${atras:-0}" -gt 0 ]; then
+              echo "Atrasado $atras commit(s) respecto de $base. Se actualiza la rama; se mergea"
+              echo "cuando los checks vuelvan a correr sobre el codigo ya integrado con la base de ahora."
+              gh pr update-branch "$n" --repo "$REPO" || echo "No se pudo actualizar (conflicto?). Queda para una persona."
               echo "::endgroup::"; continue
             fi
 
