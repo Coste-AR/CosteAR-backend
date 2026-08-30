@@ -3,7 +3,7 @@
 - **Issue:** #162
 - **Repo:** CosteAR-backend
 - **Rama:** `test/cost-structure-4xx`
-- **PR:** pendiente de creación
+- **PR:** #169
 - **Agente:** Codex · GPT-5
 - **Tanda:** B0
 
