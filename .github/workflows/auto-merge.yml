@@ -42,7 +42,13 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # `gh pr checks` arma el rollup con las tres: los check runs de Actions
+  # (checks), los commit statuses de servicios externos como Vercel (statuses),
+  # y los workflow runs (actions). Con solo `checks: read` el comando falla
+  # entero y no devuelve nada.
   checks: read
+  statuses: read
+  actions: read
 
 concurrency:
   # Dos corridas mergeando a la vez sobre la misma base se pisan.
@@ -51,6 +57,9 @@ concurrency:
 
 jobs:
   merge:
+    # El nombre importa: este job aparece como un check MAS en la lista del PR,
+    # y hay que poder distinguirlo de los checks de verdad. Ver abajo.
+    name: auto-merge (este mismo workflow)
     runs-on: ubuntu-latest
     steps:
       - name: Mergear lo que ya verifico todo
@@ -97,15 +106,40 @@ jobs:
             # LA VERIFICACION. En admin esto es lo UNICO que separa un merge
             # bueno de uno con el CI en rojo: no hay proteccion de rama que lo
             # frene despues.
-            checks=$(gh pr checks "$n" --repo "$REPO" --json name,bucket 2>/dev/null || echo '[]')
+            # Que el comando FALLE y que el PR no tenga checks son dos cosas
+            # distintas, y hay que poder distinguirlas.
+            #
+            # La primera version escribia `|| echo '[]'`, asi que un fallo por
+            # permisos se convertia en "cero checks" y el workflow reportaba
+            # "no corrio ni un check" sobre PRs que estaban perfectamente en
+            # verde. El resultado no era peligroso —no mergea— pero era mudo
+            # sobre la causa, que es el mismo modo de fallar que este proyecto
+            # ya se comio con los tests que se salteaban en silencio.
+            if ! checks=$(gh pr checks "$n" --repo "$REPO" --json name,bucket 2>&1); then
+              echo "SALTEADO: no se pudieron leer los checks. Esto es un problema del workflow,"
+              echo "no del PR. Salida del comando:"
+              echo "$checks"
+              echo "::endgroup::"; continue
+            fi
+
+            # ESTE WORKFLOW NO SE CUENTA A SI MISMO.
+            #
+            # Al dispararse por `pull_request`, este job aparece en la lista de
+            # checks del PR — y siempre pasa, porque su trabajo es decidir, no
+            # verificar. Contandolo, un PR que no dispara NINGUN CI tendria
+            # igual un check en verde: el mio. La guarda de "cero checks no es
+            # verde" quedaba anulada justamente por la cosa que la ejecuta.
+            checks=$(jq -c '[.[] | select(.name != "auto-merge (este mismo workflow)")]' <<<"$checks")
             total=$(jq 'length' <<<"$checks")
 
             # Cero checks no es "todo bien": es que no corrio nada. Sin esta
             # linea, un PR que no dispara ningun workflow entraria derecho.
             if [ "$total" -eq 0 ]; then
-              echo "SALTEADO: no corrio ni un check. Cero checks no es verde."
+              echo "SALTEADO: el PR no tiene ningun check propio. Cero checks no es verde."
               echo "::endgroup::"; continue
             fi
+
+            echo "$total check(s) encontrados."
 
             malos=$(jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' <<<"$checks")
             if [ "$malos" -ne 0 ]; then
