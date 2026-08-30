@@ -1,0 +1,139 @@
+# Mergea solo los PR que ya verificaron todo.
+#
+# POR QUE UN WORKFLOW PROPIO Y NO EL AUTO-MERGE NATIVO DE GITHUB
+#
+# El nativo solo actua cuando algo bloquea el PR: checks requeridos por la
+# proteccion de rama. CosteAR-admin es privado y en plan free no admite
+# proteccion, asi que ahi el nativo no gatea nada — mergearia al instante, con
+# el CI en rojo o sin haber corrido. Este workflow verifica los checks el mismo,
+# y por eso se comporta igual en los tres repos.
+#
+# LA REGLA DE MERGE
+#
+#   base dev      -> squash. Una rama de trabajo son N commits de ida y vuelta;
+#                    en dev queremos una linea por unidad de trabajo.
+#   base staging  -> merge commit. Promover no es trabajo nuevo: es mover un
+#                    conjunto ya integrado, y el commit de merge deja registrado
+#                    QUE tanda se promovio y cuando.
+#   base main     -> NO se automatiza. Es produccion y hay un cliente real
+#                    del otro lado. Lo mergea una persona.
+#
+# EL CONTROL: la etiqueta `auto-merge`
+#
+# Nada se mergea solo por estar en verde. Hace falta que alguien —Santiago, o
+# Claude al revisar lo que volvio de un agente— le ponga la etiqueta. Es el
+# punto donde entra el juicio humano, y es lo unico que separa "el CI paso" de
+# "esto puede entrar".
+name: Auto-merge
+
+on:
+  # El disparador principal: termino de correr una tanda de checks.
+  check_suite:
+    types: [completed]
+  # Cubre el caso de etiquetar un PR que YA estaba en verde.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
+  # Red de seguridad. `check_suite` se pierde de vez en cuando, y un PR
+  # etiquetado y en verde que nadie mergea es peor que uno que falla: no avisa.
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  # Dos corridas mergeando a la vez sobre la misma base se pisan.
+  group: auto-merge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mergear lo que ya verifico todo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          pendientes=$(gh pr list --repo "$REPO" --state open --limit 50 \
+            --json number,isDraft,labels,baseRefName,mergeStateStatus,title)
+
+          echo "$pendientes" | jq -c '.[]' | while read -r pr; do
+            n=$(jq -r '.number'         <<<"$pr")
+            base=$(jq -r '.baseRefName' <<<"$pr")
+            draft=$(jq -r '.isDraft'    <<<"$pr")
+            estado=$(jq -r '.mergeStateStatus' <<<"$pr")
+            titulo=$(jq -r '.title'     <<<"$pr")
+            etiquetas=$(jq -r '[.labels[].name] | join(" ")' <<<"$pr")
+
+            echo "::group::PR #$n — $titulo"
+            echo "base=$base draft=$draft estado=$estado etiquetas=[$etiquetas]"
+
+            if [ "$draft" = "true" ]; then
+              echo "SALTEADO: es borrador."; echo "::endgroup::"; continue
+            fi
+
+            if ! grep -qw 'auto-merge' <<<"$etiquetas"; then
+              echo "SALTEADO: sin la etiqueta auto-merge. Nada se mergea solo por estar en verde."
+              echo "::endgroup::"; continue
+            fi
+
+            case "$base" in
+              dev)     metodo="--squash" ;;
+              staging) metodo="--merge"  ;;
+              main)
+                echo "SALTEADO: main es produccion y lo mergea una persona."
+                echo "::endgroup::"; continue ;;
+              *)
+                echo "SALTEADO: base '$base' no esta contemplada."
+                echo "::endgroup::"; continue ;;
+            esac
+
+            # LA VERIFICACION. En admin esto es lo UNICO que separa un merge
+            # bueno de uno con el CI en rojo: no hay proteccion de rama que lo
+            # frene despues.
+            checks=$(gh pr checks "$n" --repo "$REPO" --json name,bucket 2>/dev/null || echo '[]')
+            total=$(jq 'length' <<<"$checks")
+
+            # Cero checks no es "todo bien": es que no corrio nada. Sin esta
+            # linea, un PR que no dispara ningun workflow entraria derecho.
+            if [ "$total" -eq 0 ]; then
+              echo "SALTEADO: no corrio ni un check. Cero checks no es verde."
+              echo "::endgroup::"; continue
+            fi
+
+            malos=$(jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' <<<"$checks")
+            if [ "$malos" -ne 0 ]; then
+              echo "SALTEADO: hay $malos check(s) que no pasaron o siguen corriendo:"
+              jq -r '.[] | select(.bucket != "pass" and .bucket != "skipping") | "  - \(.name): \(.bucket)"' <<<"$checks"
+              echo "::endgroup::"; continue
+            fi
+
+            # `strict: true` en la proteccion de dev exige estar al dia con la
+            # base. Se actualiza y se sale: los checks tienen que volver a
+            # correr sobre el codigo ya integrado, que es justamente el punto
+            # de strict. La proxima corrida lo agarra.
+            if [ "$estado" = "BEHIND" ]; then
+              echo "Atrasado respecto de $base. Actualizando la rama; se mergea cuando vuelvan los checks."
+              gh pr update-branch "$n" --repo "$REPO" || echo "No se pudo actualizar (conflicto?). Queda para una persona."
+              echo "::endgroup::"; continue
+            fi
+
+            if [ "$estado" = "DIRTY" ]; then
+              echo "SALTEADO: tiene conflictos. Los resuelve quien abrio el PR."
+              echo "::endgroup::"; continue
+            fi
+
+            echo "Todo verificado. Mergeando a $base con $metodo."
+            if gh pr merge "$n" --repo "$REPO" $metodo --delete-branch; then
+              echo "MERGEADO #$n -> $base"
+            else
+              echo "FALLO el merge de #$n. Queda abierto para que lo mire una persona."
+            fi
+            echo "::endgroup::"
+          done
