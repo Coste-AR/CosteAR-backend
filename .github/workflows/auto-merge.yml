@@ -106,58 +106,24 @@ jobs:
             # LA VERIFICACION. En admin esto es lo UNICO que separa un merge
             # bueno de uno con el CI en rojo: no hay proteccion de rama que lo
             # frene despues.
-            # Que el comando FALLE y que el PR no tenga checks son dos cosas
-            # distintas, y hay que poder distinguirlas.
-            #
-            # La primera version escribia `|| echo '[]'`, asi que un fallo por
-            # permisos se convertia en "cero checks" y el workflow reportaba
-            # "no corrio ni un check" sobre PRs que estaban perfectamente en
-            # verde. El resultado no era peligroso —no mergea— pero era mudo
-            # sobre la causa, que es el mismo modo de fallar que este proyecto
-            # ya se comio con los tests que se salteaban en silencio.
-            if ! checks=$(gh pr checks "$n" --repo "$REPO" --json name,bucket 2>&1); then
-              echo "SALTEADO: no se pudieron leer los checks. Esto es un problema del workflow,"
-              echo "no del PR. Salida del comando:"
-              echo "$checks"
-              echo "::endgroup::"; continue
-            fi
-
-            # ESTE WORKFLOW NO SE CUENTA A SI MISMO.
-            #
-            # Al dispararse por `pull_request`, este job aparece en la lista de
-            # checks del PR — y siempre pasa, porque su trabajo es decidir, no
-            # verificar. Contandolo, un PR que no dispara NINGUN CI tendria
-            # igual un check en verde: el mio. La guarda de "cero checks no es
-            # verde" quedaba anulada justamente por la cosa que la ejecuta.
-            checks=$(jq -c '[.[] | select(.name != "auto-merge (este mismo workflow)")]' <<<"$checks")
-            total=$(jq 'length' <<<"$checks")
-
-            # Cero checks no es "todo bien": es que no corrio nada. Sin esta
-            # linea, un PR que no dispara ningun workflow entraria derecho.
-            if [ "$total" -eq 0 ]; then
-              echo "SALTEADO: el PR no tiene ningun check propio. Cero checks no es verde."
-              echo "::endgroup::"; continue
-            fi
-
-            echo "$total check(s) encontrados."
-
-            malos=$(jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' <<<"$checks")
-            if [ "$malos" -ne 0 ]; then
-              echo "SALTEADO: hay $malos check(s) que no pasaron o siguen corriendo:"
-              jq -r '.[] | select(.bucket != "pass" and .bucket != "skipping") | "  - \(.name): \(.bucket)"' <<<"$checks"
-              echo "::endgroup::"; continue
-            fi
-
             if [ "$estado" = "DIRTY" ]; then
               echo "SALTEADO: tiene conflictos. Los resuelve quien abrio el PR."
               echo "::endgroup::"; continue
             fi
 
-            # EL PR TIENE QUE ESTAR AL DIA CON SU BASE.
+            # PRIMERO SE MIRA SI ESTA AL DIA. DESPUES LOS CHECKS. EN ESE ORDEN.
+            #
+            # Al reves no funciona, y costo dos corridas descubrirlo: cuando la
+            # base se mueve, GitHub recalcula el merge ref del PR y los check
+            # runs viejos quedan huerfanos. `gh pr checks` pasa a decir "no
+            # checks reported" sobre un PR que hace un minuto estaba en verde.
+            # Preguntando por los checks primero, ese PR se reporta como "sin
+            # checks" y no se toca nunca mas — cuando lo que en realidad
+            # necesita es que le actualicen la rama para que vuelvan a correr.
             #
             # Los checks de un PR YA corren sobre el codigo integrado: GitHub
             # dispara `pull_request` sobre refs/pull/N/merge, que es la rama
-            # mezclada con la base. Lo que falta garantizar es que esa mezcla
+            # mezclada con la base. Lo que hay que garantizar es que esa mezcla
             # sea contra la base de AHORA. Si no: dos PR verdes contra dev@X, se
             # mergea el primero, dev pasa a Y, y el segundo sigue mostrando un
             # verde que se calculo contra X. Entra y rompe dev.
@@ -174,6 +140,49 @@ jobs:
               echo "Atrasado $atras commit(s) respecto de $base. Se actualiza la rama; se mergea"
               echo "cuando los checks vuelvan a correr sobre el codigo ya integrado con la base de ahora."
               gh pr update-branch "$n" --repo "$REPO" || echo "No se pudo actualizar (conflicto?). Queda para una persona."
+              echo "::endgroup::"; continue
+            fi
+
+            # LEER LOS CHECKS.
+            #
+            # `gh pr checks` no sirve para decidir por su codigo de salida:
+            # devuelve distinto de cero cuando algo falla, cuando algo esta
+            # pendiente Y cuando no hay ningun check — tres situaciones que acá
+            # se resuelven distinto. Y con --json, cuando no hay checks, imprime
+            # texto plano ("no checks reported on the 'x' branch") en vez de un
+            # array vacio.
+            #
+            # Asi que se ignora el codigo de salida y se decide por la salida:
+            # si parsea como JSON, son los checks; si no, es que no hay.
+            salida=$(gh pr checks "$n" --repo "$REPO" --json name,bucket 2>&1 || true)
+
+            if ! checks=$(jq -e -c '.' <<<"$salida" 2>/dev/null); then
+              echo "SALTEADO: el PR no tiene ningun check. Cero checks no es verde."
+              echo "Lo que devolvio el comando: $salida"
+              echo "::endgroup::"; continue
+            fi
+
+            # ESTE WORKFLOW NO SE CUENTA A SI MISMO.
+            #
+            # Al dispararse por `pull_request`, este job aparece en la lista de
+            # checks del PR — y siempre pasa, porque su trabajo es decidir, no
+            # verificar. Contandolo, un PR que no dispara NINGUN CI tendria
+            # igual un check en verde: el mio. La guarda de "cero checks no es
+            # verde" quedaba anulada justamente por la cosa que la ejecuta.
+            checks=$(jq -c '[.[] | select(.name != "auto-merge (este mismo workflow)")]' <<<"$checks")
+            total=$(jq 'length' <<<"$checks")
+
+            if [ "$total" -eq 0 ]; then
+              echo "SALTEADO: el PR no tiene ningun check propio. Cero checks no es verde."
+              echo "::endgroup::"; continue
+            fi
+
+            echo "$total check(s) propios encontrados."
+
+            malos=$(jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' <<<"$checks")
+            if [ "$malos" -ne 0 ]; then
+              echo "SALTEADO: hay $malos check(s) que no pasaron o siguen corriendo:"
+              jq -r '.[] | select(.bucket != "pass" and .bucket != "skipping") | "  - \(.name): \(.bucket)"' <<<"$checks"
               echo "::endgroup::"; continue
             fi
 
