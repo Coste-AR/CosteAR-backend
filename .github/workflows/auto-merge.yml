@@ -161,18 +161,25 @@ jobs:
               if gh pr view "$n" --repo "$REPO" --json comments --jq '.comments[].body' 2>/dev/null | grep -qF "$marca"; then
                 echo "Ya estaba avisado para este SHA; no se repite el comentario."
               else
-                cuerpo="$marca
-**Este PR esta atrasado $atras commit(s) respecto de \`$base\`, asi que todavia no se puede mergear.**
+                # OJO CON LA INDENTACION.
+                #
+                # Este texto vive adentro de un bloque `run: |` de YAML, y toda
+                # linea no vacia tiene que estar indentada al menos como el
+                # bloque. La primera version escribia el cuerpo como un string
+                # multilinea con el markdown pegado a la columna 0 — y eso
+                # ROMPE EL YAML ENTERO: GitHub deja de poder parsear el archivo
+                # y el workflow no corre mas.
+                #
+                # Y falla en silencio: las corridas aparecen como "failure"
+                # colgadas de un push cualquiera, con el mensaje generico
+                # "this run likely failed because of a workflow file issue", y
+                # los PR se quedan CLEAN para siempre esperando a nadie.
+                #
+                # Por eso el cuerpo se arma con printf, una linea por argumento,
+                # todas indentadas.
+                cuerpo=$(printf '%s
+'                   "$marca"                   "**Este PR esta atrasado $atras commit(s) respecto de \`$base\`, asi que todavia no se puede mergear.**"                   ""                   "Actualizalo y el auto-merge sigue solo:"                   ""                   "\`\`\`bash"                   "gh pr update-branch $n"                   "\`\`\`"                   ""                   "**Por que no alcanza el verde que ya tenias:** se calculo contra una version anterior de \`$base\`. Dos PR verdes contra el mismo \`$base\` viejo entran los dos, y el segundo puede romperlo."                   ""                   "**Por que no lo actualiza el workflow:** el commit que genera lo firma \`github-actions[bot]\`, y GitHub deja el CI de un bot esperando aprobacion manual. La rama se actualizaba, el CI no corria, y el PR quedaba trabado en silencio.")
 
-Actualizalo y el auto-merge sigue solo:
-
-\`\`\`bash
-gh pr update-branch $n
-\`\`\`
-
-**Por que no alcanza el verde que ya tenias:** se calculo contra una version anterior de \`$base\`. Dos PR verdes contra el mismo \`$base\` viejo entran los dos, y el segundo puede romperlo.
-
-**Por que no lo actualiza el workflow:** el commit que genera lo firma \`github-actions[bot]\`, y GitHub deja el CI de un bot esperando aprobacion manual. La rama se actualizaba, el CI no corria, y el PR quedaba trabado en silencio."
                 if gh pr comment "$n" --repo "$REPO" --body "$cuerpo" >/dev/null 2>&1; then
                   echo "Avisado en el PR."
                 else
