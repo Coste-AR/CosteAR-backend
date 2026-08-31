@@ -48,8 +48,23 @@ git y de `gh` en el momento.
 
    Si no lo hacés, el auto-merge te lo va a pedir por comentario y el PR se queda esperando.
 
-5. **No mergees.** Ni el tuyo. Cuando alguien lo revise le pone la etiqueta `auto-merge` y entra
-   solo apenas el CI esté verde.
+5. **Cuando esté listo y en verde, ponele vos la etiqueta `auto-merge`:**
+
+   ```bash
+   gh pr ready <numero>
+   gh pr edit <numero> --add-label auto-merge
+   ```
+
+   **No mergeás con el botón.** Mergea `.github/workflows/auto-merge.yml`, y sólo si todos los
+   checks están en verde, la rama al día y sin conflictos. Vos decís "esto está listo"; la máquina
+   verifica que sea cierto.
+
+   Antes de etiquetar, mirá tu propio PR una vez más contra el issue: ¿hace lo que pedía?
+   ¿te fuiste de alcance? ¿declarás cobertura que no tenés? Ese es el review que estás
+   reemplazando, y lo hacés vos.
+
+   **Esperar no ayuda a nadie.** Un PR que se queda abierto se desactualiza contra `dev` y empieza
+   a generar conflictos con el trabajo de los demás. Si está listo, que entre.
 
 ## Con qué se verifica
 
