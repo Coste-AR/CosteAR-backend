@@ -48,23 +48,30 @@ git y de `gh` en el momento.
 
    Si no lo hacés, el auto-merge te lo va a pedir por comentario y el PR se queda esperando.
 
-5. **Cuando esté listo y en verde, ponele vos la etiqueta `auto-merge`:**
+5. **Cuando esté listo y en verde, marcá el PR como listo y avisá. Ahí termina tu parte:**
 
    ```bash
    gh pr ready <numero>
-   gh pr edit <numero> --add-label auto-merge
    ```
 
-   **No mergeás con el botón.** Mergea `.github/workflows/auto-merge.yml`, y sólo si todos los
-   checks están en verde, la rama al día y sin conflictos. Vos decís "esto está listo"; la máquina
-   verifica que sea cierto.
+   **Vos no ponés la etiqueta `auto-merge` y no mergeás.** Ni tu propio PR. La etiqueta la pone
+   Santiago, y es el punto donde entra el juicio humano: **reemplaza al review, no es un trámite.**
+   No hay reviews requeridos en este repo, así que sin ese freno cualquier PR entraría a `dev` en
+   cuanto el CI se pusiera verde.
 
-   Antes de etiquetar, mirá tu propio PR una vez más contra el issue: ¿hace lo que pedía?
-   ¿te fuiste de alcance? ¿declarás cobertura que no tenés? Ese es el review que estás
-   reemplazando, y lo hacés vos.
+   El merge lo hace `.github/workflows/auto-merge.yml`, y sólo si todos los checks están en verde,
+   la rama al día y sin conflictos. La persona dice "esto está listo"; la máquina verifica que sea
+   cierto.
+
+   Antes de avisar, mirá tu propio PR una vez más contra el issue: ¿hace lo que pedía? ¿te fuiste
+   de alcance? ¿declarás cobertura que no tenés? Decilo en el mensaje con el que entregás, junto
+   con lo que el issue no definía y tuviste que decidir vos.
 
    **Esperar no ayuda a nadie.** Un PR que se queda abierto se desactualiza contra `dev` y empieza
-   a generar conflictos con el trabajo de los demás. Si está listo, que entre.
+   a generar conflictos con el trabajo de los demás. Si está listo, decilo.
+
+   El reparto completo de quién hace qué está en `CosteAR-os/ORQUESTACION.md`. **Ante cualquier
+   contradicción entre este archivo y ese, manda ese.**
 
 ## Con qué se verifica
 

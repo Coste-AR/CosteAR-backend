@@ -124,10 +124,8 @@ Tres razones concretas:
 **¿Se pierden tus commits?** No. Quedan en el PR de GitHub, visibles para siempre. Lo que cambia es
 qué se ve en el historial de `dev`.
 
-```bash
-gh pr merge --auto --squash          # terminal
-```
-o en la web: desplegable del botón verde → **Squash and merge**.
+El squash lo aplica el workflow de auto-merge cuando la base es `dev`. **Nadie corre
+`gh pr merge` a mano** — ver *"Nadie mergea a mano"* más abajo.
 
 ### Para promociones (`dev → staging → main`): MERGE COMMIT
 
@@ -166,9 +164,14 @@ Ahora **nadie mergea a mano**. Un PR entra cuando pasan las dos:
 2. **Alguien le puso la etiqueta `auto-merge`.**
 
 ```bash
-gh pr ready 123                      # sale de draft
-gh pr edit 123 --add-label auto-merge   # y ahí entra solo
+gh pr update-branch 123                 # rama al dia con dev
+gh pr ready 123                         # sale de draft
+gh pr edit 123 --add-label auto-merge   # y ahi entra solo
 ```
+
+**Los dos primeros los corre quien hizo el trabajo, agente incluido. El tercero no.** La etiqueta
+la pone Santiago: es donde entra el juicio humano. Un agente llega hasta `ready` y avisa. El
+reparto completo está en `CosteAR-os/ORQUESTACION.md`, que es el canónico.
 
 ### Por qué una etiqueta y no el verde a secas
 
@@ -259,16 +262,20 @@ gh pr create --base dev --draft --title "feat(scope): ..." --body "..."
 git commit -m "test(scope): el caso que faltaba"
 git push
 
-# 5. Cuando terminaste de verdad (checklist de la Parte 1)
+# 5. Poné la rama al día con dev
+gh pr update-branch 123
+
+# 6. Cuando terminaste de verdad (checklist de la Parte 1)
 gh pr ready
 
-# 6. Mergear con SQUASH
-gh pr merge --auto --squash
+# 7. Acá termina tu parte: avisás. La etiqueta `auto-merge` la pone Santiago
+#    y mergea el workflow. Si sos vos quien decide, es:
+#    gh pr edit 123 --add-label auto-merge
 
-# 7. Verificar que el trabajo LLEGÓ, no que el PR está verde
+# 8. Verificar que el trabajo LLEGÓ, no que el PR está verde
 git log origin/dev --oneline -3
 
-# 8. Limpiar la rama local (la remota se borra sola)
+# 9. Limpiar la rama local (la remota se borra sola)
 git checkout dev && git pull
 git branch -d feat/lo-que-sea
 ```
