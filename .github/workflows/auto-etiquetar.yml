@@ -1,0 +1,143 @@
+# Pone la etiqueta `auto-merge` sola, pero SOLO donde el CI verde alcanza como
+# revision.
+#
+# EL INVARIANTE QUE ESTO NO PUEDE ROMPER
+#
+# La etiqueta `auto-merge` es el reemplazo del review: no hay reviews requeridos
+# en ningun repo, asi que sin ella cualquier PR entraria con solo ponerse verde
+# el semaforo. Automatizarla en general seria dejar de revisar, no automatizar.
+#
+# Lo que si se puede es reconocer una clase de PR donde el juicio humano no
+# agrega nada porque el cambio NO PUEDE ROMPER PRODUCCION:
+#
+#   - Documentacion descriptiva. No se ejecuta.
+#   - Tests NUEVOS, sin borrar ni recortar los que ya estaban.
+#
+# Un PR asi, con el CI en verde, ya demostro todo lo que un humano le iba a
+# mirar. En el peor caso agrega un test malo — que se descubre cuando falla, y
+# que nunca llega al cliente.
+#
+# LAS TRES GUARDAS, Y POR QUE CADA UNA
+#
+# 1. NINGUN ARCHIVO BORRADO. Un PR que borra un test entra en la clase "solo
+#    toca tests" y es exactamente lo que la regla del equipo prohibe: bajar la
+#    cobertura para poner el CI en verde.
+#
+# 2. CERO LINEAS BORRADAS BAJO tests/. Modificar un test existente para que
+#    afirme menos es la version silenciosa de lo mismo, y no se ve en la lista
+#    de archivos. Solo se auto-etiqueta lo puramente aditivo.
+#
+# 3. LOS DOCUMENTOS NORMATIVOS NO CUENTAN COMO DOCUMENTACION. AGENTS.md,
+#    CLAUDE.md, CONTRIBUTING.md y DEFINITION-OF-DONE.md son las reglas que todos
+#    siguen. Cambiarlos no rompe produccion, pero cambia lo que hace todo el
+#    mundo despues. Eso se mira.
+name: Auto-etiquetar
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+
+jobs:
+  etiquetar:
+    name: auto-etiquetar (este mismo workflow)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Etiquetar si el CI verde alcanza como revision
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # En workflow_dispatch no hay PR puntual: se revisan los abiertos.
+          if [ -n "${PR:-}" ]; then
+            lista="$PR"
+          else
+            lista=$(gh pr list --repo "$REPO" --state open --json number --jq '.[].number')
+          fi
+
+          # Documentos que son REGLAS, no descripcion. Cambiarlos no rompe
+          # produccion pero cambia lo que hace todo el mundo despues.
+          normativos='^(AGENTS|CLAUDE|CONTRIBUTING|DEFINITION-OF-DONE)\.md$'
+
+          for n in $lista; do
+            echo "::group::PR #$n"
+
+            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files)
+
+            if [ "$(jq -r '.isDraft' <<<"$info")" = "true" ]; then
+              echo "SALTEADO: es borrador."; echo "::endgroup::"; continue
+            fi
+
+            if jq -e '[.labels[].name] | index("auto-merge")' <<<"$info" >/dev/null; then
+              echo "SALTEADO: ya esta etiquetado."; echo "::endgroup::"; continue
+            fi
+
+            jq -r '.files[] | "\(.path)\t\(.deletions)"' <<<"$info" > archivos.txt
+            echo "Archivos tocados:"; sed 's/^/  /' archivos.txt
+
+            apto=si
+            while IFS=$'\t' read -r ruta borradas; do
+              [ -z "$ruta" ] && continue
+
+              # Se limpia a digitos antes de comparar. Si por lo que sea llega
+              # vacio o con basura, queda en 0 y NO se toma como "borro lineas":
+              # el que decide si el PR es apto es el conjunto de guardas, y una
+              # de ellas sola no puede dar por bueno el PR entero.
+              borradas=${borradas//[!0-9]/}
+              borradas=${borradas:-0}
+
+              case "$ruta" in
+                tests/*)
+                  # Solo aditivo. Ver guarda 2.
+                  if [ "$borradas" -ne 0 ]; then
+                    echo "NO APTO: $ruta borra $borradas linea(s). Solo se auto-etiqueta lo puramente aditivo."
+                    apto=no
+                  fi
+                  ;;
+                docs/*|bitacora/*)
+                  ;;
+                *.md)
+                  base=$(basename "$ruta")
+                  if [ "$(dirname "$ruta")" = "." ] && grep -qE "$normativos" <<<"$base"; then
+                    echo "NO APTO: $ruta es un documento normativo. Lo mira una persona."
+                    apto=no
+                  fi
+                  ;;
+                *)
+                  echo "NO APTO: $ruta no es documentacion ni un test."
+                  apto=no
+                  ;;
+              esac
+            done < archivos.txt
+
+            # Un archivo borrado no aparece con su ruta en el case de arriba con
+            # suficiente contexto: se chequea aparte contra el diff. Ver guarda 1.
+            if gh pr diff "$n" --repo "$REPO" --name-status 2>/dev/null | grep -q '^D'; then
+              echo "NO APTO: el PR borra archivos."
+              apto=no
+            fi
+
+            if [ "$apto" != "si" ]; then
+              echo "Queda para revision humana."
+              echo "::endgroup::"; continue
+            fi
+
+            echo "APTO: solo documentacion descriptiva y tests nuevos."
+            gh pr edit "$n" --repo "$REPO" --add-label auto-merge
+            # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
+            #
+            # Adentro de un bloque `run: |` toda linea no vacia tiene que estar
+            # indentada al menos como el bloque. Un texto multilinea con
+            # markdown pegado a la columna cero ROMPE EL ARCHIVO ENTERO y
+            # GitHub deja de poder parsearlo — sin decirlo en ningun lado que se
+            # mire. Ver `scripts/chequear-workflows.py`, que lo detecta.
+            cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente.\n\n**Por que sin revision humana:** este PR solo agrega tests y toca documentacion descriptiva. No modifica codigo que se ejecute en produccion, no borra archivos y no recorta ningun test existente. Con el CI en verde ya demostro todo lo que una persona le iba a mirar.\n\nEn el peor caso agrega un test malo, que se descubre cuando falla y que nunca llega al cliente.\n\nSi tocara `src/`, `prisma/`, un workflow, o alguno de los documentos que son reglas del equipo, esto **no** habria pasado: ahi sigue haciendo falta que alguien lo lea. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+            gh pr comment "$n" --repo "$REPO" --body "$cuerpo"
+            echo "::endgroup::"
+          done
