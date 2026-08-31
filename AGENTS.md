@@ -89,9 +89,33 @@ npm run lint              # eslint src tests
 npm run typecheck         # tsc --noEmit
 npm run test              # vitest — unitarios, sin base
 npm run test:http         # supertest contra la app real — 49 tests, ~4 s
-npm run test:integration  # RLS real contra Postgres. Necesita Docker
+npm run test:integration  # RLS real contra Postgres. Necesita Docker levantado
 npm run test:db           # trazabilidad y seguridad con base
 ```
+
+### Las suites con base: levantá Docker vos
+
+`test:integration` y `test:db` necesitan Postgres. **No hace falta que te lo levante nadie**, es
+un comando más de tu checklist:
+
+```bash
+docker compose up -d postgres redis   # arranca en segundo plano
+docker compose ps                     # esperá a que digan "healthy", no solo "running"
+npm run db:setup                      # migraciones + RLS, la primera vez o si cambiaron
+```
+
+El `docker-compose.yml` ya define los healthchecks y los puertos (Postgres en **5433**, no 5432,
+para no chocar con uno que tengas instalado). `.env.example` trae la `DATABASE_URL` que apunta
+ahí. Al terminar podés dejarlo corriendo; `docker compose down` sin `-v` conserva los datos.
+
+**Si `docker compose up` falla**, no saltees la suite ni la marques como "no aplica": decilo en el
+PR con el error. Una suite de RLS que no corrió es exactamente el agujero de los 34 tests de
+aislamiento entre empresas que estuvieron sin correr hasta el 15-08-2026, con el CI en verde.
+
+> ⚠️ La imagen de Postgres **tiene que ser `pgvector/pgvector:pg16`**, no `postgres:16`. Está fija
+> en el compose; si tenés un contenedor viejo creado con otra imagen, recrealo con
+> `docker compose up -d postgres` — mantiene el volumen. Con la imagen común, la migración
+> `add_vault_chunks` falla y bloquea toda migración nueva.
 
 **Cuál corrés depende de qué tocaste:**
 
