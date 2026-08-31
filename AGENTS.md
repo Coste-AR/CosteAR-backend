@@ -48,10 +48,41 @@ git y de `gh` en el momento.
 
    Si no lo hacés, el auto-merge te lo va a pedir por comentario y el PR se queda esperando.
 
-5. **No mergees.** Ni el tuyo. Cuando alguien lo revise le pone la etiqueta `auto-merge` y entra
-   solo apenas el CI esté verde.
+5. **Cuando esté listo y en verde, marcá el PR como listo y avisá. Ahí termina tu parte:**
+
+   ```bash
+   gh pr ready <numero>
+   ```
+
+   **Vos no ponés la etiqueta `auto-merge` y no mergeás.** Ni tu propio PR. La etiqueta la pone
+   Santiago, y es el punto donde entra el juicio humano: **reemplaza al review, no es un trámite.**
+   No hay reviews requeridos en este repo, así que sin ese freno cualquier PR entraría a `dev` en
+   cuanto el CI se pusiera verde.
+
+   El merge lo hace `.github/workflows/auto-merge.yml`, y sólo si todos los checks están en verde,
+   la rama al día y sin conflictos. La persona dice "esto está listo"; la máquina verifica que sea
+   cierto.
+
+   Antes de avisar, mirá tu propio PR una vez más contra el issue: ¿hace lo que pedía? ¿te fuiste
+   de alcance? ¿declarás cobertura que no tenés? Decilo en el mensaje con el que entregás, junto
+   con lo que el issue no definía y tuviste que decidir vos.
+
+   **Esperar no ayuda a nadie.** Un PR que se queda abierto se desactualiza contra `dev` y empieza
+   a generar conflictos con el trabajo de los demás. Si está listo, decilo.
+
+   El reparto completo de quién hace qué está en `CosteAR-os/ORQUESTACION.md`. **Ante cualquier
+   contradicción entre este archivo y ese, manda ese.**
 
 ## Con qué se verifica
+
+**Antes de la primera corrida**, después de `npm ci`:
+
+```bash
+npm run prisma:generate
+```
+
+Sin eso, `test:http` falla antes de ejecutar tres archivos, con un error que no dice que falta el
+cliente de Prisma. Se comió un intento entero de la sesión de B0-3.
 
 ```bash
 npm run lint              # eslint src tests

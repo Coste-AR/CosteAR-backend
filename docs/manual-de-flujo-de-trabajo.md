@@ -164,9 +164,14 @@ Ahora **nadie mergea a mano**. Un PR entra cuando pasan las dos:
 2. **Alguien le puso la etiqueta `auto-merge`.**
 
 ```bash
-gh pr ready 123                      # sale de draft
-gh pr edit 123 --add-label auto-merge   # y ahí entra solo
+gh pr update-branch 123                 # rama al dia con dev
+gh pr ready 123                         # sale de draft
+gh pr edit 123 --add-label auto-merge   # y ahi entra solo
 ```
+
+**Los dos primeros los corre quien hizo el trabajo, agente incluido. El tercero no.** La etiqueta
+la pone Santiago: es donde entra el juicio humano. Un agente llega hasta `ready` y avisa. El
+reparto completo está en `CosteAR-os/ORQUESTACION.md`, que es el canónico.
 
 ### Por qué una etiqueta y no el verde a secas
 
@@ -290,8 +295,16 @@ Abrí otro PR con lo que falta. Es lo que pasó cuatro veces en agosto — el dr
 para que no vuelva a hacer falta.
 
 **¿Puedo mergear el mismo día que abro el PR?**
-REV-07 pide esperar 24 horas salvo que haya algo roto en producción. La mitad de los problemas del
-18-08 salieron de mergear rápido y en cadena.
+Sí. **Desde el 30-08-2026 se mergea apenas está verde, al día con su base y sin conflictos.**
+
+Hasta esa fecha REV-07 pedía esperar 24 horas, porque la mitad de los problemas del 18-08 salieron
+de mergear rápido y en cadena. Esa regla se escribió cuando la única verificación era `npm test`:
+las 24 horas compraban tiempo de mirada humana porque no había otra cosa.
+
+Hoy hay otra cosa —CI obligatorio en las tres ramas, E2E en cuatro viewports, `strict`, y el merge
+automático que verifica antes de tocar nada— y además **el costo se dio vuelta**: con varios
+agentes trabajando en paralelo, una cola de PRs esperando 24 horas se desactualiza sola y genera
+los conflictos que la espera venía a evitar.
 
 **¿Por qué tanto cuidado con esto?**
 Porque se midió. En tres días, el 17 % de los PRs no agregó nada: existieron solo para mover trabajo
