@@ -130,12 +130,14 @@ jobs:
 
             echo "APTO: solo documentacion descriptiva y tests nuevos."
             gh pr edit "$n" --repo "$REPO" --add-label auto-merge
-            gh pr comment "$n" --repo "$REPO" --body "Etiquetado \`auto-merge\` automaticamente.
-
-**Por que sin revision humana:** este PR sólo agrega tests y toca documentación descriptiva. No modifica código que se ejecute en producción, no borra archivos y no recorta ningún test existente. Con el CI en verde ya demostró todo lo que una persona le iba a mirar.
-
-En el peor caso agrega un test malo — que se descubre cuando falla, y que nunca llega al cliente.
-
-Si tocara \`src/\`, \`prisma/\`, un workflow, o alguno de los documentos que son reglas del equipo (\`AGENTS.md\`, \`CLAUDE.md\`, \`CONTRIBUTING.md\`, \`DEFINITION-OF-DONE.md\`), esto **no** habría pasado: ahí sigue haciendo falta que alguien lo lea. Ver \`.github/workflows/auto-etiquetar.yml\`."
+            # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
+            #
+            # Adentro de un bloque `run: |` toda linea no vacia tiene que estar
+            # indentada al menos como el bloque. Un texto multilinea con
+            # markdown pegado a la columna cero ROMPE EL ARCHIVO ENTERO y
+            # GitHub deja de poder parsearlo — sin decirlo en ningun lado que se
+            # mire. Ver `scripts/chequear-workflows.py`, que lo detecta.
+            cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente.\n\n**Por que sin revision humana:** este PR solo agrega tests y toca documentacion descriptiva. No modifica codigo que se ejecute en produccion, no borra archivos y no recorta ningun test existente. Con el CI en verde ya demostro todo lo que una persona le iba a mirar.\n\nEn el peor caso agrega un test malo, que se descubre cuando falla y que nunca llega al cliente.\n\nSi tocara `src/`, `prisma/`, un workflow, o alguno de los documentos que son reglas del equipo, esto **no** habria pasado: ahi sigue haciendo falta que alguien lo lea. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+            gh pr comment "$n" --repo "$REPO" --body "$cuerpo"
             echo "::endgroup::"
           done
