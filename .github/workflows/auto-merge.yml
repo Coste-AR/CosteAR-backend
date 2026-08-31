@@ -161,18 +161,25 @@ jobs:
               if gh pr view "$n" --repo "$REPO" --json comments --jq '.comments[].body' 2>/dev/null | grep -qF "$marca"; then
                 echo "Ya estaba avisado para este SHA; no se repite el comentario."
               else
-                cuerpo="$marca
-**Este PR esta atrasado $atras commit(s) respecto de \`$base\`, asi que todavia no se puede mergear.**
+                # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
+                #
+                # Esto vive adentro de un bloque `run: |` de YAML: toda linea no
+                # vacia tiene que estar indentada al menos como el bloque. Un
+                # texto multilinea con markdown pegado a la columna cero ROMPE EL
+                # ARCHIVO ENTERO, y GitHub deja de poder parsearlo.
+                #
+                # Falla ademas en silencio: las corridas aparecen como "failure"
+                # colgadas de un push cualquiera, con el mensaje generico "this
+                # run likely failed because of a workflow file issue", y los PR
+                # se quedan en CLEAN para siempre esperando a nadie. Ocho PR
+                # quedaron trabados asi el 30-08 sin que nada avisara.
+                #
+                # Los saltos de linea se escriben \n dentro del formato de
+                # printf. El detalle largo del por que vive en el manual de
+                # flujo, no en este comentario: el aviso tiene que entrar de un
+                # vistazo.
+                cuerpo=$(printf '%s\n**Este PR esta atrasado %s commit(s) respecto de `%s`, asi que todavia no se puede mergear.**\n\nActualizalo y el auto-merge sigue solo:\n\n```bash\ngh pr update-branch %s\n```\n\n**Por que no alcanza el verde que ya tenias:** se calculo contra una version anterior de `%s`. Dos PR verdes contra la misma base vieja entran los dos, y el segundo puede romperla.\n' "$marca" "$atras" "$base" "$n" "$base")
 
-Actualizalo y el auto-merge sigue solo:
-
-\`\`\`bash
-gh pr update-branch $n
-\`\`\`
-
-**Por que no alcanza el verde que ya tenias:** se calculo contra una version anterior de \`$base\`. Dos PR verdes contra el mismo \`$base\` viejo entran los dos, y el segundo puede romperlo.
-
-**Por que no lo actualiza el workflow:** el commit que genera lo firma \`github-actions[bot]\`, y GitHub deja el CI de un bot esperando aprobacion manual. La rama se actualizaba, el CI no corria, y el PR quedaba trabado en silencio."
                 if gh pr comment "$n" --repo "$REPO" --body "$cuerpo" >/dev/null 2>&1; then
                   echo "Avisado en el PR."
                 else
