@@ -26,6 +26,17 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
+    # Un workflow con el YAML roto no rompe el CI: GitHub simplemente deja de
+    # correrlo, y lo reporta como un "failure" colgado de un push cualquiera con
+    # el mensaje generico "this run likely failed because of a workflow file
+    # issue". Los PR se quedan en CLEAN para siempre esperando a nadie.
+    #
+    # Paso el 30-08-2026: ocho PR quedaron trabados y se descubrio de casualidad,
+    # al etiquetar seis y ver que no pasaba nada. La causa era una linea de
+    # markdown en columna cero adentro de un bloque `run: |`.
+    - name: Los workflows tienen que ser YAML valido
+      run: python3 scripts/chequear-workflows.py .github/workflows/*.yml
+
     - name: Run Linter
       run: npm run lint
       
