@@ -68,6 +68,15 @@ git y de `gh` en el momento.
 
 ## Con qué se verifica
 
+**Antes de la primera corrida**, después de `npm ci`:
+
+```bash
+npm run prisma:generate
+```
+
+Sin eso, `test:http` falla antes de ejecutar tres archivos, con un error que no dice que falta el
+cliente de Prisma. Se comió un intento entero de la sesión de B0-3.
+
 ```bash
 npm run lint              # eslint src tests
 npm run typecheck         # tsc --noEmit
