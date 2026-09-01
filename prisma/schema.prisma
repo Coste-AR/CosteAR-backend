@@ -1145,6 +1145,18 @@ enum CostElement {
   VENTA
 }
 
+/**
+ * Cómo varía un concepto frente al volumen de actividad.
+ *
+ * `FIJO` no significa que el importe sea inmutable: puede cambiar por precio,
+ * contrato o período. Significa solamente que no varía con el volumen.
+ */
+enum ComportamientoCosto {
+  VARIABLE
+  FIJO
+  SEMIFIJO
+}
+
 // Un "dato" trazable dentro de una estructura de costos (ej. el precio de una
 // compra, las horas de un depto, un concepto de CIF). Su valor vive en
 // `DataPointVersion` — este modelo es el contenedor estable que agrupa todas
@@ -2101,6 +2113,20 @@ model ParametroCosteo {
    * pero el resultado puede marcarlo: un default no confirmado no es un dato.
    */
   confirmado Boolean @default(false)
+
+  /**
+   * Clasificación del concepto frente al volumen. NULL conserva el
+   * comportamiento histórico: ninguna fila existente pasa a ser fija o
+   * variable por efecto de la migración.
+   */
+  comportamientoVolumen ComportamientoCosto?
+
+  /**
+   * Decisión explícita, separada de `userId` (dueño/RLS): registra quién
+   * clasificó el concepto y en qué instante de servidor lo hizo.
+   */
+  clasificadoPorUserId String?   @db.Uuid
+  clasificadoEn        DateTime? @db.Timestamptz
 
   createdAt DateTime  @default(now()) @db.Timestamptz
   updatedAt DateTime  @updatedAt @db.Timestamptz
