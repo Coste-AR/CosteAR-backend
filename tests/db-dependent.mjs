@@ -45,7 +45,12 @@
  * Corren con el rol de la aplicación (NOBYPASSRLS). Verifican que las políticas
  * RLS efectivamente impidan ver datos de otro inquilino.
  */
-export const CON_ROL_DE_APP = ['tests/integration/**/*.test.ts'];
+export const CON_ROL_DE_APP = [
+  'tests/integration/**/*.test.ts',
+  // El cliente Prisma está mockeado, pero el test necesita DATABASE_URL para
+  // verificar el camino que consulta el vocabulario activo. No usa SQL crudo.
+  'tests/classifier/vocabulary-profile.test.ts',
+];
 
 /**
  * Corren con el rol dueño porque siembran sus propios datos con SQL crudo.
