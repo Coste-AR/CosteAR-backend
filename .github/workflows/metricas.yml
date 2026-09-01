@@ -76,15 +76,22 @@ jobs:
           set -euo pipefail
 
           ARCHIVO="docs/metricas/prs.csv"
-          mkdir -p docs/metricas
 
-          if [ ! -f "$ARCHIVO" ]; then
-            echo "pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_ci,fallas_ci,tokens,minutos_sesion,bitacora" > "$ARCHIVO"
+          # SE TRABAJA EN UN TEMPORAL, FUERA DEL ARBOL DEL REPO.
+          # El checkout es de la rama base, pero el CSV vive en la rama
+          # `metricas`. Escribir dentro del arbol y despues cambiar de rama deja
+          # el archivo sin commitear estorbando el checkout.
+          TMPCSV="${RUNNER_TEMP:-/tmp}/prs.csv"
+
+          # El estado actual sale de la rama `metricas`, si ya existe.
+          if ! gh api "repos/$REPO/contents/$ARCHIVO?ref=metricas" --jq '.content' 2>/dev/null \
+                | base64 -d > "$TMPCSV" 2>/dev/null; then
+            echo "pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_ci,fallas_ci,tokens,minutos_sesion,bitacora" > "$TMPCSV"
           fi
 
           # Los que ya estan anotados. La idempotencia es el corazon de un
           # barrido: sin esto, cada corrida duplicaria todo.
-          cut -d, -f1 "$ARCHIVO" | tail -n +2 | sort -u > ya.txt
+          cut -d, -f1 "$TMPCSV" | tail -n +2 | sort -u > ya.txt
 
           nuevos=0
 
@@ -159,10 +166,10 @@ jobs:
             printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
               "$n" "${issue:-}" "$autor" "$base" "$abierto" "$mergeado" "${horas:-}" \
               "$archivos" "$agregadas" "$borradas" "$corridas" "$fallas" \
-              "${tokens:-}" "${minutos:-}" "${bitacora:-}" >> "$ARCHIVO"
+              "${tokens:-}" "${minutos:-}" "${bitacora:-}" >> "$TMPCSV"
 
             nuevos=$((nuevos + 1))
-            tail -1 "$ARCHIVO"
+            tail -1 "$TMPCSV"
             echo "::endgroup::"
           done
 
@@ -175,52 +182,60 @@ jobs:
 
           echo "$nuevos fila(s) nueva(s)."
 
+          # LAS METRICAS VIVEN EN SU PROPIA RAMA `metricas`, NO EN dev.
+          #
+          # Se probaron las otras dos formas y las dos chocaron con un limite
+          # real, no con un bug:
+          #
+          #   1. Push directo a `dev`. Funciono en `CosteAR-admin` y fallo en
+          #      los otros dos: `dev` tiene proteccion de rama y la proteccion
+          #      rechaza el push aunque el token tenga `contents: write`. Los
+          #      tres reintentos no servian: estaban escritos para una carrera
+          #      entre escrituras, y el problema era un permiso.
+          #
+          #   2. Abrir un PR. GitHub responde
+          #      "GitHub Actions is not permitted to create or approve pull
+          #      requests": es un ajuste del repo, apagado por defecto.
+          #      Encenderlo le da a CUALQUIER workflow la capacidad de abrir
+          #      PR, y eso no se decide para resolver un archivo de metricas.
+          #
+          # Una rama propia no necesita permisos nuevos ni ajustes, y separa
+          # bien las dos cosas: `dev` es el codigo del producto, `metricas` es
+          # lo que el proceso dice de si mismo. Se lee en GitHub como cualquier
+          # rama.
+          RAMA_M="metricas"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$ARCHIVO"
 
+          if git ls-remote --exit-code --heads origin "$RAMA_M" >/dev/null 2>&1; then
+            git fetch -q origin "$RAMA_M"
+            git checkout -q -B "$RAMA_M" "origin/$RAMA_M"
+            mkdir -p docs/metricas
+            cp "$TMPCSV" "$ARCHIVO"
+          else
+            echo "La rama $RAMA_M no existe todavia: se crea."
+            git checkout -q --orphan "$RAMA_M"
+            git rm -rq --cached . 2>/dev/null || true
+            find . -mindepth 1 -maxdepth 1 -not -name '.git' -not -name 'docs' -exec rm -rf {} + 2>/dev/null || true
+            mkdir -p docs/metricas
+            cp "$TMPCSV" "$ARCHIVO"
+          fi
+
+          git add "$ARCHIVO"
           if git diff --cached --quiet; then
             echo "Sin cambios."; exit 0
           fi
 
-          git commit -m "chore(metricas): $nuevos PR anotados"
+          git commit -q -m "chore(metricas): $nuevos PR anotados"
 
-          # VA POR PR, NO POR PUSH DIRECTO.
-          #
-          # La primera version pusheaba a la base. En `CosteAR-admin` funciono
-          # y en los otros dos NO: `dev` tiene proteccion de rama, y la
-          # proteccion rechaza el push aunque el token tenga `contents: write`.
-          # Las tres corridas de reintento fallaban igual, porque el problema
-          # no era una carrera sino un permiso.
-          #
-          # Ademas, pushear derecho a `dev` va contra la regla del equipo de que
-          # todo entra por PR. Que la excepcion fuera para el archivo de
-          # metricas —justo el que existe para que nos miremos a nosotros
-          # mismos— era la peor eleccion posible.
-          #
-          # El PR se auto-etiqueta solo: toca unicamente `docs/`, que
-          # `auto-etiquetar.yml` ya reconoce como documentacion descriptiva
-          # desde antes del modo tanda. Entra sin que nadie lo mire, con el
-          # mismo criterio de siempre.
-          rama_base=$(git rev-parse --abbrev-ref HEAD)
-          rama="chore/metricas-$(date -u +%Y%m%d-%H%M%S)"
-          git checkout -q -b "$rama"
+          for intento in 1 2 3; do
+            if git push -q origin "$RAMA_M"; then
+              echo "Anotado en la rama $RAMA_M."
+              exit 0
+            fi
+            echo "Push rechazado (intento $intento). Reintento sobre la rama nueva."
+            git pull -q --rebase origin "$RAMA_M" || true
+          done
 
-          if ! git push -q origin "$rama"; then
-            echo "::warning::No se pudo pushear la rama de metricas. La proxima corrida lo levanta."
-            exit 0
-          fi
-
-          # EL CUERPO VA EN UNA SOLA LINEA FISICA, CON printf. NO LO PARTAS.
-          # Un texto multilinea pegado a la columna cero adentro de un bloque
-          # `run: |` ROMPE EL YAML ENTERO. Paso al escribir este mismo archivo:
-          # lo atrapo el validador antes de subirlo, pero en el repo ya dejo
-          # ocho PR trabados una vez.
-          cuerpo_pr=$(printf '%s fila(s) nueva(s) en `docs/metricas/prs.csv`, agregadas por el barrido de metricas.\n\nLo escribe solo `.github/workflows/metricas.yml`. **Nadie lo edita a mano**: si una fila esta mal, se arregla el workflow, no el archivo.\n\nVa por PR y no por push directo porque `dev` tiene proteccion de rama, y porque todo entra por PR — tambien esto.\n' "$nuevos")
-
-          gh pr create --base "$rama_base" --head "$rama" \
-            --title "chore(metricas): $nuevos PR anotados" \
-            --body "$cuerpo_pr" \
-            || echo "::warning::No se pudo abrir el PR de metricas. La rama $rama quedo pusheada."
-
-          echo "Anotado en $rama."
+          echo "::warning::No se pudo anotar despues de 3 intentos. La proxima corrida lo levanta."
