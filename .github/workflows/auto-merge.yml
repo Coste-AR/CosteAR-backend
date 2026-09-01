@@ -42,6 +42,18 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # SIN ESTO, EL `Closes #N` DEL PR NO CIERRA EL ISSUE.
+  #
+  # GitHub cierra los issues vinculados en nombre de quien mergea. Acá el que
+  # mergea es este workflow, con el GITHUB_TOKEN — y un token sin `issues:
+  # write` no puede cerrar nada. El issue quedaba solo como `cross-referenced`.
+  #
+  # Se descubrio el 01-09-2026 mirando la linea de tiempo de un issue que
+  # deberia haberse cerrado: cuatro PR habian entrado con `Closes #N` y los
+  # cuatro issues seguian abiertos. Importa mas de lo que parece: el barrido
+  # que destraba issues se fija en que sus dependencias esten CERRADAS, asi
+  # que sin este permiso nada se destraba nunca y la cola se frena entera.
+  issues: write
   # `gh pr checks` arma el rollup con las tres: los check runs de Actions
   # (checks), los commit statuses de servicios externos como Vercel (statuses),
   # y los workflow runs (actions). Con solo `checks: read` el comando falla
