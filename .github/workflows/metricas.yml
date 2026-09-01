@@ -1,0 +1,168 @@
+# Registra, solo, lo medible de cada PR que entra.
+#
+# POR QUE EXISTE
+#
+# La bitacora de sesion que escribe el agente ya cuenta QUE decidio y donde el
+# issue no alcanzaba — eso es prosa y tiene que seguir siendolo, porque es lo
+# que se lee. Pero lo medible en prosa no se puede sumar: cuanto tardo cada
+# issue, cuantos intentos hasta el verde, cuantas veces fallo el CI. Sin esos
+# numeros, "el proceso mejora" es una impresion.
+#
+# Y anotarlo a mano no funciona. Ya paso con el SHA de los deploys: el runbook
+# lo pedia, nadie lo anotaba, y cuando hubo que responder "esto afecta al
+# cliente?" nadie sabia que version corria. Lo que no se recoge solo, no se
+# recoge.
+#
+# QUE RECOGE, Y DE DONDE
+#
+#   De GitHub, sin que nadie escriba nada:
+#     - horas de apertura y merge, y el tiempo entre las dos
+#     - lineas agregadas y borradas, archivos tocados
+#     - cuantas corridas de CI hubo sobre el PR y cuantas fallaron
+#       (las fallas son la señal mas util: son los intentos hasta el verde)
+#     - que issue cerro
+#
+#   De la bitacora que escribio el agente, si la escribio:
+#     - tokens consumidos y tiempo de sesion, tal como los reporto
+#
+# LO QUE NO INVENTA
+#
+# Si un dato no esta, la celda queda vacia. Nunca se estima. Un numero
+# inventado en una tabla que despues alguien promedia es peor que un hueco:
+# el hueco se ve, el invento no.
+#
+# POR QUE COMMITEA CON [skip ci]
+#
+# El commit lo firma github-actions[bot], y GitHub deja las corridas de un bot
+# esperando aprobacion manual. Sin `[skip ci]` cada metrica dejaria un CI
+# colgado en `action_required` para siempre — ruido que enseña a ignorar el
+# tablero de Actions, que es justo lo contrario de lo que buscamos.
+name: Metricas de PR
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  # Dos PR que entran juntos escribirian el CSV a la vez y uno pisa al otro.
+  group: metricas-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  registrar:
+    name: metricas (este mismo workflow)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Anotar lo medible de este PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          ARCHIVO="docs/metricas/prs.csv"
+          mkdir -p docs/metricas
+
+          if [ ! -f "$ARCHIVO" ]; then
+            echo "pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_ci,fallas_ci,tokens,minutos_sesion,bitacora" > "$ARCHIVO"
+          fi
+
+          info=$(gh pr view "$PR" --repo "$REPO" \
+            --json number,author,baseRefName,createdAt,mergedAt,additions,deletions,files,body,headRefOid)
+
+          autor=$(jq -r '.author.login' <<<"$info")
+          abierto=$(jq -r '.createdAt' <<<"$info")
+          mergeado=$(jq -r '.mergedAt' <<<"$info")
+          agregadas=$(jq -r '.additions' <<<"$info")
+          borradas=$(jq -r '.deletions' <<<"$info")
+          archivos=$(jq -r '.files | length' <<<"$info")
+          head_sha=$(jq -r '.headRefOid' <<<"$info")
+          cuerpo=$(jq -r '.body // ""' <<<"$info")
+
+          # Que issue cerro. Si no cierra ninguno queda vacio: el hueco es la
+          # señal de que ese PR entro sin alcance declarado.
+          issue=$(grep -oiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo" | grep -oE '[0-9]+' | head -1 || true)
+
+          # HORAS ENTRE APERTURA Y MERGE, CON UN DECIMAL.
+          #
+          # Con `date` y `awk`, no con un python embebido. La primera version
+          # usaba `python3 -c` con el script multilinea, y sus lineas quedaban
+          # en la columna cero adentro del bloque `run: |`: eso ROMPE EL YAML
+          # ENTERO y el workflow falla en silencio. Es la misma trampa que ya
+          # dejo ocho PR trabados el 30-08 y la razon por la que existe
+          # `scripts/chequear-workflows.py`.
+          seg_a=$(date -u -d "$abierto" +%s 2>/dev/null || echo "")
+          seg_m=$(date -u -d "$mergeado" +%s 2>/dev/null || echo "")
+          horas=""
+          if [ -n "$seg_a" ] && [ -n "$seg_m" ]; then
+            horas=$(awk -v a="$seg_a" -v m="$seg_m" 'BEGIN{printf "%.1f", (m-a)/3600}')
+          fi
+
+          # CORRIDAS Y FALLAS DE CI SOBRE EL PR.
+          # Las fallas son el dato mas util de toda la fila: son los intentos
+          # hasta el verde, y no dependen de que el agente se acuerde de
+          # contarlos. Se cuentan sobre la rama del PR, no sobre el SHA final,
+          # porque los intentos anteriores viven en los commits anteriores.
+          rama=$(gh pr view "$PR" --repo "$REPO" --json headRefName --jq .headRefName)
+          corridas=$(gh api "repos/$REPO/actions/runs?branch=$rama&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name != "metricas (este mismo workflow)")] | length' 2>/dev/null || echo "")
+          fallas=$(gh api "repos/$REPO/actions/runs?branch=$rama&per_page=100" \
+            --jq '[.workflow_runs[] | select(.conclusion == "failure")] | length' 2>/dev/null || echo "")
+
+          # DE LA BITACORA DEL AGENTE, SI LA ESCRIBIO.
+          # No se le reclama acá: la ausencia queda registrada como celda vacia
+          # y se ve sola cuando se mira la tabla.
+          bitacora=$(jq -r '.files[].path' <<<"$info" | grep -E '^docs/sesiones/.*\.md$' | head -1 || true)
+          tokens=""
+          minutos=""
+          if [ -n "$bitacora" ] && [ -f "$bitacora" ]; then
+            # "| Tokens consumidos | 123 |" -> 123. Si dice "no informado",
+            # no matchea el patron de digitos y queda vacio, que es correcto.
+            tokens=$(grep -iE '^\|\s*Tokens consumidos\s*\|' "$bitacora" | grep -oE '[0-9][0-9.]*' | head -1 || true)
+            minutos=$(grep -iE '^\|\s*Tiempo de la sesi' "$bitacora" | grep -oE '[0-9]+' | head -1 || true)
+          fi
+
+          printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+            "$PR" "${issue:-}" "$autor" "$BASE" "$abierto" "$mergeado" "${horas:-}" \
+            "$archivos" "$agregadas" "$borradas" "${corridas:-}" "${fallas:-}" \
+            "${tokens:-}" "${minutos:-}" "${bitacora:-}" >> "$ARCHIVO"
+
+          echo "Fila agregada:"
+          tail -1 "$ARCHIVO"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$ARCHIVO"
+
+          if git diff --cached --quiet; then
+            echo "Sin cambios que commitear."
+            exit 0
+          fi
+
+          git commit -m "chore(metricas): PR #$PR [skip ci]"
+
+          # La base pudo moverse mientras corriamos. Se reintenta con rebase en
+          # vez de fallar: perder una fila de metricas por una carrera seria
+          # exactamente el tipo de hueco silencioso que esto viene a evitar.
+          for intento in 1 2 3; do
+            if git push origin "HEAD:$BASE"; then
+              echo "Anotado."
+              exit 0
+            fi
+            echo "Push rechazado (intento $intento). Reintentando sobre la base nueva."
+            git pull --rebase origin "$BASE"
+          done
+
+          echo "::warning::No se pudo anotar la metrica del PR #$PR despues de 3 intentos."
