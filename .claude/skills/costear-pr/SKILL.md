@@ -44,8 +44,10 @@ equipo y no se automatizan acá.
 4. **Lint:** `npm run lint` *(saltear en admin: todavía no tiene ESLint)*
 5. **Typecheck:** `npm run typecheck`
 6. **Backend, si tocó RLS, aislamiento o queries:** `npm run test:integration`
-7. **Si tocó UI o un flujo:** preguntar explícitamente si se probó en el navegador. **No asumir
-   que sí.** Un flujo roto con los tests en verde ya pasó.
+7. **Si tocó pantalla (frontend o admin):** `npm run test:e2e`, y la captura queda **adjunta al
+   PR**. No se le pregunta a nadie si lo probó en el navegador: ese criterio **salió de la
+   Definition of Done el 30-08-2026** y lo reemplazó la suite E2E con evidencia adjunta. El
+   canónico es `DEFINITION-OF-DONE.md` (vive en `CosteAR-admin`; los otros dos repos enlazan ahí).
 
 Si algo falla → **se arregla primero**. Pedir review con el CI en rojo le hace perder el tiempo
 a otro.
