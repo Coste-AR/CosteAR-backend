@@ -1,0 +1,107 @@
+# Destraba solo los issues que esperaban a otro.
+#
+# EL PROBLEMA QUE RESUELVE
+#
+# Un agente de Codex arranca frio y no puede preguntar. Si el reparto de
+# trabajo depende de que una persona le mande el proximo issue, el desarrollo
+# se frena cada vez que esa persona no esta. Y "fijate cada veinte minutos si
+# se destrabo" es peor: es trabajo que el agente paga en contexto y en tiempo
+# para casi siempre descubrir que no cambio nada.
+#
+# COMO FUNCIONA
+#
+# Cada issue bloqueado declara de que depende, en una linea del cuerpo:
+#
+#     Depende de #123
+#
+# Cuando ese #123 se cierra, este workflow busca a todos los que lo nombran,
+# revisa si les queda alguna otra dependencia abierta, y a los que ya no
+# tienen ninguna les saca `bloqueado`, les pone `listo` y les deja un
+# comentario. El agente no consulta nada: le llega la notificacion de GitHub.
+#
+# POR QUE LEE EL CUERPO Y NO UN CAMPO DE PROYECTO
+#
+# El cuerpo del issue es lo unico que un agente ve sin permisos extra ni una
+# consulta aparte. La dependencia tiene que estar donde el agente ya esta
+# mirando, o vuelve a ser conocimiento que vive fuera del issue — que es la
+# falla que venimos persiguiendo toda la tanda.
+name: Desbloquear issues
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: desbloquear-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  desbloquear:
+    name: desbloquear (este mismo workflow)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Destrabar lo que esperaba a este issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CERRADO: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          echo "Se cerro el #$CERRADO. Buscando quien lo esperaba."
+
+          # Solo los que siguen abiertos y estan marcados como bloqueados.
+          candidatos=$(gh issue list --repo "$REPO" --state open --label bloqueado \
+            --limit 200 --json number,title,body)
+
+          echo "$candidatos" | jq -c '.[]' | while read -r issue; do
+            n=$(jq -r '.number' <<<"$issue")
+            titulo=$(jq -r '.title' <<<"$issue")
+            cuerpo=$(jq -r '.body // ""' <<<"$issue")
+
+            # Todas las dependencias declaradas de este issue.
+            deps=$(grep -oE 'Depende de #[0-9]+' <<<"$cuerpo" | grep -oE '[0-9]+' | sort -u || true)
+            [ -z "$deps" ] && continue
+
+            # No nos nombra a nosotros: no lo tocamos en esta corrida.
+            if ! grep -qx "$CERRADO" <<<"$deps"; then continue; fi
+
+            echo "::group::#$n — $titulo"
+
+            # SE MIRAN TODAS LAS DEPENDENCIAS, NO SOLO LA QUE SE CERRO.
+            # Un issue puede esperar a dos. Destrabarlo cuando cae la primera
+            # lo manda a la cola antes de tiempo, y el agente se encuentra el
+            # terreno a medio hacer — que es peor que esperar, porque ya
+            # empezo.
+            abiertas=""
+            for d in $deps; do
+              estado=$(gh issue view "$d" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "DESCONOCIDO")
+              if [ "$estado" != "CLOSED" ]; then
+                abiertas="$abiertas #$d"
+              fi
+            done
+
+            if [ -n "$abiertas" ]; then
+              echo "Sigue bloqueado: todavia espera$abiertas"
+              echo "::endgroup::"; continue
+            fi
+
+            gh issue edit "$n" --repo "$REPO" \
+              --remove-label bloqueado --add-label listo >/dev/null
+
+            # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
+            # Esto vive adentro de un bloque `run: |` de YAML: un texto
+            # multilinea pegado a la columna cero rompe el archivo entero y el
+            # workflow falla en silencio. Los saltos se escriben \n dentro de
+            # printf.
+            cuerpo_com=$(printf '**Destrabado.** Se cerro el #%s, que era la ultima dependencia de este issue.\n\nYa se puede tomar: paso de `bloqueado` a `listo`.\n' "$CERRADO")
+            gh issue comment "$n" --repo "$REPO" --body "$cuerpo_com" >/dev/null || true
+
+            echo "DESTRABADO #$n"
+            echo "::endgroup::"
+          done
+
+          echo "Listo."
