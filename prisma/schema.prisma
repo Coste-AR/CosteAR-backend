@@ -202,6 +202,8 @@ model Company {
   desperdicioRegistros DesperdicioRegistro[]
   unidadesMedida       UnidadMedida[]
   parametrosCosteo     ParametroCosteo[]
+  unidadesProductivas  UnidadProductiva[]
+  lotesProductivos     LoteProductivo[]
   id                   String                @id @default(uuid()) @db.Uuid
   userId               String                @db.Uuid
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -2137,6 +2139,65 @@ model ParametroCosteo {
   @@index([structureId, clave])
   @@index([periodId])
   @@map("parametros_costeo")
+}
+
+// ---------------------------------------------------------------------------
+// OPERACIÓN FÍSICA GENÉRICA
+// ---------------------------------------------------------------------------
+
+/**
+ * Una unidad física donde opera la empresa. `referencia` identifica la unidad
+ * concreta; el nombre visible de este tipo de entidad pertenece al paquete de
+ * rubro, no al modelo.
+ */
+model UnidadProductiva {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  referencia String
+  activa     Boolean @default(true)
+
+  lotes LoteProductivo[]
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  // La clave compuesta habilita que un lote solo refiera una unidad de su
+  // propia empresa.
+  @@unique([companyId, id])
+  @@unique([companyId, referencia])
+  @@index([companyId])
+  @@map("unidades_productivas")
+}
+
+/**
+ * Conjunto productivo identificable de una empresa. La relación opcional es
+ * su ubicación actual: puede cambiarse cuando el conjunto se traslada, sin
+ * introducir todavía el historial de movimientos (fuera de este issue).
+ */
+model LoteProductivo {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  unidadProductivaId String?           @db.Uuid
+  unidadProductiva   UnidadProductiva? @relation(fields: [companyId, unidadProductivaId], references: [companyId, id], onDelete: Restrict)
+
+  referencia String
+  activo     Boolean @default(true)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, referencia])
+  @@index([companyId])
+  @@index([unidadProductivaId])
+  @@map("lotes_productivos")
 }
 
 // ---------------------------------------------------------------------------
