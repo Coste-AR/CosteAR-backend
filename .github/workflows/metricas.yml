@@ -118,12 +118,27 @@ jobs:
               horas=$(awk -v a="$seg_a" -v m="$seg_m" 'BEGIN{printf "%.1f", (m-a)/3600}')
             fi
 
-            # Las fallas de CI son el dato mas util de la fila: son los
-            # intentos hasta el verde, y no dependen de que el agente se
-            # acuerde de contarlos.
+            # CORRIDAS Y FALLAS DE CI, ACOTADAS A LA VIDA DEL PR.
+            #
+            # Las fallas son el dato mas util de la fila —son los intentos
+            # hasta el verde, sin depender de que el agente los cuente—, pero
+            # solo si el conteo es real.
+            #
+            # La primera version contaba TODAS las corridas de la rama. Para un
+            # PR de promocion, cuya rama es `dev` o `staging`, eso devolvia 100:
+            # el tope de la paginacion sobre una rama que acumula cientos de
+            # corridas. Un 100 que no es un conteo sino un techo es exactamente
+            # el numero falso contra el que advierte el README de esta carpeta:
+            # el hueco se ve, el invento no.
+            #
+            # Acotarlo a la ventana entre apertura y merge lo arregla para los
+            # dos casos: en una rama de trabajo son sus propias corridas, y en
+            # una promocion son las que corrieron por ese PR.
             runs=$(gh api "repos/$REPO/actions/runs?branch=$rama&per_page=100" 2>/dev/null || echo '{"workflow_runs":[]}')
-            corridas=$(jq '[.workflow_runs[]] | length' <<<"$runs")
-            fallas=$(jq '[.workflow_runs[] | select(.conclusion == "failure")] | length' <<<"$runs")
+            corridas=$(jq --arg a "$abierto" --arg m "$mergeado" \
+              '[.workflow_runs[] | select(.created_at >= $a and .created_at <= $m)] | length' <<<"$runs")
+            fallas=$(jq --arg a "$abierto" --arg m "$mergeado" \
+              '[.workflow_runs[] | select(.created_at >= $a and .created_at <= $m and .conclusion == "failure")] | length' <<<"$runs")
 
             # De la bitacora del agente, si la escribio. No se le reclama acá:
             # la ausencia queda como celda vacia y se ve sola en la tabla.
