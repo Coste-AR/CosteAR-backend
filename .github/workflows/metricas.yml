@@ -51,7 +51,10 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  # `write` y no `read`: este workflow ABRE un PR con las filas nuevas, no
+  # pushea a la base. Con `read` alcanzaba para leer los PR mergeados y fallaba
+  # recien al final, despues de haber hecho todo el trabajo.
+  pull-requests: write
   actions: read
 
 concurrency:
@@ -180,18 +183,44 @@ jobs:
             echo "Sin cambios."; exit 0
           fi
 
-          # `[skip ci]` porque el commit lo firma el bot y GitHub deja sus
-          # corridas esperando aprobacion manual: sin esto, cada metrica
-          # dejaria un CI colgado en `action_required` para siempre.
-          git commit -m "chore(metricas): $nuevos PR anotados [skip ci]"
+          git commit -m "chore(metricas): $nuevos PR anotados"
 
+          # VA POR PR, NO POR PUSH DIRECTO.
+          #
+          # La primera version pusheaba a la base. En `CosteAR-admin` funciono
+          # y en los otros dos NO: `dev` tiene proteccion de rama, y la
+          # proteccion rechaza el push aunque el token tenga `contents: write`.
+          # Las tres corridas de reintento fallaban igual, porque el problema
+          # no era una carrera sino un permiso.
+          #
+          # Ademas, pushear derecho a `dev` va contra la regla del equipo de que
+          # todo entra por PR. Que la excepcion fuera para el archivo de
+          # metricas —justo el que existe para que nos miremos a nosotros
+          # mismos— era la peor eleccion posible.
+          #
+          # El PR se auto-etiqueta solo: toca unicamente `docs/`, que
+          # `auto-etiquetar.yml` ya reconoce como documentacion descriptiva
+          # desde antes del modo tanda. Entra sin que nadie lo mire, con el
+          # mismo criterio de siempre.
           rama_base=$(git rev-parse --abbrev-ref HEAD)
-          for intento in 1 2 3; do
-            if git push origin "HEAD:$rama_base"; then
-              echo "Anotado."; exit 0
-            fi
-            echo "Push rechazado (intento $intento). Reintento sobre la base nueva."
-            git pull --rebase origin "$rama_base"
-          done
+          rama="chore/metricas-$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -q -b "$rama"
 
-          echo "::warning::No se pudieron anotar las metricas despues de 3 intentos. La proxima corrida lo levanta."
+          if ! git push -q origin "$rama"; then
+            echo "::warning::No se pudo pushear la rama de metricas. La proxima corrida lo levanta."
+            exit 0
+          fi
+
+          # EL CUERPO VA EN UNA SOLA LINEA FISICA, CON printf. NO LO PARTAS.
+          # Un texto multilinea pegado a la columna cero adentro de un bloque
+          # `run: |` ROMPE EL YAML ENTERO. Paso al escribir este mismo archivo:
+          # lo atrapo el validador antes de subirlo, pero en el repo ya dejo
+          # ocho PR trabados una vez.
+          cuerpo_pr=$(printf '%s fila(s) nueva(s) en `docs/metricas/prs.csv`, agregadas por el barrido de metricas.\n\nLo escribe solo `.github/workflows/metricas.yml`. **Nadie lo edita a mano**: si una fila esta mal, se arregla el workflow, no el archivo.\n\nVa por PR y no por push directo porque `dev` tiene proteccion de rama, y porque todo entra por PR — tambien esto.\n' "$nuevos")
+
+          gh pr create --base "$rama_base" --head "$rama" \
+            --title "chore(metricas): $nuevos PR anotados" \
+            --body "$cuerpo_pr" \
+            || echo "::warning::No se pudo abrir el PR de metricas. La rama $rama quedo pusheada."
+
+          echo "Anotado en $rama."
