@@ -406,6 +406,22 @@ CREATE POLICY tenant_isolation ON parametros_costeo
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- Operación física genérica: ambas tablas tienen `userId` denormalizado para
+-- que el aislamiento se aplique sin joins adicionales.
+ALTER TABLE unidades_productivas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE unidades_productivas FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON unidades_productivas;
+CREATE POLICY tenant_isolation ON unidades_productivas
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE lotes_productivos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lotes_productivos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON lotes_productivos;
+CREATE POLICY tenant_isolation ON lotes_productivos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;
