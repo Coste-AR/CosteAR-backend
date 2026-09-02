@@ -19,6 +19,7 @@ import {
 } from '../../domain/calculations/calculate.js';
 import { parseIndirectCostConfigInput } from './validate-inputs.js';
 import { AllocationBaseService } from './allocation-base-service.js';
+import { CalculationRunService } from './calculation-run-service.js';
 import { requireWritablePeriod, type PeriodMirrorData } from './period-sync.js';
 import { codeFromDate } from '../../domain/periods/period-calendar.js';
 import { companyRhythm } from '../../domain/periods/effective-rhythm.js';
@@ -325,6 +326,21 @@ export class CostStructureService {
     });
   }
 
+  /** A-06: precio o estructura completos cambian la vista variable sin un pedido extra. */
+  private async recalculateVariableView(
+    userId: string,
+    structureId: string,
+    ctx: AuditContext,
+    structure: { rawMaterialConfig: unknown; directLaborConfig: unknown; indirectCostConfig: unknown },
+  ) {
+    if (!structure.rawMaterialConfig || !structure.directLaborConfig || !structure.indirectCostConfig) return;
+    await new CalculationRunService(this.db).calculate(userId, structureId, {
+      id: ctx.userId ?? userId,
+      role: 'COSTISTA',
+      area: 'costista',
+    });
+  }
+
   /**
    * Resuelve el reparto en modo 'base' del PRIMARIO (conceptos) y del SECUNDARIO
    * (centros de servicio): lee las unidades vigentes de cada base de asignación
@@ -447,7 +463,7 @@ export class CostStructureService {
 
     // R1 + R2: versión append-only de la config + update del puntero vigente +
     // espejo en el período abierto + auditoría, TODO en la misma transacción.
-    return this.db.$transaction(async (tx) => {
+    const updated = await this.db.$transaction(async (tx) => {
       // Un mes cerrado no se edita (C — Fase 3). Sin períodos, sigue como antes.
       const period = await requireWritablePeriod(tx, id);
 
@@ -490,6 +506,8 @@ export class CostStructureService {
       );
       return updated;
     });
+    await this.recalculateVariableView(userId, id, ctx, updated);
+    return updated;
   }
 
   /**
@@ -551,7 +569,7 @@ export class CostStructureService {
     const produced = productionQuantity ?? null;
     const saveTrace = this.traceFrom(userId, ctx, trace);
 
-    return this.db.$transaction(async (tx) => {
+    const updated = await this.db.$transaction(async (tx) => {
       const period = await requireWritablePeriod(tx, id);
 
       await this.appendConfigVersion(
@@ -618,6 +636,8 @@ export class CostStructureService {
       );
       return updated;
     });
+    await this.recalculateVariableView(userId, id, ctx, updated);
+    return updated;
   }
 
   /**
