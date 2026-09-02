@@ -11,10 +11,13 @@ services:
       POSTGRES_DB: costear
       POSTGRES_USER: costear
       POSTGRES_PASSWORD: costear
+      APP_DB_ROLE: ${APP_DB_ROLE:-costear_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-costear_app}
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U costear"]
       interval: 5s

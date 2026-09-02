@@ -31,6 +31,47 @@
 #    CLAUDE.md, CONTRIBUTING.md y DEFINITION-OF-DONE.md son las reglas que todos
 #    siguen. Cambiarlos no rompe produccion, pero cambia lo que hace todo el
 #    mundo despues. Eso se mira.
+#
+# EL MODO TANDA — trabajar en volumen sin nadie disponible para etiquetar
+#
+# Con la variable de repositorio AUTO_ETIQUETAR_CODIGO = "si", la clase apta se
+# amplia para incluir codigo. Se activo el 01-09-2026 para la tanda B1, con dos
+# agentes en paralelo y Santiago sin disponibilidad para mirar cada PR.
+#
+# POR QUE ESTO NO ES SIMPLEMENTE "DEJAR DE REVISAR"
+#
+# Estos PR van contra `dev`, que es una rama de integracion. La promocion
+# dev -> staging -> main sigue siendo manual, y este mismo workflow se niega a
+# tocar main. El radio de daño de un merge malo es una rama interna, no el
+# cliente. Y del otro lado el costo de esperar es real: una cola de PR parados
+# se desactualiza sola y genera los conflictos que la espera venia a evitar —
+# es la razon por la que ya se elimino la regla de las 24 horas (REV-07).
+#
+# PERO SI ES UNA CONCESION, Y CONVIENE DECIRLO
+#
+# Lo que se pierde es la mirada humana sobre codigo antes de que entre a dev.
+# Lo que la reemplaza no es nada: es el CI corriendo entero sobre el codigo ya
+# integrado, mas las guardas de abajo. No es lo mismo. Se acepta a sabiendas y
+# se revisa cuando el equipo vuelva a tener disponibilidad.
+#
+# LO QUE EL MODO TANDA NO AFLOJA
+#
+# Las tres guardas de arriba siguen enteras. Ninguna es sobre romper
+# produccion: son sobre BAJAR LA VERIFICACION, que es la falla que este equipo
+# ya tuvo tres veces —tests con el cuerpo comentado, 61 tests que se salteaban
+# solos, un fixture que daba verde con la pantalla equivocada—. Un PR que borra
+# un archivo o recorta un test NO se auto-etiqueta, ni en modo tanda.
+#
+# Y se agrega una cuarta, propia de este modo: el PR tiene que CERRAR UN ISSUE
+# (ver guarda 4). Sin alcance declarado no hay contra que juzgar lo que hizo.
+#
+# COMO SE APAGA
+#
+#   gh variable set AUTO_ETIQUETAR_CODIGO --body "no" --repo Coste-AR/<repo>
+#
+# Es una variable y no una edicion de este archivo a proposito: se apaga desde
+# el telefono, sin abrir un PR ni esperar un CI. Es justo lo que hace falta el
+# dia que algo salga mal.
 name: Auto-etiquetar
 
 on:
@@ -51,6 +92,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          MODO: ${{ vars.AUTO_ETIQUETAR_CODIGO }}
         run: |
           set -euo pipefail
 
@@ -68,7 +110,17 @@ jobs:
           for n in $lista; do
             echo "::group::PR #$n"
 
-            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files)
+            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files,baseRefName,body)
+            base=$(jq -r '.baseRefName' <<<"$info")
+
+            # EL MODO TANDA SOLO APLICA CONTRA dev.
+            # staging y main son promociones: ahi el juicio humano ES el punto,
+            # no un tramite. No se tocan ni con el modo prendido.
+            tanda=no
+            if [ "${MODO:-no}" = "si" ] && [ "$base" = "dev" ]; then
+              tanda=si
+              echo "Modo tanda activo (base $base)."
+            fi
 
             if [ "$(jq -r '.isDraft' <<<"$info")" = "true" ]; then
               echo "SALTEADO: es borrador."; echo "::endgroup::"; continue
@@ -110,8 +162,16 @@ jobs:
                   fi
                   ;;
                 *)
-                  echo "NO APTO: $ruta no es documentacion ni un test."
-                  apto=no
+                  if [ "$tanda" = "si" ]; then
+                    # Modo tanda: el codigo entra. Lo que lo respalda no es que
+                    # sea inofensivo —no lo es— sino que va a dev, que el CI
+                    # corrio entero sobre el codigo ya integrado, y que las
+                    # cuatro guardas siguen puestas.
+                    echo "  (modo tanda) $ruta"
+                  else
+                    echo "NO APTO: $ruta no es documentacion ni un test."
+                    apto=no
+                  fi
                   ;;
               esac
             done < archivos.txt
@@ -123,12 +183,30 @@ jobs:
               apto=no
             fi
 
+            # GUARDA 4, SOLO EN MODO TANDA: el PR tiene que cerrar un issue.
+            #
+            # Sin un issue cerrado no hay alcance declarado. El CI verifica que
+            # el codigo anda, no que hace lo que se pidio — y "hace otra cosa"
+            # es el modo de falla mas caro de esta tanda, porque no se descubre
+            # hasta que alguien lo usa.
+            if [ "$tanda" = "si" ] && [ "$apto" = "si" ]; then
+              cuerpo_pr=$(jq -r '.body // ""' <<<"$info")
+              if ! grep -qiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo_pr"; then
+                echo "NO APTO: no cierra ningun issue. Sin alcance declarado no hay contra que verificar."
+                apto=no
+              fi
+            fi
+
             if [ "$apto" != "si" ]; then
               echo "Queda para revision humana."
               echo "::endgroup::"; continue
             fi
 
-            echo "APTO: solo documentacion descriptiva y tests nuevos."
+            if [ "$tanda" = "si" ]; then
+              echo "APTO (modo tanda): va a dev, cierra un issue, no borra archivos ni recorta tests."
+            else
+              echo "APTO: solo documentacion descriptiva y tests nuevos."
+            fi
             gh pr edit "$n" --repo "$REPO" --add-label auto-merge
             # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
             #
@@ -137,7 +215,15 @@ jobs:
             # markdown pegado a la columna cero ROMPE EL ARCHIVO ENTERO y
             # GitHub deja de poder parsearlo — sin decirlo en ningun lado que se
             # mire. Ver `scripts/chequear-workflows.py`, que lo detecta.
-            cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente.\n\n**Por que sin revision humana:** este PR solo agrega tests y toca documentacion descriptiva. No modifica codigo que se ejecute en produccion, no borra archivos y no recorta ningun test existente. Con el CI en verde ya demostro todo lo que una persona le iba a mirar.\n\nEn el peor caso agrega un test malo, que se descubre cuando falla y que nunca llega al cliente.\n\nSi tocara `src/`, `prisma/`, un workflow, o alguno de los documentos que son reglas del equipo, esto **no** habria pasado: ahi sigue haciendo falta que alguien lo lea. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+            # EL COMENTARIO TIENE QUE DECIR LA VERDAD DE POR QUE ENTRO.
+            # En modo tanda el motivo es otro, y decir "solo toca tests"
+            # sobre un PR que toca src/ seria justamente el tipo de
+            # afirmacion sin verificar que nos viene costando caro.
+            if [ "$tanda" = "si" ]; then
+              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **modo tanda**.\n\n**Por que sin revision humana:** el equipo esta trabajando en volumen y sin disponibilidad para mirar cada PR. Este va contra `dev`, que es una rama de integracion: la promocion a `staging` y `main` sigue siendo manual, asi que el radio de un merge malo es una rama interna y no el cliente.\n\n**Que se verifico igual:** el CI corrio entero sobre el codigo ya integrado, el PR no borra ningun archivo, no recorta ningun test existente, y cierra un issue — o sea que hay un alcance declarado contra el cual mirarlo despues.\n\n**Que NO se verifico:** que el codigo haga lo que el issue pedia. Eso lo mira una persona cuando vuelva, antes de promover. Si algo de este PR no cierra, se revierte en `dev` sin tocar produccion.\n\nSe apaga con `gh variable set AUTO_ETIQUETAR_CODIGO --body "no"`. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+            else
+              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente.\n\n**Por que sin revision humana:** este PR solo agrega tests y toca documentacion descriptiva. No modifica codigo que se ejecute en produccion, no borra archivos y no recorta ningun test existente. Con el CI en verde ya demostro todo lo que una persona le iba a mirar.\n\nEn el peor caso agrega un test malo, que se descubre cuando falla y que nunca llega al cliente.\n\nSi tocara `src/`, `prisma/`, un workflow, o alguno de los documentos que son reglas del equipo, esto **no** habria pasado: ahi sigue haciendo falta que alguien lo lea. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+            fi
             gh pr comment "$n" --repo "$REPO" --body "$cuerpo"
             echo "::endgroup::"
           done
