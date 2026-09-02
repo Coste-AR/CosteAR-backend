@@ -30,6 +30,7 @@ import { registerDepositoRoutes } from './routes/deposito.routes.js';
 import { registerJointCostRoutes } from './routes/joint-cost.routes.js';
 import { registerProcessCalculationRoutes } from './routes/process-calculation.routes.js';
 import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
+import { registerOwnerDashboardRoutes } from './routes/owner-dashboard.routes.js';
 import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
 import { registerParametrosCosteoRoutes } from './routes/parametros-costeo.routes.js';
 import { registerActivoAmortizableRoutes } from './routes/activo-amortizable.routes.js';
@@ -203,6 +204,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerJointCostRoutes(api);
       await registerProcessCalculationRoutes(api);
       await registerCostPeriodRoutes(api);
+      await registerOwnerDashboardRoutes(api);
       await registerDesperdicioRoutes(api);
       await registerParametrosCosteoRoutes(api);
       await registerActivoAmortizableRoutes(api);
