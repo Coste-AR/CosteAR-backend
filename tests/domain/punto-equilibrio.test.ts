@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { calcularContribucionMarginal, type FilaComportamiento } from '@/domain/calculations/contribucion-marginal.js';
-import { calcularPuntoEquilibrio } from '@/domain/calculations/punto-equilibrio.js';
+import {
+  calcularPuntoEquilibrio,
+  calcularVariacionPuntoEquilibrio,
+} from '@/domain/calculations/punto-equilibrio.js';
 
 const filas: FilaComportamiento[] = [
   { id: '1', clave: 'mp', comportamientoVolumen: 'VARIABLE', structureId: 's', periodId: null, clasificadoPorUserId: 'u', clasificadoEn: new Date() },
@@ -16,5 +19,17 @@ describe('punto de equilibrio', () => {
   it('no fabrica un número con contribución marginal no positiva', () => {
     const contribucion = calcularContribucionMarginal({ precioUnitario: 4, unidadesVendidas: 5, componentes: [{ clave: 'mp', etiqueta: 'MP', importeAbsorcion: 20 }, { clave: 'cif', etiqueta: 'CIF', importeAbsorcion: 15 }], clasificaciones: filas, contexto: { structureId: 's', periodId: null } });
     expect(calcularPuntoEquilibrio(contribucion, new Date()).unidadesEquilibrio).toBeNull();
+  });
+
+  it('mide el movimiento porcentual absoluto contra la corrida anterior', () => {
+    const contribucion = calcularContribucionMarginal({ precioUnitario: 12, unidadesVendidas: 6, componentes: [{ clave: 'mp', etiqueta: 'MP', importeAbsorcion: 18 }, { clave: 'cif', etiqueta: 'CIF', importeAbsorcion: 18 }], clasificaciones: filas, contexto: { structureId: 's', periodId: null } });
+    const anterior = calcularPuntoEquilibrio(contribucion, new Date('2026-01-01T00:00:00.000Z'));
+    const actual = {
+      ...anterior,
+      unidadesEquilibrio: anterior.unidadesEquilibrio! * 1.2,
+    } as typeof anterior;
+
+    expect(calcularVariacionPuntoEquilibrio(actual, anterior)).toBeCloseTo(20);
+    expect(calcularVariacionPuntoEquilibrio(anterior, { ...anterior, unidadesEquilibrio: null })).toBeNull();
   });
 });
