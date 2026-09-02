@@ -49,3 +49,8 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 211,,SantiagoBriz,dev,2026-09-01T20:49:39Z,2026-09-01T20:57:21Z,0.1,1,91,5,4,0,,,
 212,,SantiagoBriz,dev,2026-09-01T21:09:57Z,2026-09-01T21:11:47Z,0.0,1,43,14,4,0,,,
 213,,SantiagoBriz,dev,2026-09-01T22:00:43Z,2026-09-01T22:40:11Z,0.7,1,61,46,4,0,,,
+204,182,AlanArevalo1,dev,2026-09-01T19:22:53Z,2026-09-02T01:02:19Z,5.7,7,342,6,18,2,,,docs/sesiones/2026-09-01-182-vocabulario-clasificador.md
+214,187,AlanArevalo1,dev,2026-09-02T00:27:32Z,2026-09-02T00:40:09Z,0.2,10,268,2,8,0,,,docs/sesiones/2026-09-02-187-telegram-ingesta.md
+215,188,AlanArevalo1,dev,2026-09-02T00:39:58Z,2026-09-02T00:57:33Z,0.3,2,52,8,8,0,,,docs/sesiones/2026-09-02-188-adr-telegram.md
+217,190,AlanArevalo1,dev,2026-09-02T02:33:28Z,2026-09-02T02:57:17Z,0.4,7,317,10,6,0,,,docs/sesiones/2026-09-02-190-clasificacion-semilla.md
+219,195,AlanArevalo1,dev,2026-09-02T03:08:14Z,2026-09-02T03:27:30Z,0.3,18,783,0,5,0,,,docs/sesiones/2026-09-02-194-eventos-lote.md
