@@ -10,6 +10,11 @@ import {
   inventorySchema,
 } from '../../shared/schemas/cost.schema.js';
 import { type CalculationInput } from '../../domain/calculations/calculate.js';
+import {
+  calcularContribucionMarginal,
+  CLAVES_COMPORTAMIENTO_CONTRIBUCION,
+  type FilaComportamiento,
+} from '../../domain/calculations/contribucion-marginal.js';
 import { type TreeNode } from './tree-builder.js';
 import {
   MP_MOVEMENT_FIELD_KEYS,
@@ -253,11 +258,6 @@ export class CalculationRunService {
     // las 4 raíces, y la etiqueta solo como respaldo de datos migrados.
     await this.attachDataPointSources(structureId, tree);
 
-    // La marca de incompletitud viaja DENTRO de `results` (persistida con la
-    // corrida) y también suelta en la respuesta. Es aditiva: `results` sigue
-    // teniendo `grossMargin`, `grossMarginPct`, etc. tal cual.
-    const results = { ...output, incompletitud };
-
     // A qué período pertenece esta corrida. Órdenes calcula "la estructura", no
     // un período, así que se le adjudica el que esté abierto — que es el que el
     // costista está viendo cuando aprieta el botón. Si todavía no hay ninguno
@@ -267,6 +267,54 @@ export class CalculationRunService {
       where: { structureId, status: 'OPEN', deletedAt: null },
       select: { id: true },
     });
+
+    // A-05 — Costeo variable. La contribución es una VISTA de los tres importes
+    // ya producidos por absorción; no altera el motor ni vuelve a calcularlos.
+    // Si la estructura no trae `companyId` (mocks históricos), la ausencia de
+    // clasificación queda marcada como incompleta sin intentar una consulta sin
+    // tenant. En producción `companyId` siempre existe por el modelo Prisma.
+    const clavesComportamiento = Object.values(CLAVES_COMPORTAMIENTO_CONTRIBUCION);
+    const filasComportamiento: FilaComportamiento[] = s.companyId
+      ? await this.db.parametroCosteo.findMany({
+          where: { companyId: s.companyId, clave: { in: clavesComportamiento }, deletedAt: null },
+          select: {
+            id: true,
+            clave: true,
+            comportamientoVolumen: true,
+            structureId: true,
+            periodId: true,
+            clasificadoPorUserId: true,
+            clasificadoEn: true,
+          },
+        })
+      : [];
+    const contribucionMarginal = calcularContribucionMarginal({
+      precioUnitario: input.sales.unitPrice,
+      unidadesVendidas: input.sales.quantity,
+      componentes: [
+        {
+          clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,
+          etiqueta: 'Materia prima',
+          importeAbsorcion: output.rawMaterialConsumed,
+        },
+        {
+          clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta,
+          etiqueta: 'Mano de obra directa',
+          importeAbsorcion: output.directLaborTotal,
+        },
+        {
+          clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+          etiqueta: 'Costos indirectos de producción',
+          importeAbsorcion: output.indirectCostsApplied,
+        },
+      ],
+      clasificaciones: filasComportamiento,
+      contexto: { structureId, periodId: openPeriod?.id ?? null },
+    });
+
+    // La marca y la vista adicional viven DENTRO de `results`: se persisten con
+    // la corrida y no cambian los campos existentes del resultado de absorción.
+    const results = { ...output, incompletitud, contribucionMarginal };
 
     return withTenant(userId, async (tx) => {
       // Persistencia COMPARTIDA (misma que usará el motor de Procesos, B17): una
