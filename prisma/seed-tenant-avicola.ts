@@ -20,7 +20,7 @@
 // El relevamiento del cliente y sus cifras viven en el repo privado (CLI-02).
 
 import { PrismaClient, Prisma } from '@prisma/client';
-import { PARAMETROS_AVICOLA } from '../src/domain/parametros/parametros-costeo.js';
+import { CLASIFICACIONES_AVICOLA, PARAMETROS_AVICOLA } from '../src/domain/parametros/parametros-costeo.js';
 
 const prisma = new PrismaClient();
 
@@ -160,6 +160,46 @@ async function main() {
   }
 
   console.log(`Parámetros: ${creados} nuevo(s), ${respetados} ya estaban`);
+
+  // --- Propuestas de comportamiento frente al volumen ---------------------
+  // Una propuesta NO es una confirmación: queda sin autor de clasificación
+  // hasta que alguien la revise explícitamente desde la aplicación.
+  let propuestasCreadas = 0;
+  let propuestasRespetadas = 0;
+  for (const def of CLASIFICACIONES_AVICOLA) {
+    if (def.propuesta === null) {
+      console.log(`  ? ${def.clave} — sin propuesta: ${def.fundamento}`);
+      continue;
+    }
+    const existente = await prisma.parametroCosteo.findFirst({
+      where: { companyId, structureId, periodId: null, clave: def.clave, deletedAt: null },
+      select: { id: true, confirmado: true },
+    });
+    if (existente) {
+      propuestasRespetadas++;
+      if (existente.confirmado) console.log(`  = ${def.clave} — ya confirmado, no se toca`);
+      continue;
+    }
+    if (dryRun) {
+      console.log(`  + ${def.clave} = ${def.propuesta} (propuesta sin confirmar)`);
+      propuestasCreadas++;
+      continue;
+    }
+    await prisma.parametroCosteo.create({
+      data: {
+        companyId,
+        userId,
+        structureId,
+        periodId: null,
+        clave: def.clave,
+        descripcion: `${def.descripcion} — Propuesta de semilla: ${def.fundamento}`,
+        comportamientoVolumen: def.propuesta,
+        confirmado: false,
+      },
+    });
+    propuestasCreadas++;
+  }
+  console.log(`Propuestas de comportamiento: ${propuestasCreadas} nueva(s), ${propuestasRespetadas} ya estaban`);
 
   const sinConfirmar = PARAMETROS_AVICOLA.filter((p) => !p.seguro);
   console.log(`\n⚠  ${sinConfirmar.length} parámetros quedan SIN CONFIRMAR y hay que cerrarlos con el cliente:`);

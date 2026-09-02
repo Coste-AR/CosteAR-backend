@@ -9,6 +9,7 @@ import type { Layer4Result } from './layers/layer4-business-routing.js';
 import { runLayer5 }      from './layers/layer5-ai-fallback.js';
 import { detectAcquisitionCostLink } from './layers/layer4-acquisition-link.js';
 import { categorizeIndustry, getIndustryProfile } from './industry/industry-profile.js';
+import { getActiveVocabularyTerms, withVocabularyTerms } from './industry/vocabulary-profile.js';
 import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
 import { prisma } from '../database/prisma.js';
@@ -229,7 +230,17 @@ export async function classifyDocument(input: ClassifierInput & {
 
   // ── Categoría de industria ─────────────────────────────────────────────────
   const industryCategory: IndustryCategory = categorizeIndustry(input.industry);
-  const industryProfile  = getIndustryProfile(industryCategory);
+  const staticIndustryProfile = getIndustryProfile(industryCategory);
+  let industryProfile = staticIndustryProfile;
+
+  try {
+    const vocabularyTerms = await getActiveVocabularyTerms(industryCategory);
+    industryProfile = withVocabularyTerms(staticIndustryProfile, vocabularyTerms);
+  } catch {
+    // El clasificador ya funcionaba sin esta lectura (por ejemplo en una tarea
+    // local sin base); conservar el perfil estático evita convertir una caída de
+    // infraestructura en una clasificación distinta.
+  }
 
   // ── Texto efectivo para clasificar ────────────────────────────────────────
   // Si hay texto enriquecido (de Groq OCR), lo usamos. Si no, el rawContent.
@@ -361,7 +372,7 @@ export async function classifyDocument(input: ClassifierInput & {
     : null;
 
   // ── Layer 4: routing de sección para la hipótesis elegida ───────────────────
-  const l4 = runLayer4(chosenType, text, industryCategory, extractedRole);
+  const l4 = runLayer4(chosenType, text, industryCategory, extractedRole, industryProfile);
 
   // ── Confianza a partir de la evidencia ──────────────────────────────────────
   // ⚠️ CAVEAT DE ESCALAS: las dos ramas NO están en la misma unidad, aunque
@@ -462,7 +473,13 @@ export async function classifyDocument(input: ClassifierInput & {
   });
 
   if (aiResult) {
-    const l4afterAI = runLayer4(aiResult.documentType, text, industryCategory, extractedRole);
+    const l4afterAI = runLayer4(
+      aiResult.documentType,
+      text,
+      industryCategory,
+      extractedRole,
+      industryProfile,
+    );
 
     // Una sola decisión: la sección que se guarda y el texto que se muestra
     // salen de acá y no se vuelven a tocar por separado.
