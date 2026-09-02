@@ -1,0 +1,139 @@
+import type { PrismaClient } from '@prisma/client';
+import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
+import { NotFoundError } from '../../domain/errors/domain-error.js';
+
+type NumeroTablero = {
+  valor: number | null;
+  completo: boolean;
+  parametrosSinConfirmar: boolean;
+  motivos: string[];
+};
+
+type ResultadoCorrida = {
+  grossMargin?: number;
+  incompletitud?: { incompleto?: boolean; motivos?: string[] };
+  detail?: { unitCost?: { unitFinishedGoodsCost?: number; basadoEn?: 'producidas' | 'vendidas' } };
+  contribucionMarginal?: {
+    incompleta: boolean;
+    precioUnitario: number;
+    unidadesVendidas: number;
+    costoVariableUnitario: number | null;
+    contribucionMarginalUnitaria: number | null;
+    componentes: Array<{ importeAbsorcion: number; comportamientoVolumen: string | null; parametroId: string | null }>;
+    motivos?: string[];
+  };
+  puntoEquilibrio?: {
+    incompleta: boolean;
+    unidadesEquilibrio: number | null;
+    fechaUltimoRecalculo: string;
+    motivos?: string[];
+    motivoSinEquilibrio?: string;
+  };
+};
+
+const incompleto = (motivos: string[], parametrosSinConfirmar = false): NumeroTablero => ({
+  valor: null, completo: false, parametrosSinConfirmar, motivos,
+});
+
+const completo = (valor: number, parametrosSinConfirmar: boolean, motivos: string[] = []): NumeroTablero => ({
+  valor, completo: motivos.length === 0, parametrosSinConfirmar, motivos,
+});
+
+/**
+ * Compone los seis indicadores del tablero sin recalcularlos. Lee una foto de
+ * CalculationRun del período y transforma solamente las unidades internas a la
+ * unidad de venta configurada (`cajon`).
+ */
+export class OwnerDashboardService {
+  constructor(private readonly db: PrismaClient = prisma) {}
+
+  async get(userId: string, periodId: string) {
+    const period = await withTenant(userId, (tx) => tx.costPeriod.findFirst({
+      where: { id: periodId, userId, deletedAt: null },
+      select: { id: true, code: true, companyId: true, productionQuantity: true, salesQuantity: true },
+    }));
+    if (!period) throw new NotFoundError('Período de costos no encontrado');
+
+    const [run, unidadVenta] = await Promise.all([
+      withTenant(userId, (tx) => tx.calculationRun.findFirst({
+        where: { periodId }, orderBy: [{ validated: 'desc' }, { executedAt: 'desc' }],
+        select: { id: true, validated: true, executedAt: true, results: true },
+      })),
+      withTenant(userId, (tx) => tx.unidadMedida.findFirst({
+        where: { companyId: period.companyId, codigo: 'cajon', deletedAt: null },
+        select: { factor: true },
+      })),
+    ]);
+
+    const sinCorrida = ['No hay una corrida de cálculo para este período.'];
+    if (!run) {
+      const falta = incompleto(sinCorrida);
+      return {
+        periodo: { id: period.id, codigo: period.code }, corrida: null,
+        costoPorCajon: { variable: falta, fijo: falta, total: falta },
+        precioPromedioVenta: falta, contribucionMarginalPorCajon: falta,
+        puntoEquilibrioCajones: { ...falta, fechaUltimoRecalculo: null },
+        producidoCajones: falta, resultadoPeriodo: falta,
+      };
+    }
+
+    const resultado = run.results as ResultadoCorrida;
+    const contribucion = resultado.contribucionMarginal;
+    const equilibrio = resultado.puntoEquilibrio;
+    const unidadesEquilibrio = equilibrio?.unidadesEquilibrio ?? null;
+    const factor = unidadVenta ? Number(unidadVenta.factor) : null;
+    const motivosBase = resultado.incompletitud?.incompleto ? (resultado.incompletitud.motivos ?? []) : [];
+    const idsParametros = contribucion?.componentes.map((c) => c.parametroId).filter((id): id is string => id !== null) ?? [];
+    const sinConfirmar = idsParametros.length > 0
+      ? await withTenant(userId, (tx) => tx.parametroCosteo.count({ where: { id: { in: idsParametros }, confirmado: false, deletedAt: null } })) > 0
+      : false;
+    const sinUnidad = factor === null ? ['Falta configurar la unidad de venta "cajon" con su factor de conversión.'] : [];
+    const baseUnidades = Number(period.productionQuantity ?? 0);
+    const sinProduccion = baseUnidades <= 0 ? ['Falta cargar una cantidad producida mayor a cero para el período.'] : [];
+    const sinVentas = !contribucion || contribucion.unidadesVendidas <= 0
+      ? ['Falta cargar ventas del período para obtener este indicador.']
+      : [];
+    const costosBase = [...motivosBase, ...sinUnidad, ...sinProduccion];
+    const costos = !contribucion || factor === null || baseUnidades <= 0 || resultado.detail?.unitCost?.unitFinishedGoodsCost == null
+      ? { variable: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], sinConfirmar), fijo: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], sinConfirmar), total: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], sinConfirmar) }
+      : {
+          variable: contribucion.costoVariableUnitario === null
+            ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], sinConfirmar)
+            : completo(contribucion.costoVariableUnitario * factor, sinConfirmar, motivosBase),
+          fijo: completo(
+            contribucion.componentes.filter((c) => c.comportamientoVolumen === 'FIJO').reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades * factor,
+            sinConfirmar,
+            motivosBase,
+          ),
+          total: completo(resultado.detail.unitCost.unitFinishedGoodsCost * factor, sinConfirmar, motivosBase),
+        };
+
+    const convertido = (numero: number | null, motivos: string[]): NumeroTablero =>
+      numero === null || factor === null || motivos.length > 0
+        ? incompleto([...motivos, ...sinUnidad], sinConfirmar)
+        : completo(numero * factor, sinConfirmar);
+
+    return {
+      periodo: { id: period.id, codigo: period.code },
+      corrida: { id: run.id, validada: run.validated, ejecutadaEn: run.executedAt.toISOString() },
+      costoPorCajon: costos,
+      precioPromedioVenta: convertido(contribucion?.precioUnitario ?? null, [...motivosBase, ...sinVentas]),
+      contribucionMarginalPorCajon: convertido(
+        contribucion?.incompleta ? null : (contribucion?.contribucionMarginalUnitaria ?? null),
+        [...motivosBase, ...sinVentas, ...(contribucion?.motivos ?? [])],
+      ),
+      puntoEquilibrioCajones: {
+        ...(equilibrio?.incompleta || unidadesEquilibrio === null || factor === null
+          ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], sinConfirmar)
+          : completo(unidadesEquilibrio / factor, sinConfirmar, motivosBase)),
+        fechaUltimoRecalculo: equilibrio?.fechaUltimoRecalculo ?? null,
+      },
+      producidoCajones: factor === null || baseUnidades <= 0
+        ? incompleto([...sinProduccion, ...sinUnidad])
+        : completo(baseUnidades / factor, false),
+      resultadoPeriodo: resultado.grossMargin == null || sinVentas.length > 0
+        ? incompleto([...motivosBase, ...sinVentas], sinConfirmar)
+        : completo(resultado.grossMargin, sinConfirmar, motivosBase),
+    };
+  }
+}
