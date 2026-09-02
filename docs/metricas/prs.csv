@@ -61,3 +61,6 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 222,200,AlanArevalo1,dev,2026-09-02T12:09:59Z,2026-09-02T16:15:53Z,4.1,8,130,0,8,0,,,docs/sesiones/2026-09-02-200-paquete-rubro.md
 223,,SantiagoBriz,dev,2026-09-02T15:59:46Z,2026-09-02T16:10:28Z,0.2,2,62,2,4,0,,,
 224,191,AlanArevalo1,dev,2026-09-02T17:01:57Z,2026-09-02T17:07:15Z,0.1,5,112,3,6,0,,,docs/sesiones/2026-09-02-191-punto-equilibrio.md
+225,,SantiagoBriz,dev,2026-09-02T17:07:02Z,2026-09-02T17:47:18Z,0.7,1,108,9,7,0,,,
+227,192,AlanArevalo1,dev,2026-09-02T17:47:03Z,2026-09-02T18:07:39Z,0.3,6,378,0,8,0,,30,docs/sesiones/2026-09-02-192-tablero-dueno.md
+228,193,AlanArevalo1,dev,2026-09-02T18:07:26Z,2026-09-02T19:50:32Z,1.7,8,364,3,9,0,,,docs/sesiones/2026-09-02-193-alerta-punto-equilibrio.md
