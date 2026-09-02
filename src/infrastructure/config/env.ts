@@ -41,6 +41,9 @@ const envSchema = z.object({
   // firma X-Hub-Signature-256 del webhook. Sin esto, el POST rechaza todo
   // (falla cerrado, no abierto).
   WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+  // Token del bot de Telegram. No tiene default: sin configuración el webhook
+  // rechaza la solicitud y no intenta asociar ni descargar archivos.
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
 
   BCRA_API_URL: z.string().url().default('https://api.bcra.gob.ar'),
   INDEC_API_URL: z.string().url().default('https://apis.datos.gob.ar/series/api'),
