@@ -197,8 +197,13 @@ enum CondicionIva {
 }
 
 model Company {
+  paquetesRubro        PaqueteRubro[]
   reglasAlerta         ReglaAlerta[]
   movimientosDeposito  MovimientoDeposito[]
+  eventosLote          EventoLote[]
+  produccionesDiarias  ProduccionDiaria[]
+  corridasProduccion   CorridaProduccion[]
+  consumosCorrida      ConsumoCorrida[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   depositos            Deposito[]
@@ -246,6 +251,46 @@ model Company {
 
   @@index([userId])
   @@map("companies")
+}
+
+enum DestinoCorrida {
+  PROPIA
+  TERCEROS
+}
+
+model CorridaProduccion {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId String @db.Uuid
+  referencia String
+  formula String
+  kilosReales Decimal @db.Decimal(18, 4)
+  destino DestinoCorrida
+  consumos ConsumoCorrida[]
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  @@unique([companyId, referencia])
+  @@index([companyId])
+  @@map("corridas_produccion")
+}
+
+/** costoUnitarioPpp is the inventory valuation snapshot; total is derived. */
+model ConsumoCorrida {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId String @db.Uuid
+  corridaId String @db.Uuid
+  corrida CorridaProduccion @relation(fields: [corridaId], references: [id], onDelete: Cascade)
+  material String
+  cantidad Decimal @db.Decimal(18, 4)
+  costoUnitarioPpp Decimal @db.Decimal(18, 6)
+  /** Reserved for the A-12 linkage; no duplicated stock calculation here. */
+  depositoId String? @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+  @@index([companyId, corridaId])
+  @@map("consumos_corrida")
 }
 
 // ---------------------------------------------------------------------------
@@ -2011,6 +2056,26 @@ model IndustryProfile {
   @@map("industry_profiles")
 }
 
+model PaqueteRubro {
+  id String @id @default(uuid()) @db.Uuid
+  category String
+  companyId String? @db.Uuid
+  structureId String? @db.Uuid
+  periodId String? @db.Uuid
+  userId String? @db.Uuid
+  lexicon Json
+  icons Json
+  variants Json
+  seedParameters Json
+  alertRules Json
+  screens Json
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  @@index([category, companyId, structureId, periodId])
+  @@map("paquetes_rubro")
+}
+
 // ---------------------------------------------------------------------------
 // UNIDADES DE MEDIDA Y PARÁMETROS DE COSTEO
 //
@@ -2246,14 +2311,93 @@ model LoteProductivo {
   referencia String
   activo     Boolean @default(true)
 
+  eventos EventoLote[]
+  produccionesDiarias ProduccionDiaria[]
+
   createdAt DateTime  @default(now()) @db.Timestamptz
   updatedAt DateTime  @updatedAt @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
 
+  @@unique([companyId, id])
   @@unique([companyId, referencia])
   @@index([companyId])
   @@index([unidadProductivaId])
   @@map("lotes_productivos")
+}
+
+/** Un movimiento físico del lote; nunca guarda la población resultante. */
+enum TipoEventoLote {
+  ALTA
+  BAJA
+}
+
+/**
+ * Causa operativa declarada para una baja. El motivo no determina por sí solo
+ * su tratamiento contable: esa decisión depende de evidencia adicional.
+ */
+enum MotivoBajaLote {
+  MORTALIDAD
+  DESCARTE
+  CANIBALISMO
+  FAENA
+}
+
+/**
+ * Hechos que modifican la población de un lote. `cantidadViva` no existe como
+ * columna: se deriva de las altas y de las bajas que ya tienen motivo.
+ *
+ * Una baja histórica/importada sin motivo se conserva para que pueda revisarse,
+ * pero no entra al saldo ni a ningún cálculo hasta que alguien la clasifique.
+ */
+model EventoLote {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  loteId String         @db.Uuid
+  lote   LoteProductivo @relation(fields: [companyId, loteId], references: [companyId, id], onDelete: Restrict)
+
+  tipo     TipoEventoLote
+  cantidad Decimal          @db.Decimal(18, 4)
+  motivo   MotivoBajaLote?
+  fecha    DateTime         @db.Date
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId, loteId, fecha])
+  @@index([loteId])
+  @@map("eventos_lote")
+}
+
+/**
+ * Producción física diaria de una variante. Las variantes son datos del paquete
+ * de rubro, por eso son texto y no un enum fijo del vertical.
+ */
+model ProduccionDiaria {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  loteId String         @db.Uuid
+  lote   LoteProductivo @relation(fields: [companyId, loteId], references: [companyId, id], onDelete: Restrict)
+
+  fecha               DateTime @db.Date
+  variante            String
+  unidadesProducidas  Decimal  @db.Decimal(18, 4)
+  roturas             Decimal  @default(0) @db.Decimal(18, 4)
+  descartes           Decimal  @default(0) @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, loteId, fecha, variante])
+  @@index([companyId, fecha])
+  @@index([loteId, fecha])
+  @@map("producciones_diarias")
 }
 
 // ---------------------------------------------------------------------------
