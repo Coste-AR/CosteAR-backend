@@ -15,6 +15,7 @@ import {
   CLAVES_COMPORTAMIENTO_CONTRIBUCION,
   type FilaComportamiento,
 } from '../../domain/calculations/contribucion-marginal.js';
+import { calcularPuntoEquilibrio } from '../../domain/calculations/punto-equilibrio.js';
 import { type TreeNode } from './tree-builder.js';
 import {
   MP_MOVEMENT_FIELD_KEYS,
@@ -312,9 +313,13 @@ export class CalculationRunService {
       contexto: { structureId, periodId: openPeriod?.id ?? null },
     });
 
+    // A-06: el punto de equilibrio es una vista persistida de la contribución,
+    // no un cálculo del frontend ni una modificación del motor de absorción.
+    const puntoEquilibrio = calcularPuntoEquilibrio(contribucionMarginal, new Date());
+
     // La marca y la vista adicional viven DENTRO de `results`: se persisten con
     // la corrida y no cambian los campos existentes del resultado de absorción.
-    const results = { ...output, incompletitud, contribucionMarginal };
+    const results = { ...output, incompletitud, contribucionMarginal, puntoEquilibrio };
 
     return withTenant(userId, async (tx) => {
       // Persistencia COMPARTIDA (misma que usará el motor de Procesos, B17): una
