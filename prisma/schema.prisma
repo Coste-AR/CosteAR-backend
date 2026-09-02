@@ -803,6 +803,12 @@ model OperatorMembership {
    */
   jobTitle String?
 
+  /**
+   * Chat privado que este operador vinculó al bot. Es único globalmente: un
+   * chat no puede inyectar datos en dos empresas.
+   */
+  telegramChatId String? @unique
+
   @@unique([operatorId, connectionId])
   @@index([operatorId])
   @@index([connectionId])
@@ -860,6 +866,7 @@ enum DataEntrySourceType {
   PDF
   IMAGE
   WHATSAPP
+  TELEGRAM
 }
 
 model DataEntry {

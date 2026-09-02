@@ -11,7 +11,7 @@ import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-en
 import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
 import { SystemAlertService } from '../system/system-alert-service.js';
 
-export type IngestSourceType = 'TEXT' | 'PDF' | 'IMAGE' | 'WHATSAPP';
+export type IngestSourceType = 'TEXT' | 'PDF' | 'IMAGE' | 'WHATSAPP' | 'TELEGRAM';
 
 export interface IngestInput {
   connectionId: string;
@@ -151,7 +151,8 @@ export async function ingestDataEntry(
   // ── Clasificador en cascada ─────────────────────────────────────────────────
   // El clasificador razona sobre TEXT | PDF | IMAGE; un mensaje de WhatsApp es
   // texto libre a todos los efectos (el enum de persistencia sí lo distingue).
-  const classifierSourceType = input.sourceType === 'WHATSAPP' ? 'TEXT' : input.sourceType;
+  const classifierSourceType =
+    input.sourceType === 'WHATSAPP' || input.sourceType === 'TELEGRAM' ? 'TEXT' : input.sourceType;
 
   const classification = await classifyDocument({
     text: input.rawContent || (input.fileName ?? ''),

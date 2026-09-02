@@ -39,6 +39,7 @@ import { registerAdminRoutes } from './routes/admin.routes.js';
 import { registerSystemAlertRoutes } from './routes/system-alert.routes.js';
 import { registerBenchmarkRoutes } from './routes/benchmark.routes.js';
 import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
+import { registerTelegramRoutes } from './routes/telegram.routes.js';
 import { registerTermsRoutes } from './routes/terms.routes.js';
 import { registerIndustryProfileRoutes } from './routes/industry-profile.routes.js';
 
@@ -171,6 +172,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // --- Webhooks ---
   await app.register(registerWhatsappRoutes);
+  await app.register(registerTelegramRoutes);
 
   // --- Rutas de la API (versionadas) ---
   const prefix = `/api/${env.API_VERSION}`;
