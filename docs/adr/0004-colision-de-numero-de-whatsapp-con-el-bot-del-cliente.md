@@ -1,8 +1,8 @@
 # 0004 — Colisión de número de WhatsApp con el bot del cliente
 
 - **Fecha:** 2026-08-18
-- **Estado:** **Abierta** — este ADR plantea las opciones, no elige
-- **Decide:** el equipo, con el cliente. **No el equipo técnico solo**
+- **Estado:** **Aceptada** — opción D, Telegram
+- **Decide:** el equipo, 2026-09-01
 - **Contexto de origen:** plan del vertical avícola, decisión D-06
 
 ## Contexto
@@ -21,9 +21,9 @@ Entonces hay que elegir, y **la elección no es técnica**: es sobre quién es e
 
 ## Decisión
 
-**Sin tomar.** Se documentan las tres opciones con sus consecuencias para que la decida quien corresponde.
-
-Este ADR se actualiza cuando se resuelva.
+**Aceptada: opción D, Telegram como canal propio de ingesta.** Cada bot tiene
+su webhook, por lo que evita la colisión de número y no altera el bot existente.
+La decisión es reversible: es una apuesta de piloto, no una afirmación de adopción.
 
 ## Las tres opciones
 
@@ -57,19 +57,39 @@ Damos de alta un número propio.
 | Es la más rápida de implementar y la más fácil de revertir | Un mensaje al número equivocado **se pierde igual** que antes |
 | Los datos entran directo, con trazabilidad completa | Hay que dar de alta y verificar un número nuevo con Meta |
 
-## Lo que hay que preguntarle al cliente para poder decidir
+### D · Telegram como canal propio de CosteAR (**aceptada**)
+
+Telegram evita la colisión de número: cada bot tiene webhook y el bot existente
+sigue sin cambios. Foto, audio y documento son nativos; el canal es una capa
+fina sobre la ingesta común y por eso es reversible.
+
+El costo es de adopción: las personas operativas pueden no querer otra
+aplicación. Los botones reducen fricción, pero no se asume adopción.
+
+## Plan B
+
+Si Telegram no se adopta durante el piloto, se usa la opción A: el bot existente
+reenvía los mensajes correspondientes sin rehacer la ingesta.
+
+## Preguntas abiertas para validar el piloto
+
+1. ¿Las personas operativas tienen Telegram instalado y estarían dispuestas a usarlo?
+2. ¿Qué hace hoy el bot existente y quién lo mantiene?
+3. ¿Prefieren un canal separado para CosteAR o que todo entre por el bot existente?
+
+## Preguntas históricas del análisis previo
 
 1. **¿Qué hace hoy su bot?** Si son cosas ajenas al costeo, B queda descartada.
 2. **¿Quién lo mantiene?** Si no hay nadie, A es frágil desde el día uno.
 3. **¿Cuántas personas mandan datos?** Con dos o tres, el riesgo de C —escribir al número equivocado— es manejable. Con quince, no.
 
-## Recomendación técnica, que no es la decisión
+## Recomendación previa (superada)
 
 Si hubiera que elegir **solo** por criterio técnico, **C** es la más segura: es la única que no nos ata a un sistema ajeno ni nos hace responsables de funcionalidad que no escribimos, y es la más fácil de deshacer si sale mal.
 
 Pero el costo de C lo paga el operario, no nosotros. **Esa parte de la decisión no es técnica.**
 
-## Consecuencia mientras siga abierta
+## Consecuencias
 
 Hoy el webhook **existe y funciona para texto**. Lo que no se puede hacer todavía es procesar fotos ni responder al remitente, porque falta el token de acceso a la Graph API — y ese token depende de qué número se use, o sea, de esta decisión.
 
