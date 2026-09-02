@@ -125,10 +125,108 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
   },
 ];
 
+/**
+ * Propuestas de comportamiento frente al volumen para el rubro de postura.
+ * `null` significa deliberadamente «no proponer»: no es equivalente a fijo.
+ */
+export interface DefinicionComportamiento {
+  clave: string;
+  descripcion: string;
+  propuesta: 'VARIABLE' | 'FIJO' | 'SEMIFIJO' | null;
+  fundamento: string;
+}
+
+export const CLASIFICACIONES_AVICOLA: DefinicionComportamiento[] = [
+  {
+    clave: 'comportamiento_materia_prima',
+    descripcion: 'Comportamiento frente al volumen de la materia prima consumida.',
+    propuesta: 'VARIABLE',
+    fundamento: 'El alimento y el empaque se consumen en función de la producción.',
+  },
+  {
+    clave: 'comportamiento_mano_obra_directa',
+    descripcion: 'Comportamiento frente al volumen de la mano de obra directa.',
+    propuesta: null,
+    fundamento: 'Depende de cómo se organice y remunere el trabajo de cada empresa.',
+  },
+  {
+    clave: 'comportamiento_costos_indirectos',
+    descripcion: 'Comportamiento frente al volumen de los costos indirectos de producción.',
+    propuesta: null,
+    fundamento: 'El rubro mezcla componentes variables, como energía, y fijos, como depreciación.',
+  },
+];
+
 const CATALOGO = new Map(PARAMETROS_AVICOLA.map((p) => [p.clave, p]));
+const CATALOGO_COMPORTAMIENTOS = new Map(CLASIFICACIONES_AVICOLA.map((p) => [p.clave, p]));
 
 export function definicionDe(clave: string): DefinicionParametro | undefined {
   return CATALOGO.get(clave);
+}
+
+export function definicionComportamientoDe(clave: string): DefinicionComportamiento | undefined {
+  return CATALOGO_COMPORTAMIENTOS.get(clave);
+}
+
+export interface FilaComportamiento {
+  clave: string;
+  comportamientoVolumen: 'VARIABLE' | 'FIJO' | 'SEMIFIJO' | null;
+  periodId: string | null;
+  structureId: string | null;
+  confirmado: boolean;
+  clasificadoPorUserId: string | null;
+  clasificadoEn: Date | null;
+}
+
+export interface ComportamientoResuelto {
+  clave: string;
+  comportamientoVolumen: 'VARIABLE' | 'FIJO' | 'SEMIFIJO' | null;
+  origen: OrigenParametro;
+  confirmado: boolean;
+  clasificadoPorUserId: string | null;
+  clasificadoEn: Date | null;
+  fundamento?: string;
+}
+
+/** Cascada de comportamiento: período → estructura → empresa → propuesta. */
+export function resolverComportamiento(
+  clave: string,
+  filas: FilaComportamiento[],
+  ctx: { periodId?: string | null; structureId?: string | null },
+): ComportamientoResuelto {
+  const delTema = filas.filter((f) => f.clave === clave && f.comportamientoVolumen !== null);
+  const buscar = (pred: (f: FilaComportamiento) => boolean, origen: OrigenParametro) => {
+    const fila = delTema.find(pred);
+    return fila
+      ? {
+          clave,
+          comportamientoVolumen: fila.comportamientoVolumen,
+          origen,
+          confirmado: fila.confirmado,
+          clasificadoPorUserId: fila.clasificadoPorUserId,
+          clasificadoEn: fila.clasificadoEn,
+        }
+      : null;
+  };
+  const encontrada =
+    (ctx.periodId ? buscar((f) => f.periodId === ctx.periodId, 'periodo') : null) ??
+    (ctx.structureId
+      ? buscar((f) => f.periodId === null && f.structureId === ctx.structureId, 'estructura')
+      : null) ??
+    buscar((f) => f.periodId === null && f.structureId === null, 'empresa');
+  if (encontrada) return encontrada;
+
+  const def = definicionComportamientoDe(clave);
+  if (!def) throw new Error(`No existe la clasificación de costo "${clave}".`);
+  return {
+    clave,
+    comportamientoVolumen: def.propuesta,
+    origen: 'default',
+    confirmado: false,
+    clasificadoPorUserId: null,
+    clasificadoEn: null,
+    fundamento: def.fundamento,
+  };
 }
 
 export interface ValorResuelto {
