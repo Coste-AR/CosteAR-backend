@@ -422,6 +422,20 @@ CREATE POLICY tenant_isolation ON lotes_productivos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE depositos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE depositos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON depositos;
+CREATE POLICY tenant_isolation ON depositos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE movimientos_deposito ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimientos_deposito FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON movimientos_deposito;
+CREATE POLICY tenant_isolation ON movimientos_deposito
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;

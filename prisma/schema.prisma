@@ -198,8 +198,10 @@ enum CondicionIva {
 
 model Company {
   reglasAlerta         ReglaAlerta[]
+  movimientosDeposito  MovimientoDeposito[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
+  depositos            Deposito[]
   unidadesMedida       UnidadMedida[]
   parametrosCosteo     ParametroCosteo[]
   unidadesProductivas  UnidadProductiva[]
@@ -2032,6 +2034,7 @@ model UnidadMedida {
   reglasAlerta         ReglaAlerta[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
+  depositos            Deposito[]
   id                   String                @id @default(uuid()) @db.Uuid
   companyId            String                @db.Uuid
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2178,6 +2181,52 @@ model UnidadProductiva {
   @@unique([companyId, referencia])
   @@index([companyId])
   @@map("unidades_productivas")
+}
+
+enum TipoMovimientoDeposito {
+  INGRESO
+  EGRESO
+}
+
+/** Almacén físico genérico; su nombre visible corresponde al paquete de rubro. */
+model Deposito {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid
+
+  referencia String
+  capacidad  Decimal @db.Decimal(18, 4)
+  unidadId   String  @db.Uuid
+  unidad     UnidadMedida @relation(fields: [unidadId], references: [id], onDelete: Restrict)
+  // Regla por depósito, expresada en la misma unidad física que sus movimientos.
+  umbralBajo Decimal @db.Decimal(18, 4)
+
+  movimientos MovimientoDeposito[]
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, referencia])
+  @@index([companyId])
+  @@map("depositos")
+}
+
+/** Hechos de entrada y salida; el nivel nunca se materializa. */
+model MovimientoDeposito {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid
+  depositoId String @db.Uuid
+  deposito Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+  tipo TipoMovimientoDeposito
+  cantidad Decimal @db.Decimal(18, 4)
+  fecha DateTime @db.Date
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@index([companyId, depositoId, fecha])
+  @@map("movimientos_deposito")
 }
 
 /**
