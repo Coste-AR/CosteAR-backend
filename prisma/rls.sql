@@ -422,6 +422,11 @@ CREATE POLICY tenant_isolation ON lotes_productivos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE paquetes_rubro ENABLE ROW LEVEL SECURITY;
+ALTER TABLE paquetes_rubro FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON paquetes_rubro;
+CREATE POLICY tenant_isolation ON paquetes_rubro USING ("userId" IS NULL OR "userId" = current_app_user_id()) WITH CHECK ("userId" IS NULL OR "userId" = current_app_user_id());
+
 ALTER TABLE eventos_lote ENABLE ROW LEVEL SECURITY;
 ALTER TABLE eventos_lote FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON eventos_lote;
