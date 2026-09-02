@@ -197,6 +197,7 @@ enum CondicionIva {
 }
 
 model Company {
+  paquetesRubro        PaqueteRubro[]
   reglasAlerta         ReglaAlerta[]
   eventosLote          EventoLote[]
   produccionesDiarias  ProduccionDiaria[]
@@ -2051,6 +2052,26 @@ model IndustryProfile {
   updatedAt       DateTime @updatedAt
 
   @@map("industry_profiles")
+}
+
+model PaqueteRubro {
+  id String @id @default(uuid()) @db.Uuid
+  category String
+  companyId String? @db.Uuid
+  structureId String? @db.Uuid
+  periodId String? @db.Uuid
+  userId String? @db.Uuid
+  lexicon Json
+  icons Json
+  variants Json
+  seedParameters Json
+  alertRules Json
+  screens Json
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  @@index([category, companyId, structureId, periodId])
+  @@map("paquetes_rubro")
 }
 
 // ---------------------------------------------------------------------------

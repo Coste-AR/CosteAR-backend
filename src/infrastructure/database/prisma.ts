@@ -78,6 +78,7 @@ export const RLS_MODELS = new Set([
   // Operación física genérica.
   'UnidadProductiva',
   'LoteProductivo',
+  'PaqueteRubro',
   'EventoLote',
   'ProduccionDiaria',
   'CorridaProduccion',
