@@ -441,6 +441,15 @@ CREATE POLICY tenant_isolation ON producciones_diarias
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE corridas_produccion ENABLE ROW LEVEL SECURITY;
+ALTER TABLE corridas_produccion FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON corridas_produccion;
+CREATE POLICY tenant_isolation ON corridas_produccion USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+ALTER TABLE consumos_corrida ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consumos_corrida FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consumos_corrida;
+CREATE POLICY tenant_isolation ON consumos_corrida USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;

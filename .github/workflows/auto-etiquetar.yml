@@ -145,12 +145,31 @@ jobs:
               borradas=${borradas:-0}
 
               case "$ruta" in
-                tests/*)
+                tests/*.test.*|tests/*.spec.*|tests/**/*.test.*|tests/**/*.spec.*)
                   # Solo aditivo. Ver guarda 2.
+                  #
+                  # LA GUARDA MIRA ARCHIVOS DE TEST, NO TODO LO QUE CUELGUE DE
+                  # tests/. La primera version usaba `tests/*` y rechazaba
+                  # `tests/db-dependent.mjs`, que NO es un test: es el registro
+                  # que declara que tests necesitan base de datos. Modificarlo
+                  # obliga a reemplazar lineas, asi que nunca podia ser
+                  # "puramente aditivo".
+                  #
+                  # El efecto fue exactamente el contrario al buscado: la guarda
+                  # que existe para impedir que alguien RECORTE un test bloqueo
+                  # el arreglo que hacia que un test CORRIERA. Paso el
+                  # 01-09-2026 con el PR #204 del backend.
                   if [ "$borradas" -ne 0 ]; then
-                    echo "NO APTO: $ruta borra $borradas linea(s). Solo se auto-etiqueta lo puramente aditivo."
+                    echo "NO APTO: $ruta borra $borradas linea(s). Un test solo se auto-etiqueta si es puramente aditivo."
                     apto=no
                   fi
+                  ;;
+                tests/*)
+                  # Lo demas bajo tests/ es infraestructura de la suite:
+                  # registros, fixtures compartidos, configuracion. Se permite
+                  # modificarlo — pero sigue sin poder BORRARSE, que lo cubre la
+                  # guarda 1 mas abajo.
+                  echo "  (infraestructura de tests) $ruta"
                   ;;
                 docs/*|bitacora/*)
                   ;;

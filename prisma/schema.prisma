@@ -201,6 +201,8 @@ model Company {
   reglasAlerta         ReglaAlerta[]
   eventosLote          EventoLote[]
   produccionesDiarias  ProduccionDiaria[]
+  corridasProduccion   CorridaProduccion[]
+  consumosCorrida      ConsumoCorrida[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   unidadesMedida       UnidadMedida[]
@@ -247,6 +249,46 @@ model Company {
 
   @@index([userId])
   @@map("companies")
+}
+
+enum DestinoCorrida {
+  PROPIA
+  TERCEROS
+}
+
+model CorridaProduccion {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId String @db.Uuid
+  referencia String
+  formula String
+  kilosReales Decimal @db.Decimal(18, 4)
+  destino DestinoCorrida
+  consumos ConsumoCorrida[]
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  @@unique([companyId, referencia])
+  @@index([companyId])
+  @@map("corridas_produccion")
+}
+
+/** costoUnitarioPpp is the inventory valuation snapshot; total is derived. */
+model ConsumoCorrida {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId String @db.Uuid
+  corridaId String @db.Uuid
+  corrida CorridaProduccion @relation(fields: [corridaId], references: [id], onDelete: Cascade)
+  material String
+  cantidad Decimal @db.Decimal(18, 4)
+  costoUnitarioPpp Decimal @db.Decimal(18, 6)
+  /** Reserved for the A-12 linkage; no duplicated stock calculation here. */
+  depositoId String? @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+  @@index([companyId, corridaId])
+  @@map("consumos_corrida")
 }
 
 // ---------------------------------------------------------------------------
