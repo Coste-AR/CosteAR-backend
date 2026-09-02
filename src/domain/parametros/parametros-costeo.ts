@@ -101,6 +101,16 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
       'HAY QUE VERIFICARLO con el productor antes de mostrarle un costo como suyo.',
   },
   {
+    clave: 'vida_util_producto_dias',
+    descripcion: 'Días de vida útil del producto terminado desde su producción.',
+    valorDefault: 7,
+    unidad: 'dia',
+    seguro: false,
+    nota:
+      'Valor de referencia no confirmado. Se resuelve como parámetro porque puede cambiar por estación ' +
+      'y la antigüedad del stock debe evaluarse contra el valor vigente de cada empresa.',
+  },
+  {
     clave: 'tamanos_huevo',
     descripcion:
       'Cuántos tamaños de huevo se clasifican y se stockean por separado. ' +

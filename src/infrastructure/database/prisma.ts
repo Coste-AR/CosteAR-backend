@@ -80,6 +80,7 @@ export const RLS_MODELS = new Set([
   'LoteProductivo',
   'EventoLote',
   'ProduccionDiaria',
+  'EgresoProducto',
   'Deposito',
   'MovimientoDeposito',
   'CorridaProduccion',

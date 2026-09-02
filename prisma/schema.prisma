@@ -202,6 +202,7 @@ model Company {
   movimientosDeposito  MovimientoDeposito[]
   eventosLote          EventoLote[]
   produccionesDiarias  ProduccionDiaria[]
+  egresosProducto      EgresoProducto[]
   corridasProduccion   CorridaProduccion[]
   consumosCorrida      ConsumoCorrida[]
   activosAmortizables  ActivoAmortizable[]
@@ -2390,6 +2391,8 @@ model ProduccionDiaria {
   roturas             Decimal  @default(0) @db.Decimal(18, 4)
   descartes           Decimal  @default(0) @db.Decimal(18, 4)
 
+  egresosProducto EgresoProducto[]
+
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
@@ -2398,6 +2401,26 @@ model ProduccionDiaria {
   @@index([companyId, fecha])
   @@index([loteId, fecha])
   @@map("producciones_diarias")
+}
+
+/**
+ * Egreso físico de una partida de producto terminado. No representa una venta:
+ * A-15 podrá enlazar sus comprobantes a este hecho sin duplicar el descuento
+ * del stock. El saldo siempre se deriva de producción menos estos egresos.
+ */
+model EgresoProducto {
+  id            String            @id @default(uuid()) @db.Uuid
+  companyId     String            @db.Uuid
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId        String            @db.Uuid // denormalizado para RLS
+  produccionId  String            @db.Uuid
+  produccion    ProduccionDiaria  @relation(fields: [produccionId], references: [id], onDelete: Restrict)
+  cantidad      Decimal           @db.Decimal(18, 4)
+  fecha         DateTime          @db.Date
+  createdAt     DateTime          @default(now()) @db.Timestamptz
+
+  @@index([companyId, produccionId, fecha])
+  @@map("egresos_producto")
 }
 
 // ---------------------------------------------------------------------------

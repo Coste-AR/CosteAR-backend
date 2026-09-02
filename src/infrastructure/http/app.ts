@@ -35,6 +35,7 @@ import { registerParametrosCosteoRoutes } from './routes/parametros-costeo.route
 import { registerActivoAmortizableRoutes } from './routes/activo-amortizable.routes.js';
 import { registerEventosLoteRoutes } from './routes/eventos-lote.routes.js';
 import { registerProduccionDiariaRoutes } from './routes/produccion-diaria.routes.js';
+import { registerStockProductoRoutes } from './routes/stock-producto.routes.js';
 import { registerCorridaProduccionRoutes } from './routes/corrida-produccion.routes.js';
 import { healthPayload } from './health.js';
 import { registerVaultRoutes } from './routes/vault.routes.js';
@@ -208,6 +209,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerProduccionDiariaRoutes(api);
+      await registerStockProductoRoutes(api);
       await registerCorridaProduccionRoutes(api);
       await registerVaultRoutes(api);
       await registerVaultProposalRoutes(api);
