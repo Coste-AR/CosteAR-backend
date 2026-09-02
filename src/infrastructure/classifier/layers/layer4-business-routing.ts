@@ -1,5 +1,5 @@
 import type { DocumentType, CostSection, IndustryCategory, AcquisitionCostLink } from '../types.js';
-import { getIndustryProfile } from '../industry/industry-profile.js';
+import { getIndustryProfile, type IndustryProfile } from '../industry/industry-profile.js';
 import { routePayroll } from './layer4-payroll-routing.js';
 import { routeNota, routeFacturaCompra } from './layer4-invoice-routing.js';
 
@@ -22,9 +22,10 @@ export function runLayer4(
   text: string,
   industryCategory: IndustryCategory = 'DEFAULT',
   extractedRole?: string | null,
+  profileOverride?: IndustryProfile,
 ): Layer4Result {
   const lower = text.toLowerCase();
-  const profile = getIndustryProfile(industryCategory);
+  const profile = profileOverride ?? getIndustryProfile(industryCategory);
 
   switch (documentType) {
     case 'LIQUIDACION_MOD':
