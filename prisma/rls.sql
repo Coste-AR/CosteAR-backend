@@ -422,12 +422,33 @@ CREATE POLICY tenant_isolation ON lotes_productivos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE paquetes_rubro ENABLE ROW LEVEL SECURITY;
+ALTER TABLE paquetes_rubro FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON paquetes_rubro;
+CREATE POLICY tenant_isolation ON paquetes_rubro USING ("userId" IS NULL OR "userId" = current_app_user_id()) WITH CHECK ("userId" IS NULL OR "userId" = current_app_user_id());
+
 ALTER TABLE eventos_lote ENABLE ROW LEVEL SECURITY;
 ALTER TABLE eventos_lote FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON eventos_lote;
 CREATE POLICY tenant_isolation ON eventos_lote
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE producciones_diarias ENABLE ROW LEVEL SECURITY;
+ALTER TABLE producciones_diarias FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON producciones_diarias;
+CREATE POLICY tenant_isolation ON producciones_diarias
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE corridas_produccion ENABLE ROW LEVEL SECURITY;
+ALTER TABLE corridas_produccion FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON corridas_produccion;
+CREATE POLICY tenant_isolation ON corridas_produccion USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+ALTER TABLE consumos_corrida ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consumos_corrida FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consumos_corrida;
+CREATE POLICY tenant_isolation ON consumos_corrida USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
 
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.

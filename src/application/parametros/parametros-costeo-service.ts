@@ -5,7 +5,9 @@ import { NotFoundError, UnprocessableEntityError } from '../../domain/errors/dom
 import {
   PARAMETROS_AVICOLA,
   definicionDe,
+  definicionComportamientoDe,
   resolverParametro,
+  resolverComportamiento,
   type ValorResuelto,
   type FilaParametro,
 } from '../../domain/parametros/parametros-costeo.js';
@@ -70,6 +72,21 @@ export class ParametrosCosteoService {
     }));
   }
 
+  private async filasComportamientoDe(companyId: string) {
+    return this.db.parametroCosteo.findMany({
+      where: { companyId, deletedAt: null },
+      select: {
+        clave: true,
+        comportamientoVolumen: true,
+        periodId: true,
+        structureId: true,
+        confirmado: true,
+        clasificadoPorUserId: true,
+        clasificadoEn: true,
+      },
+    });
+  }
+
   /**
    * Resuelve un parámetro puntual con la cascada período → estructura → empresa
    * → default del catálogo. El resultado dice de qué nivel salió (`origen`) y
@@ -80,14 +97,18 @@ export class ParametrosCosteoService {
     companyId: string,
     clave: string,
     ctx: { structureId?: string | null; periodId?: string | null } = {},
-  ): Promise<ValorResuelto> {
-    if (!definicionDe(clave)) {
+  ): Promise<ValorResuelto | ReturnType<typeof resolverComportamiento>> {
+    const definicion = definicionDe(clave);
+    const definicionComportamiento = definicionComportamientoDe(clave);
+    if (!definicion && !definicionComportamiento) {
       throw new NotFoundError(`No existe el parámetro de costeo "${clave}"`);
     }
     await this.companyDe(userId, companyId);
     await this.validarAlcance(companyId, ctx);
-    const filas = await this.filasDe(companyId);
-    return resolverParametro(clave, filas, ctx);
+    if (definicionComportamiento) {
+      return resolverComportamiento(clave, await this.filasComportamientoDe(companyId), ctx);
+    }
+    return resolverParametro(clave, await this.filasDe(companyId), ctx);
   }
 
   /**
@@ -121,7 +142,8 @@ export class ParametrosCosteoService {
     actor: TraceActor,
   ) {
     const definicion = definicionDe(clave);
-    if (!definicion) {
+    const definicionComportamiento = definicionComportamientoDe(clave);
+    if (!definicion && !definicionComportamiento) {
       throw new UnprocessableEntityError(`No existe el parámetro de costeo "${clave}"`, {
         field: 'clave',
       });
@@ -131,20 +153,37 @@ export class ParametrosCosteoService {
     const periodId = input.periodId ?? null;
     await this.validarAlcance(companyId, { structureId, periodId });
 
+    if (definicion && input.valor === undefined) {
+      throw new UnprocessableEntityError(`El parámetro "${clave}" requiere un valor numérico.`, { field: 'valor' });
+    }
+    if (definicionComportamiento && input.comportamientoVolumen === undefined) {
+      throw new UnprocessableEntityError(
+        `La clasificación "${clave}" requiere un comportamiento frente al volumen.`,
+        { field: 'comportamientoVolumen' },
+      );
+    }
+
     return withTenant(userId, async (tx) => {
       const existente = await tx.parametroCosteo.findFirst({
         where: { companyId, structureId, periodId, clave, deletedAt: null },
       });
 
+      const esComportamiento = Boolean(definicionComportamiento);
+      const clasificacion = input.comportamientoVolumen;
       const data: Prisma.ParametroCosteoUncheckedCreateInput = {
         companyId,
         userId,
         structureId,
         periodId,
         clave,
-        valorNum: input.valor,
+        valorNum: esComportamiento ? null : input.valor!,
         confirmado: input.confirmado,
-        descripcion: definicion.descripcion,
+        descripcion: definicionComportamiento?.descripcion ?? definicion!.descripcion,
+        comportamientoVolumen: clasificacion ?? null,
+        // Proponer no es confirmar: la semilla no atribuye una decisión a una
+        // persona. Una edición explícita sí deja el autor y reloj del servidor.
+        clasificadoPorUserId: esComportamiento ? actor.id : null,
+        clasificadoEn: esComportamiento ? new Date() : null,
       };
 
       const guardado = existente
@@ -161,7 +200,9 @@ export class ParametrosCosteoService {
           actor,
           before: existente ?? undefined,
           after: guardado,
-          comment: `Parámetro "${clave}" ${input.confirmado ? 'confirmado' : 'cargado sin confirmar'}: ${input.valor}`,
+          comment: esComportamiento
+            ? `Clasificación "${clave}" ${input.confirmado ? 'confirmada' : 'cargada sin confirmar'}: ${clasificacion}`
+            : `Parámetro "${clave}" ${input.confirmado ? 'confirmado' : 'cargado sin confirmar'}: ${input.valor}`,
         },
         tx,
       );

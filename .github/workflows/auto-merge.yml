@@ -248,6 +248,47 @@ jobs:
             echo "Todo verificado. Mergeando a $base con $metodo."
             if gh pr merge "$n" --repo "$REPO" $metodo --delete-branch; then
               echo "MERGEADO #$n -> $base"
+
+              # CERRAR EL ISSUE A MANO. GITHUB NO LO HACE.
+              #
+              # El `Closes #N` del cuerpo del PR deberia cerrar el issue solo, y
+              # NO LO HACE cuando el merge lo ejecuta este workflow: GitHub
+              # suprime las acciones en cascada de una operacion hecha con su
+              # propio GITHUB_TOKEN. Es la misma proteccion que impide que un
+              # workflow dispare otro.
+              #
+              # Se comprobo el 01-09-2026: cinco PR entraron con `Closes #N` y
+              # los cinco issues siguieron abiertos. La linea de tiempo mostraba
+              # `cross-referenced` y ningun `closed`. Agregar `issues: write`
+              # —que ya esta— NO alcanza: el permiso no era la causa.
+              #
+              # POR QUE NO ES UN DETALLE COSMETICO. El barrido que destraba
+              # issues (`desbloquear.yml`) se fija en que las dependencias esten
+              # CERRADAS. Sin este cierre, cada PR que entra congela a sus
+              # dependientes, en silencio y con todo lo demas en verde. Llego a
+              # haber cinco issues entregados y cuatro trabajos frenados por eso.
+              cuerpo_pr=$(gh pr view "$n" --repo "$REPO" --json body --jq '.body // ""')
+              cerrados=$(grep -oiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo_pr" | grep -oE '[0-9]+' | sort -u || true)
+
+              if [ -z "$cerrados" ]; then
+                echo "El PR no declara ningun issue. No hay nada que cerrar."
+              fi
+
+              for i in $cerrados; do
+                estado=$(gh issue view "$i" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "DESCONOCIDO")
+                if [ "$estado" = "CLOSED" ]; then
+                  echo "El #$i ya estaba cerrado."
+                  continue
+                fi
+                # El mensaje va en UNA linea fisica: un texto multilinea pegado
+                # a la columna cero adentro de `run: |` rompe el YAML entero.
+                nota=$(printf 'Cerrado por el PR #%s, que entro a `%s`.\n\nLo cierra este workflow y no GitHub: el `Closes` no dispara cuando el merge lo hace el token de Actions.\n' "$n" "$base")
+                if gh issue close "$i" --repo "$REPO" --comment "$nota" >/dev/null 2>&1; then
+                  echo "CERRADO el issue #$i"
+                else
+                  echo "::warning::No se pudo cerrar el issue #$i del PR #$n."
+                fi
+              done
             else
               echo "FALLO el merge de #$n. Queda abierto para que lo mire una persona."
             fi
