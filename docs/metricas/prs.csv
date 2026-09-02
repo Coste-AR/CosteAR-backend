@@ -54,3 +54,4 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 215,188,AlanArevalo1,dev,2026-09-02T00:39:58Z,2026-09-02T00:57:33Z,0.3,2,52,8,8,0,,,docs/sesiones/2026-09-02-188-adr-telegram.md
 217,190,AlanArevalo1,dev,2026-09-02T02:33:28Z,2026-09-02T02:57:17Z,0.4,7,317,10,6,0,,,docs/sesiones/2026-09-02-190-clasificacion-semilla.md
 219,195,AlanArevalo1,dev,2026-09-02T03:08:14Z,2026-09-02T03:27:30Z,0.3,18,783,0,5,0,,,docs/sesiones/2026-09-02-194-eventos-lote.md
+221,197,AlanArevalo1,dev,2026-09-02T11:48:36Z,2026-09-02T12:10:13Z,0.4,10,170,0,5,0,,,docs/sesiones/2026-09-02-197-corrida-produccion.md
