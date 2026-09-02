@@ -429,6 +429,13 @@ CREATE POLICY tenant_isolation ON eventos_lote
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE producciones_diarias ENABLE ROW LEVEL SECURITY;
+ALTER TABLE producciones_diarias FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON producciones_diarias;
+CREATE POLICY tenant_isolation ON producciones_diarias
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;
