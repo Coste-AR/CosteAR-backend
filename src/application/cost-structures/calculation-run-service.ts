@@ -16,6 +16,7 @@ import {
   type FilaComportamiento,
 } from '../../domain/calculations/contribucion-marginal.js';
 import { calcularPuntoEquilibrio } from '../../domain/calculations/punto-equilibrio.js';
+import { PuntoEquilibrioAlertService } from '../alerts/punto-equilibrio-alert-service.js';
 import { type TreeNode } from './tree-builder.js';
 import {
   MP_MOVEMENT_FIELD_KEYS,
@@ -334,6 +335,16 @@ export class CalculationRunService {
         results,
         tree,
         audit: { actor, after: { grossMargin: output.grossMargin, grossMarginPct: output.grossMarginPct } },
+      });
+
+      await new PuntoEquilibrioAlertService().evaluar(tx, {
+        userId,
+        companyId: s.companyId,
+        structureId,
+        periodId: openPeriod?.id ?? null,
+        runId: run.id,
+        puntoEquilibrio,
+        fecha: new Date(),
       });
 
       // T-07 — UNA corrida del motor, DOS persistencias.
