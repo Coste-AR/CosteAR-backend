@@ -1,0 +1,241 @@
+# Registra, solo, lo medible de cada PR que entra.
+#
+# POR QUE EXISTE
+#
+# La bitacora de sesion que escribe el agente ya cuenta QUE decidio y donde el
+# issue no alcanzaba — eso es prosa y tiene que seguir siendolo, porque es lo
+# que se lee. Pero lo medible en prosa no se puede sumar: cuanto tardo cada
+# issue, cuantos intentos hasta el verde, cuantas veces fallo el CI. Sin esos
+# numeros, "el proceso mejora" es una impresion.
+#
+# Y anotarlo a mano no funciona. Ya paso con el SHA de los deploys: el runbook
+# lo pedia, nadie lo anotaba, y cuando hubo que responder "esto afecta al
+# cliente?" nadie sabia que version corria. Lo que no se recoge solo, no se
+# recoge.
+#
+# POR QUE BARRIDO POR CRON Y NO UN EVENTO DE `pull_request: closed`
+#
+# Asi estaba escrito la primera vez, y NO FUNCIONABA. GitHub, por diseño, no
+# dispara workflows a partir de acciones hechas con el GITHUB_TOKEN del propio
+# Actions — es la proteccion contra recursion infinita. Como acá los PR los
+# mergea `auto-merge.yml`, que corre con ese token, el evento `closed` nunca
+# llega a existir.
+#
+# Se comprobo el 01-09-2026: se mergeo un PR de prueba, `merged_by` quedo como
+# `github-actions[bot]`, y no hubo ni una corrida de este workflow.
+#
+# El barrido no depende de quien hizo la accion, y ademas se auto-repara: si
+# una corrida falla o se pierde, la siguiente levanta lo que falto. Un evento
+# perdido, en cambio, no vuelve.
+#
+# QUE RECOGE, Y DE DONDE
+#
+#   De GitHub, sin que nadie escriba nada: horas entre apertura y merge, lineas
+#   agregadas y borradas, archivos tocados, cuantas corridas de CI hubo y
+#   cuantas fallaron —que son los intentos hasta el verde— y que issue cerro.
+#
+#   De la bitacora que escribio el agente, si la escribio: tokens consumidos y
+#   tiempo de sesion, tal como los reporto.
+#
+# LO QUE NO INVENTA
+#
+# Si un dato no esta, la celda queda vacia. Nunca se estima. Un numero
+# inventado en una tabla que despues alguien promedia es peor que un hueco: el
+# hueco se ve, el invento no.
+name: Metricas de PR
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # `write` y no `read`: este workflow ABRE un PR con las filas nuevas, no
+  # pushea a la base. Con `read` alcanzaba para leer los PR mergeados y fallaba
+  # recien al final, despues de haber hecho todo el trabajo.
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: metricas-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  registrar:
+    name: metricas (este mismo workflow)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Anotar los PR mergeados que todavia no estan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          ARCHIVO="docs/metricas/prs.csv"
+
+          # SE TRABAJA EN UN TEMPORAL, FUERA DEL ARBOL DEL REPO.
+          # El checkout es de la rama base, pero el CSV vive en la rama
+          # `metricas`. Escribir dentro del arbol y despues cambiar de rama deja
+          # el archivo sin commitear estorbando el checkout.
+          TMPCSV="${RUNNER_TEMP:-/tmp}/prs.csv"
+
+          # El estado actual sale de la rama `metricas`, si ya existe.
+          if ! gh api "repos/$REPO/contents/$ARCHIVO?ref=metricas" --jq '.content' 2>/dev/null \
+                | base64 -d > "$TMPCSV" 2>/dev/null; then
+            echo "pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_ci,fallas_ci,tokens,minutos_sesion,bitacora" > "$TMPCSV"
+          fi
+
+          # Los que ya estan anotados. La idempotencia es el corazon de un
+          # barrido: sin esto, cada corrida duplicaria todo.
+          cut -d, -f1 "$TMPCSV" | tail -n +2 | sort -u > ya.txt
+
+          nuevos=0
+
+          for n in $(gh pr list --repo "$REPO" --state merged --limit 50 --json number --jq '.[].number' | sort -n); do
+            if grep -qx "$n" ya.txt; then continue; fi
+
+            echo "::group::PR #$n"
+
+            info=$(gh pr view "$n" --repo "$REPO" \
+              --json author,baseRefName,createdAt,mergedAt,additions,deletions,files,body,headRefName)
+
+            autor=$(jq -r '.author.login' <<<"$info")
+            base=$(jq -r '.baseRefName' <<<"$info")
+            abierto=$(jq -r '.createdAt' <<<"$info")
+            mergeado=$(jq -r '.mergedAt' <<<"$info")
+            agregadas=$(jq -r '.additions' <<<"$info")
+            borradas=$(jq -r '.deletions' <<<"$info")
+            archivos=$(jq -r '.files | length' <<<"$info")
+            rama=$(jq -r '.headRefName' <<<"$info")
+            cuerpo=$(jq -r '.body // ""' <<<"$info")
+
+            # Que issue cerro. Vacio = entro sin alcance declarado, y ese hueco
+            # es en si mismo el hallazgo.
+            issue=$(grep -oiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo" | grep -oE '[0-9]+' | head -1 || true)
+
+            # HORAS ENTRE APERTURA Y MERGE.
+            # Con `date` y `awk`, no con un python embebido: un script
+            # multilinea deja lineas en la columna cero adentro del bloque
+            # `run: |` y eso ROMPE EL YAML ENTERO, en silencio. Ya paso.
+            seg_a=$(date -u -d "$abierto" +%s 2>/dev/null || echo "")
+            seg_m=$(date -u -d "$mergeado" +%s 2>/dev/null || echo "")
+            horas=""
+            if [ -n "$seg_a" ] && [ -n "$seg_m" ]; then
+              horas=$(awk -v a="$seg_a" -v m="$seg_m" 'BEGIN{printf "%.1f", (m-a)/3600}')
+            fi
+
+            # CORRIDAS Y FALLAS DE CI, ACOTADAS A LA VIDA DEL PR.
+            #
+            # Las fallas son el dato mas util de la fila —son los intentos
+            # hasta el verde, sin depender de que el agente los cuente—, pero
+            # solo si el conteo es real.
+            #
+            # La primera version contaba TODAS las corridas de la rama. Para un
+            # PR de promocion, cuya rama es `dev` o `staging`, eso devolvia 100:
+            # el tope de la paginacion sobre una rama que acumula cientos de
+            # corridas. Un 100 que no es un conteo sino un techo es exactamente
+            # el numero falso contra el que advierte el README de esta carpeta:
+            # el hueco se ve, el invento no.
+            #
+            # Acotarlo a la ventana entre apertura y merge lo arregla para los
+            # dos casos: en una rama de trabajo son sus propias corridas, y en
+            # una promocion son las que corrieron por ese PR.
+            runs=$(gh api "repos/$REPO/actions/runs?branch=$rama&per_page=100" 2>/dev/null || echo '{"workflow_runs":[]}')
+            corridas=$(jq --arg a "$abierto" --arg m "$mergeado" \
+              '[.workflow_runs[] | select(.created_at >= $a and .created_at <= $m)] | length' <<<"$runs")
+            fallas=$(jq --arg a "$abierto" --arg m "$mergeado" \
+              '[.workflow_runs[] | select(.created_at >= $a and .created_at <= $m and .conclusion == "failure")] | length' <<<"$runs")
+
+            # De la bitacora del agente, si la escribio. No se le reclama acá:
+            # la ausencia queda como celda vacia y se ve sola en la tabla.
+            bitacora=$(jq -r '.files[].path' <<<"$info" | grep -E '^docs/sesiones/.*\.md$' | head -1 || true)
+            tokens=""
+            minutos=""
+            if [ -n "$bitacora" ]; then
+              texto=$(gh api "repos/$REPO/contents/$bitacora?ref=$base" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+              if [ -n "$texto" ]; then
+                tokens=$(grep -iE '^\|[[:space:]]*Tokens consumidos' <<<"$texto" | grep -oE '[0-9][0-9.]*' | head -1 || true)
+                minutos=$(grep -iE '^\|[[:space:]]*Tiempo de la sesi' <<<"$texto" | grep -oE '[0-9]+' | head -1 || true)
+              fi
+            fi
+
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+              "$n" "${issue:-}" "$autor" "$base" "$abierto" "$mergeado" "${horas:-}" \
+              "$archivos" "$agregadas" "$borradas" "$corridas" "$fallas" \
+              "${tokens:-}" "${minutos:-}" "${bitacora:-}" >> "$TMPCSV"
+
+            nuevos=$((nuevos + 1))
+            tail -1 "$TMPCSV"
+            echo "::endgroup::"
+          done
+
+          rm -f ya.txt
+
+          if [ "$nuevos" -eq 0 ]; then
+            echo "Nada nuevo que anotar."
+            exit 0
+          fi
+
+          echo "$nuevos fila(s) nueva(s)."
+
+          # LAS METRICAS VIVEN EN SU PROPIA RAMA `metricas`, NO EN dev.
+          #
+          # Se probaron las otras dos formas y las dos chocaron con un limite
+          # real, no con un bug:
+          #
+          #   1. Push directo a `dev`. Funciono en `CosteAR-admin` y fallo en
+          #      los otros dos: `dev` tiene proteccion de rama y la proteccion
+          #      rechaza el push aunque el token tenga `contents: write`. Los
+          #      tres reintentos no servian: estaban escritos para una carrera
+          #      entre escrituras, y el problema era un permiso.
+          #
+          #   2. Abrir un PR. GitHub responde
+          #      "GitHub Actions is not permitted to create or approve pull
+          #      requests": es un ajuste del repo, apagado por defecto.
+          #      Encenderlo le da a CUALQUIER workflow la capacidad de abrir
+          #      PR, y eso no se decide para resolver un archivo de metricas.
+          #
+          # Una rama propia no necesita permisos nuevos ni ajustes, y separa
+          # bien las dos cosas: `dev` es el codigo del producto, `metricas` es
+          # lo que el proceso dice de si mismo. Se lee en GitHub como cualquier
+          # rama.
+          RAMA_M="metricas"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin "$RAMA_M" >/dev/null 2>&1; then
+            git fetch -q origin "$RAMA_M"
+            git checkout -q -B "$RAMA_M" "origin/$RAMA_M"
+            mkdir -p docs/metricas
+            cp "$TMPCSV" "$ARCHIVO"
+          else
+            echo "La rama $RAMA_M no existe todavia: se crea."
+            git checkout -q --orphan "$RAMA_M"
+            git rm -rq --cached . 2>/dev/null || true
+            find . -mindepth 1 -maxdepth 1 -not -name '.git' -not -name 'docs' -exec rm -rf {} + 2>/dev/null || true
+            mkdir -p docs/metricas
+            cp "$TMPCSV" "$ARCHIVO"
+          fi
+
+          git add "$ARCHIVO"
+          if git diff --cached --quiet; then
+            echo "Sin cambios."; exit 0
+          fi
+
+          git commit -q -m "chore(metricas): $nuevos PR anotados"
+
+          for intento in 1 2 3; do
+            if git push -q origin "$RAMA_M"; then
+              echo "Anotado en la rama $RAMA_M."
+              exit 0
+            fi
+            echo "Push rechazado (intento $intento). Reintento sobre la rama nueva."
+            git pull -q --rebase origin "$RAMA_M" || true
+          done
+
+          echo "::warning::No se pudo anotar despues de 3 intentos. La proxima corrida lo levanta."

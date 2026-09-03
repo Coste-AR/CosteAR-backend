@@ -44,8 +44,10 @@ equipo y no se automatizan acá.
 4. **Lint:** `npm run lint` *(saltear en admin: todavía no tiene ESLint)*
 5. **Typecheck:** `npm run typecheck`
 6. **Backend, si tocó RLS, aislamiento o queries:** `npm run test:integration`
-7. **Si tocó UI o un flujo:** preguntar explícitamente si se probó en el navegador. **No asumir
-   que sí.** Un flujo roto con los tests en verde ya pasó.
+7. **Si tocó pantalla (frontend o admin):** `npm run test:e2e`, y la captura queda **adjunta al
+   PR**. No se le pregunta a nadie si lo probó en el navegador: ese criterio **salió de la
+   Definition of Done el 30-08-2026** y lo reemplazó la suite E2E con evidencia adjunta. El
+   canónico es `DEFINITION-OF-DONE.md` (vive en `CosteAR-admin`; los otros dos repos enlazan ahí).
 
 Si algo falla → **se arregla primero**. Pedir review con el CI en rojo le hace perder el tiempo
 a otro.
@@ -136,18 +138,24 @@ Ya existía una regla escrita para evitarlo (REV-08, del 18-08) y volvió a pasa
 # 1. Se abre en borrador y se sigue trabajando tranquilo
 gh pr create --base dev --draft --title "..." --body "..."
 
-# 2. Cuando de verdad está listo (tests, lint, typecheck, ADR si corresponde):
-gh pr ready
+# 2. Poné la rama al día con dev antes de marcarlo listo:
+gh pr update-branch <numero>
 
-# 3. Y en vez de esperar a que el CI termine mirando la pantalla:
-gh pr merge --auto --squash
+# 3. Cuando de verdad está listo (tests, lint, typecheck, ADR si corresponde):
+gh pr ready
 ```
 
-**`--auto` es la otra mitad.** GitHub mergea solo cuando los checks pasan. Nadie espera a nadie y
-nadie mergea a mano en el medio.
+**Ahí termina tu parte.** No corras `gh pr merge` — tampoco con `--auto`. Desde el 30-08-2026 el
+merge lo hace `.github/workflows/auto-merge.yml`, y sólo cuando el PR tiene **todos sus checks en
+verde** y **la etiqueta `auto-merge`**. La etiqueta la pone Santiago: es el juicio humano que
+**reemplaza al review**, porque no hay reviews requeridos en estos repos.
 
-> ⚠️ **`CosteAR-admin` no soporta auto-merge**: es privado y el plan Free no lo incluye. Ahí el
-> draft sigue funcionando igual; el merge se hace a mano una vez que el CI está verde.
+> ⚠️ Este skill decía antes `gh pr merge --auto --squash`. Quedó obsoleto el 30-08-2026: el
+> auto-merge nativo de GitHub sólo actúa donde hay protección de rama, y `CosteAR-admin` no la
+> tiene. Por eso el workflow verifica los checks él mismo, igual en los tres repos.
+
+**El canónico de quién hace qué es `CosteAR-os/ORQUESTACION.md`.** Si este archivo lo contradice,
+manda ese y este está viejo.
 
 ### Cuándo marcar `ready`
 
@@ -200,11 +208,10 @@ Y correr **`/costear-bitacora`** para registrar la sesión.
 ## Gotchas conocidos
 
 - **`main` y `staging` están protegidos** en backend y frontend: exigen PR y **el CI en verde**.
-  `dev` también. Si `gh pr merge` falla por los checks, no es un error de la skill.
+  `dev` también. Si el auto-merge no entra por los checks, no es un error de la skill.
 - **El review NO bloquea el merge** (decisión del equipo del 15-08-2026: con 4 personas, exigir
-  aprobación trababa el trabajo). Sigue siendo parte del proceso, pero como práctica: **pedile
-  review a alguien antes de mergear algo que toque lógica de negocio o plata del cliente.**
-  Nadie te lo va a impedir — por eso depende de vos.
+  aprobación trababa el trabajo). Desde el 30-08-2026 lo que ocupa su lugar es **la etiqueta
+  `auto-merge`**: sin ella no entra nada, y la pone una persona. **Esa etiqueta es el review.**
 - **`CosteAR-admin` es privado y no tiene protección forzada** (limitación del plan Free de
   GitHub). Las reglas valen igual, por acuerdo.
 - El CI del backend tiene **dos jobs** (`build-and-test` e `integration-tests`) y los dos son

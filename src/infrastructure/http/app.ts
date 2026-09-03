@@ -26,12 +26,17 @@ import { registerAllocationBaseRoutes } from './routes/allocation-base.routes.js
 import { registerProcessDepartmentRoutes } from './routes/process-department.routes.js';
 import { registerProcessSetupRoutes } from './routes/process-setup.routes.js';
 import { registerUnitMovementRoutes } from './routes/unit-movement.routes.js';
+import { registerDepositoRoutes } from './routes/deposito.routes.js';
 import { registerJointCostRoutes } from './routes/joint-cost.routes.js';
 import { registerProcessCalculationRoutes } from './routes/process-calculation.routes.js';
 import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
+import { registerOwnerDashboardRoutes } from './routes/owner-dashboard.routes.js';
 import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
 import { registerParametrosCosteoRoutes } from './routes/parametros-costeo.routes.js';
 import { registerActivoAmortizableRoutes } from './routes/activo-amortizable.routes.js';
+import { registerEventosLoteRoutes } from './routes/eventos-lote.routes.js';
+import { registerProduccionDiariaRoutes } from './routes/produccion-diaria.routes.js';
+import { registerCorridaProduccionRoutes } from './routes/corrida-produccion.routes.js';
 import { healthPayload } from './health.js';
 import { registerVaultRoutes } from './routes/vault.routes.js';
 import { registerVaultProposalRoutes } from './routes/vault-proposal.routes.js';
@@ -39,6 +44,7 @@ import { registerAdminRoutes } from './routes/admin.routes.js';
 import { registerSystemAlertRoutes } from './routes/system-alert.routes.js';
 import { registerBenchmarkRoutes } from './routes/benchmark.routes.js';
 import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
+import { registerTelegramRoutes } from './routes/telegram.routes.js';
 import { registerTermsRoutes } from './routes/terms.routes.js';
 import { registerIndustryProfileRoutes } from './routes/industry-profile.routes.js';
 
@@ -171,6 +177,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // --- Webhooks ---
   await app.register(registerWhatsappRoutes);
+  await app.register(registerTelegramRoutes);
 
   // --- Rutas de la API (versionadas) ---
   const prefix = `/api/${env.API_VERSION}`;
@@ -192,13 +199,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerAllocationBaseRoutes(api);
       await registerProcessDepartmentRoutes(api);
       await registerProcessSetupRoutes(api);
-  await registerUnitMovementRoutes(api);
+      await registerUnitMovementRoutes(api);
+      await registerDepositoRoutes(api);
       await registerJointCostRoutes(api);
       await registerProcessCalculationRoutes(api);
       await registerCostPeriodRoutes(api);
+      await registerOwnerDashboardRoutes(api);
       await registerDesperdicioRoutes(api);
       await registerParametrosCosteoRoutes(api);
       await registerActivoAmortizableRoutes(api);
+      await registerEventosLoteRoutes(api);
+      await registerProduccionDiariaRoutes(api);
+      await registerCorridaProduccionRoutes(api);
       await registerVaultRoutes(api);
       await registerVaultProposalRoutes(api);
       await registerAdminRoutes(api);

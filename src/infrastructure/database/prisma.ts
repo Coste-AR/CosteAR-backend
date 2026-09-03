@@ -75,6 +75,16 @@ export const RLS_MODELS = new Set([
   // S-02 del vertical avicola: parametros de costeo y unidades de medida.
   'UnidadMedida',
   'ParametroCosteo',
+  // Operación física genérica.
+  'UnidadProductiva',
+  'LoteProductivo',
+  'EventoLote',
+  'ProduccionDiaria',
+  'Deposito',
+  'MovimientoDeposito',
+  'CorridaProduccion',
+  'ConsumoCorrida',
+  'PaqueteRubro',
   // S-03 y S-04.
   'ActivoAmortizable',
   'DesperdicioRegistro',

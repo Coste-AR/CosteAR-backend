@@ -98,10 +98,10 @@ describe('#115 — resolución de parámetros de costeo', () => {
     ).rejects.toThrow(NotFoundError);
   });
 
-  it('`listar` resuelve las 8 claves del catálogo avícola', async () => {
+  it('`listar` resuelve las 9 claves del catálogo avícola', async () => {
     const db = makeDb();
     const r = await service(db).listar(USER, 'comp-1');
-    expect(r).toHaveLength(8);
+    expect(r).toHaveLength(9);
     expect(r.map((p) => p.clave)).toContain('umbral_merma_normal_pct');
   });
 

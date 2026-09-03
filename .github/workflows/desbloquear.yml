@@ -1,0 +1,217 @@
+# Destraba solo los issues que esperaban a otro.
+#
+# EL PROBLEMA QUE RESUELVE
+#
+# Un agente de Codex arranca frio y no puede preguntar. Si el reparto de
+# trabajo depende de que una persona le mande el proximo issue, el desarrollo
+# se frena cada vez que esa persona no esta.
+#
+# COMO FUNCIONA
+#
+# Cada issue bloqueado declara de que depende, en una linea del cuerpo:
+#
+#     Depende de #123                          <- un issue de ESTE repo
+#     Depende de Coste-AR/CosteAR-backend#194  <- un issue de OTRO repo
+#
+# Este barrido recorre los issues abiertos con la etiqueta `bloqueado`, mira si
+# TODAS sus dependencias estan cerradas, y a los que ya no esperan nada les
+# saca `bloqueado`, les pone `listo` y les deja un comentario.
+#
+# POR QUE BARRIDO POR CRON Y NO UN EVENTO DE `issues: closed`
+#
+# Asi estaba escrito la primera vez, y NO FUNCIONABA. GitHub, por diseño, no
+# dispara workflows a partir de acciones hechas con el GITHUB_TOKEN del propio
+# Actions. Como los issues los cierra el merge que hace `auto-merge.yml` con
+# ese token, el evento `closed` nunca llega a existir.
+#
+# Se comprobo el 01-09-2026 sobre un PR de prueba: `merged_by` quedo como
+# `github-actions[bot]` y no se disparo ningun workflow encadenado.
+#
+# El barrido no depende de quien cerro el issue, y ademas se auto-repara: si
+# una corrida se pierde, la siguiente levanta lo que falto. Un evento perdido
+# no vuelve nunca.
+#
+# POR QUE LEE EL CUERPO DEL ISSUE
+#
+# Es lo unico que el agente ve sin permisos extra ni una consulta aparte. La
+# dependencia tiene que estar donde el agente ya esta mirando, o vuelve a ser
+# conocimiento que vive fuera del issue — la falla que perseguimos toda la
+# tanda B0.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# CRUZAR REPOS (02-09-2026)
+#
+# Hasta hoy el barrido solo miraba issues de su propio repo. La consecuencia se
+# midio: `frontend#96` quedo `bloqueado` con sus dos dependencias del backend
+# YA CERRADAS, y arrastro al `#97` y al `#98` — tres issues detenidos por una
+# etiqueta que sobro, con el trabajo del que dependian ya en `dev`.
+#
+# NO HACE FALTA NINGUN TOKEN NUEVO, y conviene entender por que antes de
+# tocarlo:
+#
+#   - Este barrido solo ESCRIBE en su propio repo. Las etiquetas y el
+#     comentario van sobre issues de aca, que es lo que el GITHUB_TOKEN cubre.
+#   - De los otros repos solo LEE el estado de un issue. `CosteAR-backend` y
+#     `CosteAR-frontend` son publicos, y un token autenticado puede leer un
+#     repo publico aunque este fuera de su alcance de escritura. Todas las
+#     dependencias entre repos que existen hoy son frontend -> backend.
+#
+# La excepcion es `CosteAR-admin`, que es PRIVADO: el GITHUB_TOKEN de otro repo
+# no lo puede leer. Si algun dia un issue depende de uno de admin, esa lectura
+# va a fallar — y este barrido NO ADIVINA: lo deja bloqueado y lo dice en el
+# log. Es preferible un issue que espera de mas a uno que se manda a la cola
+# porque no se pudo verificar. Si eso pasa seguido, ahi si hace falta un token
+# con permiso en los tres repos, y esa es una decision de Santiago.
+#
+# LA TRAMPA DEL `#N` SUELTO
+#
+# Un issue real escribia esto:
+#
+#     Depende de `Coste-AR/CosteAR-backend#194` y `#195`
+#
+# Para una persona es obvio que el `#195` es del backend. Para un parser no lo
+# es: `#195` significa "de este repo" en todos los demas casos. Resolverlo
+# "razonablemente" —heredar el repo del ref anterior— es como se fabrica un
+# barrido que acierta casi siempre y un dia destraba el issue equivocado.
+#
+# Por eso: `#N` es SIEMPRE de este repo, y una linea que mezcla un ref con repo
+# y uno suelto se considera AMBIGUA. No se destraba y se avisa. La forma de
+# arreglarlo es escribir los dos refs completos en el issue, no ablandar esto.
+name: Desbloquear issues
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: desbloquear-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  desbloquear:
+    name: desbloquear (este mismo workflow)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Destrabar lo que ya no espera a nadie
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          candidatos=$(gh issue list --repo "$REPO" --state open --label bloqueado \
+            --limit 200 --json number,title,body)
+
+          total=$(jq 'length' <<<"$candidatos")
+          echo "$total issue(s) con la etiqueta bloqueado."
+
+          echo "$candidatos" | jq -c '.[]' | while read -r issue; do
+            n=$(jq -r '.number' <<<"$issue")
+            titulo=$(jq -r '.title' <<<"$issue")
+            cuerpo=$(jq -r '.body // ""' <<<"$issue")
+
+            echo "::group::#$n — $titulo"
+
+            # Solo las lineas que declaran dependencia. Se recorren de a una
+            # porque la deteccion de ambiguedad es POR LINEA: mezclar un ref
+            # con repo y uno suelto solo es ambiguo si estan en la misma frase.
+            lineas=$(grep -E 'Depende de' <<<"$cuerpo" || true)
+
+            if [ -z "$lineas" ]; then
+              # Bloqueado sin decir por que. No se destraba solo: si el agente
+              # no puede saber que espera, una persona tiene que mirarlo.
+              echo "Sin linea 'Depende de ...'. Queda como esta; hay que revisarlo a mano."
+              echo "::endgroup::"; continue
+            fi
+
+            # deps queda como una lista de "owner/repo#N", ya normalizada: el
+            # resto del barrido no vuelve a preguntarse si un ref era local.
+            deps=""
+            ambigua=""
+
+            while IFS= read -r linea; do
+              [ -n "$linea" ] || continue
+
+              # Refs con repo explicito: Coste-AR/CosteAR-backend#194
+              quals=$(grep -oE '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+' <<<"$linea" || true)
+
+              # Refs sueltos: se buscan DESPUES de borrar los de arriba, o el
+              # "#194" de un ref completo se contaria dos veces.
+              # El delimitador de sed es `|` y no `/` ni `#`: el patron tiene
+              # los dos adentro.
+              resto=$(sed -E 's|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+||g' <<<"$linea")
+              bares=$(grep -oE '#[0-9]+' <<<"$resto" || true)
+
+              if [ -n "$quals" ] && [ -n "$bares" ]; then
+                ambigua="$linea"
+                break
+              fi
+
+              for q in $quals; do deps="$deps $q"; done
+              for b in $bares; do deps="$deps ${REPO}${b}"; done
+            done <<<"$lineas"
+
+            if [ -n "$ambigua" ]; then
+              echo "AMBIGUO: la linea mezcla un ref con repo y uno suelto, y un '#N' suelto"
+              echo "significa 'de este repo'. No se destraba. Escribi los dos refs completos:"
+              echo "  $ambigua"
+              echo "::endgroup::"; continue
+            fi
+
+            deps=$(tr ' ' '\n' <<<"$deps" | grep -v '^$' | sort -u || true)
+
+            if [ -z "$deps" ]; then
+              echo "Dice 'Depende de' pero no se le pudo leer ningun #N. Hay que revisarlo a mano."
+              echo "::endgroup::"; continue
+            fi
+
+            # SE MIRAN TODAS LAS DEPENDENCIAS, NO ALCANZA CON UNA.
+            # Un issue puede esperar a dos. Destrabarlo cuando cae la primera lo
+            # manda a la cola antes de tiempo, y el agente se encuentra el
+            # terreno a medio hacer — peor que esperar, porque ya empezo.
+            abiertas=""
+            ilegibles=""
+            for d in $deps; do
+              d_repo=${d%%#*}
+              d_num=${d##*#}
+              estado=$(gh issue view "$d_num" --repo "$d_repo" --json state --jq .state 2>/dev/null || echo "DESCONOCIDO")
+              case "$estado" in
+                CLOSED) ;;
+                # Un repo privado ajeno, un issue borrado o un numero que no
+                # existe caen todos aca. NO se asume que este cerrado.
+                DESCONOCIDO) ilegibles="$ilegibles $d" ;;
+                *)      abiertas="$abiertas $d" ;;
+              esac
+            done
+
+            if [ -n "$ilegibles" ]; then
+              echo "NO SE PUDO VERIFICAR:$ilegibles"
+              echo "Puede ser un repo privado fuera del alcance de este token, o un numero que no existe."
+              echo "Queda bloqueado a proposito: no se destraba lo que no se pudo leer."
+              echo "::endgroup::"; continue
+            fi
+
+            if [ -n "$abiertas" ]; then
+              echo "Sigue esperando:$abiertas"
+              echo "::endgroup::"; continue
+            fi
+
+            gh issue edit "$n" --repo "$REPO" \
+              --remove-label bloqueado --add-label listo >/dev/null
+
+            # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
+            # Adentro de un bloque `run: |`, un texto multilinea pegado a la
+            # columna cero rompe el archivo entero y el workflow falla en
+            # silencio. Los saltos se escriben \n dentro de printf.
+            cuerpo_com=$(printf '**Destrabado.** Ya se cerraron todas sus dependencias, asi que este issue paso de `bloqueado` a `listo` y se puede tomar.\n\nSi estas trabajando en este repo, pedi tu proximo trabajo con:\n\n```bash\ngh issue list --assignee @me --label listo --json number,title --jq "sort_by(.number)[] | \\"#\\(.number) \\(.title)\\""\n```\n')
+            gh issue comment "$n" --repo "$REPO" --body "$cuerpo_com" >/dev/null || true
+
+            echo "DESTRABADO #$n"
+            echo "::endgroup::"
+          done
+
+          echo "Barrido terminado."

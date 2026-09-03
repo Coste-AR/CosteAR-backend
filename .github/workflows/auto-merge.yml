@@ -1,0 +1,296 @@
+# Mergea solo los PR que ya verificaron todo.
+#
+# POR QUE UN WORKFLOW PROPIO Y NO EL AUTO-MERGE NATIVO DE GITHUB
+#
+# El nativo solo actua cuando algo bloquea el PR: checks requeridos por la
+# proteccion de rama. CosteAR-admin es privado y en plan free no admite
+# proteccion, asi que ahi el nativo no gatea nada — mergearia al instante, con
+# el CI en rojo o sin haber corrido. Este workflow verifica los checks el mismo,
+# y por eso se comporta igual en los tres repos.
+#
+# LA REGLA DE MERGE
+#
+#   base dev      -> squash. Una rama de trabajo son N commits de ida y vuelta;
+#                    en dev queremos una linea por unidad de trabajo.
+#   base staging  -> merge commit. Promover no es trabajo nuevo: es mover un
+#                    conjunto ya integrado, y el commit de merge deja registrado
+#                    QUE tanda se promovio y cuando.
+#   base main     -> NO se automatiza. Es produccion y hay un cliente real
+#                    del otro lado. Lo mergea una persona.
+#
+# EL CONTROL: la etiqueta `auto-merge`
+#
+# Nada se mergea solo por estar en verde. Hace falta que alguien —Santiago, o
+# Claude al revisar lo que volvio de un agente— le ponga la etiqueta. Es el
+# punto donde entra el juicio humano, y es lo unico que separa "el CI paso" de
+# "esto puede entrar".
+name: Auto-merge
+
+on:
+  # El disparador principal: termino de correr una tanda de checks.
+  check_suite:
+    types: [completed]
+  # Cubre el caso de etiquetar un PR que YA estaba en verde.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
+  # Red de seguridad. `check_suite` se pierde de vez en cuando, y un PR
+  # etiquetado y en verde que nadie mergea es peor que uno que falla: no avisa.
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  # SIN ESTO, EL `Closes #N` DEL PR NO CIERRA EL ISSUE.
+  #
+  # GitHub cierra los issues vinculados en nombre de quien mergea. Acá el que
+  # mergea es este workflow, con el GITHUB_TOKEN — y un token sin `issues:
+  # write` no puede cerrar nada. El issue quedaba solo como `cross-referenced`.
+  #
+  # Se descubrio el 01-09-2026 mirando la linea de tiempo de un issue que
+  # deberia haberse cerrado: cuatro PR habian entrado con `Closes #N` y los
+  # cuatro issues seguian abiertos. Importa mas de lo que parece: el barrido
+  # que destraba issues se fija en que sus dependencias esten CERRADAS, asi
+  # que sin este permiso nada se destraba nunca y la cola se frena entera.
+  issues: write
+  # `gh pr checks` arma el rollup con las tres: los check runs de Actions
+  # (checks), los commit statuses de servicios externos como Vercel (statuses),
+  # y los workflow runs (actions). Con solo `checks: read` el comando falla
+  # entero y no devuelve nada.
+  checks: read
+  statuses: read
+  actions: read
+
+concurrency:
+  # Dos corridas mergeando a la vez sobre la misma base se pisan.
+  group: auto-merge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    # El nombre importa: este job aparece como un check MAS en la lista del PR,
+    # y hay que poder distinguirlo de los checks de verdad. Ver abajo.
+    name: auto-merge (este mismo workflow)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mergear lo que ya verifico todo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          pendientes=$(gh pr list --repo "$REPO" --state open --limit 50 \
+            --json number,isDraft,labels,baseRefName,mergeStateStatus,title)
+
+          echo "$pendientes" | jq -c '.[]' | while read -r pr; do
+            n=$(jq -r '.number'         <<<"$pr")
+            base=$(jq -r '.baseRefName' <<<"$pr")
+            draft=$(jq -r '.isDraft'    <<<"$pr")
+            estado=$(jq -r '.mergeStateStatus' <<<"$pr")
+            titulo=$(jq -r '.title'     <<<"$pr")
+            etiquetas=$(jq -r '[.labels[].name] | join(" ")' <<<"$pr")
+
+            echo "::group::PR #$n — $titulo"
+            echo "base=$base draft=$draft estado=$estado etiquetas=[$etiquetas]"
+
+            if [ "$draft" = "true" ]; then
+              echo "SALTEADO: es borrador."; echo "::endgroup::"; continue
+            fi
+
+            if ! grep -qw 'auto-merge' <<<"$etiquetas"; then
+              echo "SALTEADO: sin la etiqueta auto-merge. Nada se mergea solo por estar en verde."
+              echo "::endgroup::"; continue
+            fi
+
+            case "$base" in
+              dev)     metodo="--squash" ;;
+              staging) metodo="--merge"  ;;
+              main)
+                echo "SALTEADO: main es produccion y lo mergea una persona."
+                echo "::endgroup::"; continue ;;
+              *)
+                echo "SALTEADO: base '$base' no esta contemplada."
+                echo "::endgroup::"; continue ;;
+            esac
+
+            # LA VERIFICACION. En admin esto es lo UNICO que separa un merge
+            # bueno de uno con el CI en rojo: no hay proteccion de rama que lo
+            # frene despues.
+            if [ "$estado" = "DIRTY" ]; then
+              echo "SALTEADO: tiene conflictos. Los resuelve quien abrio el PR."
+              echo "::endgroup::"; continue
+            fi
+
+            # PRIMERO SE MIRA SI ESTA AL DIA. DESPUES LOS CHECKS. EN ESE ORDEN.
+            #
+            # Al reves no funciona, y costo dos corridas descubrirlo: cuando la
+            # base se mueve, GitHub recalcula el merge ref del PR y los check
+            # runs viejos quedan huerfanos. `gh pr checks` pasa a decir "no
+            # checks reported" sobre un PR que hace un minuto estaba en verde.
+            # Preguntando por los checks primero, ese PR se reporta como "sin
+            # checks" y no se toca nunca mas — cuando lo que en realidad
+            # necesita es que le actualicen la rama para que vuelvan a correr.
+            #
+            # Los checks de un PR YA corren sobre el codigo integrado: GitHub
+            # dispara `pull_request` sobre refs/pull/N/merge, que es la rama
+            # mezclada con la base. Lo que hay que garantizar es que esa mezcla
+            # sea contra la base de AHORA. Si no: dos PR verdes contra dev@X, se
+            # mergea el primero, dev pasa a Y, y el segundo sigue mostrando un
+            # verde que se calculo contra X. Entra y rompe dev.
+            #
+            # No se usa `mergeStateStatus == BEHIND` porque GitHub solo lo
+            # reporta cuando una regla de proteccion exige estar al dia. Admin
+            # no tiene proteccion: ahi devuelve CLEAN aunque el PR este viejo y
+            # la guarda no dispararia nunca. Comparar las ramas anda igual en
+            # los tres repos, con proteccion y sin ella.
+            head_sha=$(gh pr view "$n" --repo "$REPO" --json headRefOid --jq .headRefOid)
+            atras=$(gh api "repos/$REPO/compare/$base...$head_sha" --jq .behind_by 2>/dev/null || echo 0)
+
+            if [ "${atras:-0}" -gt 0 ]; then
+              echo "SALTEADO: atrasado $atras commit(s) respecto de $base."
+              echo "Lo actualiza quien abrio el PR, no este workflow."
+
+              # POR QUE EL WORKFLOW NO ACTUALIZA LA RAMA EL MISMO.
+              #
+              # Lo hacia, y no funcionaba. El commit que genera `update-branch`
+              # lo firma `github-actions[bot]`, y GitHub deja las corridas de CI
+              # de un bot en `action_required` esperando aprobacion manual. O
+              # sea: la rama se actualizaba, el CI no corria nunca, y el PR
+              # quedaba trabado en silencio para siempre. Peor que no hacer nada,
+              # porque parecia que algo estaba pasando.
+              #
+              # La alternativa era un PAT de larga vida como secret en los tres
+              # repos, para que el push quede a nombre de un usuario real. No
+              # vale un token permanente ahorrar un comando.
+              #
+              # UN COMENTARIO POR SHA, NO UNO POR CORRIDA. Este workflow se
+              # despierta con cada tanda de checks y ademas cada 15 minutos.
+              # Sin guarda, un PR que pasa la noche atrasado amanece con
+              # cuarenta comentarios iguales y el aviso deja de leerse.
+              marca="<!-- auto-merge:atrasado:$head_sha -->"
+              if gh pr view "$n" --repo "$REPO" --json comments --jq '.comments[].body' 2>/dev/null | grep -qF "$marca"; then
+                echo "Ya estaba avisado para este SHA; no se repite el comentario."
+              else
+                # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
+                #
+                # Esto vive adentro de un bloque `run: |` de YAML: toda linea no
+                # vacia tiene que estar indentada al menos como el bloque. Un
+                # texto multilinea con markdown pegado a la columna cero ROMPE EL
+                # ARCHIVO ENTERO, y GitHub deja de poder parsearlo.
+                #
+                # Falla ademas en silencio: las corridas aparecen como "failure"
+                # colgadas de un push cualquiera, con el mensaje generico "this
+                # run likely failed because of a workflow file issue", y los PR
+                # se quedan en CLEAN para siempre esperando a nadie. Ocho PR
+                # quedaron trabados asi el 30-08 sin que nada avisara.
+                #
+                # Los saltos de linea se escriben \n dentro del formato de
+                # printf. El detalle largo del por que vive en el manual de
+                # flujo, no en este comentario: el aviso tiene que entrar de un
+                # vistazo.
+                cuerpo=$(printf '%s\n**Este PR esta atrasado %s commit(s) respecto de `%s`, asi que todavia no se puede mergear.**\n\nActualizalo y el auto-merge sigue solo:\n\n```bash\ngh pr update-branch %s\n```\n\n**Por que no alcanza el verde que ya tenias:** se calculo contra una version anterior de `%s`. Dos PR verdes contra la misma base vieja entran los dos, y el segundo puede romperla.\n' "$marca" "$atras" "$base" "$n" "$base")
+
+                if gh pr comment "$n" --repo "$REPO" --body "$cuerpo" >/dev/null 2>&1; then
+                  echo "Avisado en el PR."
+                else
+                  echo "No se pudo comentar. Queda solo en este log."
+                fi
+              fi
+
+              echo "::endgroup::"; continue
+            fi
+
+            # LEER LOS CHECKS.
+            #
+            # `gh pr checks` no sirve para decidir por su codigo de salida:
+            # devuelve distinto de cero cuando algo falla, cuando algo esta
+            # pendiente Y cuando no hay ningun check — tres situaciones que acá
+            # se resuelven distinto. Y con --json, cuando no hay checks, imprime
+            # texto plano ("no checks reported on the 'x' branch") en vez de un
+            # array vacio.
+            #
+            # Asi que se ignora el codigo de salida y se decide por la salida:
+            # si parsea como JSON, son los checks; si no, es que no hay.
+            salida=$(gh pr checks "$n" --repo "$REPO" --json name,bucket 2>&1 || true)
+
+            if ! checks=$(jq -e -c '.' <<<"$salida" 2>/dev/null); then
+              echo "SALTEADO: el PR no tiene ningun check. Cero checks no es verde."
+              echo "Lo que devolvio el comando: $salida"
+              echo "::endgroup::"; continue
+            fi
+
+            # ESTE WORKFLOW NO SE CUENTA A SI MISMO.
+            #
+            # Al dispararse por `pull_request`, este job aparece en la lista de
+            # checks del PR — y siempre pasa, porque su trabajo es decidir, no
+            # verificar. Contandolo, un PR que no dispara NINGUN CI tendria
+            # igual un check en verde: el mio. La guarda de "cero checks no es
+            # verde" quedaba anulada justamente por la cosa que la ejecuta.
+            checks=$(jq -c '[.[] | select(.name != "auto-merge (este mismo workflow)")]' <<<"$checks")
+            total=$(jq 'length' <<<"$checks")
+
+            if [ "$total" -eq 0 ]; then
+              echo "SALTEADO: el PR no tiene ningun check propio. Cero checks no es verde."
+              echo "::endgroup::"; continue
+            fi
+
+            echo "$total check(s) propios encontrados."
+
+            malos=$(jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' <<<"$checks")
+            if [ "$malos" -ne 0 ]; then
+              echo "SALTEADO: hay $malos check(s) que no pasaron o siguen corriendo:"
+              jq -r '.[] | select(.bucket != "pass" and .bucket != "skipping") | "  - \(.name): \(.bucket)"' <<<"$checks"
+              echo "::endgroup::"; continue
+            fi
+
+            echo "Todo verificado. Mergeando a $base con $metodo."
+            if gh pr merge "$n" --repo "$REPO" $metodo --delete-branch; then
+              echo "MERGEADO #$n -> $base"
+
+              # CERRAR EL ISSUE A MANO. GITHUB NO LO HACE.
+              #
+              # El `Closes #N` del cuerpo del PR deberia cerrar el issue solo, y
+              # NO LO HACE cuando el merge lo ejecuta este workflow: GitHub
+              # suprime las acciones en cascada de una operacion hecha con su
+              # propio GITHUB_TOKEN. Es la misma proteccion que impide que un
+              # workflow dispare otro.
+              #
+              # Se comprobo el 01-09-2026: cinco PR entraron con `Closes #N` y
+              # los cinco issues siguieron abiertos. La linea de tiempo mostraba
+              # `cross-referenced` y ningun `closed`. Agregar `issues: write`
+              # —que ya esta— NO alcanza: el permiso no era la causa.
+              #
+              # POR QUE NO ES UN DETALLE COSMETICO. El barrido que destraba
+              # issues (`desbloquear.yml`) se fija en que las dependencias esten
+              # CERRADAS. Sin este cierre, cada PR que entra congela a sus
+              # dependientes, en silencio y con todo lo demas en verde. Llego a
+              # haber cinco issues entregados y cuatro trabajos frenados por eso.
+              cuerpo_pr=$(gh pr view "$n" --repo "$REPO" --json body --jq '.body // ""')
+              cerrados=$(grep -oiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo_pr" | grep -oE '[0-9]+' | sort -u || true)
+
+              if [ -z "$cerrados" ]; then
+                echo "El PR no declara ningun issue. No hay nada que cerrar."
+              fi
+
+              for i in $cerrados; do
+                estado=$(gh issue view "$i" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "DESCONOCIDO")
+                if [ "$estado" = "CLOSED" ]; then
+                  echo "El #$i ya estaba cerrado."
+                  continue
+                fi
+                # El mensaje va en UNA linea fisica: un texto multilinea pegado
+                # a la columna cero adentro de `run: |` rompe el YAML entero.
+                nota=$(printf 'Cerrado por el PR #%s, que entro a `%s`.\n\nLo cierra este workflow y no GitHub: el `Closes` no dispara cuando el merge lo hace el token de Actions.\n' "$n" "$base")
+                if gh issue close "$i" --repo "$REPO" --comment "$nota" >/dev/null 2>&1; then
+                  echo "CERRADO el issue #$i"
+                else
+                  echo "::warning::No se pudo cerrar el issue #$i del PR #$n."
+                fi
+              done
+            else
+              echo "FALLO el merge de #$n. Queda abierto para que lo mire una persona."
+            fi
+            echo "::endgroup::"
+          done

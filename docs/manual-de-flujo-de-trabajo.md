@@ -124,10 +124,8 @@ Tres razones concretas:
 **¿Se pierden tus commits?** No. Quedan en el PR de GitHub, visibles para siempre. Lo que cambia es
 qué se ve en el historial de `dev`.
 
-```bash
-gh pr merge --auto --squash          # terminal
-```
-o en la web: desplegable del botón verde → **Squash and merge**.
+El squash lo aplica el workflow de auto-merge cuando la base es `dev`. **Nadie corre
+`gh pr merge` a mano** — ver *"Nadie mergea a mano"* más abajo.
 
 ### Para promociones (`dev → staging → main`): MERGE COMMIT
 
@@ -155,21 +153,53 @@ En la web es el botón por defecto (**Create a merge commit**), así que alcanza
 
 ---
 
-## Parte 3 — `--auto`, la parte opcional
+## Parte 3 — El merge es automático. La decisión no.
 
-`gh pr merge --auto` (o **Enable auto-merge** en la web) le dice a GitHub:
+**Actualizado el 30-08-2026.** Hasta esa fecha esta parte decía que el auto-merge era "opcional,
+comodidad, no una regla", y que `CosteAR-admin` no podía tenerlo. Las dos cosas cambiaron.
 
-> *"Mergealo vos cuando el CI termine en verde."*
+Ahora **nadie mergea a mano**. Un PR entra cuando pasan las dos:
 
-Para qué sirve:
+1. **Todos sus checks están en verde** — y cero checks *no* cuenta como verde.
+2. **Alguien le puso la etiqueta `auto-merge`.**
 
-- No te quedás mirando la pantalla dos minutos esperando el CI.
-- **Nadie mergea a mano en el medio**, porque el PR ya tiene dueño.
+```bash
+gh pr update-branch 123                 # rama al dia con dev
+gh pr ready 123                         # sale de draft
+gh pr edit 123 --add-label auto-merge   # y ahi entra solo
+```
 
-Es comodidad, no una regla. Si preferís esperar y apretar el botón, es igual de válido.
+**Los dos primeros los corre quien hizo el trabajo, agente incluido. El tercero no.** La etiqueta
+la pone Santiago: es donde entra el juicio humano. Un agente llega hasta `ready` y avisa. El
+reparto completo está en `CosteAR-os/ORQUESTACION.md`, que es el canónico.
 
-> `CosteAR-admin` **no tiene auto-merge**: es privado y el plan Free no lo incluye. Ahí el draft
-> funciona igual, y el merge se hace a mano con el CI en verde.
+### Por qué una etiqueta y no el verde a secas
+
+**No hay reviews requeridos en ningún repo.** Sin ese freno, cualquier PR entraría a `dev` en
+cuanto el semáforo se pusiera verde, sin que nadie lo haya mirado — y ahora quien abre la mayoría
+de los PRs es un agente. **La etiqueta reemplaza al review, no es un trámite.**
+
+El draft sigue cumpliendo su función y se lleva bien con esto: un PR en borrador **nunca** se
+auto-mergea. Trabajás tranquilo, y cuando terminaste lo marcás listo.
+
+### Por qué un workflow nuestro y no el `--auto` de GitHub
+
+El nativo sólo actúa cuando **algo bloquea** el PR: checks requeridos por la protección de rama.
+`CosteAR-admin` es privado y en plan Free no admite protección, así que ahí el nativo no gatea
+nada — mergearía al instante, con el CI en rojo o sin haber corrido.
+
+`.github/workflows/auto-merge.yml` **verifica los checks él mismo**, y por eso se comporta igual
+en los tres repos. En admin es literalmente lo único que separa un merge bueno de uno en rojo.
+
+### Lo que hace por vos sin que se lo pidas
+
+- **Si el PR quedó atrás de su base, lo actualiza y espera.** No lo mergea. Los checks tienen que
+  volver a correr sobre el código integrado con la base de *ahora*: sin eso, dos PR verdes contra
+  el mismo `dev` viejo entran los dos y el segundo rompe.
+- **Borra la rama** después de mergear.
+- **Registra por qué no mergeó**, cuando no mergea. Está en la pestaña Actions, un grupo por PR.
+
+> **`main` sigue siendo a mano.** Es producción y hay un cliente real del otro lado.
 
 ---
 
@@ -232,16 +262,20 @@ gh pr create --base dev --draft --title "feat(scope): ..." --body "..."
 git commit -m "test(scope): el caso que faltaba"
 git push
 
-# 5. Cuando terminaste de verdad (checklist de la Parte 1)
+# 5. Poné la rama al día con dev
+gh pr update-branch 123
+
+# 6. Cuando terminaste de verdad (checklist de la Parte 1)
 gh pr ready
 
-# 6. Mergear con SQUASH
-gh pr merge --auto --squash
+# 7. Acá termina tu parte: avisás. La etiqueta `auto-merge` la pone Santiago
+#    y mergea el workflow. Si sos vos quien decide, es:
+#    gh pr edit 123 --add-label auto-merge
 
-# 7. Verificar que el trabajo LLEGÓ, no que el PR está verde
+# 8. Verificar que el trabajo LLEGÓ, no que el PR está verde
 git log origin/dev --oneline -3
 
-# 8. Limpiar la rama local (la remota se borra sola)
+# 9. Limpiar la rama local (la remota se borra sola)
 git checkout dev && git pull
 git branch -d feat/lo-que-sea
 ```
@@ -261,8 +295,16 @@ Abrí otro PR con lo que falta. Es lo que pasó cuatro veces en agosto — el dr
 para que no vuelva a hacer falta.
 
 **¿Puedo mergear el mismo día que abro el PR?**
-REV-07 pide esperar 24 horas salvo que haya algo roto en producción. La mitad de los problemas del
-18-08 salieron de mergear rápido y en cadena.
+Sí. **Desde el 30-08-2026 se mergea apenas está verde, al día con su base y sin conflictos.**
+
+Hasta esa fecha REV-07 pedía esperar 24 horas, porque la mitad de los problemas del 18-08 salieron
+de mergear rápido y en cadena. Esa regla se escribió cuando la única verificación era `npm test`:
+las 24 horas compraban tiempo de mirada humana porque no había otra cosa.
+
+Hoy hay otra cosa —CI obligatorio en las tres ramas, E2E en cuatro viewports, `strict`, y el merge
+automático que verifica antes de tocar nada— y además **el costo se dio vuelta**: con varios
+agentes trabajando en paralelo, una cola de PRs esperando 24 horas se desactualiza sola y genera
+los conflictos que la espera venía a evitar.
 
 **¿Por qué tanto cuidado con esto?**
 Porque se midió. En tres días, el 17 % de los PRs no agregó nada: existieron solo para mover trabajo
