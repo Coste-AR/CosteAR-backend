@@ -193,7 +193,11 @@ jobs:
               casos=$((casos + c))
               afirmaciones=$((afirmaciones + a))
             done < <(git ls-tree -r --name-only "$ref" | grep -E '\.(test|spec)\.[cm]?[jt]sx?$' || true)
-            printf '%s %s' "$casos" "$afirmaciones"
+            # EL SALTO DE LINEA NO ES COSMETICO. Sin el, `read` del otro lado
+            # llega a EOF sin delimitador y devuelve 1 — y con `set -e` eso mata
+            # el step sin imprimir una sola linea. Es exactamente como fallo el
+            # primer run real en CosteAR-os #30: exit code 1 y ningun mensaje.
+            echo "$casos $afirmaciones"
           }
 
           # En workflow_dispatch no hay PR puntual: se revisan los abiertos.
@@ -269,8 +273,8 @@ jobs:
             # ── GUARDA 1: el balance de verificacion no baja ──────────────────
             #
             # No se afloja en ningun modo ni contra ninguna base.
-            read -r casos_base afirm_base < <(balance "$base_sha")
-            read -r casos_head afirm_head < <(balance "$head_sha")
+            read -r casos_base afirm_base < <(balance "$base_sha") || true
+            read -r casos_head afirm_head < <(balance "$head_sha") || true
             echo "Verificacion — base: $casos_base casos / $afirm_base afirmaciones. PR: $casos_head casos / $afirm_head afirmaciones."
 
             apto=si
