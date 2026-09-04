@@ -202,6 +202,7 @@ model Company {
   movimientosDeposito  MovimientoDeposito[]
   eventosLote          EventoLote[]
   produccionesDiarias  ProduccionDiaria[]
+  ventasProducto       VentaProducto[]
   corridasProduccion   CorridaProduccion[]
   consumosCorrida      ConsumoCorrida[]
   activosAmortizables  ActivoAmortizable[]
@@ -545,6 +546,7 @@ model CostPeriod {
 
 model CostStructure {
   reglasAlerta        ReglaAlerta[]
+  ventasProducto      VentaProducto[]
   activosAmortizables ActivoAmortizable[]
   parametrosCosteo    ParametroCosteo[]
   // Lado inverso de la FK que ya existía en la base — ver CostConfigVersion.structure.
@@ -2100,6 +2102,7 @@ model UnidadMedida {
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   depositos            Deposito[]
+  ventasProducto       VentaProducto[]
   id                   String                @id @default(uuid()) @db.Uuid
   companyId            String                @db.Uuid
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2398,6 +2401,37 @@ model ProduccionDiaria {
   @@index([companyId, fecha])
   @@index([loteId, fecha])
   @@map("producciones_diarias")
+}
+
+/**
+ * Venta real de una variante. El precio promedio del período no se persiste:
+ * se deriva ponderando estas filas en la unidad que solicite quien consulta.
+ */
+model VentaProducto {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  structureId String        @db.Uuid
+  structure   CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  fecha    DateTime @db.Date
+  canal    String
+  variante String
+
+  cantidad       Decimal       @db.Decimal(18, 4)
+  precioUnitario Decimal       @db.Decimal(18, 4)
+  unidadId       String        @db.Uuid
+  unidad         UnidadMedida  @relation(fields: [unidadId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId, structureId, fecha])
+  @@index([companyId, structureId, canal, fecha])
+  @@map("ventas_producto")
 }
 
 // ---------------------------------------------------------------------------
