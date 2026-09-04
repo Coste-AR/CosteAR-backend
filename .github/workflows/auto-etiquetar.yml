@@ -228,18 +228,43 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
+            # ── Traer las dos puntas que hay que medir ────────────────────────
+            #
+            # NADA DE ESTO PUEDE ABORTAR EL WORKFLOW.
+            #
+            # La primera version resolvia la base con `git rev-parse "origin/$base"`
+            # a secas. Con `set -e`, si esa ref no existe el step muere con exit 1
+            # ANTES de imprimir una sola linea — que es como fallo el primer run
+            # real de este archivo en CosteAR-os: exit code 1 justo despues de
+            # abrir el grupo del PR, sin ningun mensaje que dijera por que.
+            # `actions/checkout` sobre un PR hace checkout del merge ref y no
+            # garantiza dejar la rama base como remote-tracking.
+            #
+            # Ahora cada paso trae su ref explicitamente y toda falla se degrada
+            # a un "no se pudo medir". Y NO PODER MEDIR NUNCA SIGNIFICA APTO:
+            # significa que lo mira una persona. Un guardian que se cae tiene que
+            # dejar la puerta cerrada, no abierta.
+            git fetch -q --no-tags origin "+refs/heads/$base:refs/remotes/origin/$base" 2>/dev/null || true
+            # `--verify` NO ES OPCIONAL: `git rev-parse` a secas, cuando no puede
+            # resolver la ref, IMPRIME EL STRING TAL CUAL y ademas sale con
+            # error. Con `|| true` eso deja `base_sha` con basura en vez de
+            # vacio, el chequeo de abajo pasa de largo, y se termina midiendo
+            # contra nada. Lo encontro la prueba de degradacion, no el diseño.
+            base_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$base" 2>/dev/null || true)
+            if [ -z "$base_sha" ]; then
+              echo "NO APTO: no se pudo resolver la base ($base) para medirla. Sin medicion no se etiqueta."
+              echo "::endgroup::"; continue
+            fi
+
             # El head puede venir de un fork o de una rama que este checkout no
-            # trajo. Sin el objeto no hay nada que contar, y NO CONTAR NO PUEDE
-            # SIGNIFICAR APTO: se salta.
-            git fetch -q origin "$base" 2>/dev/null || true
+            # trajo.
             if ! git cat-file -e "$head_sha^{commit}" 2>/dev/null; then
-              git fetch -q origin "pull/$n/head" 2>/dev/null || true
+              git fetch -q --no-tags origin "+refs/pull/$n/head:refs/remotes/origin/pr-$n" 2>/dev/null || true
             fi
             if ! git cat-file -e "$head_sha^{commit}" 2>/dev/null; then
               echo "NO APTO: no se pudo traer el head del PR para medirlo. Sin medicion no se etiqueta."
               echo "::endgroup::"; continue
             fi
-            base_sha=$(git rev-parse "origin/$base")
 
             # ── GUARDA 1: el balance de verificacion no baja ──────────────────
             #
