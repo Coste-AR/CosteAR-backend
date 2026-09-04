@@ -59,8 +59,10 @@
 #     salteaban solos, un fixture que daba verde con la pantalla equivocada—.
 #
 # G2. UN DOCUMENTO NORMATIVO SE ETIQUETA SI DECLARA SU PROPIO CAMBIO. AGENTS.md,
-#     CLAUDE.md, CONTRIBUTING.md y DEFINITION-OF-DONE.md son las reglas que todos
-#     siguen. Cambiarlos no rompe produccion, pero cambia lo que hace todo el
+#     CLAUDE.md, CONTRIBUTING.md, DEFINITION-OF-DONE.md, ORQUESTACION.md y
+#     FLUJO.md son las reglas que todos siguen. ORQUESTACION.md es el canonico
+#     del reparto entre agentes: es el mas normativo de todos y faltaba en esta
+#     lista. Cambiarlos no rompe produccion, pero cambia lo que hace todo el
 #     mundo despues — y el riesgo real no es que la regla sea mala, es que
 #     CAMBIE SIN QUE NADIE SE ENTERE. Eso se resuelve exigiendo que el propio PR
 #     agregue su fila a la tabla de cambios del documento, y avisando cuando
@@ -202,7 +204,7 @@ jobs:
           fi
 
           # Documentos que son REGLAS, no descripcion. Ver guarda 2.
-          normativos='^(AGENTS|CLAUDE|CONTRIBUTING|DEFINITION-OF-DONE)\.md$'
+          normativos='^(AGENTS|CLAUDE|CONTRIBUTING|DEFINITION-OF-DONE|ORQUESTACION|FLUJO)\.md$'
 
           for n in $lista; do
             echo "::group::PR #$n"
