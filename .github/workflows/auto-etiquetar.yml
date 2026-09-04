@@ -7,30 +7,84 @@
 # en ningun repo, asi que sin ella cualquier PR entraria con solo ponerse verde
 # el semaforo. Automatizarla en general seria dejar de revisar, no automatizar.
 #
-# Lo que si se puede es reconocer una clase de PR donde el juicio humano no
-# agrega nada porque el cambio NO PUEDE ROMPER PRODUCCION:
+# Lo que si se puede es reconocer clases de PR donde el juicio humano no agrega
+# nada porque lo que iba a mirar YA SE PUEDE MEDIR.
 #
-#   - Documentacion descriptiva. No se ejecuta.
-#   - Tests NUEVOS, sin borrar ni recortar los que ya estaban.
+# ─────────────────────────────────────────────────────────────────────────────
+# LO QUE CAMBIO EL 04-09-2026, Y POR QUE
 #
-# Un PR asi, con el CI en verde, ya demostro todo lo que un humano le iba a
-# mirar. En el peor caso agrega un test malo — que se descubre cuando falla, y
-# que nunca llega al cliente.
+# Hasta hoy habia cuatro clases que quedaban a mano, y las cuatro costaban
+# tiempo de Santiago todas las semanas:
 #
-# LAS TRES GUARDAS, Y POR QUE CADA UNA
+#   1. PR que tocan documentos normativos (CLAUDE.md y compania).
+#   2. PR que borran archivos.
+#   3. PR que recortan lineas bajo tests/.
+#   4. PR contra staging o main.
 #
-# 1. NINGUN ARCHIVO BORRADO. Un PR que borra un test entra en la clase "solo
-#    toca tests" y es exactamente lo que la regla del equipo prohibe: bajar la
-#    cobertura para poner el CI en verde.
+# Las guardas 2 y 3 eran PROXIES SINTACTICOS de lo que de verdad importaba:
+# que no bajara la verificacion. Y como proxies eran malos en las dos
+# direcciones:
 #
-# 2. CERO LINEAS BORRADAS BAJO tests/. Modificar un test existente para que
-#    afirme menos es la version silenciosa de lo mismo, y no se ve en la lista
-#    de archivos. Solo se auto-etiqueta lo puramente aditivo.
+#   - De mas: rechazaban trabajo legitimo. Renombrar un archivo de test, partir
+#     uno en dos, borrar un fixture muerto — todo eso "borra lineas" y quedaba
+#     esperando a una persona sin que hubiera nada que mirar. Ya paso con el
+#     PR #204 del backend, y hubo que parchear la guarda.
 #
-# 3. LOS DOCUMENTOS NORMATIVOS NO CUENTAN COMO DOCUMENTACION. AGENTS.md,
-#    CLAUDE.md, CONTRIBUTING.md y DEFINITION-OF-DONE.md son las reglas que todos
-#    siguen. Cambiarlos no rompe produccion, pero cambia lo que hace todo el
-#    mundo despues. Eso se mira.
+#   - De menos: no veian el caso que mas duele. Un test al que le comentan el
+#     cuerpo y le dejan las llaves BORRA POCAS LINEAS O NINGUNA. La guarda lo
+#     dejaba pasar. Es literalmente uno de los tres incidentes que la guarda
+#     decia estar previniendo.
+#
+# Ahora se mide lo que importa, directo: EL BALANCE DE VERIFICACION NO BAJA.
+# Se cuentan los casos (`it(`, `test(`) y las afirmaciones (`expect(`) en todo
+# el arbol de tests, en la base y en el PR. Si cualquiera de los dos baja, no se
+# etiqueta. Si no bajan, el PR puede borrar, renombrar y reescribir tests con
+# total libertad: demostro que no recorto nada.
+#
+# LO QUE ESTA MEDICION NO ATRAPA — Y CONVIENE DECIRLO
+#
+# Un PR que borra un test bueno y agrega uno trivial mantiene la cuenta y pasa.
+# La guarda vieja tampoco lo atrapaba (podia agregar un test malo sin borrar
+# nada), pero es una perdida real respecto de "cero lineas borradas" y se acepta
+# a sabiendas. Lo que lo respalda: va a `dev`, es revertible, y el costo de la
+# alternativa —una cola de PR parados esperando a alguien— ya se pago y fue peor.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# LAS GUARDAS, Y POR QUE CADA UNA
+#
+# G1. EL BALANCE DE VERIFICACION NO BAJA. Ni casos ni afirmaciones. Reemplaza a
+#     las dos guardas viejas de borrado y recorte. Es la unica que no se afloja
+#     NUNCA, en ningun modo y contra ninguna base: es la falla que este equipo
+#     ya tuvo tres veces —tests con el cuerpo comentado, 61 tests que se
+#     salteaban solos, un fixture que daba verde con la pantalla equivocada—.
+#
+# G2. UN DOCUMENTO NORMATIVO SE ETIQUETA SI DECLARA SU PROPIO CAMBIO. AGENTS.md,
+#     CLAUDE.md, CONTRIBUTING.md, DEFINITION-OF-DONE.md, ORQUESTACION.md y
+#     FLUJO.md son las reglas que todos siguen. ORQUESTACION.md es el canonico
+#     del reparto entre agentes: es el mas normativo de todos y faltaba en esta
+#     lista. Cambiarlos no rompe produccion, pero cambia lo que hace todo el
+#     mundo despues — y el riesgo real no es que la regla sea mala, es que
+#     CAMBIE SIN QUE NADIE SE ENTERE. Eso se resuelve exigiendo que el propio PR
+#     agregue su fila a la tabla de cambios del documento, y avisando cuando
+#     entra. Un cambio declarado y anunciado no necesita que alguien lo frene:
+#     necesita que se sepa. Si no declara la fila, sigue quedando a mano.
+#
+# G3. EL PR CIERRA UN ISSUE (solo en modo tanda, ver abajo). Sin alcance
+#     declarado no hay contra que juzgar lo que hizo.
+#
+# G4. CONTRA `staging`, SOLO PROMOCIONES SIN TRABAJO NUEVO. Un PR dev -> staging
+#     que no trae NI UN COMMIT que no este ya en `dev` no es trabajo: es mover
+#     un conjunto que ya se integro y ya paso el CI entero. Ahi no hay nada que
+#     revisar que no se haya revisado. Si el PR trae aunque sea un commit propio
+#     —un arreglo hecho sobre la rama de promocion, que es exactamente donde
+#     nadie lo mira— deja de ser una promocion y vuelve a mano.
+#
+# G5. CONTRA `main`, NUNCA. No hay guarda que lo habilite y no se agrega una.
+#     Es produccion, hay un cliente real del otro lado, y es el unico paso
+#     irreversible del circuito: lo que entra a `dev` se revierte sin que nadie
+#     se entere, lo que entra a `main` ya lo vio alguien que paga. El tiempo que
+#     cuesta mergear main a mano son treinta segundos por promocion, y es el
+#     unico lugar del circuito donde ese minuto compra algo.
 #
 # EL MODO TANDA — trabajar en volumen sin nadie disponible para etiquetar
 #
@@ -41,29 +95,19 @@
 # POR QUE ESTO NO ES SIMPLEMENTE "DEJAR DE REVISAR"
 #
 # Estos PR van contra `dev`, que es una rama de integracion. La promocion
-# dev -> staging -> main sigue siendo manual, y este mismo workflow se niega a
-# tocar main. El radio de daño de un merge malo es una rama interna, no el
-# cliente. Y del otro lado el costo de esperar es real: una cola de PR parados
-# se desactualiza sola y genera los conflictos que la espera venia a evitar —
-# es la razon por la que ya se elimino la regla de las 24 horas (REV-07).
+# dev -> staging -> main sigue teniendo su freno: staging solo pasa sola cuando
+# no trae trabajo nuevo, y main no pasa sola nunca. El radio de daño de un merge
+# malo es una rama interna, no el cliente. Y del otro lado el costo de esperar
+# es real: una cola de PR parados se desactualiza sola y genera los conflictos
+# que la espera venia a evitar — es la razon por la que ya se elimino la regla
+# de las 24 horas (REV-07).
 #
 # PERO SI ES UNA CONCESION, Y CONVIENE DECIRLO
 #
 # Lo que se pierde es la mirada humana sobre codigo antes de que entre a dev.
 # Lo que la reemplaza no es nada: es el CI corriendo entero sobre el codigo ya
-# integrado, mas las guardas de abajo. No es lo mismo. Se acepta a sabiendas y
+# integrado, mas las guardas de arriba. No es lo mismo. Se acepta a sabiendas y
 # se revisa cuando el equipo vuelva a tener disponibilidad.
-#
-# LO QUE EL MODO TANDA NO AFLOJA
-#
-# Las tres guardas de arriba siguen enteras. Ninguna es sobre romper
-# produccion: son sobre BAJAR LA VERIFICACION, que es la falla que este equipo
-# ya tuvo tres veces —tests con el cuerpo comentado, 61 tests que se salteaban
-# solos, un fixture que daba verde con la pantalla equivocada—. Un PR que borra
-# un archivo o recorta un test NO se auto-etiqueta, ni en modo tanda.
-#
-# Y se agrega una cuarta, propia de este modo: el PR tiene que CERRAR UN ISSUE
-# (ver guarda 4). Sin alcance declarado no hay contra que juzgar lo que hizo.
 #
 # COMO SE APAGA
 #
@@ -81,12 +125,19 @@ on:
 
 permissions:
   pull-requests: write
+  contents: read
 
 jobs:
   etiquetar:
     name: auto-etiquetar (este mismo workflow)
     runs-on: ubuntu-latest
     steps:
+      # Hace falta el arbol entero para contar tests en la base y en el head.
+      # Sin fetch-depth 0 no hay con que comparar.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - name: Etiquetar si el CI verde alcanza como revision
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -96,6 +147,59 @@ jobs:
         run: |
           set -euo pipefail
 
+          # ── Un archivo sin sus comentarios ───────────────────────────────────
+          #
+          # ESTO NO ES PROLIJIDAD: ES LA MITAD DE LA GUARDA.
+          #
+          # La primera version de este workflow contaba `expect(` con un grep
+          # crudo, y por eso contaba tambien `// expect(`. O sea que comentar
+          # veinte afirmaciones dejaba el balance intacto y el PR se
+          # auto-etiquetaba — exactamente el caso que esta guarda existe para
+          # atrapar, y exactamente la falla que el equipo ya tuvo. Se descubrio
+          # probando el sabotaje contra un archivo real antes de subir esto.
+          #
+          # Maneja las tres formas: `//` al final de una linea, `/* */` en la
+          # misma linea, y el bloque `/* */` abierto a lo largo de varias. La
+          # semantica es la de C: el primer `*/` cierra, aunque adentro hubiera
+          # otro `/*`. Es la misma que aplica el compilador, asi que la cuenta
+          # coincide con lo que de verdad se ejecuta.
+          sin_comentarios() {
+            awk '{ l=$0
+              if (inb) { p=index(l,"*/"); if(p==0){ print ""; next } else { l=substr(l,p+2); inb=0 } }
+              while ((p=index(l,"/*"))>0) { r=substr(l,p+2); q=index(r,"*/"); if(q==0){ l=substr(l,1,p-1); inb=1; break } else { l=substr(l,1,p-1) substr(r,q+2) } }
+              p=index(l,"//"); if(p>0) l=substr(l,1,p-1)
+              print l }'
+          }
+
+          # ── El balance de verificacion de un arbol ───────────────────────────
+          #
+          # Cuenta casos y afirmaciones sobre TODOS los archivos de test de la
+          # ref que se le pase. Se cuenta sobre el arbol entero y no sobre el
+          # diff a proposito: un PR puede mover un test de un archivo a otro sin
+          # perder nada, y mirar solo los archivos tocados diria que desaparecio.
+          #
+          # Se lee con `git show` en vez de checkout: no ensucia el working tree
+          # y sirve igual para una ref remota.
+          balance() {
+            local ref="$1" casos=0 afirmaciones=0 archivo contenido c a
+            while IFS= read -r archivo; do
+              [ -z "$archivo" ] && continue
+              contenido=$(git show "$ref:$archivo" 2>/dev/null | sin_comentarios || true)
+              # `|| true` en los grep: grep -c devuelve 1 cuando no hay ninguna
+              # coincidencia, y con `set -e` eso aborta el workflow entero. Un
+              # archivo de test sin un solo `expect(` es raro pero no es un error.
+              c=$(printf '%s' "$contenido" | grep -cE '(^|[^A-Za-z0-9_.])(it|test)(\.[a-z]+)?[[:space:]]*\(' || true)
+              a=$(printf '%s' "$contenido" | grep -cE '(^|[^A-Za-z0-9_.])(expect|assert)[[:space:]]*\(' || true)
+              casos=$((casos + c))
+              afirmaciones=$((afirmaciones + a))
+            done < <(git ls-tree -r --name-only "$ref" | grep -E '\.(test|spec)\.[cm]?[jt]sx?$' || true)
+            # EL SALTO DE LINEA NO ES COSMETICO. Sin el, `read` del otro lado
+            # llega a EOF sin delimitador y devuelve 1 — y con `set -e` eso mata
+            # el step sin imprimir una sola linea. Es exactamente como fallo el
+            # primer run real en CosteAR-os #30: exit code 1 y ningun mensaje.
+            echo "$casos $afirmaciones"
+          }
+
           # En workflow_dispatch no hay PR puntual: se revisan los abiertos.
           if [ -n "${PR:-}" ]; then
             lista="$PR"
@@ -103,24 +207,15 @@ jobs:
             lista=$(gh pr list --repo "$REPO" --state open --json number --jq '.[].number')
           fi
 
-          # Documentos que son REGLAS, no descripcion. Cambiarlos no rompe
-          # produccion pero cambia lo que hace todo el mundo despues.
-          normativos='^(AGENTS|CLAUDE|CONTRIBUTING|DEFINITION-OF-DONE)\.md$'
+          # Documentos que son REGLAS, no descripcion. Ver guarda 2.
+          normativos='^(AGENTS|CLAUDE|CONTRIBUTING|DEFINITION-OF-DONE|ORQUESTACION|FLUJO)\.md$'
 
           for n in $lista; do
             echo "::group::PR #$n"
 
-            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files,baseRefName,body)
+            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files,baseRefName,body,headRefOid)
             base=$(jq -r '.baseRefName' <<<"$info")
-
-            # EL MODO TANDA SOLO APLICA CONTRA dev.
-            # staging y main son promociones: ahi el juicio humano ES el punto,
-            # no un tramite. No se tocan ni con el modo prendido.
-            tanda=no
-            if [ "${MODO:-no}" = "si" ] && [ "$base" = "dev" ]; then
-              tanda=si
-              echo "Modo tanda activo (base $base)."
-            fi
+            head_sha=$(jq -r '.headRefOid' <<<"$info")
 
             if [ "$(jq -r '.isDraft' <<<"$info")" = "true" ]; then
               echo "SALTEADO: es borrador."; echo "::endgroup::"; continue
@@ -130,62 +225,122 @@ jobs:
               echo "SALTEADO: ya esta etiquetado."; echo "::endgroup::"; continue
             fi
 
-            jq -r '.files[] | "\(.path)\t\(.deletions)"' <<<"$info" > archivos.txt
-            echo "Archivos tocados:"; sed 's/^/  /' archivos.txt
+            # GUARDA 5: main no se automatiza. Es lo primero que se chequea
+            # porque ninguna otra guarda lo puede habilitar.
+            if [ "$base" = "main" ]; then
+              echo "NO APTO: la base es main. Produccion la mergea una persona."
+              echo "::endgroup::"; continue
+            fi
+
+            # ── Traer las dos puntas que hay que medir ────────────────────────
+            #
+            # NADA DE ESTO PUEDE ABORTAR EL WORKFLOW.
+            #
+            # La primera version resolvia la base con `git rev-parse "origin/$base"`
+            # a secas. Con `set -e`, si esa ref no existe el step muere con exit 1
+            # ANTES de imprimir una sola linea — que es como fallo el primer run
+            # real de este archivo en CosteAR-os: exit code 1 justo despues de
+            # abrir el grupo del PR, sin ningun mensaje que dijera por que.
+            # `actions/checkout` sobre un PR hace checkout del merge ref y no
+            # garantiza dejar la rama base como remote-tracking.
+            #
+            # Ahora cada paso trae su ref explicitamente y toda falla se degrada
+            # a un "no se pudo medir". Y NO PODER MEDIR NUNCA SIGNIFICA APTO:
+            # significa que lo mira una persona. Un guardian que se cae tiene que
+            # dejar la puerta cerrada, no abierta.
+            git fetch -q --no-tags origin "+refs/heads/$base:refs/remotes/origin/$base" 2>/dev/null || true
+            # `--verify` NO ES OPCIONAL: `git rev-parse` a secas, cuando no puede
+            # resolver la ref, IMPRIME EL STRING TAL CUAL y ademas sale con
+            # error. Con `|| true` eso deja `base_sha` con basura en vez de
+            # vacio, el chequeo de abajo pasa de largo, y se termina midiendo
+            # contra nada. Lo encontro la prueba de degradacion, no el diseño.
+            base_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$base" 2>/dev/null || true)
+            if [ -z "$base_sha" ]; then
+              echo "NO APTO: no se pudo resolver la base ($base) para medirla. Sin medicion no se etiqueta."
+              echo "::endgroup::"; continue
+            fi
+
+            # El head puede venir de un fork o de una rama que este checkout no
+            # trajo.
+            if ! git cat-file -e "$head_sha^{commit}" 2>/dev/null; then
+              git fetch -q --no-tags origin "+refs/pull/$n/head:refs/remotes/origin/pr-$n" 2>/dev/null || true
+            fi
+            if ! git cat-file -e "$head_sha^{commit}" 2>/dev/null; then
+              echo "NO APTO: no se pudo traer el head del PR para medirlo. Sin medicion no se etiqueta."
+              echo "::endgroup::"; continue
+            fi
+
+            # ── GUARDA 1: el balance de verificacion no baja ──────────────────
+            #
+            # No se afloja en ningun modo ni contra ninguna base.
+            read -r casos_base afirm_base < <(balance "$base_sha") || true
+            read -r casos_head afirm_head < <(balance "$head_sha") || true
+            echo "Verificacion — base: $casos_base casos / $afirm_base afirmaciones. PR: $casos_head casos / $afirm_head afirmaciones."
 
             apto=si
-            while IFS=$'\t' read -r ruta borradas; do
+            if [ "$casos_head" -lt "$casos_base" ] || [ "$afirm_head" -lt "$afirm_base" ]; then
+              echo "NO APTO: el PR baja la verificacion. Un PR que verifica menos que su base lo mira una persona, siempre."
+              apto=no
+            fi
+
+            # ── GUARDA 4: contra staging, solo promociones sin trabajo nuevo ──
+            if [ "$base" = "staging" ] && [ "$apto" = "si" ]; then
+              git fetch -q origin dev 2>/dev/null || true
+              propios=$(git rev-list --count "origin/dev..$head_sha" 2>/dev/null || echo "-1")
+              if [ "$propios" = "-1" ]; then
+                echo "NO APTO: no se pudo verificar contra dev que la promocion no traiga trabajo nuevo."
+              elif [ "$propios" != "0" ]; then
+                echo "NO APTO: la promocion trae $propios commit(s) que no estan en dev. Un arreglo hecho sobre la rama de promocion es justo donde nadie lo mira."
+              else
+                echo "APTO (promocion): no trae ni un commit que no haya pasado por dev."
+                gh pr edit "$n" --repo "$REPO" --add-label auto-merge
+                cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **promocion**.\n\n**Por que sin revision humana:** este PR no trae ni un commit que no este ya en `dev`. No es trabajo nuevo: es mover un conjunto que ya se integro y ya paso el CI entero. No hay nada para mirar que no se haya mirado.\n\n**Que lo habria frenado:** un solo commit propio sobre la rama de promocion, o que el balance de verificacion fuera menor que el de la base. Ninguna de las dos.\n\n`main` no se etiqueta sola nunca. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+                gh pr comment "$n" --repo "$REPO" --body "$cuerpo"
+              fi
+              echo "::endgroup::"; continue
+            fi
+
+            if [ "$apto" != "si" ]; then
+              echo "Queda para revision humana."; echo "::endgroup::"; continue
+            fi
+
+            # EL MODO TANDA SOLO APLICA CONTRA dev.
+            tanda=no
+            if [ "${MODO:-no}" = "si" ] && [ "$base" = "dev" ]; then
+              tanda=si
+              echo "Modo tanda activo (base $base)."
+            fi
+
+            jq -r '.files[].path' <<<"$info" > archivos.txt
+            echo "Archivos tocados:"; sed 's/^/  /' archivos.txt
+
+            normativo_tocado=no
+            while IFS= read -r ruta; do
               [ -z "$ruta" ] && continue
-
-              # Se limpia a digitos antes de comparar. Si por lo que sea llega
-              # vacio o con basura, queda en 0 y NO se toma como "borro lineas":
-              # el que decide si el PR es apto es el conjunto de guardas, y una
-              # de ellas sola no puede dar por bueno el PR entero.
-              borradas=${borradas//[!0-9]/}
-              borradas=${borradas:-0}
-
+              nombre=$(basename "$ruta")
+              if [ "$(dirname "$ruta")" = "." ] && grep -qE "$normativos" <<<"$nombre"; then
+                normativo_tocado=si
+                continue
+              fi
               case "$ruta" in
-                tests/*.test.*|tests/*.spec.*|tests/**/*.test.*|tests/**/*.spec.*)
-                  # Solo aditivo. Ver guarda 2.
+                .github/workflows/*)
+                  # NI EN MODO TANDA. Un PR que cambia el guardian no se puede
+                  # aprobar a si mismo: si afloja una guarda, la version que
+                  # decide si entra es la vieja, y a partir del merge ya no
+                  # existe nadie que lo controle. Ademas el modo de falla es
+                  # mudo — un YAML roto no pone el CI en rojo, GitHub
+                  # simplemente deja de correr el workflow y los PR se quedan
+                  # esperando a nadie (paso el 30-08-2026 con ocho PR).
                   #
-                  # LA GUARDA MIRA ARCHIVOS DE TEST, NO TODO LO QUE CUELGUE DE
-                  # tests/. La primera version usaba `tests/*` y rechazaba
-                  # `tests/db-dependent.mjs`, que NO es un test: es el registro
-                  # que declara que tests necesitan base de datos. Modificarlo
-                  # obliga a reemplazar lineas, asi que nunca podia ser
-                  # "puramente aditivo".
-                  #
-                  # El efecto fue exactamente el contrario al buscado: la guarda
-                  # que existe para impedir que alguien RECORTE un test bloqueo
-                  # el arreglo que hacia que un test CORRIERA. Paso el
-                  # 01-09-2026 con el PR #204 del backend.
-                  if [ "$borradas" -ne 0 ]; then
-                    echo "NO APTO: $ruta borra $borradas linea(s). Un test solo se auto-etiqueta si es puramente aditivo."
-                    apto=no
-                  fi
+                  # Hasta hoy el modo tanda los dejaba pasar mientras el
+                  # comentario del propio workflow le decia al lector que no.
+                  echo "NO APTO: $ruta es un workflow. El guardian no se aprueba a si mismo, tampoco en modo tanda."
+                  apto=no
                   ;;
-                tests/*)
-                  # Lo demas bajo tests/ es infraestructura de la suite:
-                  # registros, fixtures compartidos, configuracion. Se permite
-                  # modificarlo — pero sigue sin poder BORRARSE, que lo cubre la
-                  # guarda 1 mas abajo.
-                  echo "  (infraestructura de tests) $ruta"
-                  ;;
-                docs/*|bitacora/*)
-                  ;;
-                *.md)
-                  base=$(basename "$ruta")
-                  if [ "$(dirname "$ruta")" = "." ] && grep -qE "$normativos" <<<"$base"; then
-                    echo "NO APTO: $ruta es un documento normativo. Lo mira una persona."
-                    apto=no
-                  fi
+                docs/*|bitacora/*|tests/*|*.md|*.test.*|*.spec.*)
                   ;;
                 *)
                   if [ "$tanda" = "si" ]; then
-                    # Modo tanda: el codigo entra. Lo que lo respalda no es que
-                    # sea inofensivo —no lo es— sino que va a dev, que el CI
-                    # corrio entero sobre el codigo ya integrado, y que las
-                    # cuatro guardas siguen puestas.
                     echo "  (modo tanda) $ruta"
                   else
                     echo "NO APTO: $ruta no es documentacion ni un test."
@@ -195,19 +350,22 @@ jobs:
               esac
             done < archivos.txt
 
-            # Un archivo borrado no aparece con su ruta en el case de arriba con
-            # suficiente contexto: se chequea aparte contra el diff. Ver guarda 1.
-            if gh pr diff "$n" --repo "$REPO" --name-status 2>/dev/null | grep -q '^D'; then
-              echo "NO APTO: el PR borra archivos."
-              apto=no
+            # ── GUARDA 2: un normativo se etiqueta si declara su propio cambio ─
+            #
+            # La fila del changelog tiene que venir EN ESTE PR. Que el documento
+            # ya tenga una tabla no prueba nada: lo que se exige es que el cambio
+            # que trae este PR quede escrito.
+            if [ "$normativo_tocado" = "si" ] && [ "$apto" = "si" ]; then
+              agregadas=$(gh pr diff "$n" --repo "$REPO" 2>/dev/null | grep -cE '^\+\|[0-9]{4}-[0-9]{2}-[0-9]{2}\|' || true)
+              if [ "$agregadas" = "0" ]; then
+                echo "NO APTO: toca un documento normativo y no agrega su fila a la tabla de cambios. Una regla que cambia sin quedar escrita es la que despues nadie sabe de donde salio."
+                apto=no
+              else
+                echo "Normativo con su cambio declarado ($agregadas fila/s nueva/s)."
+              fi
             fi
 
-            # GUARDA 4, SOLO EN MODO TANDA: el PR tiene que cerrar un issue.
-            #
-            # Sin un issue cerrado no hay alcance declarado. El CI verifica que
-            # el codigo anda, no que hace lo que se pidio — y "hace otra cosa"
-            # es el modo de falla mas caro de esta tanda, porque no se descubre
-            # hasta que alguien lo usa.
+            # GUARDA 3, SOLO EN MODO TANDA: el PR tiene que cerrar un issue.
             if [ "$tanda" = "si" ] && [ "$apto" = "si" ]; then
               cuerpo_pr=$(jq -r '.body // ""' <<<"$info")
               if ! grep -qiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo_pr"; then
@@ -217,31 +375,30 @@ jobs:
             fi
 
             if [ "$apto" != "si" ]; then
-              echo "Queda para revision humana."
-              echo "::endgroup::"; continue
+              echo "Queda para revision humana."; echo "::endgroup::"; continue
             fi
 
-            if [ "$tanda" = "si" ]; then
-              echo "APTO (modo tanda): va a dev, cierra un issue, no borra archivos ni recorta tests."
-            else
-              echo "APTO: solo documentacion descriptiva y tests nuevos."
-            fi
             gh pr edit "$n" --repo "$REPO" --add-label auto-merge
+
             # EL MENSAJE VA EN UNA SOLA LINEA FISICA. NO LO PARTAS.
             #
             # Adentro de un bloque `run: |` toda linea no vacia tiene que estar
-            # indentada al menos como el bloque. Un texto multilinea con
-            # markdown pegado a la columna cero ROMPE EL ARCHIVO ENTERO y
-            # GitHub deja de poder parsearlo — sin decirlo en ningun lado que se
-            # mire. Ver `scripts/chequear-workflows.py`, que lo detecta.
+            # indentada al menos como el bloque. Un texto multilinea con markdown
+            # pegado a la columna cero ROMPE EL ARCHIVO ENTERO y GitHub deja de
+            # poder parsearlo — sin decirlo en ningun lado que se mire. Ver
+            # `scripts/chequear-workflows.py`, que lo detecta.
+            #
             # EL COMENTARIO TIENE QUE DECIR LA VERDAD DE POR QUE ENTRO.
-            # En modo tanda el motivo es otro, y decir "solo toca tests"
-            # sobre un PR que toca src/ seria justamente el tipo de
-            # afirmacion sin verificar que nos viene costando caro.
-            if [ "$tanda" = "si" ]; then
-              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **modo tanda**.\n\n**Por que sin revision humana:** el equipo esta trabajando en volumen y sin disponibilidad para mirar cada PR. Este va contra `dev`, que es una rama de integracion: la promocion a `staging` y `main` sigue siendo manual, asi que el radio de un merge malo es una rama interna y no el cliente.\n\n**Que se verifico igual:** el CI corrio entero sobre el codigo ya integrado, el PR no borra ningun archivo, no recorta ningun test existente, y cierra un issue — o sea que hay un alcance declarado contra el cual mirarlo despues.\n\n**Que NO se verifico:** que el codigo haga lo que el issue pedia. Eso lo mira una persona cuando vuelva, antes de promover. Si algo de este PR no cierra, se revierte en `dev` sin tocar produccion.\n\nSe apaga con `gh variable set AUTO_ETIQUETAR_CODIGO --body "no"`. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+            verif="Verificacion: $casos_base -> $casos_head casos, $afirm_base -> $afirm_head afirmaciones."
+            if [ "$normativo_tocado" = "si" ]; then
+              echo "APTO: normativo con su cambio declarado."
+              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **documento normativo con su cambio declarado**.\n\n**@SantiagoBriz: esto cambia una regla del equipo.** No rompe produccion, pero cambia lo que hace todo el mundo despues. Entro solo porque el PR declara su propio cambio en la tabla del documento, que es lo que hace que la regla no cambie en silencio. Si la fila no dice lo que el PR hizo, revertilo en `dev`.\n\n%s\n\nVer `.github/workflows/auto-etiquetar.yml`.\n' "$verif")
+            elif [ "$tanda" = "si" ]; then
+              echo "APTO (modo tanda)."
+              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **modo tanda**.\n\n**Por que sin revision humana:** el equipo esta trabajando en volumen y sin disponibilidad para mirar cada PR. Este va contra `dev`, que es una rama de integracion: `staging` solo entra sola cuando la promocion no trae trabajo nuevo y `main` no entra sola nunca, asi que el radio de un merge malo es una rama interna y no el cliente.\n\n**Que se verifico:** el CI corrio entero sobre el codigo ya integrado, el PR cierra un issue —o sea que hay un alcance declarado contra el cual mirarlo despues— y **no baja el balance de verificacion**. %s\n\n**Que NO se verifico:** que el codigo haga lo que el issue pedia. Eso lo mira una persona cuando vuelva, antes de promover. Si algo de este PR no cierra, se revierte en `dev` sin tocar produccion.\n\nSe apaga con `gh variable set AUTO_ETIQUETAR_CODIGO --body "no"`. Ver `.github/workflows/auto-etiquetar.yml`.\n' "$verif")
             else
-              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente.\n\n**Por que sin revision humana:** este PR solo agrega tests y toca documentacion descriptiva. No modifica codigo que se ejecute en produccion, no borra archivos y no recorta ningun test existente. Con el CI en verde ya demostro todo lo que una persona le iba a mirar.\n\nEn el peor caso agrega un test malo, que se descubre cuando falla y que nunca llega al cliente.\n\nSi tocara `src/`, `prisma/`, un workflow, o alguno de los documentos que son reglas del equipo, esto **no** habria pasado: ahi sigue haciendo falta que alguien lo lea. Ver `.github/workflows/auto-etiquetar.yml`.\n')
+              echo "APTO: solo documentacion descriptiva y tests."
+              cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente.\n\n**Por que sin revision humana:** este PR solo toca tests y documentacion descriptiva. No modifica codigo que se ejecute en produccion, y **no baja el balance de verificacion**: %s\n\nEn el peor caso agrega un test malo, que se descubre cuando falla y que nunca llega al cliente.\n\nSi tocara `src/`, `prisma/`, un workflow, o un documento normativo sin declarar su cambio, esto **no** habria pasado. Ver `.github/workflows/auto-etiquetar.yml`.\n' "$verif")
             fi
             gh pr comment "$n" --repo "$REPO" --body "$cuerpo"
             echo "::endgroup::"
