@@ -436,6 +436,13 @@ CREATE POLICY tenant_isolation ON producciones_diarias
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE egresos_producto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE egresos_producto FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON egresos_producto;
+CREATE POLICY tenant_isolation ON egresos_producto
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 ALTER TABLE ventas_producto ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ventas_producto FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON ventas_producto;
