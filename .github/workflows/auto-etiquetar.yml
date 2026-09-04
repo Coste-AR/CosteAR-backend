@@ -69,8 +69,16 @@
 #     entra. Un cambio declarado y anunciado no necesita que alguien lo frene:
 #     necesita que se sepa. Si no declara la fila, sigue quedando a mano.
 #
-# G3. EL PR CIERRA UN ISSUE (solo en modo tanda, ver abajo). Sin alcance
-#     declarado no hay contra que juzgar lo que hizo.
+# G3. EL PR QUE TRAE CODIGO CIERRA UN ISSUE. Sin alcance declarado no hay contra
+#     que juzgar lo que hizo: el CI verifica que el codigo anda, no que hace lo
+#     que se pidio.
+#
+#     APLICA AL PR QUE TRAE CODIGO, NO AL QUE CORRE CON EL MODO TANDA PRENDIDO.
+#     La primera version confundia las dos cosas y el efecto fue que NINGUNA
+#     BITACORA se auto-etiquetaba: un PR de puros `.md` no cierra ningun issue
+#     —no tiene por que— y quedaba frenado por una guarda pensada para codigo.
+#     Las bitacoras las venia etiquetando Santiago a mano una por una, que es
+#     exactamente el trabajo que este workflow existe para sacarle.
 #
 # G4. CONTRA `staging`, SOLO PROMOCIONES SIN TRABAJO NUEVO. Un PR dev -> staging
 #     que no trae NI UN COMMIT que no este ya en `dev` no es trabajo: es mover
@@ -315,6 +323,10 @@ jobs:
             echo "Archivos tocados:"; sed 's/^/  /' archivos.txt
 
             normativo_tocado=no
+            # Se reinicia por PR: en workflow_dispatch el loop recorre
+            # varios y una marca pegada del anterior decidiria por el
+            # siguiente.
+            codigo=no
             while IFS= read -r ruta; do
               [ -z "$ruta" ] && continue
               nombre=$(basename "$ruta")
@@ -341,6 +353,10 @@ jobs:
                   ;;
                 *)
                   if [ "$tanda" = "si" ]; then
+                    # Marca que este PR necesito el modo tanda para pasar, o
+                    # sea que trae al menos un archivo que NO es documentacion
+                    # ni test. Es lo que decide si se le exige cerrar un issue.
+                    codigo=si
                     echo "  (modo tanda) $ruta"
                   else
                     echo "NO APTO: $ruta no es documentacion ni un test."
@@ -365,8 +381,26 @@ jobs:
               fi
             fi
 
-            # GUARDA 3, SOLO EN MODO TANDA: el PR tiene que cerrar un issue.
-            if [ "$tanda" = "si" ] && [ "$apto" = "si" ]; then
+            # GUARDA 3: el PR que trae CODIGO tiene que cerrar un issue.
+            #
+            # OJO CON LA CONDICION: es `codigo`, no `tanda`.
+            #
+            # La primera version pedia el issue a todo PR cuando el modo tanda
+            # estaba prendido, mirara lo que mirara. El efecto real fue que
+            # NINGUNA BITACORA se auto-etiquetaba: un PR de puros `.md` no
+            # cierra ningun issue —no tiene por que— y quedaba frenado por una
+            # guarda pensada para codigo. Las bitacoras de CosteAR-os venia
+            # etiquetandolas Santiago a mano una por una, que es justo el
+            # trabajo que este workflow existe para sacarle; y la del 03-09
+            # (os #29) quedo abierta cuatro dias porque no llego.
+            #
+            # Se vio en el log de admin #78, un PR que solo tocaba dos archivos
+            # de bitacora: "NO APTO: no cierra ningun issue".
+            #
+            # El issue existe para tener contra que juzgar CODIGO que el CI dice
+            # que anda pero que puede estar haciendo otra cosa. Una bitacora no
+            # tiene ese modo de falla: lo que dice es lo que es.
+            if [ "${codigo:-no}" = "si" ] && [ "$apto" = "si" ]; then
               cuerpo_pr=$(jq -r '.body // ""' <<<"$info")
               if ! grep -qiE '(closes|fixes|resolves) #[0-9]+' <<<"$cuerpo_pr"; then
                 echo "NO APTO: no cierra ningun issue. Sin alcance declarado no hay contra que verificar."
@@ -393,7 +427,7 @@ jobs:
             if [ "$normativo_tocado" = "si" ]; then
               echo "APTO: normativo con su cambio declarado."
               cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **documento normativo con su cambio declarado**.\n\n**@SantiagoBriz: esto cambia una regla del equipo.** No rompe produccion, pero cambia lo que hace todo el mundo despues. Entro solo porque el PR declara su propio cambio en la tabla del documento, que es lo que hace que la regla no cambie en silencio. Si la fila no dice lo que el PR hizo, revertilo en `dev`.\n\n%s\n\nVer `.github/workflows/auto-etiquetar.yml`.\n' "$verif")
-            elif [ "$tanda" = "si" ]; then
+            elif [ "$codigo" = "si" ]; then
               echo "APTO (modo tanda)."
               cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente — **modo tanda**.\n\n**Por que sin revision humana:** el equipo esta trabajando en volumen y sin disponibilidad para mirar cada PR. Este va contra `dev`, que es una rama de integracion: `staging` solo entra sola cuando la promocion no trae trabajo nuevo y `main` no entra sola nunca, asi que el radio de un merge malo es una rama interna y no el cliente.\n\n**Que se verifico:** el CI corrio entero sobre el codigo ya integrado, el PR cierra un issue —o sea que hay un alcance declarado contra el cual mirarlo despues— y **no baja el balance de verificacion**. %s\n\n**Que NO se verifico:** que el codigo haga lo que el issue pedia. Eso lo mira una persona cuando vuelva, antes de promover. Si algo de este PR no cierra, se revierte en `dev` sin tocar produccion.\n\nSe apaga con `gh variable set AUTO_ETIQUETAR_CODIGO --body "no"`. Ver `.github/workflows/auto-etiquetar.yml`.\n' "$verif")
             else
