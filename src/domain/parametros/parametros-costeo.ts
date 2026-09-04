@@ -52,6 +52,17 @@ export interface DefinicionParametro {
  */
 export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
   {
+    clave: 'umbral_variacion_punto_equilibrio_pct',
+    descripcion:
+      'Variación porcentual absoluta del punto de equilibrio a partir de la cual se avisa.',
+    // Referencia inicial del equipo, no un dato de ningún cliente. Queda editable
+    // por empresa, estructura o período mediante la misma cascada del catálogo.
+    valorDefault: 10,
+    seguro: false,
+    nota:
+      'Referencia inicial elegida por el equipo para habilitar la alerta. Confirmar el nivel de sensibilidad antes de usarla como decisión de negocio.',
+  },
+  {
     clave: 'huevos_por_cajon',
     descripcion: 'Huevos que entran en un cajón. Es la unidad de gestión del negocio.',
     valorDefault: 360,

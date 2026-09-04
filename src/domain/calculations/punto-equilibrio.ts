@@ -1,3 +1,4 @@
+import { Decimal } from 'decimal.js';
 import { Money } from '../value-objects/money.js';
 import type { ContribucionMarginal } from './contribucion-marginal.js';
 
@@ -34,4 +35,36 @@ export function calcularPuntoEquilibrio(
     unidadesEquilibrio: costosFijos.divide(contribucion.contribucionMarginalUnitaria).toNumber(),
     fechaUltimoRecalculo: fecha,
   };
+}
+
+/**
+ * Variación absoluta entre dos fotos válidas del punto de equilibrio.
+ *
+ * Un cambio hacia arriba y uno hacia abajo son ambos relevantes: el indicador
+ * no decide si el movimiento fue bueno o malo, solo evita que pase inadvertido.
+ * Sin dos puntos calculables (o con una referencia en cero) no inventa un
+ * porcentaje para alertar.
+ */
+export function calcularVariacionPuntoEquilibrio(
+  actual: PuntoEquilibrio,
+  anterior: PuntoEquilibrio,
+): number | null {
+  const unidadesActuales = actual.unidadesEquilibrio;
+  const unidadesAnteriores = anterior.unidadesEquilibrio;
+  if (
+    actual.incompleta ||
+    anterior.incompleta ||
+    unidadesActuales === null ||
+    unidadesAnteriores === null ||
+    unidadesAnteriores === 0
+  ) {
+    return null;
+  }
+
+  return new Decimal(unidadesActuales)
+    .minus(unidadesAnteriores)
+    .abs()
+    .dividedBy(unidadesAnteriores)
+    .times(100)
+    .toNumber();
 }
