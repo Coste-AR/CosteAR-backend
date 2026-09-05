@@ -38,6 +38,38 @@ on:
   # midio: un PR verde y etiquetado quedaba esperando al cron, que declara 15
   # minutos y en la practica corre cada 2 a 4 horas y media.
   status:
+  # EL UNICO DISPARADOR QUE VE EL VERDE PROPIO. NO LO SAQUES.
+  #
+  # `check_suite: completed` NO DISPARA NUNCA, y por eso este workflow dependia
+  # del cron sin que nadie lo notara. Las suites de checks las crea Actions con
+  # el GITHUB_TOKEN, y GitHub no encadena workflows a partir de acciones hechas
+  # con ese token — la misma proteccion que impide que el `Closes #N` cierre el
+  # issue y que un `issues: closed` dispare el barrido de desbloqueo.
+  #
+  # Se midio el 05-09-2026: en el historial completo de los cuatro repos no hay
+  # UNA SOLA corrida de este workflow con `event=check_suite`. Las que aparecen
+  # como `pull_request` son del instante del push, con el CI todavia arrancando:
+  # ven todo en `pending` y saltean. Resultado: cuatro PR verdes y etiquetados
+  # pasaron la noche del 04-09 sin entrar, esperando a un cron que declara 15
+  # minutos y corre cada 2 a 4 horas y media.
+  #
+  # `workflow_run` SI se emite cuando termina una corrida creada por Actions.
+  # Es el unico trigger que cierra el lazo, y no necesita ningun token nuevo.
+  #
+  # LA LISTA ES LA UNION DE LOS CUATRO REPOS, A PROPOSITO. Un nombre que no
+  # existe en este repo simplemente no matchea nunca. Se prefiere un archivo
+  # igual en los cuatro a cuatro archivos que hay que leer por separado para
+  # saber que hace cada uno. Si agregas un workflow de CI, agregalo aca.
+  workflow_run:
+    workflows:
+      - Backend CI
+      - Frontend CI
+      - Admin CI
+      - Docs CI
+      - Frontend E2E
+      - Playwright Tests
+      - Auto-etiquetar
+    types: [completed]
   # Red de seguridad. `check_suite` se pierde de vez en cuando, y un PR
   # etiquetado y en verde que nadie mergea es peor que uno que falla: no avisa.
   schedule:
@@ -153,9 +185,37 @@ jobs:
             head_sha=$(gh pr view "$n" --repo "$REPO" --json headRefOid --jq .headRefOid)
             atras=$(gh api "repos/$REPO/compare/$base...$head_sha" --jq .behind_by 2>/dev/null || echo 0)
 
+            # UN PR QUE SOLO TOCA DOCUMENTACION ENTRA AUNQUE ESTE ATRASADO.
+            #
+            # El atraso importa por una razon concreta: el verde se calculo
+            # contra otra version de la base, y dos PR verdes contra la misma
+            # base vieja pueden romperla al entrar los dos. Eso vale para el
+            # codigo. Un `.md` no cambia nada de lo que el CI ejecuta, asi que
+            # exigirle estar al dia es puro costo — y un costo que no se paga
+            # solo, porque el que "abrio el PR" es una sesion de Codex que ya
+            # termino y no va a volver a actualizar nada.
+            #
+            # El 04-09 quedaron cuatro PR trabados por esto. Dos eran bitacoras.
+            #
+            # SE FALLA CERRADO: si no se puede leer la lista de archivos, cuenta
+            # como que trae codigo y la guarda se aplica igual. No poder medir
+            # nunca significa apto.
+            # NADA DE `test("\.md$")` ACA: gojq —que es lo que usa `gh --jq`—
+            # rechaza `\.` en un literal de string y el comando falla entero. La
+            # primera version de esta linea lo tenia y no media nada: caia
+            # siempre en el `|| echo 1`. Fallaba cerrado, asi que no se rompio
+            # nada, pero la guarda tampoco servia. `endswith` no tiene escapes.
+            no_docs=$(gh pr view "$n" --repo "$REPO" --json files --jq '[.files[].path | select(endswith(".md") | not)] | length' 2>/dev/null || echo 1)
+
+            if [ "${no_docs:-1}" = "0" ] && [ "${atras:-0}" -gt 0 ]; then
+              echo "Atrasado $atras commit(s), pero el PR solo toca .md: el atraso no cambia lo que el CI ejecuta. Sigue."
+              atras=0
+            fi
+
             if [ "${atras:-0}" -gt 0 ]; then
               echo "SALTEADO: atrasado $atras commit(s) respecto de $base."
-              echo "Lo actualiza quien abrio el PR, no este workflow."
+              echo "Lo destraba una persona con: gh pr update-branch $n --repo $REPO"
+              echo "Tiene que ser un token de usuario real: el push del bot no dispara el CI."
 
               # POR QUE EL WORKFLOW NO ACTUALIZA LA RAMA EL MISMO.
               #
