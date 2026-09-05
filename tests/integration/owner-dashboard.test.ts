@@ -47,6 +47,7 @@ describe('A-07 — tablero del dueño por período', () => {
       producidoCajones: { valor: 2, completo: true },
       resultadoPeriodo: { valor: 12, completo: true },
     });
+    expect(tablero.costoPorCajon.variable).toMatchObject({ parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] });
   });
 
   it('marca incompletos los indicadores comerciales si no hay ventas', async () => {
@@ -79,5 +80,43 @@ describe('A-07 — tablero del dueño por período', () => {
 
   it('no filtra el período de otro tenant', async () => {
     await expect(new OwnerDashboardService().get(B.userId, A.periodId)).rejects.toThrow(/Período de costos no encontrado/);
+  });
+
+  it('enumera el parámetro sin confirmar que afecta cada número', async () => {
+    const parametro = await withTenant(A.userId, (tx) => tx.parametroCosteo.create({
+      data: {
+        companyId: A.companyId,
+        userId: A.userId,
+        structureId: A.structureId,
+        periodId: A.periodId,
+        clave: 'rendimiento_operativo',
+        descripcion: 'Rendimiento operativo',
+        valorNum: 1,
+        confirmado: false,
+      },
+    }));
+    await withTenant(A.userId, (tx) => tx.calculationRun.create({
+      data: {
+        structureId: A.structureId, periodId: A.periodId, runN: 3, engineVersion: 'test', executedBy: A.userId,
+        validated: true, inputsSnapshot: {},
+        results: {
+          grossMargin: 12,
+          incompletitud: { incompleto: false, motivos: [] },
+          detail: { unitCost: { unitFinishedGoodsCost: 5, basadoEn: 'producidas' } },
+          contribucionMarginal: {
+            incompleta: false, precioUnitario: 4, unidadesVendidas: 24, costoVariableUnitario: 2,
+            contribucionMarginalUnitaria: 2,
+            componentes: [{ importeAbsorcion: 36, comportamientoVolumen: 'FIJO', parametroId: parametro.id }],
+          },
+          puntoEquilibrio: { incompleta: false, unidadesEquilibrio: 24, fechaUltimoRecalculo: '2026-09-02T00:00:00.000Z' },
+        },
+      },
+    }));
+
+    const tablero = await new OwnerDashboardService().get(A.userId, A.periodId);
+    const detalle = [{ id: parametro.id, nombre: 'Rendimiento operativo' }];
+    expect(tablero.costoPorCajon.variable).toMatchObject({ parametrosSinConfirmar: true, parametrosSinConfirmarDetalle: detalle });
+    expect(tablero.precioPromedioVenta).toMatchObject({ parametrosSinConfirmar: true, parametrosSinConfirmarDetalle: detalle });
+    expect(tablero.producidoCajones).toMatchObject({ parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] });
   });
 });
