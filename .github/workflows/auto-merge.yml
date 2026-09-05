@@ -217,6 +217,23 @@ jobs:
               echo "Lo destraba una persona con: gh pr update-branch $n --repo $REPO"
               echo "Tiene que ser un token de usuario real: el push del bot no dispara el CI."
 
+              # LA ETIQUETA `necesita-mano`: QUE EL EMBUDO SE PUEDA CONSULTAR.
+              #
+              # Este workflow ya avisaba en un comentario del PR, y no alcanzaba:
+              # el 04-09 cuatro PR pasaron la noche trabados y nadie lo supo
+              # hasta que alguien los fue a buscar de a uno. Un aviso que hay que
+              # ir a buscar no es un aviso.
+              #
+              # Con la etiqueta, el estado del embudo es una consulta, y la misma
+              # en los cuatro repos:
+              #
+              #   gh pr list --repo Coste-AR/<repo> --label necesita-mano
+              #
+              # Se pone y se saca sola. No reemplaza al comentario, que explica
+              # el caso concreto; la etiqueta es para verlo desde afuera sin
+              # abrir nada.
+              gh pr edit "$n" --repo "$REPO" --add-label necesita-mano >/dev/null 2>&1                 || echo "::warning::No se pudo poner la etiqueta necesita-mano en #$n. Falta crearla en este repo."
+
               # POR QUE EL WORKFLOW NO ACTUALIZA LA RAMA EL MISMO.
               #
               # Lo hacia, y no funcionaba. El commit que genera `update-branch`
@@ -266,6 +283,12 @@ jobs:
 
               echo "::endgroup::"; continue
             fi
+
+            # YA NO ESTA ATRASADO: SE SACA LA ETIQUETA.
+            # Una etiqueta que se pone sola y se saca a mano miente a la primera
+            # distraccion, y una lista de pendientes con cosas resueltas adentro
+            # se deja de mirar.
+            gh pr edit "$n" --repo "$REPO" --remove-label necesita-mano >/dev/null 2>&1 || true
 
             # LEER LOS CHECKS.
             #
