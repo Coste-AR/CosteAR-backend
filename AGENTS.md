@@ -157,6 +157,35 @@ a mano al final es una promesa que se incumple sola.
 
 Formato completo: `CosteAR-os/plantillas/bitacora-sesion-agente.md`.
 
+## Antes de decir que algo ya está resuelto
+
+Vale para cualquier trabajo de investigación: un triage, cerrar un issue viejo, contestar "eso ya
+está hecho". **Que el código exista no significa que esté en `dev`.**
+
+```bash
+git merge-base --is-ancestor <commit> origin/dev && echo "SI llegó" || echo "NO llegó"
+git branch -r --contains <commit>          # ¿en qué ramas vive?
+git grep -n "<el símbolo que agregó>" origin/dev
+```
+
+**Los tres, no uno.** Que el archivo exista en `dev` no alcanza: puede existir por otro trabajo
+distinto y parecido.
+
+> **Pasó el 04-09-2026.** Un triage recomendó cerrar el issue #98 del backend —el control de
+> variaciones presupuesto/volumen— afirmando que el commit "ya está en `origin/dev`". Estaba
+> únicamente en una rama del 20-08 **sin ningún PR, ni abierto ni cerrado**. Lo que confundió es
+> que en `dev` sí hay trabajo sobre variaciones, y el archivo de test existe y menciona la misma
+> tolerancia: 12 coincidencias en `dev` contra 36 en la rama. **Se parecía lo suficiente como para
+> dar por cerrado algo que no estaba.** Si se cerraba, se perdían 125 líneas y un ADR.
+
+Tirando de ese hilo aparecieron **seis ramas remotas con commits fuera de `dev` y sin ningún PR**,
+tres de ellas la implementación de issues que siguen abiertos. `PR-06` cubre *"se mergeó pero no
+llegó"*; esto es el hueco de al lado: **trabajo que nunca se propuso**, así que no hay merge que
+verificar y ninguna alarma que suene.
+
+**Si encontrás una rama así, no la mergees ni la des por perdida: decilo en el issue con el commit
+y la rama.** Que exista trabajo escrito cambia la recomendación, no la ejecuta.
+
 ## Lo que no hacés nunca
 
 - **No mergeás.**
@@ -173,3 +202,15 @@ corriste. Si encontraste un bug que no era tuyo, decilo con el número del issue
 ---
 
 El protocolo completo del equipo está en [`Coste-AR/CosteAR-os`](https://github.com/Coste-AR/CosteAR-os).
+
+---
+
+## Registro de cambios de este archivo
+
+Este archivo es **normativo**: cambia lo que hace todo el mundo después. Por eso cada cambio deja
+su fila acá, y por eso el auto-etiquetado no lo deja entrar sin ella — un PR que toca este archivo
+y no declara qué cambió queda esperando a una persona.
+
+|Fecha|Qué cambió|Fuente|
+|---|---|---|
+|2026-09-04|**Se agrega "Antes de decir que algo ya está resuelto".** Un triage recomendó cerrar un issue afirmando que el commit ya estaba en `dev`; estaba sólo en una rama sin PR, y cerrarlo habría perdido 125 líneas y un ADR. Se agregan los tres comandos que lo comprueban y qué hacer al encontrar una rama huérfana. **Y se inaugura esta tabla**, que no existía: sin ella ningún cambio a este archivo se podía auto-etiquetar.|Santiago|
