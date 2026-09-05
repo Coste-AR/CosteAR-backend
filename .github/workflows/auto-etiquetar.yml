@@ -41,13 +41,28 @@
 # etiqueta. Si no bajan, el PR puede borrar, renombrar y reescribir tests con
 # total libertad: demostro que no recorto nada.
 #
-# LO QUE ESTA MEDICION NO ATRAPA — Y CONVIENE DECIRLO
+# Y NO SE MIDE SOLO CUANTOS: SE MIDE CUALES
 #
-# Un PR que borra un test bueno y agrega uno trivial mantiene la cuenta y pasa.
-# La guarda vieja tampoco lo atrapaba (podia agregar un test malo sin borrar
-# nada), pero es una perdida real respecto de "cero lineas borradas" y se acepta
-# a sabiendas. Lo que lo respalda: va a `dev`, es revertible, y el costo de la
-# alternativa —una cola de PR parados esperando a alguien— ya se pago y fue peor.
+# Contar sola dejaba un agujero: un PR que borra un test bueno y agrega uno
+# trivial mantiene la cuenta y pasa. Quedo escrito como perdida aceptada cuando
+# se reemplazaron las guardas viejas, y duro medio dia. Se cierra comparando los
+# TITULOS de los tests de la base contra los del PR: si alguno desaparece, no se
+# etiqueta.
+#
+# LA BAJA DE UN TEST NO ESTA PROHIBIDA, ESTA OBLIGADA A SER EXPLICITA. Borrar un
+# test es trabajo legitimo —cubre algo que ya no existe, quedo duplicado, era
+# malo—. Lo que no puede pasar es que se borre EN SILENCIO, que es como se
+# pierde cobertura sin que nadie lo haya decidido. El PR lo declara en su cuerpo
+# con una linea y entra:
+#
+#     Baja de test: <el titulo exacto> — <por que>
+#
+# LO QUE SIGUE SIN ATRAPAR, Y CONVIENE DECIRLO
+#
+# Un titulo armado con template (`it(`caso ${n}`)`) no es literal y no se puede
+# seguir entre versiones: esos casos quedan cubiertos solo por el conteo. Y un
+# test al que le cambian el titulo cuenta como una baja mas un alta, asi que hay
+# que declararlo — es ruido, pero del lado seguro.
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # LAS GUARDAS, Y POR QUE CADA UNA
@@ -179,6 +194,45 @@ jobs:
               print l }'
           }
 
+          # ── Los titulos de los tests de un arbol ─────────────────────────────
+          #
+          # CONTAR NO ALCANZA, Y ESE ERA EL AGUJERO CONOCIDO.
+          #
+          # El balance de abajo mide CUANTOS tests hay. Un PR que borra un test
+          # bueno y agrega uno trivial mantiene la cuenta y pasa — quedo escrito
+          # como perdida aceptada cuando se reemplazaron las guardas viejas.
+          # Esto lo cierra: no se mira cuantos, se mira CUALES.
+          #
+          # Se comparan los titulos de la base contra los del PR. Si alguno
+          # desaparece, no se etiqueta — a menos que el PR lo declare (ver la
+          # guarda de abajo). Renombrar un archivo, moverlo o partirlo en dos no
+          # rompe nada, porque los titulos se juntan de TODO el arbol y no por
+          # archivo: lo que importa es que el caso siga existiendo en algun lado.
+          #
+          # LO QUE ESTA MEDICION NO VE, Y HAY QUE DECIRLO:
+          #
+          #   - Un titulo armado con template (`it(`caso ${n}`)`) no es literal y
+          #     no se puede seguir entre versiones. Se ignora. Esos casos quedan
+          #     cubiertos solo por el conteo.
+          #   - Un test que conserva el titulo y le vacian el cuerpo NO lo atrapa
+          #     esta guarda: lo atrapa el conteo de afirmaciones, que baja.
+          #
+          # Las dos se complementan a proposito. Una mira identidad, la otra
+          # volumen; hay que pasar las dos.
+          titulos() {
+            local ref="$1" archivo contenido
+            while IFS= read -r archivo; do
+              [ -z "$archivo" ] && continue
+              contenido=$(git show "$ref:$archivo" 2>/dev/null | sin_comentarios || true)
+              # Una pasada por tipo de comilla: `grep -oE` no tiene
+              # retrorreferencias, asi que no se puede exigir que la comilla de
+              # cierre sea la misma con un solo patron. Las backticks quedan
+              # afuera aposta: son las que suelen llevar interpolacion.
+              printf '%s' "$contenido" | grep -oE "(^|[^A-Za-z0-9_.])(it|test)(\.(only|skip|concurrent|sequential))?[[:space:]]*\([[:space:]]*'[^']+'" | sed "s/.*'\\([^']*\\)'\$/\\1/" || true
+              printf '%s' "$contenido" | grep -oE "(^|[^A-Za-z0-9_.])(it|test)(\.(only|skip|concurrent|sequential))?[[:space:]]*\([[:space:]]*\"[^\"]+\"" | sed 's/.*"\([^"]*\)"$/\1/' || true
+            done < <(git ls-tree -r --name-only "$ref" | grep -E '\.(test|spec)\.[cm]?[jt]sx?$' || true)
+          }
+
           # ── El balance de verificacion de un arbol ───────────────────────────
           #
           # Cuenta casos y afirmaciones sobre TODOS los archivos de test de la
@@ -289,6 +343,43 @@ jobs:
             if [ "$casos_head" -lt "$casos_base" ] || [ "$afirm_head" -lt "$afirm_base" ]; then
               echo "NO APTO: el PR baja la verificacion. Un PR que verifica menos que su base lo mira una persona, siempre."
               apto=no
+            fi
+
+            # ── GUARDA 1b: ningun test existente desaparece sin declararlo ────
+            #
+            # Cierra el agujero que dejaba el conteo: borrar un test bueno y
+            # agregar uno trivial mantiene el balance. Acá se mira identidad.
+            #
+            # LA BAJA NO ESTA PROHIBIDA, ESTA OBLIGADA A SER EXPLICITA. Un test
+            # se puede borrar —cubre algo que ya no existe, quedo duplicado, era
+            # malo— y eso es trabajo legitimo. Lo que no puede pasar es que se
+            # borre EN SILENCIO, que es como se pierde cobertura sin que nadie
+            # lo decida. El PR lo declara en su cuerpo:
+            #
+            #     Baja de test: <el titulo exacto> — <por que>
+            #
+            # y con eso entra. El costo de declararlo es una linea; el de no
+            # pedirlo es no enterarse nunca.
+            titulos "$base_sha" | sort -u > titulos-base.txt || true
+            titulos "$head_sha" | sort -u > titulos-head.txt || true
+            faltantes=$(comm -23 titulos-base.txt titulos-head.txt || true)
+            if [ -n "$faltantes" ]; then
+              cuerpo_pr=$(jq -r '.body // ""' <<<"$info")
+              sin_declarar=0
+              while IFS= read -r t; do
+                [ -z "$t" ] && continue
+                # Se busca el titulo literal en el cuerpo. `grep -F` para que un
+                # titulo con parentesis o acentos no se lea como regex.
+                if grep -qF "$t" <<<"$cuerpo_pr"; then
+                  echo "  baja declarada: $t"
+                else
+                  echo "NO APTO: desaparece el test \"$t\" y el PR no lo declara. Agregá al cuerpo: Baja de test: $t — <por que>"
+                  sin_declarar=$((sin_declarar + 1))
+                fi
+              done <<<"$faltantes"
+              if [ "$sin_declarar" -gt 0 ]; then
+                apto=no
+              fi
             fi
 
             # ── GUARDA 4: contra staging, solo promociones sin trabajo nuevo ──
