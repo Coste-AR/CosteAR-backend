@@ -2,10 +2,16 @@ import type { PrismaClient } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
 
+type ParametroSinConfirmar = {
+  id: string;
+  nombre: string;
+};
+
 type NumeroTablero = {
   valor: number | null;
   completo: boolean;
   parametrosSinConfirmar: boolean;
+  parametrosSinConfirmarDetalle: ParametroSinConfirmar[];
   motivos: string[];
 };
 
@@ -31,12 +37,20 @@ type ResultadoCorrida = {
   };
 };
 
-const incompleto = (motivos: string[], parametrosSinConfirmar = false): NumeroTablero => ({
-  valor: null, completo: false, parametrosSinConfirmar, motivos,
+const incompleto = (motivos: string[], parametrosSinConfirmarDetalle: ParametroSinConfirmar[] = []): NumeroTablero => ({
+  valor: null,
+  completo: false,
+  parametrosSinConfirmar: parametrosSinConfirmarDetalle.length > 0,
+  parametrosSinConfirmarDetalle,
+  motivos,
 });
 
-const completo = (valor: number, parametrosSinConfirmar: boolean, motivos: string[] = []): NumeroTablero => ({
-  valor, completo: motivos.length === 0, parametrosSinConfirmar, motivos,
+const completo = (valor: number, parametrosSinConfirmarDetalle: ParametroSinConfirmar[] = [], motivos: string[] = []): NumeroTablero => ({
+  valor,
+  completo: motivos.length === 0,
+  parametrosSinConfirmar: parametrosSinConfirmarDetalle.length > 0,
+  parametrosSinConfirmarDetalle,
+  motivos,
 });
 
 /**
@@ -84,9 +98,16 @@ export class OwnerDashboardService {
     const factor = unidadVenta ? Number(unidadVenta.factor) : null;
     const motivosBase = resultado.incompletitud?.incompleto ? (resultado.incompletitud.motivos ?? []) : [];
     const idsParametros = contribucion?.componentes.map((c) => c.parametroId).filter((id): id is string => id !== null) ?? [];
-    const sinConfirmar = idsParametros.length > 0
-      ? await withTenant(userId, (tx) => tx.parametroCosteo.count({ where: { id: { in: idsParametros }, confirmado: false, deletedAt: null } })) > 0
-      : false;
+    const parametrosSinConfirmar = idsParametros.length > 0
+      ? await withTenant(userId, async (tx) => (await tx.parametroCosteo.findMany({
+          where: { id: { in: idsParametros }, confirmado: false, deletedAt: null },
+          select: { id: true, clave: true, descripcion: true },
+          orderBy: [{ clave: 'asc' }, { id: 'asc' }],
+        })).map((parametro) => ({
+          id: parametro.id,
+          nombre: parametro.descripcion?.trim() || parametro.clave,
+        })))
+      : [];
     const sinUnidad = factor === null ? ['Falta configurar la unidad de venta "cajon" con su factor de conversión.'] : [];
     const baseUnidades = Number(period.productionQuantity ?? 0);
     const sinProduccion = baseUnidades <= 0 ? ['Falta cargar una cantidad producida mayor a cero para el período.'] : [];
@@ -95,23 +116,23 @@ export class OwnerDashboardService {
       : [];
     const costosBase = [...motivosBase, ...sinUnidad, ...sinProduccion];
     const costos = !contribucion || factor === null || baseUnidades <= 0 || resultado.detail?.unitCost?.unitFinishedGoodsCost == null
-      ? { variable: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], sinConfirmar), fijo: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], sinConfirmar), total: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], sinConfirmar) }
+      ? { variable: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], parametrosSinConfirmar), fijo: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], parametrosSinConfirmar), total: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], parametrosSinConfirmar) }
       : {
           variable: contribucion.costoVariableUnitario === null
-            ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], sinConfirmar)
-            : completo(contribucion.costoVariableUnitario * factor, sinConfirmar, motivosBase),
+            ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], parametrosSinConfirmar)
+            : completo(contribucion.costoVariableUnitario * factor, parametrosSinConfirmar, motivosBase),
           fijo: completo(
             contribucion.componentes.filter((c) => c.comportamientoVolumen === 'FIJO').reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades * factor,
-            sinConfirmar,
+            parametrosSinConfirmar,
             motivosBase,
           ),
-          total: completo(resultado.detail.unitCost.unitFinishedGoodsCost * factor, sinConfirmar, motivosBase),
+          total: completo(resultado.detail.unitCost.unitFinishedGoodsCost * factor, parametrosSinConfirmar, motivosBase),
         };
 
     const convertido = (numero: number | null, motivos: string[]): NumeroTablero =>
       numero === null || factor === null || motivos.length > 0
-        ? incompleto([...motivos, ...sinUnidad], sinConfirmar)
-        : completo(numero * factor, sinConfirmar);
+        ? incompleto([...motivos, ...sinUnidad], parametrosSinConfirmar)
+        : completo(numero * factor, parametrosSinConfirmar);
 
     return {
       periodo: { id: period.id, codigo: period.code },
@@ -124,16 +145,16 @@ export class OwnerDashboardService {
       ),
       puntoEquilibrioCajones: {
         ...(equilibrio?.incompleta || unidadesEquilibrio === null || factor === null
-          ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], sinConfirmar)
-          : completo(unidadesEquilibrio / factor, sinConfirmar, motivosBase)),
+          ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], parametrosSinConfirmar)
+          : completo(unidadesEquilibrio / factor, parametrosSinConfirmar, motivosBase)),
         fechaUltimoRecalculo: equilibrio?.fechaUltimoRecalculo ?? null,
       },
       producidoCajones: factor === null || baseUnidades <= 0
         ? incompleto([...sinProduccion, ...sinUnidad])
-        : completo(baseUnidades / factor, false),
+        : completo(baseUnidades / factor),
       resultadoPeriodo: resultado.grossMargin == null || sinVentas.length > 0
-        ? incompleto([...motivosBase, ...sinVentas], sinConfirmar)
-        : completo(resultado.grossMargin, sinConfirmar, motivosBase),
+        ? incompleto([...motivosBase, ...sinVentas], parametrosSinConfirmar)
+        : completo(resultado.grossMargin, parametrosSinConfirmar, motivosBase),
     };
   }
 }
