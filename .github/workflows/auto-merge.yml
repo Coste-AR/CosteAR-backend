@@ -33,6 +33,11 @@ on:
   # Cubre el caso de etiquetar un PR que YA estaba en verde.
   pull_request:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
+  # Vercel publica por la Status API, no por la Checks API, y este workflow
+  # escuchaba una sola de las dos. Ver el detalle en CosteAR-frontend, donde se
+  # midio: un PR verde y etiquetado quedaba esperando al cron, que declara 15
+  # minutos y en la practica corre cada 2 a 4 horas y media.
+  status:
   # Red de seguridad. `check_suite` se pierde de vez en cuando, y un PR
   # etiquetado y en verde que nadie mergea es peor que uno que falla: no avisa.
   schedule:
