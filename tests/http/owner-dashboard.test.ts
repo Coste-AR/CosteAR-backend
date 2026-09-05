@@ -9,7 +9,7 @@ const { db } = vi.hoisted(() => ({
     costPeriod: { findFirst: vi.fn() },
     calculationRun: { findFirst: vi.fn() },
     unidadMedida: { findFirst: vi.fn() },
-    parametroCosteo: { count: vi.fn() },
+    parametroCosteo: { findMany: vi.fn() },
   },
 }));
 
@@ -39,7 +39,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.costPeriod.findFirst.mockResolvedValue({ id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 24, salesQuantity: 24 });
   db.unidadMedida.findFirst.mockResolvedValue({ factor: 12 });
-  db.parametroCosteo.count.mockResolvedValue(0);
+  db.parametroCosteo.findMany.mockResolvedValue([]);
   db.calculationRun.findFirst.mockResolvedValue({
     id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
     results: {
@@ -63,5 +63,35 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data).toHaveProperty('puntoEquilibrioCajones');
     expect(body.data).toHaveProperty('producidoCajones');
     expect(body.data).toHaveProperty('resultadoPeriodo');
+    expect(body.data.costoPorCajon).toMatchObject({
+      variable: { parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] },
+    });
+  });
+
+  it('enumera los parámetros sin confirmar sin consultas por indicador', async () => {
+    db.calculationRun.findFirst.mockResolvedValue({
+      id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
+      results: {
+        grossMargin: 12, incompletitud: { incompleto: false, motivos: [] },
+        detail: { unitCost: { unitFinishedGoodsCost: 5, basadoEn: 'producidas' } },
+        contribucionMarginal: {
+          incompleta: false, precioUnitario: 4, unidadesVendidas: 24, costoVariableUnitario: 2, contribucionMarginalUnitaria: 2,
+          componentes: [{ importeAbsorcion: 36, comportamientoVolumen: 'FIJO', parametroId: 'parametro-1' }],
+        },
+        puntoEquilibrio: { incompleta: false, unidadesEquilibrio: 24, fechaUltimoRecalculo: '2026-09-02T00:00:00.000Z' },
+      },
+    });
+    db.parametroCosteo.findMany.mockResolvedValue([{ id: 'parametro-1', clave: 'rendimiento_operativo', descripcion: 'Rendimiento operativo' }]);
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { data: { costoPorCajon: { variable: Record<string, unknown> } } };
+    expect(body.data.costoPorCajon.variable).toMatchObject({
+      parametrosSinConfirmar: true,
+      parametrosSinConfirmarDetalle: [{ id: 'parametro-1', nombre: 'Rendimiento operativo' }],
+    });
+    expect(db.parametroCosteo.findMany).toHaveBeenCalledTimes(1);
   });
 });
