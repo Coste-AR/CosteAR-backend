@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidCuit, createCompanySchema } from '@/shared/schemas/company.schema.js';
+import { isValidCuit, createCompanySchema, updateCompanySchema } from '@/shared/schemas/company.schema.js';
 
 describe('Validación de CUIT', () => {
   it('acepta un CUIT con dígito verificador correcto', () => {
@@ -41,5 +41,21 @@ describe('createCompanySchema', () => {
   it('rechaza CUIT inválido', () => {
     const r = createCompanySchema.safeParse({ name: 'PyME', cuit: '20123456780' });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('updateCompanySchema', () => {
+  it('acepta declarar o quitar explícitamente la unidad de gestión', () => {
+    const declarada = updateCompanySchema.parse({
+      unidadGestionId: '00000000-0000-0000-0000-000000000001',
+    });
+    const quitada = updateCompanySchema.parse({ unidadGestionId: null });
+
+    expect(declarada.unidadGestionId).toBe('00000000-0000-0000-0000-000000000001');
+    expect(quitada.unidadGestionId).toBeNull();
+  });
+
+  it('rechaza una referencia de unidad que no es UUID', () => {
+    expect(updateCompanySchema.safeParse({ unidadGestionId: 'cajon' }).success).toBe(false);
   });
 });
