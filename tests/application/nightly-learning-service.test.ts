@@ -16,9 +16,9 @@ vi.mock('node:child_process', () => ({
 }));
 
 vi.mock('@/application/vault-indexer/vault-indexer-service.js', () => ({
-  VaultIndexerService: vi.fn().mockImplementation(() => ({
-    indexVault: vi.fn().mockResolvedValue({ chunksUpserted: 0 }),
-  })),
+  VaultIndexerService: vi.fn().mockImplementation(function VaultIndexerServiceMock() {
+    return { indexVault: vi.fn().mockResolvedValue({ chunksUpserted: 0 }) };
+  }),
 }));
 
 const mockAi = { isConfigured: true, completeJSON: vi.fn() };

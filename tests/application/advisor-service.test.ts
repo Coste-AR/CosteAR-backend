@@ -13,7 +13,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockCompleteJSON = vi.fn();
 
 vi.mock('@/infrastructure/ai/groq-service.js', () => ({
-  GroqService: vi.fn(() => ({ completeJSON: mockCompleteJSON })),
+  GroqService: vi.fn(function GroqServiceMock() {
+    return { completeJSON: mockCompleteJSON };
+  }),
 }));
 
 describe('AdvisorService', () => {
