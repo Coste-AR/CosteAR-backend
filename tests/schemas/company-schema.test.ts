@@ -45,6 +45,16 @@ describe('createCompanySchema', () => {
 });
 
 describe('updateCompanySchema', () => {
+  it('requires value and explicit physical unit for operation scale', () => {
+    const declared = updateCompanySchema.parse({
+      operationScale: { value: 1200, unit: 'unidades_fisicas_por_anio' },
+    });
+
+    expect(declared.operationScale).toEqual({ value: 1200, unit: 'unidades_fisicas_por_anio' });
+    expect(updateCompanySchema.safeParse({ operationScale: { value: 1200 } }).success).toBe(false);
+    expect(updateCompanySchema.safeParse({ operationScale: { value: 0, unit: 'unidades_fisicas_por_anio' } }).success).toBe(false);
+  });
+
   it('acepta declarar o quitar explícitamente la unidad de gestión', () => {
     const declarada = updateCompanySchema.parse({
       unidadGestionId: '00000000-0000-0000-0000-000000000001',

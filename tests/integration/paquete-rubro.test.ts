@@ -13,12 +13,14 @@ beforeAll(async () => {
     data: {
       category: 'TEST', userId: null, companyId: null, structureId: null, periodId: null,
       lexicon: { UnidadProductiva: 'Rubro' }, icons: {}, variants: [], seedParameters: {}, alertRules: {}, screens: {},
+      scale: { value: 100, unit: 'unidades_fisicas_por_anio' },
     },
   }));
   await withTenant(A.userId, (tx) => tx.paqueteRubro.create({
     data: {
       category: 'TEST', userId: A.userId, companyId: A.companyId, structureId: null, periodId: null,
       lexicon: { UnidadProductiva: 'Empresa' }, icons: {}, variants: [], seedParameters: {}, alertRules: {}, screens: {},
+      scale: { value: 500, unit: 'unidades_fisicas_por_anio' },
     },
   }));
 });
@@ -30,6 +32,7 @@ describe('A-16 — paquete de rubro y cascada', () => {
     const service = new PaqueteRubroService();
     const resolved = await service.resolve(A.userId, 'TEST', { companyId: A.companyId });
     expect((resolved.lexicon as Record<string, string>).UnidadProductiva).toBe('Empresa');
+    expect(resolved.scale).toEqual({ value: 500, unit: 'unidades_fisicas_por_anio' });
     const fallback = await service.resolve(A.userId, 'MISSING');
     expect(fallback.defaults['lexicon.UnidadProductiva']).toBe('Unidad productiva');
   });

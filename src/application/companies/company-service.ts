@@ -42,6 +42,10 @@ export class CompanyService {
         description: input.description ?? null,
         // Si no lo eligen, mensual: es el ritmo más común y el default de la DB.
         periodicity: input.periodicity ?? 'MONTHLY',
+        ...(input.operationScale && {
+          operationScaleValue: input.operationScale.value,
+          operationScaleUnit: input.operationScale.unit,
+        }),
         // Si no la eligen, Responsable Inscripto: es el default de la columna y
         // el supuesto con el que costea todo el sistema (ver DECISIONES.md,
         // CL-09). Decide si el IVA de cada comprobante es costo o crédito fiscal.
@@ -119,6 +123,10 @@ export class CompanyService {
         description: input.description ?? existing.description,
         isActive: input.isActive ?? existing.isActive,
         ...(input.unidadGestionId !== undefined && { unidadGestionId: input.unidadGestionId }),
+        ...(input.operationScale !== undefined && {
+          operationScaleValue: input.operationScale?.value ?? null,
+          operationScaleUnit: input.operationScale?.unit ?? null,
+        }),
         periodicity: input.periodicity ?? existing.periodicity,
         condicionIva: input.condicionIva ?? existing.condicionIva,
         ...(confirmaCondicion
