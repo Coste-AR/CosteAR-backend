@@ -109,6 +109,17 @@
 #     cuesta mergear main a mano son treinta segundos por promocion, y es el
 #     unico lugar del circuito donde ese minuto compra algo.
 #
+# G6. UN BUMP DE DEPENDABOT QUE NO CAMBIA DE VERSION MAYOR. Agregada el
+#     07-09-2026. Un PR de Dependabot no cierra ningun issue —no lo abrio una
+#     persona— y por eso la G3 lo frenaba siempre. Medido ese dia: seis bumps
+#     que Santiago mergeo a mano de madrugada y dos parados en verde, a razon
+#     de unos seis por semana para siempre. Es el mismo error de forma que ya
+#     se corrigio con las bitacoras: una guarda pensada para codigo aplicada a
+#     una clase que no tiene ese modo de falla. Se acota a tres condiciones:
+#     toca solo package.json y package-lock.json, el titulo declara UN salto de
+#     version medible, y ese salto no cambia la mayor. Los agrupados y los
+#     mayores siguen yendo a una persona.
+#
 # EL MODO TANDA — trabajar en volumen sin nadie disponible para etiquetar
 #
 # Con la variable de repositorio AUTO_ETIQUETAR_CODIGO = "si", la clase apta se
@@ -275,9 +286,11 @@ jobs:
           for n in $lista; do
             echo "::group::PR #$n"
 
-            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files,baseRefName,body,headRefOid)
+            info=$(gh pr view "$n" --repo "$REPO" --json isDraft,labels,files,baseRefName,body,headRefOid,author,title)
             base=$(jq -r '.baseRefName' <<<"$info")
             head_sha=$(jq -r '.headRefOid' <<<"$info")
+            autor=$(jq -r '.author.login // ""' <<<"$info")
+            titulo=$(jq -r '.title // ""' <<<"$info")
 
             if [ "$(jq -r '.isDraft' <<<"$info")" = "true" ]; then
               echo "SALTEADO: es borrador."; echo "::endgroup::"; continue
@@ -338,6 +351,8 @@ jobs:
             read -r casos_base afirm_base < <(balance "$base_sha") || true
             read -r casos_head afirm_head < <(balance "$head_sha") || true
             echo "Verificacion — base: $casos_base casos / $afirm_base afirmaciones. PR: $casos_head casos / $afirm_head afirmaciones."
+
+            verif_dep="$casos_base -> $casos_head casos, $afirm_base -> $afirm_head afirmaciones"
 
             apto=si
             if [ "$casos_head" -lt "$casos_base" ] || [ "$afirm_head" -lt "$afirm_base" ]; then
@@ -401,6 +416,101 @@ jobs:
 
             if [ "$apto" != "si" ]; then
               echo "Queda para revision humana."; echo "::endgroup::"; continue
+            fi
+
+            # -- GUARDA 6: los bumps de Dependabot que no cambian de mayor -----
+            #
+            # POR QUE EXISTE. Un PR de Dependabot no cierra ningun issue -no
+            # tiene por que, no lo abrio una persona- y por eso la guarda 3 lo
+            # frenaba SIEMPRE, con el mensaje "no cierra ningun issue". Medido
+            # el 07-09-2026 en el frontend: seis bumps entraron esa madrugada
+            # porque Santiago los mergeo a mano uno por uno, y dos quedaron
+            # parados en verde. Son del orden de seis por semana, para siempre.
+            #
+            # Es el mismo error de forma que ya se corrigio con las bitacoras en
+            # la guarda 3: una guarda pensada para codigo escrito por un agente,
+            # aplicada a una clase de PR que no tiene ese modo de falla.
+            #
+            # QUE REEMPLAZA A LA MIRADA HUMANA, PORQUE NO ES NADA
+            #
+            #   - El balance de verificacion (G1 y G1b) ya corrio arriba y no se
+            #     afloja: un bump no puede bajar ni un test.
+            #   - El CI entero, que es quien de verdad prueba que la version
+            #     nueva no rompe nada. El auto-merge no entra nada en rojo.
+            #   - Y las tres condiciones de abajo, que acotan la clase.
+            #
+            # LAS TRES CONDICIONES, Y POR QUE CADA UNA
+            #
+            #   a. SOLO package.json y package-lock.json. Si el PR toca
+            #      cualquier otra cosa dejo de ser un bump: es un cambio de
+            #      codigo firmado por un bot.
+            #
+            #   b. UN SOLO salto de version declarado en el titulo. Los PR
+            #      agrupados ("bump esbuild, @vitest/coverage-v8 and vitest") no
+            #      declaran un rango unico, asi que no se puede medir cual subio
+            #      cuanto. NO PODER MEDIR NO ES APTO: van a una persona. Es la
+            #      misma regla que gobierna todo este archivo.
+            #
+            #   c. NO CAMBIA LA VERSION MAYOR. Un mayor cambia el contrato de la
+            #      libreria a proposito; que el CI este verde no prueba que ese
+            #      cambio de contrato sea el que queremos. El caso que motivo
+            #      esto es real: vite 6 -> 7 (frontend #145), verde y esperando.
+            #
+            # Contra `main` no llega nunca: la guarda 5 corta antes. Contra
+            # `staging` tampoco: una promocion es otra clase y la mide la G4.
+            if [ "$autor" = "dependabot[bot]" ] && [ "$base" = "dev" ]; then
+              # NO PODER MEDIR NO ES APTO, TAMPOCO ACA.
+              #
+              # La primera version arrancaba con `solo_manifiestos=si` y lo
+              # bajaba a `no` al ver un archivo ajeno. Si la lista venia vacia
+              # -jq que falla, un PR sin archivos, la API que devuelve otra
+              # cosa- el bucle no corria una sola vez, la marca quedaba en `si`
+              # y el PR se etiquetaba SIN QUE NADIE HUBIERA MIRADO UN ARCHIVO.
+              # Lo encontro la prueba de sabotaje, no el diseño: en la maquina
+              # donde se probo no estaba `jq` en el PATH y el caso que tenia que
+              # dar NO APTO dio APTO.
+              #
+              # Por eso la marca arranca en `no` y solo sube si de verdad se
+              # leyo al menos un archivo y todos eran manifiestos.
+              solo_manifiestos=no
+              leidos=0
+              ajenos=0
+              while IFS= read -r ruta; do
+                [ -z "$ruta" ] && continue
+                leidos=$((leidos + 1))
+                case "$(basename "$ruta")" in
+                  package.json|package-lock.json) ;;
+                  *) ajenos=$((ajenos + 1)); echo "  fuera del manifiesto: $ruta" ;;
+                esac
+              done < <(jq -r '.files[].path' <<<"$info" || true)
+              if [ "$leidos" -gt 0 ] && [ "$ajenos" -eq 0 ]; then
+                solo_manifiestos=si
+              fi
+
+              # `|| true`: grep sale con 1 cuando no hay coincidencias y con
+              # `set -e` eso mata el step sin imprimir una sola linea.
+              rangos=$(grep -oE 'from [0-9]+\.[0-9]+(\.[0-9]+)? to [0-9]+\.[0-9]+(\.[0-9]+)?' <<<"$titulo" || true)
+              cuantos=$(grep -c . <<<"$rangos" || true)
+
+              if [ "$leidos" -eq 0 ]; then
+                echo "NO APTO (dependabot): no se pudo leer que archivos toca. Sin medicion no se etiqueta."
+              elif [ "$solo_manifiestos" != "si" ]; then
+                echo "NO APTO (dependabot): toca algo que no es package.json ni package-lock.json. Deja de ser un bump."
+              elif [ -z "$rangos" ] || [ "$cuantos" != "1" ]; then
+                echo "NO APTO (dependabot): el titulo no declara UN salto de version medible: \"$titulo\". Sin medicion, lo mira una persona."
+              else
+                desde=$(awk '{print $2}' <<<"$rangos")
+                hasta=$(awk '{print $4}' <<<"$rangos")
+                if [ "${desde%%.*}" != "${hasta%%.*}" ]; then
+                  echo "NO APTO (dependabot): salto de version MAYOR, $desde -> $hasta. Un mayor cambia el contrato de la libreria a proposito."
+                else
+                  echo "APTO (dependabot): $desde -> $hasta, sin cambio de version mayor."
+                  gh pr edit "$n" --repo "$REPO" --add-label auto-merge
+                  cuerpo=$(printf 'Etiquetado `auto-merge` automaticamente - **bump de Dependabot sin cambio de version mayor** (`%s` -> `%s`).\n\n**Por que sin revision humana:** toca solo `package.json` y `package-lock.json`, no cambia la version mayor, y el balance de verificacion no bajo (%s). Lo que de verdad prueba que la version nueva anda es el CI entero, que tiene que estar en verde para que el auto-merge lo entre.\n\n**Que lo habria frenado:** tocar cualquier otro archivo, un titulo sin un salto de version unico y medible (los bumps agrupados no lo tienen), o un salto de version mayor. Los mayores los mira Santiago, siempre.\n\nVer la guarda 6 en `.github/workflows/auto-etiquetar.yml`.\n' "$desde" "$hasta" "$verif_dep")
+                  gh pr comment "$n" --repo "$REPO" --body "$cuerpo"
+                fi
+              fi
+              echo "::endgroup::"; continue
             fi
 
             # EL MODO TANDA SOLO APLICA CONTRA dev.
