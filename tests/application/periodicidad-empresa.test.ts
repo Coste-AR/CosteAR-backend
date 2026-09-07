@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CostStructureService } from '@/application/cost-structures/cost-structure-service.js';
 import { CompanyService } from '@/application/companies/company-service.js';
-import { ConflictError } from '@/domain/errors/domain-error.js';
+import { ConflictError, NotFoundError } from '@/domain/errors/domain-error.js';
 
 vi.mock('@/application/audit/audit-logger.js', () => ({
   recordAudit: vi.fn(async () => undefined),
@@ -32,6 +32,9 @@ function makeDb(periodicity: string, periodCount = 0) {
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: COMPANY, ...data })),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: COMPANY, ...data })),
     },
+    unidadMedida: {
+      findFirst: vi.fn(async () => ({ id: 'unidad-1', companyId: COMPANY })),
+    },
     costStructure: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'struct-1', ...data })),
     },
@@ -42,6 +45,7 @@ function makeDb(periodicity: string, periodCount = 0) {
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   return db as {
     company: { findFirst: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+    unidadMedida: { findFirst: ReturnType<typeof vi.fn> };
     costStructure: { create: ReturnType<typeof vi.fn> };
     costPeriod: { count: ReturnType<typeof vi.fn> };
     $transaction: ReturnType<typeof vi.fn>;
@@ -149,5 +153,39 @@ describe('El ritmo no se cambia con la empresa en marcha', () => {
 
     const call = db.company.update.mock.calls[0]![0] as { data: { periodicity: string } };
     expect(call.data.periodicity).toBe('MONTHLY'); // conserva el suyo
+  });
+});
+
+describe('La unidad de gestión se declara por empresa, nunca por rubro', () => {
+  it('guarda la referencia explícita elegida por la empresa', async () => {
+    const db = makeDb('MONTHLY');
+    await new CompanyService(db as never).update(
+      USER, COMPANY, { unidadGestionId: 'unidad-1' }, ctx,
+    );
+
+    const call = db.company.update.mock.calls[0]![0] as { data: { unidadGestionId: string | null } };
+    expect(db.unidadMedida.findFirst).toHaveBeenCalledWith({
+      where: { id: 'unidad-1', companyId: COMPANY, deletedAt: null },
+    });
+    expect(call.data.unidadGestionId).toBe('unidad-1');
+  });
+
+  it('rechaza una unidad que no pertenece a la empresa en lugar de devolverla como ausencia', async () => {
+    const db = makeDb('MONTHLY');
+    db.unidadMedida.findFirst.mockResolvedValue(null);
+
+    await expect(
+      new CompanyService(db as never).update(USER, COMPANY, { unidadGestionId: 'unidad-ajena' }, ctx),
+    ).rejects.toThrow(NotFoundError);
+    expect(db.company.update).not.toHaveBeenCalled();
+  });
+
+  it('permite quitar una declaración previa con null explícito', async () => {
+    const db = makeDb('MONTHLY');
+    await new CompanyService(db as never).update(USER, COMPANY, { unidadGestionId: null }, ctx);
+
+    const call = db.company.update.mock.calls[0]![0] as { data: { unidadGestionId: string | null } };
+    expect(db.unidadMedida.findFirst).not.toHaveBeenCalled();
+    expect(call.data.unidadGestionId).toBeNull();
   });
 });

@@ -66,6 +66,9 @@ export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
 
 export const updateCompanySchema = createCompanySchema.partial().extend({
   isActive: z.boolean().optional(),
+  // `undefined` conserva la declaración actual; `null` la quita de forma
+  // explícita. No hay un default: declarar la unidad es un acto del tenant.
+  unidadGestionId: z.string().uuid().nullable().optional(),
 });
 export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
 

@@ -75,6 +75,16 @@ export class CompanyService {
   async update(userId: string, id: string, input: UpdateCompanyInput, ctx: AuditContext) {
     const existing = await this.getById(userId, id);
 
+    // La FK garantiza que la unidad exista, pero no que sea de ESTA empresa.
+    // Validarlo antes de escribir distingue una referencia inconsistente de la
+    // ausencia legítima (`null`) y evita que una empresa adopte una unidad ajena.
+    if (input.unidadGestionId !== undefined && input.unidadGestionId !== null) {
+      const unidad = await this.db.unidadMedida.findFirst({
+        where: { id: input.unidadGestionId, companyId: id, deletedAt: null },
+      });
+      if (!unidad) throw new NotFoundError('Unidad de gestión no encontrada para esta empresa');
+    }
+
     // El ritmo de costeo no se cambia con la empresa en marcha. Los períodos ya abiertos
     // llevan un código que responde al ritmo viejo ("2026-07" es mensual; "2026-07-Q1" es
     // quincenal): cambiarlo dejaría a la empresa con períodos de dos ritmos distintos
@@ -108,6 +118,7 @@ export class CompanyService {
         cuit: input.cuit ?? existing.cuit,
         description: input.description ?? existing.description,
         isActive: input.isActive ?? existing.isActive,
+        ...(input.unidadGestionId !== undefined && { unidadGestionId: input.unidadGestionId }),
         periodicity: input.periodicity ?? existing.periodicity,
         condicionIva: input.condicionIva ?? existing.condicionIva,
         ...(confirmaCondicion
