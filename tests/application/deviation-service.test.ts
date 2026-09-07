@@ -23,9 +23,9 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 
 // CompanyService.getById usa this.db.company.findFirst. Lo inyectamos mockeado.
 vi.mock('@/application/companies/company-service.js', () => ({
-  CompanyService: vi.fn(() => ({
-    getById: vi.fn(),
-  })),
+  CompanyService: vi.fn(function CompanyServiceMock() {
+    return { getById: vi.fn() };
+  }),
 }));
 
 const target = {

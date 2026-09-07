@@ -40,6 +40,12 @@ vi.mock('@/infrastructure/classifier/cascade-classifier.js', () => ({
   classifyDocument: mockClassify,
 }));
 
+// La memoria de correcciones se mockea porque su fallo es no-fatal y sin Docker agrega un timeout.
+// El detalle está en tests/classifier/cascade-section-decision.test.ts.
+vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
+  getCorrectionExamples: vi.fn(async () => undefined),
+}));
+
 const fakeGroq = { analyzeDocument: vi.fn() };
 
 function classificationResult(overrides: Record<string, unknown> = {}) {
@@ -87,10 +93,6 @@ describe('ingestDataEntry', () => {
 // ~4s de timeout por llamada en una máquina sin Docker. Sin base ya devolvía
 // `undefined`: mockearla no cambia lo que se prueba, solo saca la espera.
 // El detalle está en tests/classifier/cascade-section-decision.test.ts.
-vi.mock('@/infrastructure/classifier/memory/correction-memory.js', () => ({
-  getCorrectionExamples: vi.fn(async () => undefined),
-}));
-
   it('persiste el ClassificationAudit junto con la DataEntry', async () => {
     const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry.js');
 
