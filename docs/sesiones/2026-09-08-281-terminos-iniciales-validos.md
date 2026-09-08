@@ -3,7 +3,7 @@
 - **Issue:** #281
 - **Repo:** CosteAR-backend
 - **Rama:** `fix/issue-281-terms-validation`
-- **PR:** pendiente de creación
+- **PR:** #283
 - **Agente:** Codex · GPT-5
 - **Tanda:** no informada
 
