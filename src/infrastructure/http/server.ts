@@ -17,6 +17,7 @@ import { startNightlyLearningWorker } from '../workers/nightly-learning.worker.j
 import { macroSyncQueue } from '../workers/queues.js';
 import { registerRepeatableJobs } from '../workers/repeatable-jobs.js';
 import { TermsService } from '../../application/legal/terms-service.js';
+import { seedInitialTermsAtStartup } from './terms-startup.js';
 
 /**
  * Punto de entrada del servidor HTTP.
@@ -24,7 +25,7 @@ import { TermsService } from '../../application/legal/terms-service.js';
  * El servidor escucha PRIMERO para que el healthcheck pase.
  * Workers y BullMQ se inician después, en modo degradado si Redis no está.
  */
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   console.log('[startup] Iniciando CosteAR backend...');
 
   const env = getEnv();
@@ -39,18 +40,10 @@ async function main(): Promise<void> {
   // dejaba cualquier base recién creada con `requireCurrentVersion()` tirando
   // error y el registro bloqueado hasta que alguien corriera un script a mano.
   //
-  // Antes de `listen()` para que ninguna request pueda llegar sin términos, y
-  // no fatal por el mismo motivo que RLS: preferible arrancar en modo degradado
-  // y que se vea en los logs, a que un fallo transitorio tumbe todo el arranque.
-  try {
-    const seeded = await new TermsService().ensureInitialVersion();
-    if (seeded) console.log(`[startup] Sembrada la versión inicial de Términos (v${seeded.version}).`);
-  } catch (err) {
-    console.warn(
-      '[startup] WARN: no se pudo sembrar los Términos y Condiciones — el registro puede estar bloqueado hasta que se resuelva:',
-      err,
-    );
-  }
+  // Antes de `listen()` para que ninguna request pueda llegar sin términos.
+  // Una base temporalmente caída sigue el modo degradado histórico; contenido
+  // legal inválido en producción, en cambio, corta acá antes de aceptar tráfico.
+  await seedInitialTermsAtStartup(new TermsService(), env.NODE_ENV);
 
   // --- Escuchar PRIMERO — el healthcheck debe responder cuanto antes ---
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
@@ -102,4 +95,6 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void close('SIGTERM'));
 }
 
-void main();
+// Vitest importa `main()` para cubrir el límite entre sembrar y escuchar. El
+// proceso real no define esta variable, por lo que conserva el arranque normal.
+if (process.env.VITEST !== 'true') void main();

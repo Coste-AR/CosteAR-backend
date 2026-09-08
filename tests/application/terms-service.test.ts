@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TermsService } from '@/application/legal/terms-service.js';
+import { TermsService, type TermsServiceOptions } from '@/application/legal/terms-service.js';
+
+vi.mock('@/infrastructure/config/env.js', () => ({
+  getEnv: () => ({ NODE_ENV: process.env.NODE_ENV ?? 'test' }),
+}));
 
 /**
  * Términos y Condiciones: versionado explícito, nunca se edita el contenido
@@ -14,8 +18,8 @@ const db = {
   $transaction: vi.fn(),
 };
 
-function service() {
-  return new TermsService(db as never);
+function service(options: TermsServiceOptions = {}) {
+  return new TermsService(db as never, options);
 }
 
 beforeEach(() => {
@@ -109,11 +113,35 @@ describe('TermsService.requireCurrentVersion', () => {
 });
 
 describe('TermsService.ensureInitialVersion', () => {
-  it('siembra la v1 con el texto de prisma/initial-terms.md si no hay ninguna activa', async () => {
+  it('en producción rechaza el markdown real con marcadores y no crea ninguna versión', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    db.termsVersion.findFirst.mockResolvedValue(null);
+
+    try {
+      await expect(service().ensureInitialVersion()).rejects.toThrow(/COMPLETAR|RAZÓN SOCIAL|borrador/i);
+      expect(db.termsVersion.create).not.toHaveBeenCalled();
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
+  it('en producción siembra la v1 cuando el markdown no tiene marcadores', async () => {
     db.termsVersion.findFirst.mockResolvedValue(null);
     db.termsVersion.create.mockResolvedValue({ id: 'v1', version: 1 });
 
-    const created = await service().ensureInitialVersion();
+    await expect(
+      service({ nodeEnv: 'production', readInitialTerms: async () => '# Términos definitivos\nSin pendientes.' }).ensureInitialVersion(),
+    ).resolves.toEqual({ id: 'v1', version: 1 });
+  });
+
+  it('en desarrollo siembra el markdown real y avisa los marcadores', async () => {
+    db.termsVersion.findFirst.mockResolvedValue(null);
+    db.termsVersion.create.mockResolvedValue({ id: 'v1', version: 1 });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const created = await service({ nodeEnv: 'development' }).ensureInitialVersion();
 
     expect(created).toEqual({ id: 'v1', version: 1 });
     const arg = db.termsVersion.create.mock.calls[0]![0] as { data: { version: number; content: string; isActive: boolean } };
@@ -122,6 +150,17 @@ describe('TermsService.ensureInitialVersion', () => {
     // El contenido sale del archivo real del repo, no de un string inventado:
     // si alguien lo borra o lo mueve, este test lo dice.
     expect(arg.data.content.length).toBeGreaterThan(0);
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('[COMPLETAR FECHA]'));
+    warning.mockRestore();
+  });
+
+  it('no siembra si no puede leer el archivo, incluso en desarrollo', async () => {
+    db.termsVersion.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service({ nodeEnv: 'development', readInitialTerms: async () => Promise.reject(new Error('EACCES')) }).ensureInitialVersion(),
+    ).rejects.toThrow(/no se pudo leer/i);
+    expect(db.termsVersion.create).not.toHaveBeenCalled();
   });
 
   it('es idempotente: con una versión activa no crea nada y devuelve null', async () => {
