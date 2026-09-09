@@ -1,15 +1,19 @@
 import { Prisma } from '@prisma/client';
-import { VoyageService, EMBEDDING_MODEL } from '../../infrastructure/ai/voyage-service.js';
+import { EMBEDDING_MODEL } from '../../infrastructure/ai/voyage-service.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
-import { PrismaVaultChunkRepository } from '../vault-indexer/vault-chunk-repository.js';
+import { VaultRetriever, RETRIEVER_VERSION } from './vault-retriever.js';
 import { UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { prisma } from '../../infrastructure/database/prisma.js';
 
 /** Techo defensivo de caracteres del contexto armado para el prompt del RAG. */
 const MAX_CONTEXT_CHARS = 12_000;
 
-/** Versión del retriever que respondió. F1-07 la sube cuando entra el híbrido. */
-const RETRIEVER_VERSION = 'v1-cosine';
+/**
+ * Debajo de esta distancia coseno consideramos que hubo un match semántico
+ * directo (confianza alta). Si ningún chunk lo alcanza —vino todo por full-text
+ * o por vecinos lejanos— la confianza no puede ser HIGH.
+ */
+const CLOSE_VECTOR_DISTANCE = 0.65;
 
 export interface VaultQueryResult {
   answer: string;
@@ -28,7 +32,8 @@ export interface VaultQueryOptions {
 interface RetrievedChunkLite {
   sourceFile: string;
   headingPath: string | null;
-  distance: number;
+  distance: number | null;
+  rrfScore: number;
 }
 
 const QA_SYSTEM_PROMPT = `Sos el consejero experto de CosteAR, respondiendo exclusivamente basándote en la metodología de la cátedra de costos.
@@ -51,9 +56,8 @@ Contexto extraído de la Bóveda:
 
 export class VaultQueryService {
   constructor(
-    private readonly embedder: VoyageService = new VoyageService(),
+    private readonly retriever: VaultRetriever = new VaultRetriever(),
     private readonly ai: GroqService = new GroqService(),
-    private readonly repo: PrismaVaultChunkRepository = new PrismaVaultChunkRepository(),
   ) {}
 
   /**
@@ -94,35 +98,26 @@ export class VaultQueryService {
     const startedAt = Date.now();
     const maxResults = opts.maxResults ?? 5;
 
-    if (!this.embedder.isConfigured || !this.ai.isConfigured) {
+    if (!this.ai.isConfigured) {
       throw new UnprocessableEntityError('El servicio de IA o embeddings no está configurado (faltan API keys).');
     }
 
-    // 1. Convertir pregunta a vector
-    const embeddings = await this.embedder.embed([question], 'query');
-    if (!embeddings || embeddings.length === 0 || !embeddings[0]) {
-      throw new UnprocessableEntityError('No se pudo generar el embedding para la consulta.');
-    }
-    const queryVector = embeddings[0];
+    // Recuperación híbrida (vector + full-text, fusionada con RRF). El retriever
+    // lanza UnprocessableEntityError si no puede generar el embedding.
+    const chunks = await this.retriever.retrieve(question, { limit: maxResults });
 
-    // 2. Búsqueda semántica en Postgres (distancia coseno < 0.65)
-    let chunks = await this.repo.searchChunks(queryVector, maxResults, 0.65);
-
-    // Preguntas cortas o con siglas (ej. "¿Qué es el ITCS?") suelen quedar justo
-    // por fuera de 0.65 aunque el término SÍ esté en la bóveda. Antes de rendirnos,
-    // reintentamos con un umbral más amplio. Los chunks siguen siendo reales — el LLM
-    // sigue restringido a responder solo desde ellos — pero marcamos la confianza como
-    // LOW porque el match es menos preciso.
-    let usedWidenedSearch = false;
-    if (chunks.length === 0) {
-      chunks = await this.repo.searchChunks(queryVector, maxResults, 0.85);
-      usedWidenedSearch = chunks.length > 0;
-    }
+    // La confianza no puede ser HIGH si el resultado no se apoya en al menos un
+    // match semántico directo (vino todo por full-text o por vecinos lejanos).
+    const hadCloseVectorMatch = chunks.some(
+      (c) => c.distance !== null && c.distance < CLOSE_VECTOR_DISTANCE,
+    );
+    const usedWidenedSearch = chunks.length > 0 && !hadCloseVectorMatch;
 
     const chunksLite: RetrievedChunkLite[] = chunks.map((c) => ({
       sourceFile: c.sourceFile,
       headingPath: c.headingPath,
       distance: c.distance,
+      rrfScore: c.rrfScore,
     }));
 
     if (chunks.length === 0) {
@@ -132,7 +127,7 @@ export class VaultQueryService {
           type: 'RAG_MISS',
           source: 'COSTISTA_CHAT',
           content: question,
-          context: { reason: 'No chunks found above similarity threshold' }
+          context: { reason: 'Hybrid retrieval returned no chunks' }
         }
       });
 
