@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, VaultSourceType } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 
 export interface VaultChunkIdentity {
@@ -15,6 +15,23 @@ export interface UpsertChunkInput {
   chunkIndex: number;
   vaultCommit: string;
   embedding: number[];
+  /** Namespace por origen. Si no se pasa, se deriva del `sourceFile`. */
+  sourceType?: VaultSourceType | null;
+  /** Contexto que F1-05 antepone al `content` antes de embeber. */
+  contextualPrefix?: string | null;
+}
+
+/**
+ * Deriva el namespace de un chunk a partir del primer segmento de su ruta.
+ * Cubre la estructura nueva (`conocimiento/<ns>/…`) y la previa a F1-02.
+ * Devuelve `null` si la carpeta no matchea ninguna conocida.
+ */
+export function deriveSourceType(sourceFile: string): VaultSourceType | null {
+  const p = sourceFile.replace(/\\/g, '/');
+  if (p.startsWith('conocimiento/catedra/') || p.startsWith('001.1 - Clases')) return 'CATEDRA';
+  if (p.startsWith('conocimiento/procesos/') || p.startsWith('costeo-procesos/')) return 'PROCESOS';
+  if (p.startsWith('conocimiento/aprendizaje/')) return 'APRENDIZAJE';
+  return null;
 }
 
 export interface VaultChunkRepository {
@@ -60,11 +77,13 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
 
   async upsertChunk(input: UpsertChunkInput): Promise<void> {
     const vectorLiteral = `[${input.embedding.join(',')}]`;
+    const sourceType = input.sourceType ?? deriveSourceType(input.sourceFile);
+    const contextualPrefix = input.contextualPrefix ?? null;
     await this.db.$executeRaw`
       INSERT INTO "vault_chunks"
-        ("id", "sourceFile", "sourceTitle", "headingPath", "content", "contentHash", "chunkIndex", "vaultCommit", "embedding", "createdAt", "updatedAt")
+        ("id", "sourceFile", "sourceTitle", "headingPath", "content", "contentHash", "chunkIndex", "vaultCommit", "sourceType", "contextualPrefix", "embedding", "createdAt", "updatedAt")
       VALUES
-        (gen_random_uuid(), ${input.sourceFile}, ${input.sourceTitle}, ${input.headingPath}, ${input.content}, ${input.contentHash}, ${input.chunkIndex}, ${input.vaultCommit}, ${vectorLiteral}::vector, now(), now())
+        (gen_random_uuid(), ${input.sourceFile}, ${input.sourceTitle}, ${input.headingPath}, ${input.content}, ${input.contentHash}, ${input.chunkIndex}, ${input.vaultCommit}, ${sourceType}::"VaultSourceType", ${contextualPrefix}, ${vectorLiteral}::vector, now(), now())
       ON CONFLICT ("sourceFile", "chunkIndex")
       DO UPDATE SET
         "sourceTitle" = EXCLUDED."sourceTitle",
@@ -72,6 +91,8 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
         "content" = EXCLUDED."content",
         "contentHash" = EXCLUDED."contentHash",
         "vaultCommit" = EXCLUDED."vaultCommit",
+        "sourceType" = EXCLUDED."sourceType",
+        "contextualPrefix" = EXCLUDED."contextualPrefix",
         "embedding" = EXCLUDED."embedding",
         "updatedAt" = now()
     `;
