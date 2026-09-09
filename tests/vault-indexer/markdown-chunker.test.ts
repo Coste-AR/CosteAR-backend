@@ -150,4 +150,102 @@ describe('chunkMarkdown', () => {
     expect(chunks[0]).toMatchObject({ headingPath: 'Primer tema', content: 'Contenido del primer tema.' });
     expect(chunks[1]).toMatchObject({ headingPath: 'Segundo tema', content: 'Contenido del segundo tema.' });
   });
+
+  describe('troceo recursivo (F1-04)', () => {
+    const parrafo = (n: number) => `Párrafo ${n}. ` + 'palabra '.repeat(60).trim() + '.';
+
+    it('una sección corta sigue siendo un solo chunk (sin cambios)', () => {
+      const raw = '# X\n\n## Sección\n\n' + [parrafo(1), parrafo(2)].join('\n\n') + '\n';
+      const chunks = chunkMarkdown('x.md', raw);
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]?.headingPath).toBe('Sección');
+    });
+
+    it('una sección larga se parte en varios chunks, todos con el mismo headingPath', () => {
+      const parrafos = Array.from({ length: 12 }, (_, i) => parrafo(i + 1));
+      const raw = '# X\n\n## Sección grande\n\n' + parrafos.join('\n\n') + '\n';
+      const chunks = chunkMarkdown('x.md', raw);
+
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks.every((c) => c.headingPath === 'Sección grande')).toBe(true);
+      // chunkIndex correlativo global
+      expect(chunks.map((c) => c.chunkIndex)).toEqual(chunks.map((_, i) => i));
+      // ningún chunk supera holgadamente el techo (~3200 chars) — se permite
+      // un margen por el párrafo de solape.
+      expect(chunks.every((c) => c.content.length <= 3200 + 700)).toBe(true);
+    });
+
+    it('los chunks contiguos de una sección comparten el último párrafo (solape)', () => {
+      const parrafos = Array.from({ length: 12 }, (_, i) => parrafo(i + 1));
+      const raw = '# X\n\n## Sección\n\n' + parrafos.join('\n\n') + '\n';
+      const chunks = chunkMarkdown('x.md', raw);
+
+      expect(chunks.length).toBeGreaterThan(1);
+      for (let i = 1; i < chunks.length; i++) {
+        const prevParas = chunks[i - 1]!.content.split(/\n\s*\n/);
+        const lastOfPrev = prevParas[prevParas.length - 1]!.trim();
+        expect(chunks[i]!.content.startsWith(lastOfPrev)).toBe(true);
+      }
+    });
+
+    it('un solo párrafo enorme se parte por oraciones', () => {
+      const oraciones = Array.from({ length: 40 }, (_, i) => `Esta es la oración número ${i + 1} y tiene bastante texto de relleno para ocupar lugar.`);
+      const raw = '# X\n\n## Sección\n\n' + oraciones.join(' ') + '\n';
+      const chunks = chunkMarkdown('x.md', raw);
+
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks.every((c) => c.headingPath === 'Sección')).toBe(true);
+      // no se corta a mitad de oración: cada chunk termina en signo de puntería
+      expect(chunks.every((c) => /[.!?…]["'”’)\]]*$/.test(c.content.trim()))).toBe(true);
+    });
+
+    it('los headings de nivel 4-6 aportan al headingPath en vez de aplanarse', () => {
+      const raw = [
+        '# Nota',
+        '',
+        '## CIP',
+        '',
+        '### Prorrateo',
+        '',
+        '#### Base horas máquina',
+        '',
+        'El prorrateo usa las horas máquina de cada departamento.',
+        '',
+        '##### Detalle',
+        '',
+        'Un detalle todavía más fino.',
+        '',
+      ].join('\n');
+
+      const chunks = chunkMarkdown('nota.md', raw);
+
+      const base = chunks.find((c) => c.content.startsWith('El prorrateo usa'));
+      expect(base?.headingPath).toBe('CIP > Prorrateo > Base horas máquina');
+      const detalle = chunks.find((c) => c.content.startsWith('Un detalle'));
+      expect(detalle?.headingPath).toBe('CIP > Prorrateo > Base horas máquina > Detalle');
+    });
+
+    it('un ### después de un #### vuelve a nivel 3 (el stack se recorta)', () => {
+      const raw = [
+        '# Nota',
+        '',
+        '## A',
+        '',
+        '### A1',
+        '',
+        '#### A1a',
+        '',
+        'contenido a1a',
+        '',
+        '### A2',
+        '',
+        'contenido a2',
+        '',
+      ].join('\n');
+
+      const chunks = chunkMarkdown('nota.md', raw);
+      expect(chunks.find((c) => c.content === 'contenido a1a')?.headingPath).toBe('A > A1 > A1a');
+      expect(chunks.find((c) => c.content === 'contenido a2')?.headingPath).toBe('A > A2');
+    });
+  });
 });
