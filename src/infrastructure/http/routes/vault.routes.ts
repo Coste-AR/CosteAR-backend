@@ -25,9 +25,29 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/vault/query', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
     const { question } = vaultQuerySchema.parse(request.body);
-    const result = await service.query(question);
+    const result = await service.query(question, { userId: request.authUser!.id });
     return reply.status(200).send({ data: result });
   });
+
+  // 👍 / 👎 sobre una respuesta del RAG. Setea `feedbackUseful` en la fila de
+  // `vault_query_log` que devolvió `queryLogId`.
+  app.post(
+    '/vault/query/:id/feedback',
+    { preHandler: [authenticate, requireRole('ADMIN')] },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const { useful } = z.object({ useful: z.boolean() }).parse(request.body);
+
+      const log = await prisma.vaultQueryLog.findUnique({ where: { id: params.id } });
+      if (!log) return reply.status(404).send({ error: 'Query no encontrada' });
+
+      await prisma.vaultQueryLog.update({
+        where: { id: params.id },
+        data: { feedbackUseful: useful },
+      });
+      return reply.status(200).send({ data: { success: true } });
+    },
+  );
 
   // --- Session Management ---
   
@@ -91,7 +111,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // 2. Ejecutar query contra la bóveda
-    const result = await service.query(question);
+    const result = await service.query(question, { userId: request.authUser!.id });
 
     // 3. Guardar respuesta del asistente
     const assistantMessage = await prisma.vaultChatMessage.create({

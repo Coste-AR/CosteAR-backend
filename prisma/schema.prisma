@@ -1671,6 +1671,29 @@ model VaultChatMessage {
   @@map("vault_chat_messages")
 }
 
+// Log de TODA consulta al RAG (no solo los misses). Reemplaza la "precisión
+// proxy" del panel admin por métricas reales. Sin RLS: es operativo, no dato de
+// un tenant (mismo criterio que vault_chunks).
+model VaultQueryLog {
+  id                 String   @id @default(uuid()) @db.Uuid
+  question           String
+  retrieverVersion   String // qué versión del retriever respondió (ej. "v1-cosine")
+  embeddingModel     String
+  llmModel           String
+  // [{ sourceFile, headingPath, distance, rrfScore?, rerankScore? }] de cada chunk usado
+  chunksReturned     Json
+  confidence         String // HIGH | LOW | NONE
+  answeredFromContext Boolean
+  latencyMs          Int
+  userId             String?  @db.Uuid
+  // 👍/👎 del consumidor. null = sin feedback todavía.
+  feedbackUseful     Boolean?
+  createdAt          DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("vault_query_log")
+}
+
 // ---------------------------------------------------------------------------
 // Costeo por Procesos (B03)
 // ---------------------------------------------------------------------------

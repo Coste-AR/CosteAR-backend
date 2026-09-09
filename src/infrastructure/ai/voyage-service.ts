@@ -7,7 +7,7 @@ import { getEnv } from '../config/env.js';
 import { voyageFetch } from './voyage-rate-limiter.js';
 
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings';
-const EMBEDDING_MODEL = 'voyage-4-large';
+export const EMBEDDING_MODEL = 'voyage-4-large';
 export const EMBEDDING_DIMENSIONS = 1024;
 
 interface VoyageEmbeddingsResponse {
