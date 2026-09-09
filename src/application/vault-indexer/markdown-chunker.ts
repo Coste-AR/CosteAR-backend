@@ -7,6 +7,13 @@ export interface MarkdownChunk {
   content: string;
   chunkIndex: number;
   contentHash: string;
+  /**
+   * Contexto de 1-2 frases que el indexador antepone al `content` antes de
+   * embeber (Contextual Retrieval, F1-05). `null` al salir del chunker: lo
+   * completa el indexador. NO entra en `contentHash` — ese hash detecta cambios
+   * de contenido crudo; el prefijo se regenera cuando el contenido cambió.
+   */
+  contextualPrefix: string | null;
 }
 
 const H1_RE = /^#\s+.+$/;
@@ -216,6 +223,7 @@ export function chunkMarkdown(filePath: string, rawContent: string): MarkdownChu
         content: trimmed,
         chunkIndex,
         contentHash,
+        contextualPrefix: null,
       });
       chunkIndex++;
     }

@@ -86,7 +86,42 @@ describe('VaultIndexerService', () => {
     expect(result.filesProcessed).toBe(1);
     expect(result.chunksUpserted).toBe(2);
     expect(result.chunksSkippedUnchanged).toBe(0);
+    expect(result.chunksWithContext).toBe(0); // sin generador de contexto → contenido pelado
     expect(repo.chunks.size).toBe(2);
+  });
+
+  it('con un generador de contexto: antepone el prefijo al texto embebido y lo persiste', async () => {
+    await writeFile(join(vaultPath, 'cip.md'), '# CIP\n\n## Prorrateo\n\nPor horas máquina.\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const contextGen = { generate: async () => 'Fragmento del apunte de CIP sobre prorrateo.' };
+    const service = new VaultIndexerService(repo, embedder, contextGen as never);
+
+    const result = await service.indexVault(vaultPath, 'commit-1');
+
+    expect(result.chunksWithContext).toBe(result.chunksUpserted);
+    // el texto que se mandó a embeber empieza por el prefijo
+    const embeddedTexts = embedder.calls.flat();
+    expect(embeddedTexts.some((t) => t.startsWith('Fragmento del apunte de CIP sobre prorrateo.\n\n'))).toBe(true);
+    // y quedó guardado en el chunk
+    const stored = [...repo.chunks.values()];
+    expect(stored.every((c) => c.contextualPrefix === 'Fragmento del apunte de CIP sobre prorrateo.')).toBe(true);
+    // el content sin prefijo
+    expect(stored.some((c) => c.content === 'Por horas máquina.')).toBe(true);
+  });
+
+  it('si el generador de contexto tira error, embebe el contenido pelado (degradación segura)', async () => {
+    await writeFile(join(vaultPath, 'x.md'), '# X\n\ncontenido\n', 'utf-8');
+    const repo = new FakeRepository();
+    const embedder = new FakeEmbedder();
+    const contextGen = { generate: async () => { throw new Error('LLM caído'); } };
+    const service = new VaultIndexerService(repo, embedder, contextGen as never);
+
+    const result = await service.indexVault(vaultPath, 'commit-1');
+
+    expect(result.chunksUpserted).toBe(1);
+    expect(result.chunksWithContext).toBe(0);
+    expect([...repo.chunks.values()][0]?.contextualPrefix).toBeNull();
   });
 
   it('omite re-embedear chunks cuyo contenido no cambió', async () => {
