@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.setConfig({ testTimeout: 15000 });
 
 
-const { mockTx, mockDb, mockClassify } = vi.hoisted(() => {
+const { mockTx, mockDb, mockClassify, mockPackageResolve } = vi.hoisted(() => {
   const tx = {
     dataEntry: { create: vi.fn() },
     classificationAudit: { create: vi.fn() },
@@ -32,12 +32,16 @@ const { mockTx, mockDb, mockClassify } = vi.hoisted(() => {
       $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
     },
     mockClassify: vi.fn(),
+    mockPackageResolve: vi.fn(),
   };
 });
 
 vi.mock('@/infrastructure/database/prisma.js', () => ({ prisma: mockDb }));
 vi.mock('@/infrastructure/classifier/cascade-classifier.js', () => ({
   classifyDocument: mockClassify,
+}));
+vi.mock('@/application/operacion/paquete-rubro-service.js', () => ({
+  PaqueteRubroService: class { resolve = mockPackageResolve; },
 }));
 
 // La memoria de correcciones se mockea porque su fallo es no-fatal y sin Docker agrega un timeout.
@@ -86,6 +90,7 @@ beforeEach(() => {
   mockDb.$transaction.mockImplementation(async (fn: (t: typeof mockTx) => unknown) => fn(mockTx));
   fakeGroq.analyzeDocument.mockResolvedValue(null);
   mockClassify.mockResolvedValue(classificationResult());
+  mockPackageResolve.mockResolvedValue({});
 });
 
 describe('ingestDataEntry', () => {
@@ -119,6 +124,33 @@ describe('ingestDataEntry', () => {
     expect(mockClassify.mock.calls[0]![0].sourceType).toBe('TEXT');
     // La entrada persistida sí conserva el canal real.
     expect(mockTx.dataEntry.create.mock.calls[0]![0].data.sourceType).toBe('WHATSAPP');
+  });
+
+  it('pasa al clasificador la escala declarada y la calibración resuelta del perfil', async () => {
+    const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry.js');
+    mockDb.company.findUnique.mockResolvedValue({
+      industry: 'avicultura', description: null,
+      operationScaleValue: { toString: () => '500' }, operationScaleUnit: 'unidades_fisicas_por_anio',
+    });
+    mockPackageResolve.mockResolvedValue({ scale: { value: 100, unit: 'unidades_fisicas_por_anio' } });
+    mockClassify.mockResolvedValue(classificationResult({
+      scaleCalibrationWarning: {
+        code: 'OUTSIDE_CALIBRATED_RANGE',
+        operationScale: { value: 500, unit: 'unidades_fisicas_por_anio' },
+        profileScale: { value: 100, unit: 'unidades_fisicas_por_anio' },
+        materialFactor: 5,
+      },
+    }));
+
+    const result = await ingestDataEntry(baseInput, { db: mockDb as never, groq: fakeGroq as never });
+
+    expect(mockClassify).toHaveBeenCalledWith(expect.objectContaining({
+      operationScale: { value: 500, unit: 'unidades_fisicas_por_anio' },
+      profileScale: { value: 100, unit: 'unidades_fisicas_por_anio' },
+    }));
+    expect(result.classification).toMatchObject({
+      scaleCalibrationWarning: expect.objectContaining({ code: 'OUTSIDE_CALIBRATED_RANGE' }),
+    });
   });
 
   it('con rejectIllegible=false guarda la entrada ilegible en vez de perderla', async () => {

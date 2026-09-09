@@ -9,6 +9,7 @@ import type { Layer4Result } from './layers/layer4-business-routing.js';
 import { runLayer5 }      from './layers/layer5-ai-fallback.js';
 import { detectAcquisitionCostLink } from './layers/layer4-acquisition-link.js';
 import { categorizeIndustry, getIndustryProfile } from './industry/industry-profile.js';
+import { getScaleCalibrationWarning } from './profile-scale.js';
 import { getActiveVocabularyTerms, withVocabularyTerms } from './industry/vocabulary-profile.js';
 import { getCorrectionExamples } from './memory/correction-memory.js';
 import type { ClassifierInput, ClassificationResult, DocumentType, CostSection, InputIntent, IndustryCategory } from './types.js';
@@ -232,6 +233,10 @@ export async function classifyDocument(input: ClassifierInput & {
   const industryCategory: IndustryCategory = categorizeIndustry(input.industry);
   const staticIndustryProfile = getIndustryProfile(industryCategory);
   let industryProfile = staticIndustryProfile;
+  const scaleCalibrationWarning = getScaleCalibrationWarning(input.operationScale, input.profileScale);
+  // La señal se limita a informar al consumidor: no modifica ninguna rama de
+  // decisión, confianza o sección del clasificador.
+  const scaleWarningResult = scaleCalibrationWarning ? { scaleCalibrationWarning } : {};
 
   try {
     const vocabularyTerms = await getActiveVocabularyTerms(industryCategory);
@@ -282,6 +287,7 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap: null,
       intent,
       industryCategory,
+      ...scaleWarningResult,
       explanation: 'El documento es ilegible. No se puede determinar su tipo ni contenido. Por favor reenviá una imagen más clara.',
     };
   }
@@ -424,6 +430,7 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
+      ...scaleWarningResult,
       acquisitionLink,
       // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
       ...buildSectionAndExplanation({
@@ -512,6 +519,7 @@ export async function classifyDocument(input: ClassifierInput & {
       confidenceCap,
       intent,
       industryCategory,
+      ...scaleWarningResult,
       acquisitionLink,
       // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
       ...buildSectionAndExplanation({
@@ -539,6 +547,7 @@ export async function classifyDocument(input: ClassifierInput & {
     confidenceCap,
     intent,
     industryCategory,
+    ...scaleWarningResult,
     // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
     ...buildSectionAndExplanation({
       intent, documentType: chosenType,
