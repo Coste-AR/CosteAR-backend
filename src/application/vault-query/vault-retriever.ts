@@ -1,5 +1,6 @@
 import type { VaultSourceType } from '@prisma/client';
 import { VoyageService } from '../../infrastructure/ai/voyage-service.js';
+import { VoyageReranker } from '../../infrastructure/ai/voyage-reranker.js';
 import {
   PrismaVaultChunkRepository,
   type VaultSearchHit,
@@ -7,7 +8,7 @@ import {
 import { UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 
 /** Versión del retriever — se registra en `vault_query_log`. */
-export const RETRIEVER_VERSION = 'v2-hybrid-rrf';
+export const RETRIEVER_VERSION = 'v3-hybrid-rrf-rerank';
 
 /** Cuántos candidatos pide cada rama antes de fusionar. */
 const CANDIDATE_POOL = 20;
@@ -29,6 +30,8 @@ export interface RetrievedChunk {
   /** Distancia coseno del mejor match vector, o `null` si vino solo por full-text. */
   distance: number | null;
   rrfScore: number;
+  /** Score de relevancia del reranker, o `null` si el rerank no corrió. */
+  rerankScore: number | null;
 }
 
 export interface RetrieveOptions {
@@ -50,6 +53,7 @@ export class VaultRetriever {
   constructor(
     private readonly embedder: VoyageService = new VoyageService(),
     private readonly repo: PrismaVaultChunkRepository = new PrismaVaultChunkRepository(),
+    private readonly reranker: VoyageReranker = new VoyageReranker(),
   ) {}
 
   async retrieve(question: string, opts: RetrieveOptions = {}): Promise<RetrievedChunk[]> {
@@ -66,7 +70,20 @@ export class VaultRetriever {
       this.repo.searchByFullText(question, CANDIDATE_POOL, opts.namespaces),
     ]);
 
-    return fuseRRF(vectorHits, ftsHits).slice(0, limit);
+    const fused = fuseRRF(vectorHits, ftsHits);
+    if (fused.length === 0) return [];
+
+    // Re-ranking sobre los candidatos del híbrido. Si no está configurado o
+    // falla, se cae al orden por RRF (degradación segura).
+    const reranked = await this.reranker.rerank(
+      question,
+      fused.map((c) => c.content),
+      limit,
+    );
+    if (reranked) {
+      return reranked.map(({ index, score }) => ({ ...fused[index]!, rerankScore: score }));
+    }
+    return fused.slice(0, limit);
   }
 }
 
@@ -92,6 +109,7 @@ export function fuseRRF(vectorHits: VaultSearchHit[], ftsHits: VaultSearchHit[])
         ftsRank: null,
         distance: null,
         rrfScore: 0,
+        rerankScore: null,
       };
       byId.set(hit.id, entry);
     }

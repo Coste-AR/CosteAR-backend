@@ -22,6 +22,7 @@ function chunk(over: Record<string, unknown> = {}) {
     ftsRank: null,
     distance: 0.12,
     rrfScore: 0.9,
+    rerankScore: null,
     ...over,
   };
 }
@@ -53,7 +54,7 @@ describe('VaultQueryService.query — vault_query_log', () => {
       question,
       confidence: 'NONE',
       answeredFromContext: false,
-      retrieverVersion: 'v2-hybrid-rrf',
+      retrieverVersion: 'v3-hybrid-rrf-rerank',
       embeddingModel: 'voyage-4-large',
     });
     expect((row?.chunksReturned as unknown[]).length).toBe(0);
