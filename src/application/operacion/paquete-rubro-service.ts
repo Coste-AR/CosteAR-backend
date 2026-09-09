@@ -10,7 +10,12 @@ export class PaqueteRubroService {
     const rank = (r: typeof rows[number]) => (r.periodId ? 8 : 0) + (r.structureId ? 4 : 0) + (r.companyId ? 2 : 0) + (r.userId ? 1 : 0);
     eligible.sort((a, b) => rank(a) - rank(b));
     const result: Record<string, unknown> = {};
-    for (const row of eligible) Object.assign(result, { lexicon: row.lexicon, icons: row.icons, variants: row.variants, seedParameters: row.seedParameters, alertRules: row.alertRules, screens: row.screens });
+    for (const row of eligible) {
+      Object.assign(result, { lexicon: row.lexicon, icons: row.icons, variants: row.variants, seedParameters: row.seedParameters, alertRules: row.alertRules, screens: row.screens });
+      // Un override sin escala no borra la calibración menos específica: la
+      // ausencia es ausencia declarada, no un valor por defecto plausible.
+      if (row.scale !== null) result.scale = row.scale;
+    }
     return { category, ...result, defaults: CORE_DEFAULTS };
   }
 }

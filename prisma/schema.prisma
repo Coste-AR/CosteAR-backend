@@ -202,12 +202,22 @@ model Company {
   movimientosDeposito  MovimientoDeposito[]
   eventosLote          EventoLote[]
   produccionesDiarias  ProduccionDiaria[]
+  egresosProducto      EgresoProducto[]
+  ventasProducto       VentaProducto[]
   corridasProduccion   CorridaProduccion[]
   consumosCorrida      ConsumoCorrida[]
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   depositos            Deposito[]
   unidadesMedida       UnidadMedida[]
+  // La unidad en la que esta empresa gestiona y comunica sus cantidades. Es
+  // explícita: no se infiere del rubro ni de ningún perfil global.
+  unidadGestionId      String?               @db.Uuid
+  unidadGestion        UnidadMedida?         @relation("UnidadGestion", fields: [unidadGestionId], references: [id], onDelete: Restrict)
+  // Escala declarada como cantidad física anual. La unidad viaja junto al valor:
+  // nunca se infiere del rubro ni se reemplaza por una estimación monetaria.
+  operationScaleValue  Decimal?              @db.Decimal(18, 4)
+  operationScaleUnit   String?
   parametrosCosteo     ParametroCosteo[]
   unidadesProductivas  UnidadProductiva[]
   lotesProductivos     LoteProductivo[]
@@ -261,7 +271,7 @@ enum DestinoCorrida {
 model CorridaProduccion {
   id String @id @default(uuid()) @db.Uuid
   companyId String @db.Uuid
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "corridas_produccion_company_fkey")
   userId String @db.Uuid
   referencia String
   formula String
@@ -279,10 +289,10 @@ model CorridaProduccion {
 model ConsumoCorrida {
   id String @id @default(uuid()) @db.Uuid
   companyId String @db.Uuid
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "consumos_corrida_company_fkey")
   userId String @db.Uuid
   corridaId String @db.Uuid
-  corrida CorridaProduccion @relation(fields: [corridaId], references: [id], onDelete: Cascade)
+  corrida CorridaProduccion @relation(fields: [corridaId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "consumos_corrida_corrida_fkey")
   material String
   cantidad Decimal @db.Decimal(18, 4)
   costoUnitarioPpp Decimal @db.Decimal(18, 6)
@@ -545,6 +555,7 @@ model CostPeriod {
 
 model CostStructure {
   reglasAlerta        ReglaAlerta[]
+  ventasProducto      VentaProducto[]
   activosAmortizables ActivoAmortizable[]
   parametrosCosteo    ParametroCosteo[]
   // Lado inverso de la FK que ya existía en la base — ver CostConfigVersion.structure.
@@ -2069,10 +2080,13 @@ model PaqueteRubro {
   seedParameters Json
   alertRules Json
   screens Json
-  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Escala de calibración del perfil: { value, unit }. Nullable hasta que el
+  // rubro la declare; la cascada no inventa una si no hay dato.
+  scale Json?
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paquetes_rubro_company_fkey")
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
-  @@index([category, companyId, structureId, periodId])
+  @@index([category, companyId, structureId, periodId], map: "paquetes_rubro_scope_idx")
   @@map("paquetes_rubro")
 }
 
@@ -2100,9 +2114,11 @@ model UnidadMedida {
   activosAmortizables  ActivoAmortizable[]
   desperdicioRegistros DesperdicioRegistro[]
   depositos            Deposito[]
+  ventasProducto       VentaProducto[]
   id                   String                @id @default(uuid()) @db.Uuid
   companyId            String                @db.Uuid
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  empresasQueLaGestionan Company[]           @relation("UnidadGestion")
   userId               String                @db.Uuid // denormalizado para RLS
 
   /**
@@ -2390,6 +2406,8 @@ model ProduccionDiaria {
   roturas             Decimal  @default(0) @db.Decimal(18, 4)
   descartes           Decimal  @default(0) @db.Decimal(18, 4)
 
+  egresosProducto EgresoProducto[]
+
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
@@ -2398,6 +2416,57 @@ model ProduccionDiaria {
   @@index([companyId, fecha])
   @@index([loteId, fecha])
   @@map("producciones_diarias")
+}
+
+/**
+ * Egreso físico de una partida de producto terminado. No representa una venta:
+ * A-15 podrá enlazar sus comprobantes a este hecho sin duplicar el descuento
+ * del stock. El saldo siempre se deriva de producción menos estos egresos.
+ */
+model EgresoProducto {
+  id            String            @id @default(uuid()) @db.Uuid
+  companyId     String            @db.Uuid
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId        String            @db.Uuid // denormalizado para RLS
+  produccionId  String            @db.Uuid
+  produccion    ProduccionDiaria  @relation(fields: [produccionId], references: [id], onDelete: Restrict)
+  cantidad      Decimal           @db.Decimal(18, 4)
+  fecha         DateTime          @db.Date
+  createdAt     DateTime          @default(now()) @db.Timestamptz
+
+  @@index([companyId, produccionId, fecha])
+  @@map("egresos_producto")
+}
+
+/**
+ * Venta real de una variante. El precio promedio del período no se persiste:
+ * se deriva ponderando estas filas en la unidad que solicite quien consulta.
+ */
+model VentaProducto {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  structureId String        @db.Uuid
+  structure   CostStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  fecha    DateTime @db.Date
+  canal    String
+  variante String
+
+  cantidad       Decimal       @db.Decimal(18, 4)
+  precioUnitario Decimal       @db.Decimal(18, 4)
+  unidadId       String        @db.Uuid
+  unidad         UnidadMedida  @relation(fields: [unidadId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@index([companyId, structureId, fecha])
+  @@index([companyId, structureId, canal, fecha])
+  @@map("ventas_producto")
 }
 
 // ---------------------------------------------------------------------------

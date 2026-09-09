@@ -27,6 +27,16 @@ export const cuitSchema = z
 export const periodicitySchema = z.enum(['MONTHLY', 'BIWEEKLY', 'QUARTERLY']);
 
 /**
+ * Cantidad física producida durante un año. La unidad es obligatoria porque
+ * dos escalas sin una misma base física no se pueden comparar honestamente.
+ */
+export const operationScaleSchema = z.object({
+  value: z.number().finite().positive(),
+  unit: z.string().trim().min(1).max(80),
+});
+export type OperationScaleInput = z.infer<typeof operationScaleSchema>;
+
+/**
  * La CONDICIÓN FRENTE AL IVA de la empresa. No es un dato administrativo: decide
  * qué importe de cada comprobante entra al costo.
  *
@@ -58,6 +68,7 @@ export const createCompanySchema = z.object({
   cuit: cuitSchema.optional(),
   description: z.string().max(5000).trim().optional(),
   periodicity: periodicitySchema.optional(),
+  operationScale: operationScaleSchema.optional(),
   // Opcional en el contrato: omitirla deja el default de la DB
   // (RESPONSABLE_INSCRIPTO), que es lo que asume el resto del sistema.
   condicionIva: condicionIvaSchema.optional(),
@@ -66,6 +77,11 @@ export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
 
 export const updateCompanySchema = createCompanySchema.partial().extend({
   isActive: z.boolean().optional(),
+  // `undefined` conserva la declaración actual; `null` la quita de forma
+  // explícita. No hay un default: declarar la unidad es un acto del tenant.
+  unidadGestionId: z.string().uuid().nullable().optional(),
+  // `null` borra ambos componentes; no se admite actualizar sólo valor o unidad.
+  operationScale: operationScaleSchema.nullable().optional(),
 });
 export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
 

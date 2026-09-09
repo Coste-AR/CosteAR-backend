@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { PrismaClient, TermsVersion } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
+import { getEnv, type Env } from '../../infrastructure/config/env.js';
 import { NotFoundError, ValidationError } from '../../domain/errors/domain-error.js';
 
 // Sube tres niveles hasta la raíz del proyecto. Da lo mismo desde `src/` que
@@ -10,6 +11,43 @@ import { NotFoundError, ValidationError } from '../../domain/errors/domain-error
 // `prisma/` a la imagen de runtime.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const INITIAL_TERMS_PATH = join(ROOT, 'prisma', 'initial-terms.md');
+
+/**
+ * Marcadores que impiden publicar los términos iniciales en producción. Se
+ * nombran y exportan para que agregar uno sea una decisión revisable, no una
+ * condición escondida dentro del sembrado.
+ */
+export const INITIAL_TERMS_INVALID_MARKER_PATTERNS = [
+  {
+    name: 'marcador pendiente entre corchetes',
+    expression: /\[(?:COMPLETAR|RAZÓN SOCIAL)[^\]]*\]/giu,
+  },
+  {
+    name: 'nota interna de borrador no revisado por un abogado',
+    expression: /Nota interna, no forma parte del contrato/iu,
+  },
+] as const;
+
+export class InvalidInitialTermsContentError extends Error {
+  constructor(readonly markers: readonly string[]) {
+    super(`El texto inicial de Términos y Condiciones contiene marcadores inválidos: ${markers.join(', ')}`);
+    this.name = 'InvalidInitialTermsContentError';
+  }
+}
+
+export type InitialTermsReader = () => Promise<string>;
+
+export type TermsServiceOptions = {
+  nodeEnv?: Env['NODE_ENV'];
+  readInitialTerms?: InitialTermsReader;
+};
+
+export function findInitialTermsMarkers(content: string): string[] {
+  return INITIAL_TERMS_INVALID_MARKER_PATTERNS.flatMap(({ name, expression }) => {
+    const matches = content.match(expression);
+    return matches ? matches.map((match) => `${name}: ${match}`) : [];
+  });
+}
 
 /**
  * TÉRMINOS Y CONDICIONES — versionado explícito.
@@ -27,7 +65,10 @@ const INITIAL_TERMS_PATH = join(ROOT, 'prisma', 'initial-terms.md');
  * interno (ADMIN) nunca pasa por el frontend de costistas.
  */
 export class TermsService {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly options: TermsServiceOptions = {},
+  ) {}
 
   async getCurrentVersion(): Promise<TermsVersion | null> {
     return this.db.termsVersion.findFirst({ where: { isActive: true }, orderBy: { version: 'desc' } });
@@ -56,7 +97,27 @@ export class TermsService {
   async ensureInitialVersion(): Promise<TermsVersion | null> {
     if (await this.getCurrentVersion()) return null;
 
-    const content = await readFile(INITIAL_TERMS_PATH, 'utf8');
+    const readInitialTerms = this.options.readInitialTerms ?? (() => readFile(INITIAL_TERMS_PATH, 'utf8'));
+    let content: string;
+    try {
+      content = await readInitialTerms();
+    } catch {
+      // Sin el archivo no hay contenido apto para publicar. En desarrollo el
+      // borrador se puede sembrar, pero un archivo ilegible no tiene nada que
+      // registrar y jamás debe terminar en una versión activa.
+      throw new InvalidInitialTermsContentError(['no se pudo leer prisma/initial-terms.md']);
+    }
+
+    const markers = findInitialTermsMarkers(content);
+    if (markers.length > 0) {
+      if ((this.options.nodeEnv ?? getEnv().NODE_ENV) === 'production') {
+        throw new InvalidInitialTermsContentError(markers);
+      }
+      console.warn(
+        `[terms] WARN: se sembrarán los Términos iniciales con marcadores sin completar: ${markers.join(', ')}`,
+      );
+    }
+
     return this.db.termsVersion.create({ data: { version: 1, content, isActive: true } });
   }
 

@@ -112,6 +112,16 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
       'HAY QUE VERIFICARLO con el productor antes de mostrarle un costo como suyo.',
   },
   {
+    clave: 'vida_util_producto_dias',
+    descripcion: 'Días de vida útil del producto terminado desde su producción.',
+    valorDefault: 7,
+    unidad: 'dia',
+    seguro: false,
+    nota:
+      'Valor de referencia no confirmado. Se resuelve como parámetro porque puede cambiar por estación ' +
+      'y la antigüedad del stock debe evaluarse contra el valor vigente de cada empresa.',
+  },
+  {
     clave: 'tamanos_huevo',
     descripcion:
       'Cuántos tamaños de huevo se clasifican y se stockean por separado. ' +
@@ -243,6 +253,10 @@ export function resolverComportamiento(
 export interface ValorResuelto {
   clave: string;
   valor: number;
+  descripcion: string;
+  unidad: string | null;
+  valorDefault: number;
+  seguro: boolean;
   origen: OrigenParametro;
   /**
    * `false` cuando el valor salió de un default que nadie confirmó. Quien calcula
@@ -275,11 +289,20 @@ export function resolverParametro(
   filas: FilaParametro[],
   ctx: { periodId?: string | null; structureId?: string | null },
 ): ValorResuelto {
+  const catalogDef = CATALOGO.get(clave);
+  if (!catalogDef) throw new Error(`No existe el parámetro de costeo "${clave}".`);
+  const metadata = {
+    descripcion: catalogDef.descripcion,
+    unidad: catalogDef.unidad ?? null,
+    valorDefault: catalogDef.valorDefault,
+    seguro: catalogDef.seguro,
+    ...(catalogDef.nota ? { nota: catalogDef.nota } : {}),
+  };
   const delTema = filas.filter((f) => f.clave === clave && f.valorNum !== null);
 
   const buscar = (pred: (f: FilaParametro) => boolean, origen: OrigenParametro) => {
     const f = delTema.find(pred);
-    return f ? { clave, valor: Number(f.valorNum), origen, confirmado: f.confirmado } : null;
+    return f ? { clave, valor: Number(f.valorNum), ...metadata, origen, confirmado: f.confirmado } : null;
   };
 
   const encontrado =
@@ -301,6 +324,7 @@ export function resolverParametro(
   return {
     clave,
     valor: def.valorDefault,
+    ...metadata,
     origen: 'default',
     // Un default del catálogo nunca se da por confirmado, ni siquiera los seguros:
     // "confirmado" significa que lo dijo el cliente, no que sea razonable.
