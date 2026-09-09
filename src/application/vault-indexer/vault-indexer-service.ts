@@ -1,8 +1,9 @@
-import { readFile, readdir, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { execSync } from 'node:child_process';
 import { chunkMarkdown } from './markdown-chunker.js';
+import { listMarkdownFiles } from './vault-filter.js';
 import { PrismaVaultChunkRepository, type VaultChunkRepository } from './vault-chunk-repository.js';
 import { VoyageService, type Embedder } from '../../infrastructure/ai/voyage-service.js';
 
@@ -21,7 +22,6 @@ export interface IndexVaultResult {
   };
 }
 
-const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
 const BATCH_SIZE = 5;
 
 // Módulo-nivel a propósito: hay varios disparadores de indexVault que corren
@@ -31,26 +31,6 @@ const BATCH_SIZE = 5;
 // termina nunca — cada una le come el cupo a la otra. Un flag por instancia
 // no alcanza porque cada caller crea su propio `new VaultIndexerService()`.
 let indexingInProgress = false;
-
-async function listMarkdownFiles(rootDir: string): Promise<string[]> {
-  const result: string[] = [];
-  async function walk(dir: string): Promise<void> {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (IGNORED_DIRS.has(entry.name)) continue;
-        await walk(join(dir, entry.name));
-      } else if (entry.isFile() && entry.name.endsWith('.md')) {
-        // El README.md de la raíz del repo son instrucciones para el equipo
-        // (cómo subir contenido), no conocimiento de costeo — no se indexa.
-        if (dir === rootDir && entry.name.toLowerCase() === 'readme.md') continue;
-        result.push(join(dir, entry.name));
-      }
-    }
-  }
-  await walk(rootDir);
-  return result;
-}
 
 export class VaultIndexerService {
   constructor(
