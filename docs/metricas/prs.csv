@@ -95,3 +95,6 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 277,170,AlanArevalo1,dev,2026-09-07T20:40:49Z,2026-09-07T20:42:14Z,0.0,2,135,0,5,0,,,docs/sesiones/2026-09-07-170-config-4xx.md
 279,234,AlanArevalo1,dev,2026-09-07T20:59:27Z,2026-09-07T21:00:56Z,0.0,10,171,1,5,0,,,docs/sesiones/2026-09-07-234-escala-paquete.md
 280,278,AlanArevalo1,dev,2026-09-07T21:35:41Z,2026-09-07T21:37:01Z,0.0,7,863,1614,3,0,,,docs/sesiones/2026-09-07-278-vitest5.md
+283,281,AlanArevalo1,dev,2026-09-08T23:59:45Z,2026-09-09T02:07:18Z,2.1,7,295,20,15,2,,30,docs/sesiones/2026-09-08-281-terminos-iniciales-validos.md
+285,,SantiagoBriz,staging,2026-09-09T02:23:20Z,2026-09-09T02:25:03Z,0.0,88,12941,9788,4,0,,30,docs/sesiones/2026-09-02-198-stock-por-variante.md
+286,202,AlanArevalo1,dev,2026-09-09T02:30:00Z,2026-09-09T02:31:25Z,0.0,10,331,3,5,0,,35,docs/sesiones/2026-09-08-202-escala-perfil.md
