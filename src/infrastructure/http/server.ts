@@ -95,6 +95,4 @@ export async function main(): Promise<void> {
   process.on('SIGTERM', () => void close('SIGTERM'));
 }
 
-// Vitest importa `main()` para cubrir el límite entre sembrar y escuchar. El
-// proceso real no define esta variable, por lo que conserva el arranque normal.
-if (process.env.VITEST !== 'true') void main();
+void main();

@@ -13,7 +13,7 @@
 | --- | --- |
 | Tiempo de la sesión | ~15 min |
 | Tokens consumidos | no informado |
-| Intentos hasta el verde | 2 (primero rojo deliberado, luego verde) |
+| Intentos hasta el verde | 3 (rojo deliberado, verde local y corrección de arranque E2E) |
 | Comandos de verificación corridos | `npm.cmd run prisma:generate`, `npm.cmd test`, `npm.cmd run lint`, `npm.cmd run typecheck`, `npm.cmd run check:tests-base` |
 
 ## Qué se hizo
@@ -31,6 +31,10 @@ También se cubrió el caso de no poder leer el archivo: nunca termina en una si
 - **Qué decidí:** inyectar en el servicio el lector del markdown y el ambiente solo para las pruebas.
 - **Qué otra opción había:** mockear `node:fs/promises` globalmente.
 - **Por qué elegí esta:** permite probar sabotaje de lectura y un markdown limpio sin ocultar la lectura del archivo real que cubre el flujo local.
+
+- **Qué decidí:** conservar la ejecución incondicional de `main()` en el módulo de servidor y mockear sus dependencias en el test de arranque.
+- **Qué otra opción había:** omitir el arranque cuando `VITEST=true`.
+- **Por qué elegí esta:** la E2E hereda esa variable al proceso compilado que lanza; usarla como guard impedía que el servidor escuchara.
 
 ## Dónde el issue no alcanzaba
 
@@ -63,4 +67,7 @@ npm.cmd run check:tests-base
 # pasó: todos los tests con base están declarados.
 npm.cmd test
 # 172 archivos pasaron, 1 omitido; 1557 tests pasaron, 4 omitidos.
+
+docker compose ps
+# no se pudo ejecutar la E2E local: el daemon de Docker no estaba disponible.
 ```
