@@ -1,4 +1,5 @@
-import { VoyageService } from '../../infrastructure/ai/voyage-service.js';
+import { Prisma } from '@prisma/client';
+import { VoyageService, EMBEDDING_MODEL } from '../../infrastructure/ai/voyage-service.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { PrismaVaultChunkRepository } from '../vault-indexer/vault-chunk-repository.js';
 import { UnprocessableEntityError } from '../../domain/errors/domain-error.js';
@@ -7,11 +8,27 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 /** Techo defensivo de caracteres del contexto armado para el prompt del RAG. */
 const MAX_CONTEXT_CHARS = 12_000;
 
+/** Versión del retriever que respondió. F1-07 la sube cuando entra el híbrido. */
+const RETRIEVER_VERSION = 'v1-cosine';
+
 export interface VaultQueryResult {
   answer: string;
   citations: string[];
   confidence: 'HIGH' | 'LOW' | 'NONE';
   fallbackMessage?: string;
+  /** id de la fila de `vault_query_log` — para asociar el feedback 👍/👎. */
+  queryLogId?: string;
+}
+
+export interface VaultQueryOptions {
+  maxResults?: number;
+  userId?: string | null;
+}
+
+interface RetrievedChunkLite {
+  sourceFile: string;
+  headingPath: string | null;
+  distance: number;
 }
 
 const QA_SYSTEM_PROMPT = `Sos el consejero experto de CosteAR, respondiendo exclusivamente basándote en la metodología de la cátedra de costos.
@@ -39,7 +56,44 @@ export class VaultQueryService {
     private readonly repo: PrismaVaultChunkRepository = new PrismaVaultChunkRepository(),
   ) {}
 
-  async query(question: string, maxResults = 5): Promise<VaultQueryResult> {
+  /**
+   * Escribe una fila en `vault_query_log`. **Nunca puede romper la respuesta al
+   * usuario**: cualquier error de la escritura se loguea y se devuelve `undefined`.
+   */
+  private async logQuery(row: {
+    question: string;
+    chunks: RetrievedChunkLite[];
+    confidence: VaultQueryResult['confidence'];
+    answeredFromContext: boolean;
+    latencyMs: number;
+    userId?: string | null;
+  }): Promise<string | undefined> {
+    try {
+      const created = await prisma.vaultQueryLog.create({
+        data: {
+          question: row.question,
+          retrieverVersion: RETRIEVER_VERSION,
+          embeddingModel: EMBEDDING_MODEL,
+          llmModel: 'groq', // F1-10 lo hace real
+          chunksReturned: row.chunks as unknown as Prisma.InputJsonValue,
+          confidence: row.confidence,
+          answeredFromContext: row.answeredFromContext,
+          latencyMs: row.latencyMs,
+          userId: row.userId ?? null,
+        },
+        select: { id: true },
+      });
+      return created.id;
+    } catch (err) {
+      console.error('[vault-query] no se pudo registrar la query en vault_query_log:', err);
+      return undefined;
+    }
+  }
+
+  async query(question: string, opts: VaultQueryOptions = {}): Promise<VaultQueryResult> {
+    const startedAt = Date.now();
+    const maxResults = opts.maxResults ?? 5;
+
     if (!this.embedder.isConfigured || !this.ai.isConfigured) {
       throw new UnprocessableEntityError('El servicio de IA o embeddings no está configurado (faltan API keys).');
     }
@@ -65,6 +119,12 @@ export class VaultQueryService {
       usedWidenedSearch = chunks.length > 0;
     }
 
+    const chunksLite: RetrievedChunkLite[] = chunks.map((c) => ({
+      sourceFile: c.sourceFile,
+      headingPath: c.headingPath,
+      distance: c.distance,
+    }));
+
     if (chunks.length === 0) {
       // Registrar la falla en el Nightly Pipeline
       await prisma.dailySignal.create({
@@ -76,12 +136,22 @@ export class VaultQueryService {
         }
       });
 
+      const queryLogId = await this.logQuery({
+        question,
+        chunks: [],
+        confidence: 'NONE',
+        answeredFromContext: false,
+        latencyMs: Date.now() - startedAt,
+        userId: opts.userId,
+      });
+
       // Short-circuit: no se encontró contexto suficientemente similar.
       return {
         answer: 'No encontré información relevante en la bóveda de costeo para responder esta pregunta.',
         citations: [],
         confidence: 'NONE',
-        fallbackMessage: 'Intentá usar palabras clave más específicas que coincidan con la terminología de la cátedra.'
+        fallbackMessage: 'Intentá usar palabras clave más específicas que coincidan con la terminología de la cátedra.',
+        queryLogId,
       };
     }
 
@@ -108,6 +178,14 @@ export class VaultQueryService {
     );
 
     if (!result) {
+      await this.logQuery({
+        question,
+        chunks: chunksLite,
+        confidence: 'NONE',
+        answeredFromContext: false,
+        latencyMs: Date.now() - startedAt,
+        userId: opts.userId,
+      });
       throw new UnprocessableEntityError('Error al contactar al modelo generador.');
     }
 
@@ -134,10 +212,24 @@ export class VaultQueryService {
 
     // Si el match sólo apareció al ampliar el umbral, la confianza no puede ser HIGH
     // aunque el LLM haya podido responder con esos chunks.
+    const confidence: VaultQueryResult['confidence'] = result.answeredFromContext
+      ? (usedWidenedSearch ? 'LOW' : 'HIGH')
+      : 'LOW';
+
+    const queryLogId = await this.logQuery({
+      question,
+      chunks: chunksLite,
+      confidence,
+      answeredFromContext: result.answeredFromContext,
+      latencyMs: Date.now() - startedAt,
+      userId: opts.userId,
+    });
+
     return {
       answer: result.answer,
       citations: verifiedCitations,
-      confidence: result.answeredFromContext ? (usedWidenedSearch ? 'LOW' : 'HIGH') : 'LOW'
+      confidence,
+      queryLogId,
     };
   }
 }

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockDb = { dailySignal: { create: vi.fn() } };
+const mockDb = {
+  dailySignal: { create: vi.fn() },
+  vaultQueryLog: { create: vi.fn().mockResolvedValue({ id: 'log-1' }) },
+};
 vi.mock('@/infrastructure/database/prisma.js', () => ({ prisma: mockDb }));
 
 const mockEmbedder = { isConfigured: true, embed: vi.fn() };
