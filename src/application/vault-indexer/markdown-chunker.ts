@@ -10,9 +10,21 @@ export interface MarkdownChunk {
 }
 
 const H1_RE = /^#\s+.+$/;
-const HEADING_RE = /^(#{2,3})\s+(.+)$/;
+// H2..H6 abren sección. Antes era `{2,3}` y todo lo más profundo se aplanaba
+// como contenido; ahora los niveles 4-6 también aportan al `headingPath` para
+// no perder la ubicación de un fragmento (ej. "CIP > Prorrateo > Base horas
+// máquina") — clave para el retrieval.
+const HEADING_RE = /^(#{2,6})\s+(.+)$/;
 const FENCE_RE = /^```/;
 const FRONTMATTER_TITLE_RE = /^title:\s*(.*)$/;
+
+/**
+ * Techo de tamaño de un chunk, en caracteres. ~800 tokens ≈ 3200 caracteres
+ * (heurística ~4 chars/token; no hay tokenizador en el stack). Una sección más
+ * grande se subdivide recursivamente: por párrafos, y si un párrafo solo ya
+ * supera el techo, por oraciones.
+ */
+const MAX_CHUNK_CHARS = 3200;
 
 /**
  * Separa el frontmatter YAML (bloque `---\n...\n---` al inicio del archivo,
@@ -39,22 +51,99 @@ function extractFrontmatter(rawContent: string): { title: string | null; body: s
   return { title: title || null, body };
 }
 
+/** Divide un texto en párrafos (separados por una o más líneas en blanco). */
+function splitParagraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+/** Divide un párrafo largo en oraciones, conservando el signo de puntuación. */
+function splitSentences(paragraph: string): string[] {
+  const parts = paragraph.match(/[^.!?…]+[.!?…]+(?:["'”’)\]]+)?|\S[^.!?…]*$/g);
+  return (parts ?? [paragraph]).map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
 /**
- * Trocea una nota Markdown respetando su estructura: un chunk por sección
- * de nivel 2/3, más un chunk inicial para el texto que cuelga directo del H1
- * (si lo hay). El título de la nota se propaga a todos los chunks para dar
- * contexto, con esta prioridad: H1 de la nota > `title:` del frontmatter >
- * nombre de archivo.
+ * Empaqueta las piezas (párrafos u oraciones) en grupos que no superen el
+ * techo. Una pieza que sola ya lo supera se subdivide por oraciones; si aún
+ * así una oración sola lo supera, se deja entera (no se corta una oración).
+ */
+function packPieces(pieces: string[]): string[] {
+  const groups: string[] = [];
+  let current = '';
+
+  const flush = () => {
+    if (current.trim()) groups.push(current.trim());
+    current = '';
+  };
+
+  for (const piece of pieces) {
+    if (piece.length > MAX_CHUNK_CHARS) {
+      flush();
+      const sentences = splitSentences(piece);
+      if (sentences.length > 1) {
+        for (const g of packPieces(sentences)) groups.push(g);
+      } else {
+        groups.push(piece); // una sola oración enorme: no se parte
+      }
+      continue;
+    }
+    if (current && current.length + 2 + piece.length > MAX_CHUNK_CHARS) {
+      flush();
+    }
+    current = current ? `${current}\n\n${piece}` : piece;
+  }
+  flush();
+  return groups;
+}
+
+/**
+ * Trocea el contenido de una sección. Si entra en el techo, un solo trozo (el
+ * comportamiento de siempre). Si no, varios trozos con **solape de un párrafo**
+ * entre trozos contiguos de la misma sección: el último párrafo de un trozo se
+ * repite al inicio del siguiente para no perder el hilo en el corte.
+ */
+function splitSectionContent(content: string): string[] {
+  if (content.length <= MAX_CHUNK_CHARS) return [content];
+
+  const paragraphs = splitParagraphs(content);
+  if (paragraphs.length <= 1) return packPieces([content]);
+
+  const groups = packPieces(paragraphs);
+  if (groups.length <= 1) return groups;
+
+  const withOverlap: string[] = [];
+  for (let i = 0; i < groups.length; i++) {
+    if (i === 0) {
+      withOverlap.push(groups[i]!);
+      continue;
+    }
+    const prevParas = splitParagraphs(groups[i - 1]!);
+    const overlap = prevParas[prevParas.length - 1] ?? '';
+    withOverlap.push(overlap ? `${overlap}\n\n${groups[i]!}` : groups[i]!);
+  }
+  return withOverlap;
+}
+
+/**
+ * Trocea una nota Markdown respetando su estructura: un chunk por sección de
+ * nivel 2-6, más un chunk inicial para el texto que cuelga directo del H1 (si
+ * lo hay). Una sección que supera `MAX_CHUNK_CHARS` se subdivide por párrafos
+ * (y, si hace falta, por oraciones), con solape de un párrafo entre trozos
+ * contiguos. El título de la nota se propaga a todos los chunks, con esta
+ * prioridad: H1 de la nota > `title:` del frontmatter > nombre de archivo.
  *
  * Decisiones de diseño intencionales (no son descuidos):
  * - Solo el primer H1 se usa como título de la nota. Cualquier `#` adicional
  *   se descarta silenciosamente: no se trata como contenido ni genera una
  *   sección nueva.
- * - Headings de nivel 4 o más profundo (`####`, etc.) no generan una nueva
- *   sección. El spec solo pide trocear por H2/H3, así que quedan como
- *   contenido plano de la sección actual.
+ * - Los niveles 4-6 (`####`, etc.) SÍ generan sección y aportan al
+ *   `headingPath`; niveles más profundos no existen en Markdown.
  * - El frontmatter YAML se descarta antes de trocear: nunca aparece en el
  *   contenido de ningún chunk.
+ * - Dentro de un bloque de código, ninguna línea se interpreta como heading.
  */
 export function chunkMarkdown(filePath: string, rawContent: string): MarkdownChunk[] {
   const { title: frontmatterTitle, body } = extractFrontmatter(rawContent);
@@ -90,10 +179,6 @@ export function chunkMarkdown(filePath: string, rawContent: string): MarkdownChu
       continue;
     }
 
-    // Dentro de un bloque de código, ninguna línea se interpreta como
-    // heading (ni H1 ni H2/H3) — se trata como contenido plano. Evita que
-    // fórmulas o ejemplos de sintaxis Markdown documentados en un fence
-    // (p. ej. una línea "## Ejemplo" dentro de ```) se parseen como sección real.
     if (insideFence) {
       sections[sections.length - 1]!.lines.push(line);
       continue;
@@ -107,15 +192,10 @@ export function chunkMarkdown(filePath: string, rawContent: string): MarkdownChu
       continue;
     }
 
-    const level = match[1]!.length; // 2 o 3
+    const level = match[1]!.length; // 2..6
     const text = match[2]!.trim();
-    if (level === 2) {
-      stack[0] = text;
-      stack.length = 1;
-    } else {
-      stack[1] = text;
-      stack.length = 2;
-    }
+    stack[level - 2] = text;
+    stack.length = level - 1;
     sections.push({ headingPath: stack.filter(Boolean).join(' > '), lines: [] });
   }
 
@@ -124,11 +204,21 @@ export function chunkMarkdown(filePath: string, rawContent: string): MarkdownChu
   for (const section of sections) {
     const content = section.lines.join('\n').trim();
     if (!content) continue;
-    const contentHash = createHash('sha256')
-      .update(`${section.headingPath ?? ''}\n${content}`)
-      .digest('hex');
-    chunks.push({ sourceTitle, headingPath: section.headingPath, content, chunkIndex, contentHash });
-    chunkIndex++;
+    for (const piece of splitSectionContent(content)) {
+      const trimmed = piece.trim();
+      if (!trimmed) continue;
+      const contentHash = createHash('sha256')
+        .update(`${section.headingPath ?? ''}\n${trimmed}`)
+        .digest('hex');
+      chunks.push({
+        sourceTitle,
+        headingPath: section.headingPath,
+        content: trimmed,
+        chunkIndex,
+        contentHash,
+      });
+      chunkIndex++;
+    }
   }
   return chunks;
 }
