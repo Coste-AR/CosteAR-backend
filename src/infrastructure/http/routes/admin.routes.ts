@@ -28,27 +28,69 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     
     const totalCompanies = await prisma.company.count();
 
-    // Vault Metrics
+    // --- Métricas de la bóveda ---
     const totalChunks = await prisma.vaultChunk.count();
     const totalSignals = await prisma.dailySignal.count();
     const pendingSignals = await prisma.dailySignal.count({ where: { status: 'PENDING' } });
-    
-    // Rough precision (1 - (RAG_MISS / TOTAL_QUERIES)) -- Since we only store RAG_MISS right now,
-    // we just return count of RAG_MISS vs processed. We could store all queries, but this is a proxy.
-    const misses = await prisma.dailySignal.count({ where: { type: 'RAG_MISS' } });
-    const corrections = await prisma.dailySignal.count({ where: { type: 'USER_CORRECTION' } });
+    const userCorrections = await prisma.dailySignal.count({ where: { type: 'USER_CORRECTION' } });
 
     const sourceGroups = await prisma.dailySignal.groupBy({
       by: ['source'],
       _count: { _all: true },
     });
-    
     const signalsBySource = {
       PIPELINE_NOCTURNO: 0,
       COSTISTA_CHAT: 0,
       VALIDACIONES_CORRECCION: 0,
-      ...Object.fromEntries(sourceGroups.map(g => [g.source, g._count._all]))
+      ...Object.fromEntries(sourceGroups.map((g) => [g.source, g._count._all])),
     };
+
+    // --- Métricas reales del RAG desde vault_query_log (reemplazan la "precisión proxy") ---
+    const now = Date.now();
+    const since7d = new Date(now - 7 * 24 * 3600 * 1000);
+    const since30d = new Date(now - 30 * 24 * 3600 * 1000);
+
+    const [queries7d, queries30d, confGroups, feedbackGroups, withFeedback, topCited, recentMisses] =
+      await Promise.all([
+        prisma.vaultQueryLog.count({ where: { createdAt: { gte: since7d } } }),
+        prisma.vaultQueryLog.count({ where: { createdAt: { gte: since30d } } }),
+        prisma.vaultQueryLog.groupBy({
+          by: ['confidence'],
+          where: { createdAt: { gte: since30d } },
+          _count: { _all: true },
+        }),
+        prisma.vaultQueryLog.groupBy({
+          by: ['feedbackUseful'],
+          where: { createdAt: { gte: since30d }, feedbackUseful: { not: null } },
+          _count: { _all: true },
+        }),
+        prisma.vaultQueryLog.count({
+          where: { createdAt: { gte: since30d }, feedbackUseful: { not: null } },
+        }),
+        prisma.$queryRaw<Array<{ sourceFile: string; uses: bigint }>>`
+          SELECT elem->>'sourceFile' AS "sourceFile", count(*) AS "uses"
+          FROM "vault_query_log", jsonb_array_elements("chunksReturned") elem
+          WHERE "createdAt" >= ${since30d}
+          GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+        `,
+        prisma.vaultQueryLog.findMany({
+          where: { confidence: 'NONE' },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { question: true, createdAt: true },
+        }),
+      ]);
+
+    const byConfidence: { HIGH: number; LOW: number; NONE: number } = { HIGH: 0, LOW: 0, NONE: 0 };
+    for (const g of confGroups) {
+      if (g.confidence === 'HIGH' || g.confidence === 'LOW' || g.confidence === 'NONE') {
+        byConfidence[g.confidence] = g._count._all;
+      }
+    }
+    const totalScored = byConfidence.HIGH + byConfidence.LOW + byConfidence.NONE;
+
+    const thumbsUp = feedbackGroups.find((g) => g.feedbackUseful === true)?._count._all ?? 0;
+    const thumbsDown = feedbackGroups.find((g) => g.feedbackUseful === false)?._count._all ?? 0;
 
     return reply.status(200).send({
       data: {
@@ -61,11 +103,33 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           totalChunks,
           totalSignals,
           pendingSignals,
-          ragMisses: misses,
-          userCorrections: corrections,
-          signalsBySource
-        }
-      }
+          userCorrections,
+          signalsBySource,
+          // null cuando todavía no hay tráfico: no mostrar ceros como si fueran datos.
+          queryLog:
+            queries30d === 0
+              ? null
+              : {
+                  queries7d,
+                  queries30d,
+                  byConfidence,
+                  refusalRate: totalScored > 0 ? byConfidence.NONE / totalScored : 0,
+                  feedback: {
+                    up: thumbsUp,
+                    down: thumbsDown,
+                    withFeedbackPct: queries30d > 0 ? withFeedback / queries30d : 0,
+                  },
+                  topCitedFiles: topCited.map((r) => ({
+                    sourceFile: r.sourceFile,
+                    uses: Number(r.uses),
+                  })),
+                  recentMisses: recentMisses.map((m) => ({
+                    question: m.question,
+                    at: m.createdAt,
+                  })),
+                },
+        },
+      },
     });
   });
 
