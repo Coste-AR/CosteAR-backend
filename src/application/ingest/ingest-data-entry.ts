@@ -4,12 +4,16 @@ import { prisma } from '../../infrastructure/database/prisma.js';
 import { ConflictError } from '../../domain/errors/domain-error.js';
 import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { classifyDocument } from '../../infrastructure/classifier/cascade-classifier.js';
+import { categorizeIndustry } from '../../infrastructure/classifier/industry/industry-profile.js';
+import type { PhysicalScale, ScaleCalibrationWarning } from '../../infrastructure/classifier/types.js';
 import { extractCuits } from '../../infrastructure/classifier/utils/cuit-validator.js';
 import { extractCAE } from '../../infrastructure/classifier/utils/cae-validator.js';
 import { buildStrongDedupeKey } from '../../infrastructure/classifier/utils/dedupe-key.js';
 import { buildEnrichedText } from '../../infrastructure/classifier/utils/text-enricher.js';
 import { uploadToCloudinary } from '../../infrastructure/cloudinary/cloudinary-upload.js';
 import { SystemAlertService } from '../system/system-alert-service.js';
+import { PaqueteRubroService } from '../operacion/paquete-rubro-service.js';
+import { CATEGORY_BY_INDUSTRY } from '../operacion/paquete-avicola.js';
 
 export type IngestSourceType = 'TEXT' | 'PDF' | 'IMAGE' | 'WHATSAPP' | 'TELEGRAM';
 
@@ -59,6 +63,7 @@ export interface IngestResult {
     confidence: number;
     requiresReview: boolean;
     qualityGate: string;
+    scaleCalibrationWarning?: ScaleCalibrationWarning;
   };
 }
 
@@ -88,10 +93,31 @@ export async function ingestDataEntry(
   // ── Rubro de la empresa (clasificación consciente de la industria) ──────────
   const company = await db.company.findUnique({
     where: { id: input.companyId },
-    select: { industry: true, description: true },
+    select: { industry: true, description: true, operationScaleValue: true, operationScaleUnit: true },
   });
   const industry = company?.industry ?? null;
   const companyContext = company?.description ?? null;
+  const operationScale: PhysicalScale | null = company?.operationScaleValue && company.operationScaleUnit
+    ? { value: Number(company.operationScaleValue), unit: company.operationScaleUnit }
+    : null;
+  let profileScale: PhysicalScale | null = null;
+  const profileCategory = CATEGORY_BY_INDUSTRY[categorizeIndustry(industry) as keyof typeof CATEGORY_BY_INDUSTRY];
+  if (profileCategory) {
+    try {
+      const profile = await new PaqueteRubroService().resolve(input.costistId, profileCategory, { companyId: input.companyId });
+      const scale = profile.scale;
+      if (
+        typeof scale === 'object' && scale !== null &&
+        typeof (scale as Record<string, unknown>).value === 'number' &&
+        typeof (scale as Record<string, unknown>).unit === 'string'
+      ) {
+        profileScale = scale as PhysicalScale;
+      }
+    } catch {
+      // La configuración de perfil es optativa. Si no se puede resolver, se
+      // conserva el clasificador previo y no se inventa una calibración.
+    }
+  }
 
   // ── Análisis de Groq (extracción + calidad + OCR) ───────────────────────────
   const aiAnalysis = await groq.analyzeDocument({
@@ -165,6 +191,8 @@ export async function ingestDataEntry(
     supplierCuit,
     groqQuality: aiAnalysis?.quality ?? null,
     extractedData: (aiAnalysis?.extractedData as Record<string, unknown> | null) ?? null,
+    operationScale,
+    profileScale,
   });
 
   if (classification.qualityGate === 'FAIL' && rejectIllegible) {
@@ -266,6 +294,7 @@ export async function ingestDataEntry(
       confidence: classification.confidence,
       requiresReview: classification.requiresReview,
       qualityGate: classification.qualityGate,
+      ...(classification.scaleCalibrationWarning && { scaleCalibrationWarning: classification.scaleCalibrationWarning }),
     },
   };
 }
