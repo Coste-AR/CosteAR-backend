@@ -11,7 +11,7 @@
 
 | | |
 | --- | --- |
-| Tiempo de la sesión | ~15 min |
+| Tiempo de la sesión | ~30 min |
 | Tokens consumidos | no informado |
 | Intentos hasta el verde | 3 (rojo deliberado, verde local y corrección de arranque E2E) |
 | Comandos de verificación corridos | `npm.cmd run prisma:generate`, `npm.cmd test`, `npm.cmd run lint`, `npm.cmd run typecheck`, `npm.cmd run check:tests-base` |
