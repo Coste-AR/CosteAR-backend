@@ -3,7 +3,7 @@
 - **Issue:** #202
 - **Repo:** CosteAR-backend
 - **Rama:** `feat/issue-202-scale-warning`
-- **PR:** pendiente
+- **PR:** #286
 - **Agente:** Codex · GPT-5
 - **Tanda:** no informada
 
