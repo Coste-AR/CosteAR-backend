@@ -98,3 +98,13 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 283,281,AlanArevalo1,dev,2026-09-08T23:59:45Z,2026-09-09T02:07:18Z,2.1,7,295,20,15,2,,30,docs/sesiones/2026-09-08-281-terminos-iniciales-validos.md
 285,,SantiagoBriz,staging,2026-09-09T02:23:20Z,2026-09-09T02:25:03Z,0.0,88,12941,9788,4,0,,30,docs/sesiones/2026-09-02-198-stock-por-variante.md
 286,202,AlanArevalo1,dev,2026-09-09T02:30:00Z,2026-09-09T02:31:25Z,0.0,10,331,3,5,0,,35,docs/sesiones/2026-09-08-202-escala-perfil.md
+305,,giuliannadr,dev,2026-09-09T17:04:31Z,2026-09-09T19:34:50Z,2.5,5,1582,0,5,0,,,
+306,289,giuliannadr,dev,2026-09-09T17:13:32Z,2026-09-09T19:37:06Z,2.4,4,353,22,8,0,,,docs/sesiones/2026-09-09-289-vault-filter.md
+307,291,giuliannadr,dev,2026-09-09T17:17:27Z,2026-09-09T19:38:48Z,2.4,3,263,26,8,0,,,docs/sesiones/2026-09-09-291-chunker-recursivo.md
+308,292,giuliannadr,dev,2026-09-09T19:09:28Z,2026-09-09T19:40:48Z,0.5,5,202,3,8,0,,,docs/sesiones/2026-09-09-292-vault-sourcetype.md
+310,293,giuliannadr,dev,2026-09-09T19:18:44Z,2026-09-09T19:42:52Z,0.4,6,523,70,8,0,,,docs/sesiones/2026-09-09-293-llm-service.md
+311,296,giuliannadr,dev,2026-09-09T19:29:20Z,2026-09-09T19:45:56Z,0.3,10,403,8,8,0,,,docs/sesiones/2026-09-09-296-vault-query-log.md
+312,,app/dependabot,dev,2026-09-09T19:49:50Z,2026-09-09T20:10:07Z,0.3,2,40,21,5,0,,,
+313,295,giuliannadr,dev,2026-09-09T19:55:53Z,2026-09-09T20:12:14Z,0.3,8,523,161,8,0,,,docs/sesiones/2026-09-09-295-vault-retriever.md
+314,,giuliannadr,dev,2026-09-09T19:59:45Z,2026-09-09T20:13:57Z,0.2,3,209,13,8,0,,,docs/sesiones/2026-09-09-300-admin-metricas-rag.md
+315,297,giuliannadr,dev,2026-09-09T20:06:15Z,2026-09-09T20:16:16Z,0.2,6,249,3,8,0,,,docs/sesiones/2026-09-09-297-contextual-retrieval.md
