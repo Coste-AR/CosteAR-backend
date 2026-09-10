@@ -31,6 +31,8 @@ export interface CompleteJsonOptions<T> {
 
 export interface LLMService {
   readonly isConfigured: boolean;
+  /** Identificador del modelo que responde — se registra en `vault_query_log`. */
+  readonly modelId: string;
   completeJSON<T = unknown>(
     system: string,
     user: string,
@@ -54,6 +56,7 @@ export function extractJson<T>(text: string): T | null {
 export class AnthropicLLMService implements LLMService {
   constructor(
     private readonly model: LanguageModel,
+    readonly modelId: string = 'anthropic',
     readonly isConfigured: boolean = true,
   ) {}
 
@@ -96,6 +99,8 @@ export class AnthropicLLMService implements LLMService {
 }
 
 export class GroqLLMService implements LLMService {
+  readonly modelId = 'groq';
+
   constructor(private readonly groq: GroqService = new GroqService()) {}
 
   get isConfigured(): boolean {
@@ -152,7 +157,7 @@ export function getLLMService(useCase: LlmUseCase): LLMService {
     useCase === 'context'
       ? env.LLM_MODEL_ANTHROPIC_CHEAP
       : env.LLM_MODEL_ANTHROPIC_DEFAULT;
-  return new AnthropicLLMService(anthropic(modelId));
+  return new AnthropicLLMService(anthropic(modelId), modelId);
 }
 
 /** Sólo para tests: resetea el flag del warning de fallback. */

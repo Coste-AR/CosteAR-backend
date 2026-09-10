@@ -1,9 +1,16 @@
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 import { EMBEDDING_MODEL } from '../../infrastructure/ai/voyage-service.js';
-import { GroqService } from '../../infrastructure/ai/groq-service.js';
+import { getLLMService, type LLMService } from '../../infrastructure/ai/llm-service.js';
 import { VaultRetriever, RETRIEVER_VERSION } from './vault-retriever.js';
 import { UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { prisma } from '../../infrastructure/database/prisma.js';
+
+const answerSchema = z.object({
+  answer: z.string(),
+  citations: z.array(z.string()),
+  answeredFromContext: z.boolean(),
+});
 
 /** Techo defensivo de caracteres del contexto armado para el prompt del RAG. */
 const MAX_CONTEXT_CHARS = 12_000;
@@ -55,10 +62,21 @@ Contexto extraído de la Bóveda:
 `;
 
 export class VaultQueryService {
+  private llm: LLMService | null;
+
   constructor(
     private readonly retriever: VaultRetriever = new VaultRetriever(),
-    private readonly ai: GroqService = new GroqService(),
-  ) {}
+    llm?: LLMService,
+  ) {
+    // Perezoso: `getLLMService` evalúa `getEnv()`; el servicio se instancia en
+    // contextos donde el entorno completo puede no estar cargado.
+    this.llm = llm ?? null;
+  }
+
+  private getLlm(): LLMService {
+    if (!this.llm) this.llm = getLLMService('vault_query');
+    return this.llm;
+  }
 
   /**
    * Escribe una fila en `vault_query_log`. **Nunca puede romper la respuesta al
@@ -78,7 +96,7 @@ export class VaultQueryService {
           question: row.question,
           retrieverVersion: RETRIEVER_VERSION,
           embeddingModel: EMBEDDING_MODEL,
-          llmModel: 'groq', // F1-10 lo hace real
+          llmModel: this.getLlm().modelId,
           chunksReturned: row.chunks as unknown as Prisma.InputJsonValue,
           confidence: row.confidence,
           answeredFromContext: row.answeredFromContext,
@@ -98,7 +116,7 @@ export class VaultQueryService {
     const startedAt = Date.now();
     const maxResults = opts.maxResults ?? 5;
 
-    if (!this.ai.isConfigured) {
+    if (!this.getLlm().isConfigured) {
       throw new UnprocessableEntityError('El servicio de IA o embeddings no está configurado (faltan API keys).');
     }
 
@@ -166,11 +184,13 @@ export class VaultQueryService {
 
     const userPrompt = `PREGUNTA DEL USUARIO:\n"${question}"\n\nCONTEXTO:\n${contextStr}`;
 
-    // 4. Generación de respuesta (Groq)
-    const result = await this.ai.completeJSON<{ answer: string; citations: string[]; answeredFromContext: boolean }>(
-      QA_SYSTEM_PROMPT,
-      userPrompt
-    );
+    // 4. Generación de respuesta (LLM: Claude por default — ver getLLMService).
+    // El system prompt anti-alucinación va con cacheSystem: se cachea y se
+    // reusa; lo que varía es el contexto recuperado.
+    const result = await this.getLlm().completeJSON(QA_SYSTEM_PROMPT, userPrompt, {
+      cacheSystem: true,
+      schema: answerSchema,
+    });
 
     if (!result) {
       await this.logQuery({

@@ -4,7 +4,7 @@ import { VaultQueryService } from '@/application/vault-query/vault-query-service
 
 // Retriever y LLM fakeados; prisma / vault_query_log son reales.
 const fakeRetriever = { retrieve: vi.fn() } as unknown as ConstructorParameters<typeof VaultQueryService>[0];
-const fakeAi = { isConfigured: true, completeJSON: vi.fn() } as unknown as ConstructorParameters<typeof VaultQueryService>[1];
+const fakeAi = { isConfigured: true, modelId: 'test-model', completeJSON: vi.fn() } as unknown as ConstructorParameters<typeof VaultQueryService>[1];
 
 const svc = new VaultQueryService(fakeRetriever, fakeAi);
 const retrieve = fakeRetriever.retrieve as unknown as ReturnType<typeof vi.fn>;
