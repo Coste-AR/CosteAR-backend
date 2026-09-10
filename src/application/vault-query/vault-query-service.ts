@@ -34,6 +34,7 @@ interface RetrievedChunkLite {
   headingPath: string | null;
   distance: number | null;
   rrfScore: number;
+  rerankScore: number | null;
 }
 
 const QA_SYSTEM_PROMPT = `Sos el consejero experto de CosteAR, respondiendo exclusivamente basándote en la metodología de la cátedra de costos.
@@ -118,6 +119,7 @@ export class VaultQueryService {
       headingPath: c.headingPath,
       distance: c.distance,
       rrfScore: c.rrfScore,
+      rerankScore: c.rerankScore,
     }));
 
     if (chunks.length === 0) {

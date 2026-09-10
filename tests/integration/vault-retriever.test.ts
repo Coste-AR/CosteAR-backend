@@ -44,7 +44,9 @@ afterAll(async () => {
 
 describe('VaultRetriever (integración: híbrido vector + full-text + RRF)', () => {
   const embedder = { embed: async (_t: string[]) => [vec(0)] };
-  const retriever = new VaultRetriever(embedder as never, repo);
+  // Reranker desactivado: se prueba el orden por RRF (el rerank real necesita API key).
+  const noRerank = { rerank: async () => null };
+  const retriever = new VaultRetriever(embedder as never, repo, noRerank as never);
 
   it('una sigla exacta se recupera aunque el vector apunte a otro chunk (rama full-text)', async () => {
     // El embedder devuelve vec(0) → el más cercano por vector es itcs. Pero
