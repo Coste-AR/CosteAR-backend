@@ -111,3 +111,4 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 316,298,giuliannadr,dev,2026-09-09T20:22:53Z,2026-09-10T15:31:58Z,19.2,9,237,9,5,0,,,docs/sesiones/2026-09-09-298-voyage-reranker.md
 318,301,giuliannadr,dev,2026-09-10T15:17:32Z,2026-09-10T15:34:23Z,0.3,8,131,70,6,0,,,docs/sesiones/2026-09-09-301-claude-generation.md
 320,,SantiagoBriz,staging,2026-09-10T17:23:15Z,2026-09-10T17:24:41Z,0.0,59,4949,312,4,0,,35,docs/sesiones/2026-09-08-202-escala-perfil.md
+325,,AlanArevalo1,dev,2026-09-10T20:55:24Z,2026-09-10T23:10:43Z,2.3,16,1520,6,6,0,,,docs/sesiones/2026-09-10-282-contrato-tipado-fase1.md
