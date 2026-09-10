@@ -108,3 +108,6 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 313,295,giuliannadr,dev,2026-09-09T19:55:53Z,2026-09-09T20:12:14Z,0.3,8,523,161,8,0,,,docs/sesiones/2026-09-09-295-vault-retriever.md
 314,,giuliannadr,dev,2026-09-09T19:59:45Z,2026-09-09T20:13:57Z,0.2,3,209,13,8,0,,,docs/sesiones/2026-09-09-300-admin-metricas-rag.md
 315,297,giuliannadr,dev,2026-09-09T20:06:15Z,2026-09-09T20:16:16Z,0.2,6,249,3,8,0,,,docs/sesiones/2026-09-09-297-contextual-retrieval.md
+316,298,giuliannadr,dev,2026-09-09T20:22:53Z,2026-09-10T15:31:58Z,19.2,9,237,9,5,0,,,docs/sesiones/2026-09-09-298-voyage-reranker.md
+318,301,giuliannadr,dev,2026-09-10T15:17:32Z,2026-09-10T15:34:23Z,0.3,8,131,70,6,0,,,docs/sesiones/2026-09-09-301-claude-generation.md
+320,,SantiagoBriz,staging,2026-09-10T17:23:15Z,2026-09-10T17:24:41Z,0.0,59,4949,312,4,0,,35,docs/sesiones/2026-09-08-202-escala-perfil.md
