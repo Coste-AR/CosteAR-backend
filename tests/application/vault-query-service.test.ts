@@ -22,6 +22,7 @@ function chunk(over: Record<string, unknown> = {}) {
     ftsRank: null,
     distance: 0.12,
     rrfScore: 0.9,
+    rerankScore: null,
     ...over,
   };
 }
@@ -142,7 +143,7 @@ describe('VaultQueryService.query', () => {
     await (await service()).query('¿Qué es el ITCS?', { userId: null });
 
     const logged = mockDb.vaultQueryLog.create.mock.calls[0]![0].data;
-    expect(logged.retrieverVersion).toBe('v2-hybrid-rrf');
+    expect(logged.retrieverVersion).toBe('v3-hybrid-rrf-rerank');
     expect(logged.chunksReturned[0]).toMatchObject({
       sourceFile: 'Costeo/ITCS.md',
       rrfScore: 0.42,
