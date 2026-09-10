@@ -25,6 +25,8 @@ type PendienteCierre = {
 
 type FuentePendiente = Omit<PendienteCierre, 'periodo'>;
 
+type UnidadGestion = { codigo: string; nombre: string; factor: number };
+
 type ResultadoCorrida = {
   grossMargin?: number;
   incompletitud?: { incompleto?: boolean; motivos?: string[]; datosPendientes?: Array<{ id: string; nombre: string }> };
@@ -80,7 +82,10 @@ const completo = (valor: number, parametrosSinConfirmarDetalle: ParametroSinConf
 /**
  * Compone los seis indicadores del tablero sin recalcularlos. Lee una foto de
  * CalculationRun del período y transforma solamente las unidades internas a la
- * unidad de venta configurada (`cajon`).
+ * unidad de gestión que la empresa declaró (`Company.unidadGestionId`, #274).
+ * Sin esa declaración no hay a qué unidad convertir: los indicadores por unidad
+ * quedan incompletos y la respuesta lo dice con `unidadGestion: null`, nunca con
+ * un default inventado (#252).
  */
 export class OwnerDashboardService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -92,23 +97,26 @@ export class OwnerDashboardService {
     }));
     if (!period) throw new NotFoundError('Período de costos no encontrado');
 
-    const [run, unidadVenta] = await Promise.all([
+    const [run, company] = await Promise.all([
       withTenant(userId, (tx) => tx.calculationRun.findFirst({
         where: { periodId }, orderBy: [{ validated: 'desc' }, { executedAt: 'desc' }],
         select: { id: true, validated: true, executedAt: true, results: true },
       })),
-      withTenant(userId, (tx) => tx.unidadMedida.findFirst({
-        where: { companyId: period.companyId, codigo: 'cajon', deletedAt: null },
-        select: { factor: true },
+      withTenant(userId, (tx) => tx.company.findFirst({
+        where: { id: period.companyId },
+        select: { unidadGestion: { select: { codigo: true, nombre: true, factor: true } } },
       })),
     ]);
+    const unidadGestion: UnidadGestion | null = company?.unidadGestion
+      ? { codigo: company.unidadGestion.codigo, nombre: company.unidadGestion.nombre, factor: Number(company.unidadGestion.factor) }
+      : null;
 
     const sinCorrida = ['No hay una corrida de cálculo para este período.'];
     if (!run) {
       const falta = incompleto(sinCorrida);
       const periodo = { id: period.id, codigo: period.code };
       return {
-        periodo, corrida: null,
+        periodo, corrida: null, unidadGestion,
         pendientes: pendientesUnicos(periodo, [{ area: 'calculo', dato: 'corrida de cálculo' }]),
         costoPorCajon: { variable: falta, fijo: falta, total: falta },
         precioPromedioVenta: falta, contribucionMarginalPorCajon: falta,
@@ -122,7 +130,7 @@ export class OwnerDashboardService {
     const contribucion = resultado.contribucionMarginal;
     const equilibrio = resultado.puntoEquilibrio;
     const unidadesEquilibrio = equilibrio?.unidadesEquilibrio ?? null;
-    const factor = unidadVenta ? Number(unidadVenta.factor) : null;
+    const factor = unidadGestion ? unidadGestion.factor : null;
     const motivosBase = resultado.incompletitud?.incompleto ? (resultado.incompletitud.motivos ?? []) : [];
     const datosPendientesBase = resultado.incompletitud?.datosPendientes ?? [];
     const idsParametros = contribucion?.componentes.map((c) => c.parametroId).filter((id): id is string => id !== null) ?? [];
@@ -136,7 +144,7 @@ export class OwnerDashboardService {
           nombre: parametro.descripcion?.trim() || parametro.clave,
         })))
       : [];
-    const sinUnidad = factor === null ? ['Falta configurar la unidad de venta "cajon" con su factor de conversión.'] : [];
+    const sinUnidad = factor === null ? ['La empresa no tiene declarada su unidad de gestión.'] : [];
     const baseUnidades = Number(period.productionQuantity ?? 0);
     const sinProduccion = baseUnidades <= 0 ? ['Falta cargar una cantidad producida mayor a cero para el período.'] : [];
     const sinVentas = !contribucion || contribucion.unidadesVendidas <= 0
@@ -156,7 +164,7 @@ export class OwnerDashboardService {
     }) ?? [];
     const pendientes = pendientesUnicos(periodo, [
       ...pendientesBase,
-      ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de venta "cajon" con factor de conversión' }] : []),
+      ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de gestión de la empresa' }] : []),
       ...(baseUnidades <= 0 ? [{ area: 'produccion' as const, dato: 'cantidad producida mayor a cero' }] : []),
       ...(sinVentas.length > 0 ? [{ area: 'ventas' as const, dato: 'ventas del período' }] : []),
       ...pendientesClasificacion,
@@ -188,6 +196,7 @@ export class OwnerDashboardService {
     return {
       periodo,
       corrida: { id: run.id, validada: run.validated, ejecutadaEn: run.executedAt.toISOString() },
+      unidadGestion,
       pendientes,
       costoPorCajon: costos,
       precioPromedioVenta: convertido(contribucion?.precioUnitario ?? null, [...motivosBase, ...sinVentas]),

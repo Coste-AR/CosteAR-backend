@@ -10,9 +10,10 @@ beforeAll(async () => {
   A = await createTenant('tablero-dueno-a');
   B = await createTenant('tablero-dueno-b');
   await withTenant(A.userId, async (tx) => {
-    await tx.unidadMedida.create({
+    const unidad = await tx.unidadMedida.create({
       data: { companyId: A.companyId, userId: A.userId, codigo: 'cajon', nombre: 'Cajón de prueba', factor: 12 },
     });
+    await tx.company.update({ where: { id: A.companyId }, data: { unidadGestionId: unidad.id } });
     await tx.costPeriod.update({ where: { id: A.periodId }, data: { productionQuantity: 24, salesQuantity: 24 } });
     await tx.calculationRun.create({
       data: {
@@ -49,6 +50,14 @@ describe('A-07 — tablero del dueño por período', () => {
     });
     expect(tablero.costoPorCajon.variable).toMatchObject({ parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] });
     expect(tablero.pendientes).toEqual([]);
+    expect(tablero.unidadGestion).toEqual({ codigo: 'cajon', nombre: 'Cajón de prueba', factor: 12 });
+  });
+
+  it('responde unidadGestion null, sin default, cuando la empresa no la declaró', async () => {
+    // B no tiene corrida ni unidad de gestión declarada: igual responde el
+    // contrato con `unidadGestion: null` explícito, nunca un default inventado.
+    const tablero = await new OwnerDashboardService().get(B.userId, B.periodId);
+    expect(tablero.unidadGestion).toBeNull();
   });
 
   it('marca incompletos los indicadores comerciales si no hay ventas', async () => {
