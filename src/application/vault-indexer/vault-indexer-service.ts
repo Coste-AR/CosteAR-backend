@@ -1,8 +1,10 @@
-import { readFile, readdir, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { execSync } from 'node:child_process';
 import { chunkMarkdown } from './markdown-chunker.js';
+import { listMarkdownFiles } from './vault-filter.js';
+import { ContextualPrefixGenerator } from './contextual-prefix.js';
 import { PrismaVaultChunkRepository, type VaultChunkRepository } from './vault-chunk-repository.js';
 import { VoyageService, type Embedder } from '../../infrastructure/ai/voyage-service.js';
 
@@ -11,6 +13,8 @@ export interface IndexVaultResult {
   chunksUpserted: number;
   chunksSkippedUnchanged: number;
   chunksDeleted: number;
+  /** De los `chunksUpserted`, cuántos se embebieron con prefijo contextual. */
+  chunksWithContext: number;
   filesWithErrors: string[];
   /** Diagnóstico: dónde miró y qué encontró, para depurar sin acceso a los logs del server. */
   debug: {
@@ -21,7 +25,6 @@ export interface IndexVaultResult {
   };
 }
 
-const IGNORED_DIRS = new Set(['.obsidian', '.trash', '.git']);
 const BATCH_SIZE = 5;
 
 // Módulo-nivel a propósito: hay varios disparadores de indexVault que corren
@@ -32,30 +35,11 @@ const BATCH_SIZE = 5;
 // no alcanza porque cada caller crea su propio `new VaultIndexerService()`.
 let indexingInProgress = false;
 
-async function listMarkdownFiles(rootDir: string): Promise<string[]> {
-  const result: string[] = [];
-  async function walk(dir: string): Promise<void> {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (IGNORED_DIRS.has(entry.name)) continue;
-        await walk(join(dir, entry.name));
-      } else if (entry.isFile() && entry.name.endsWith('.md')) {
-        // El README.md de la raíz del repo son instrucciones para el equipo
-        // (cómo subir contenido), no conocimiento de costeo — no se indexa.
-        if (dir === rootDir && entry.name.toLowerCase() === 'readme.md') continue;
-        result.push(join(dir, entry.name));
-      }
-    }
-  }
-  await walk(rootDir);
-  return result;
-}
-
 export class VaultIndexerService {
   constructor(
     private readonly repo: VaultChunkRepository = new PrismaVaultChunkRepository(),
     private readonly embedder: Embedder = new VoyageService(),
+    private readonly contextGen: ContextualPrefixGenerator = new ContextualPrefixGenerator(),
   ) {}
 
   async indexVault(vaultPath: string, options: { forceClone?: boolean } = {}): Promise<IndexVaultResult> {
@@ -164,12 +148,15 @@ export class VaultIndexerService {
       chunksUpserted: 0,
       chunksSkippedUnchanged: 0,
       chunksDeleted: 0,
+      chunksWithContext: 0,
       filesWithErrors: [],
       debug: { vaultPath, hadGitFolder, vaultCommit, totalFilesFound: absoluteFiles.length },
     };
 
     const toEmbedQueue: { sourceFile: string; chunk: ReturnType<typeof chunkMarkdown>[number] }[] = [];
     const maxChunksPerFile = new Map<string, number>();
+    /** Texto completo de cada archivo — lo necesita el prefijo contextual (F1-05). */
+    const fileTextBySource = new Map<string, string>();
 
     // Fase 1: Identificar qué chunks cambiaron
     for (let i = 0; i < absoluteFiles.length; i++) {
@@ -177,6 +164,7 @@ export class VaultIndexerService {
       const sourceFile = relativeFiles[i]!;
       try {
         const rawContent = await readFile(absoluteFile, 'utf-8');
+        fileTextBySource.set(sourceFile, rawContent);
         const chunks = chunkMarkdown(sourceFile, rawContent);
         maxChunksPerFile.set(sourceFile, chunks.length);
 
@@ -196,17 +184,34 @@ export class VaultIndexerService {
       }
     }
 
-    // Fase 2: Embeddear en batches
+    // Fase 2: prefijo contextual (F1-05) + embeddear en batches.
     for (let i = 0; i < toEmbedQueue.length; i += BATCH_SIZE) {
       const batch = toEmbedQueue.slice(i, i + BATCH_SIZE);
-      const embeddings = await this.embedder.embed(batch.map((item) => item.chunk.content), 'document');
-      
+
+      // Prefijo contextual por chunk. El documento se cachea entre chunks del
+      // mismo archivo (cacheSystem). Si el LLM no está disponible, `generate`
+      // devuelve null y se embebe el `content` pelado (degradación segura).
+      const prefixes = await Promise.all(
+        batch.map((item) =>
+          this.contextGen
+            .generate(fileTextBySource.get(item.sourceFile) ?? '', item.chunk.content)
+            .catch(() => null),
+        ),
+      );
+
+      const textsToEmbed = batch.map((item, k) => {
+        const prefix = prefixes[k];
+        return prefix ? `${prefix}\n\n${item.chunk.content}` : item.chunk.content;
+      });
+
+      const embeddings = await this.embedder.embed(textsToEmbed, 'document');
       if (!embeddings) {
         throw new Error('Voyage no devolvió embeddings para un lote de chunks');
       }
 
       for (let j = 0; j < batch.length; j++) {
         const item = batch[j]!;
+        const prefix = prefixes[j] ?? null;
         await this.repo.upsertChunk({
           sourceFile: item.sourceFile,
           sourceTitle: item.chunk.sourceTitle,
@@ -216,8 +221,10 @@ export class VaultIndexerService {
           chunkIndex: item.chunk.chunkIndex,
           vaultCommit,
           embedding: embeddings[j]!,
+          contextualPrefix: prefix,
         });
         result.chunksUpserted++;
+        if (prefix) result.chunksWithContext++;
       }
     }
 

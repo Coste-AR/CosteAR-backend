@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, VaultSourceType } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma.js';
 
 export interface VaultChunkIdentity {
@@ -15,6 +15,23 @@ export interface UpsertChunkInput {
   chunkIndex: number;
   vaultCommit: string;
   embedding: number[];
+  /** Namespace por origen. Si no se pasa, se deriva del `sourceFile`. */
+  sourceType?: VaultSourceType | null;
+  /** Contexto que F1-05 antepone al `content` antes de embeber. */
+  contextualPrefix?: string | null;
+}
+
+/**
+ * Deriva el namespace de un chunk a partir del primer segmento de su ruta.
+ * Cubre la estructura nueva (`conocimiento/<ns>/…`) y la previa a F1-02.
+ * Devuelve `null` si la carpeta no matchea ninguna conocida.
+ */
+export function deriveSourceType(sourceFile: string): VaultSourceType | null {
+  const p = sourceFile.replace(/\\/g, '/');
+  if (p.startsWith('conocimiento/catedra/') || p.startsWith('001.1 - Clases')) return 'CATEDRA';
+  if (p.startsWith('conocimiento/procesos/') || p.startsWith('costeo-procesos/')) return 'PROCESOS';
+  if (p.startsWith('conocimiento/aprendizaje/')) return 'APRENDIZAJE';
+  return null;
 }
 
 export interface VaultChunkRepository {
@@ -29,15 +46,36 @@ export interface VaultChunkRepository {
   /** Borra todo chunk cuyo sourceFile NO esté en `currentSourceFiles`
    *  (notas eliminadas/renombradas). Devuelve cuántos borró. */
   deleteOrphanChunks(currentSourceFiles: string[]): Promise<number>;
-  /** Busca los chunks más similares semánticamente al embedding provisto usando distancia coseno. */
-  searchChunks(queryEmbedding: number[], limit?: number, maxDistance?: number): Promise<Array<{
-    id: string;
-    sourceFile: string;
-    sourceTitle: string;
-    headingPath: string | null;
-    content: string;
-    distance: number;
-  }>>;
+  /**
+   * Vecinos por distancia coseno del embedding. Sin filtro de distancia: el
+   * ranking lo resuelve el fusor (RRF). `namespaces` acota por `sourceType`.
+   */
+  searchByVector(
+    queryEmbedding: number[],
+    limit: number,
+    namespaces?: VaultSourceType[],
+  ): Promise<VaultSearchHit[]>;
+
+  /**
+   * Coincidencias por full-text en español (`contentTsv @@ websearch_to_tsquery`).
+   * Ordenadas por `ts_rank_cd` desc. `namespaces` acota por `sourceType`.
+   */
+  searchByFullText(
+    query: string,
+    limit: number,
+    namespaces?: VaultSourceType[],
+  ): Promise<VaultSearchHit[]>;
+}
+
+export interface VaultSearchHit {
+  id: string;
+  sourceFile: string;
+  sourceTitle: string;
+  headingPath: string | null;
+  content: string;
+  sourceType: VaultSourceType | null;
+  /** Distancia coseno (rama vector). `null` cuando el hit vino solo por full-text. */
+  distance: number | null;
 }
 
 export class PrismaVaultChunkRepository implements VaultChunkRepository {
@@ -60,11 +98,13 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
 
   async upsertChunk(input: UpsertChunkInput): Promise<void> {
     const vectorLiteral = `[${input.embedding.join(',')}]`;
+    const sourceType = input.sourceType ?? deriveSourceType(input.sourceFile);
+    const contextualPrefix = input.contextualPrefix ?? null;
     await this.db.$executeRaw`
       INSERT INTO "vault_chunks"
-        ("id", "sourceFile", "sourceTitle", "headingPath", "content", "contentHash", "chunkIndex", "vaultCommit", "embedding", "createdAt", "updatedAt")
+        ("id", "sourceFile", "sourceTitle", "headingPath", "content", "contentHash", "chunkIndex", "vaultCommit", "sourceType", "contextualPrefix", "embedding", "createdAt", "updatedAt")
       VALUES
-        (gen_random_uuid(), ${input.sourceFile}, ${input.sourceTitle}, ${input.headingPath}, ${input.content}, ${input.contentHash}, ${input.chunkIndex}, ${input.vaultCommit}, ${vectorLiteral}::vector, now(), now())
+        (gen_random_uuid(), ${input.sourceFile}, ${input.sourceTitle}, ${input.headingPath}, ${input.content}, ${input.contentHash}, ${input.chunkIndex}, ${input.vaultCommit}, ${sourceType}::"VaultSourceType", ${contextualPrefix}, ${vectorLiteral}::vector, now(), now())
       ON CONFLICT ("sourceFile", "chunkIndex")
       DO UPDATE SET
         "sourceTitle" = EXCLUDED."sourceTitle",
@@ -72,6 +112,8 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
         "content" = EXCLUDED."content",
         "contentHash" = EXCLUDED."contentHash",
         "vaultCommit" = EXCLUDED."vaultCommit",
+        "sourceType" = EXCLUDED."sourceType",
+        "contextualPrefix" = EXCLUDED."contextualPrefix",
         "embedding" = EXCLUDED."embedding",
         "updatedAt" = now()
     `;
@@ -95,52 +137,83 @@ export class PrismaVaultChunkRepository implements VaultChunkRepository {
     return result.count;
   }
 
-  async searchChunks(queryEmbedding: number[], limit = 5, maxDistance = 0.35): Promise<Array<{
+  /**
+   * La forma de la fila cruda. Los numéricos de Postgres pueden llegar como
+   * texto según el driver — de ahí los `Number(...)` al mapear.
+   */
+  private mapHit(row: {
     id: string;
     sourceFile: string;
     sourceTitle: string;
     headingPath: string | null;
     content: string;
-    distance: number;
-  }>> {
-    const vectorLiteral = `[${queryEmbedding.join(',')}]`;
-    
-    // Usamos el operador <=> para distancia coseno en pgvector
-    /**
-     * La forma de la fila cruda. `distance` se declara `number | string`
-     * porque el driver puede devolver el numérico de Postgres como texto —
-     * de ahí el `Number(...)` de más abajo, que ya estaba y ahora se explica.
-     */
-    type FilaVecina = {
-      id: string;
-      sourceFile: string;
-      sourceTitle: string;
-      headingPath: string | null;
-      content: string;
-      distance: number | string;
-    };
-
-    const result = await this.db.$queryRawUnsafe<FilaVecina[]>(`
-      SELECT 
-        "id", 
-        "sourceFile", 
-        "sourceTitle", 
-        "headingPath", 
-        "content",
-        ("embedding" <=> $1::vector) as "distance"
-      FROM "vault_chunks"
-      WHERE ("embedding" <=> $1::vector) < $2
-      ORDER BY "embedding" <=> $1::vector ASC
-      LIMIT $3;
-    `, vectorLiteral, maxDistance, limit);
-
-    return result.map(row => ({
+    sourceType: string | null;
+    distance?: number | string | null;
+  }): VaultSearchHit {
+    return {
       id: row.id,
       sourceFile: row.sourceFile,
       sourceTitle: row.sourceTitle,
       headingPath: row.headingPath,
       content: row.content,
-      distance: Number(row.distance)
-    }));
+      sourceType: (row.sourceType as VaultSourceType | null) ?? null,
+      distance: row.distance == null ? null : Number(row.distance),
+    };
+  }
+
+  /** `sourceType IN (...)` como fragmento SQL + params posicionales, o vacío. */
+  private namespaceClause(
+    namespaces: VaultSourceType[] | undefined,
+    startParam: number,
+  ): { clause: string; params: string[] } {
+    if (!namespaces || namespaces.length === 0) return { clause: '', params: [] };
+    const placeholders = namespaces.map((_, i) => `$${startParam + i}`).join(', ');
+    // `::text` para comparar el enum contra params de texto sin un cast por valor.
+    return { clause: `AND "sourceType"::text IN (${placeholders})`, params: [...namespaces] };
+  }
+
+  async searchByVector(
+    queryEmbedding: number[],
+    limit: number,
+    namespaces?: VaultSourceType[],
+  ): Promise<VaultSearchHit[]> {
+    const vectorLiteral = `[${queryEmbedding.join(',')}]`;
+    const ns = this.namespaceClause(namespaces, 2);
+    const rows = await this.db.$queryRawUnsafe<Parameters<typeof this.mapHit>[0][]>(
+      `
+      SELECT "id", "sourceFile", "sourceTitle", "headingPath", "content", "sourceType",
+             ("embedding" <=> $1::vector) AS "distance"
+      FROM "vault_chunks"
+      WHERE "embedding" IS NOT NULL ${ns.clause}
+      ORDER BY "embedding" <=> $1::vector ASC
+      LIMIT $${2 + ns.params.length};
+    `,
+      vectorLiteral,
+      ...ns.params,
+      limit,
+    );
+    return rows.map((r) => this.mapHit(r));
+  }
+
+  async searchByFullText(
+    query: string,
+    limit: number,
+    namespaces?: VaultSourceType[],
+  ): Promise<VaultSearchHit[]> {
+    const ns = this.namespaceClause(namespaces, 2);
+    const rows = await this.db.$queryRawUnsafe<Parameters<typeof this.mapHit>[0][]>(
+      `
+      SELECT "id", "sourceFile", "sourceTitle", "headingPath", "content", "sourceType",
+             NULL AS "distance"
+      FROM "vault_chunks"
+      WHERE "contentTsv" @@ websearch_to_tsquery('spanish', $1) ${ns.clause}
+      ORDER BY ts_rank_cd("contentTsv", websearch_to_tsquery('spanish', $1)) DESC
+      LIMIT $${2 + ns.params.length};
+    `,
+      query,
+      ...ns.params,
+      limit,
+    );
+    return rows.map((r) => this.mapHit(r));
   }
 }

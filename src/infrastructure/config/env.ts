@@ -32,6 +32,19 @@ const envSchema = z.object({
 
   GROQ_API_KEY: z.string().min(1).default('groq_placeholder'),
 
+  // IA — Anthropic (Claude). Generación del Q&A de la bóveda y del consejero.
+  // Sin key válida, `getLLMService` cae a Groq y lo registra (degradación segura).
+  ANTHROPIC_API_KEY: z.string().min(1).default('anthropic_placeholder'),
+  // Proveedor de LLM por caso de uso. `anthropic` para lo que sintetiza con
+  // citas; `groq` para el clasificador (latencia).
+  LLM_PROVIDER_VAULT_QUERY: z.enum(['anthropic', 'groq']).default('anthropic'),
+  LLM_PROVIDER_ADVISOR: z.enum(['anthropic', 'groq']).default('anthropic'),
+  LLM_PROVIDER_CONTEXT: z.enum(['anthropic', 'groq']).default('anthropic'),
+  LLM_PROVIDER_CLASSIFIER: z.enum(['anthropic', 'groq']).default('groq'),
+  // IDs de modelo, configurables por entorno para no atarlos al código.
+  LLM_MODEL_ANTHROPIC_DEFAULT: z.string().min(1).default('claude-sonnet-4-5'),
+  LLM_MODEL_ANTHROPIC_CHEAP: z.string().min(1).default('claude-haiku-4-5'),
+
   // IA — Voyage AI (embeddings para indexar la bóveda de costeo)
   VOYAGE_API_KEY: z.string().min(1).default('voyage_placeholder'),
 

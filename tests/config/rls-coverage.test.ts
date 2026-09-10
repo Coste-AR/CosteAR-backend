@@ -47,6 +47,7 @@ const EXENTAS: Record<string, string> = {
   macro_snapshots: 'Datos públicos (BCRA/INDEC/ARCA), iguales para todos los tenants.',
   vault_chunks: 'Conocimiento compartido de la bóveda, no dato de un cliente.',
   vault_edit_proposals: 'Propuestas de edición de la bóveda; se revisan desde el panel admin.',
+  vault_query_log: 'Log operativo de consultas al RAG (métricas del panel admin), no dato de un tenant. Mismo criterio que vault_chunks.',
   system_alerts: 'Alertas de Sentry sobre la app, no sobre un tenant.',
   terms_versions: 'El texto de los T&C es el mismo para todos.',
 

@@ -155,6 +155,22 @@ export interface ClassifierInput {
   enrichedText?: string | null;     // texto enriquecido con OCR de Groq
   sourceType?: 'TEXT' | 'PDF' | 'IMAGE';
   extractedData?: Record<string, unknown> | null;  // datos estructurados de Groq
+  operationScale?: PhysicalScale | null;
+  profileScale?: PhysicalScale | null;
+}
+
+/** Escala física explícita; sin unidad no se compara. */
+export interface PhysicalScale {
+  value: number;
+  unit: string;
+}
+
+/** Señal informativa: nunca modifica la decisión que tomó la cascada. */
+export interface ScaleCalibrationWarning {
+  code: 'OUTSIDE_CALIBRATED_RANGE' | 'UNIT_MISMATCH';
+  operationScale: PhysicalScale;
+  profileScale: PhysicalScale;
+  materialFactor?: number;
 }
 
 export interface ClassificationResult {
@@ -181,4 +197,6 @@ export interface ClassificationResult {
    * y sigue funcionando igual que antes.
    */
   acquisitionLink?: AcquisitionCostLink | null;
+  /** Solo aparece si la escala declarada no es compatible con el perfil. */
+  scaleCalibrationWarning?: ScaleCalibrationWarning;
 }

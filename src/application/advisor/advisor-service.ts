@@ -1,5 +1,6 @@
 // src/application/advisor/advisor-service.ts
-import { GroqService } from '../../infrastructure/ai/groq-service.js';
+import { z } from 'zod';
+import { getLLMService, type LLMService } from '../../infrastructure/ai/llm-service.js';
 
 export type AdvisorKind = 'cost_result' | 'reconciliation' | 'macro' | 'alerts';
 
@@ -7,6 +8,11 @@ export interface AdvisorResult {
   headline: string;
   points: string[];
 }
+
+const advisorSchema = z.object({
+  headline: z.string(),
+  points: z.array(z.string()),
+});
 
 const SYSTEM = `Sos un asesor experto en contabilidad de costos para PyMEs argentinas, hablándole a un costista.
 Te paso datos REALES ya calculados. Tu trabajo es interpretarlos y dar consejo accionable, claro y breve,
@@ -44,10 +50,23 @@ ${data}`;
 }
 
 export class AdvisorService {
-  constructor(private readonly groq: GroqService = new GroqService()) {}
+  private llm: LLMService | null;
+
+  constructor(llm?: LLMService) {
+    // Perezoso: `getLLMService` evalúa `getEnv()`.
+    this.llm = llm ?? null;
+  }
+
+  private getLlm(): LLMService {
+    if (!this.llm) this.llm = getLLMService('advisor');
+    return this.llm;
+  }
 
   async advise(kind: AdvisorKind, context: Record<string, unknown>): Promise<AdvisorResult | null> {
-    const result = await this.groq.completeJSON<AdvisorResult>(SYSTEM, buildUserPrompt(kind, context));
+    const result = await this.getLlm().completeJSON(SYSTEM, buildUserPrompt(kind, context), {
+      cacheSystem: true,
+      schema: advisorSchema,
+    });
     if (!result || !result.headline) return null;
     return {
       headline: String(result.headline),

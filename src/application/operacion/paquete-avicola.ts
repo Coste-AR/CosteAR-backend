@@ -2,6 +2,11 @@ import { PARAMETROS_AVICOLA } from '../../domain/parametros/parametros-costeo.js
 
 export const CATEGORIA_AVICOLA_POSTURA = 'AVICOLA_POSTURA';
 
+/** El primer perfil que consume la escala del paquete es el de postura. */
+export const CATEGORY_BY_INDUSTRY = {
+  AVICULTURA: CATEGORIA_AVICOLA_POSTURA,
+} as const;
+
 /** Contenido declarativo del paquete; no contiene reglas de dominio. */
 export const PAQUETE_AVICOLA_POSTURA = {
   lexicon: {

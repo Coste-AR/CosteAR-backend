@@ -1,17 +1,47 @@
-import { VoyageService } from '../../infrastructure/ai/voyage-service.js';
-import { GroqService } from '../../infrastructure/ai/groq-service.js';
-import { PrismaVaultChunkRepository } from '../vault-indexer/vault-chunk-repository.js';
+import { Prisma } from '@prisma/client';
+import { z } from 'zod';
+import { EMBEDDING_MODEL } from '../../infrastructure/ai/voyage-service.js';
+import { getLLMService, type LLMService } from '../../infrastructure/ai/llm-service.js';
+import { VaultRetriever, RETRIEVER_VERSION } from './vault-retriever.js';
 import { UnprocessableEntityError } from '../../domain/errors/domain-error.js';
 import { prisma } from '../../infrastructure/database/prisma.js';
 
+const answerSchema = z.object({
+  answer: z.string(),
+  citations: z.array(z.string()),
+  answeredFromContext: z.boolean(),
+});
+
 /** Techo defensivo de caracteres del contexto armado para el prompt del RAG. */
 const MAX_CONTEXT_CHARS = 12_000;
+
+/**
+ * Debajo de esta distancia coseno consideramos que hubo un match semántico
+ * directo (confianza alta). Si ningún chunk lo alcanza —vino todo por full-text
+ * o por vecinos lejanos— la confianza no puede ser HIGH.
+ */
+const CLOSE_VECTOR_DISTANCE = 0.65;
 
 export interface VaultQueryResult {
   answer: string;
   citations: string[];
   confidence: 'HIGH' | 'LOW' | 'NONE';
   fallbackMessage?: string;
+  /** id de la fila de `vault_query_log` — para asociar el feedback 👍/👎. */
+  queryLogId?: string;
+}
+
+export interface VaultQueryOptions {
+  maxResults?: number;
+  userId?: string | null;
+}
+
+interface RetrievedChunkLite {
+  sourceFile: string;
+  headingPath: string | null;
+  distance: number | null;
+  rrfScore: number;
+  rerankScore: number | null;
 }
 
 const QA_SYSTEM_PROMPT = `Sos el consejero experto de CosteAR, respondiendo exclusivamente basándote en la metodología de la cátedra de costos.
@@ -33,37 +63,82 @@ Contexto extraído de la Bóveda:
 `;
 
 export class VaultQueryService {
-  constructor(
-    private readonly embedder: VoyageService = new VoyageService(),
-    private readonly ai: GroqService = new GroqService(),
-    private readonly repo: PrismaVaultChunkRepository = new PrismaVaultChunkRepository(),
-  ) {}
+  private llm: LLMService | null;
 
-  async query(question: string, maxResults = 5): Promise<VaultQueryResult> {
-    if (!this.embedder.isConfigured || !this.ai.isConfigured) {
+  constructor(
+    private readonly retriever: VaultRetriever = new VaultRetriever(),
+    llm?: LLMService,
+  ) {
+    // Perezoso: `getLLMService` evalúa `getEnv()`; el servicio se instancia en
+    // contextos donde el entorno completo puede no estar cargado.
+    this.llm = llm ?? null;
+  }
+
+  private getLlm(): LLMService {
+    if (!this.llm) this.llm = getLLMService('vault_query');
+    return this.llm;
+  }
+
+  /**
+   * Escribe una fila en `vault_query_log`. **Nunca puede romper la respuesta al
+   * usuario**: cualquier error de la escritura se loguea y se devuelve `undefined`.
+   */
+  private async logQuery(row: {
+    question: string;
+    chunks: RetrievedChunkLite[];
+    confidence: VaultQueryResult['confidence'];
+    answeredFromContext: boolean;
+    latencyMs: number;
+    userId?: string | null;
+  }): Promise<string | undefined> {
+    try {
+      const created = await prisma.vaultQueryLog.create({
+        data: {
+          question: row.question,
+          retrieverVersion: RETRIEVER_VERSION,
+          embeddingModel: EMBEDDING_MODEL,
+          llmModel: this.getLlm().modelId,
+          chunksReturned: row.chunks as unknown as Prisma.InputJsonValue,
+          confidence: row.confidence,
+          answeredFromContext: row.answeredFromContext,
+          latencyMs: row.latencyMs,
+          userId: row.userId ?? null,
+        },
+        select: { id: true },
+      });
+      return created.id;
+    } catch (err) {
+      console.error('[vault-query] no se pudo registrar la query en vault_query_log:', err);
+      return undefined;
+    }
+  }
+
+  async query(question: string, opts: VaultQueryOptions = {}): Promise<VaultQueryResult> {
+    const startedAt = Date.now();
+    const maxResults = opts.maxResults ?? 5;
+
+    if (!this.getLlm().isConfigured) {
       throw new UnprocessableEntityError('El servicio de IA o embeddings no está configurado (faltan API keys).');
     }
 
-    // 1. Convertir pregunta a vector
-    const embeddings = await this.embedder.embed([question], 'query');
-    if (!embeddings || embeddings.length === 0 || !embeddings[0]) {
-      throw new UnprocessableEntityError('No se pudo generar el embedding para la consulta.');
-    }
-    const queryVector = embeddings[0];
+    // Recuperación híbrida (vector + full-text, fusionada con RRF). El retriever
+    // lanza UnprocessableEntityError si no puede generar el embedding.
+    const chunks = await this.retriever.retrieve(question, { limit: maxResults });
 
-    // 2. Búsqueda semántica en Postgres (distancia coseno < 0.65)
-    let chunks = await this.repo.searchChunks(queryVector, maxResults, 0.65);
+    // La confianza no puede ser HIGH si el resultado no se apoya en al menos un
+    // match semántico directo (vino todo por full-text o por vecinos lejanos).
+    const hadCloseVectorMatch = chunks.some(
+      (c) => c.distance !== null && c.distance < CLOSE_VECTOR_DISTANCE,
+    );
+    const usedWidenedSearch = chunks.length > 0 && !hadCloseVectorMatch;
 
-    // Preguntas cortas o con siglas (ej. "¿Qué es el ITCS?") suelen quedar justo
-    // por fuera de 0.65 aunque el término SÍ esté en la bóveda. Antes de rendirnos,
-    // reintentamos con un umbral más amplio. Los chunks siguen siendo reales — el LLM
-    // sigue restringido a responder solo desde ellos — pero marcamos la confianza como
-    // LOW porque el match es menos preciso.
-    let usedWidenedSearch = false;
-    if (chunks.length === 0) {
-      chunks = await this.repo.searchChunks(queryVector, maxResults, 0.85);
-      usedWidenedSearch = chunks.length > 0;
-    }
+    const chunksLite: RetrievedChunkLite[] = chunks.map((c) => ({
+      sourceFile: c.sourceFile,
+      headingPath: c.headingPath,
+      distance: c.distance,
+      rrfScore: c.rrfScore,
+      rerankScore: c.rerankScore,
+    }));
 
     if (chunks.length === 0) {
       // Registrar la falla en el Nightly Pipeline
@@ -72,8 +147,17 @@ export class VaultQueryService {
           type: 'RAG_MISS',
           source: 'COSTISTA_CHAT',
           content: question,
-          context: { reason: 'No chunks found above similarity threshold' }
+          context: { reason: 'Hybrid retrieval returned no chunks' }
         }
+      });
+
+      const queryLogId = await this.logQuery({
+        question,
+        chunks: [],
+        confidence: 'NONE',
+        answeredFromContext: false,
+        latencyMs: Date.now() - startedAt,
+        userId: opts.userId,
       });
 
       // Short-circuit: no se encontró contexto suficientemente similar.
@@ -81,7 +165,8 @@ export class VaultQueryService {
         answer: 'No encontré información relevante en la bóveda de costeo para responder esta pregunta.',
         citations: [],
         confidence: 'NONE',
-        fallbackMessage: 'Intentá usar palabras clave más específicas que coincidan con la terminología de la cátedra.'
+        fallbackMessage: 'Intentá usar palabras clave más específicas que coincidan con la terminología de la cátedra.',
+        queryLogId,
       };
     }
 
@@ -101,13 +186,23 @@ export class VaultQueryService {
 
     const userPrompt = `PREGUNTA DEL USUARIO:\n"${question}"\n\nCONTEXTO:\n${contextStr}`;
 
-    // 4. Generación de respuesta (Groq)
-    const result = await this.ai.completeJSON<{ answer: string; citations: string[]; answeredFromContext: boolean }>(
-      QA_SYSTEM_PROMPT,
-      userPrompt
-    );
+    // 4. Generación de respuesta (LLM: Claude por default — ver getLLMService).
+    // El system prompt anti-alucinación va con cacheSystem: se cachea y se
+    // reusa; lo que varía es el contexto recuperado.
+    const result = await this.getLlm().completeJSON(QA_SYSTEM_PROMPT, userPrompt, {
+      cacheSystem: true,
+      schema: answerSchema,
+    });
 
     if (!result) {
+      await this.logQuery({
+        question,
+        chunks: chunksLite,
+        confidence: 'NONE',
+        answeredFromContext: false,
+        latencyMs: Date.now() - startedAt,
+        userId: opts.userId,
+      });
       throw new UnprocessableEntityError('Error al contactar al modelo generador.');
     }
 
@@ -134,10 +229,24 @@ export class VaultQueryService {
 
     // Si el match sólo apareció al ampliar el umbral, la confianza no puede ser HIGH
     // aunque el LLM haya podido responder con esos chunks.
+    const confidence: VaultQueryResult['confidence'] = result.answeredFromContext
+      ? (usedWidenedSearch ? 'LOW' : 'HIGH')
+      : 'LOW';
+
+    const queryLogId = await this.logQuery({
+      question,
+      chunks: chunksLite,
+      confidence,
+      answeredFromContext: result.answeredFromContext,
+      latencyMs: Date.now() - startedAt,
+      userId: opts.userId,
+    });
+
     return {
       answer: result.answer,
       citations: verifiedCitations,
-      confidence: result.answeredFromContext ? (usedWidenedSearch ? 'LOW' : 'HIGH') : 'LOW'
+      confidence,
+      queryLogId,
     };
   }
 }
