@@ -49,6 +49,10 @@ export async function registerWhatsappRoutes(app: FastifyInstance): Promise<void
     const challenge = query['hub.challenge'];
     const env = getEnv();
 
+    if (!env.WHATSAPP_VERIFY_TOKEN) {
+      request.log.error('[webhooks/whatsapp] WHATSAPP_VERIFY_TOKEN no configurado — rechazando (fail closed)');
+      return reply.status(403).send('Forbidden');
+    }
     if (mode === 'subscribe' && token === env.WHATSAPP_VERIFY_TOKEN) {
       return reply.status(200).send(challenge);
     }
