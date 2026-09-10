@@ -1,83 +1,56 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AdvisorService } from '@/application/advisor/advisor-service.js';
 
 /**
- * Tests de AdvisorService (issue #99, B-11).
- *
- * El servicio es una capa delgada sobre GroqService.completeJSON. Verificamos:
- *   - Que devuelve un AdvisorResult bien formado cuando Groq responde
- *   - Que devuelve null cuando Groq no responde o la respuesta no tiene headline
- *   - Que trunca los points a 4 máximo
- *   - Que el prompt incluye los datos del contexto
+ * AdvisorService (issue #99, B-11). Capa delgada sobre `LLMService.completeJSON`
+ * (Claude por default desde F1-10). Se inyecta un fake. Verificamos:
+ *   - AdvisorResult bien formado cuando el LLM responde
+ *   - null cuando el LLM no responde o falta headline
+ *   - points truncados a 4
+ *   - schema + cacheSystem se pasan al LLM
  */
 
-const mockCompleteJSON = vi.fn();
+const completeJSON = vi.fn();
+const fakeLlm = { isConfigured: true, modelId: 'claude-sonnet-4-5', completeJSON } as never;
 
-vi.mock('@/infrastructure/ai/groq-service.js', () => ({
-  GroqService: vi.fn(function GroqServiceMock() {
-    return { completeJSON: mockCompleteJSON };
-  }),
-}));
+beforeEach(() => completeJSON.mockReset());
 
 describe('AdvisorService', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('devuelve AdvisorResult cuando Groq responde con JSON válido', async () => {
-    const { AdvisorService } = await import('@/application/advisor/advisor-service.js');
-    const svc = new AdvisorService();
-
-    mockCompleteJSON.mockResolvedValue({
+  it('devuelve AdvisorResult cuando el LLM responde con JSON válido', async () => {
+    completeJSON.mockResolvedValue({
       headline: 'El margen es bajo, subí el precio.',
       points: ['Punto A', 'Punto B'],
     });
 
-    const result = await svc.advise('cost_result', { margin: 5 });
+    const result = await new AdvisorService(fakeLlm).advise('cost_result', { margin: 5 });
 
     expect(result).toMatchObject({
       headline: 'El margen es bajo, subí el precio.',
       points: ['Punto A', 'Punto B'],
     });
+    expect(completeJSON.mock.calls[0]![2]).toMatchObject({ cacheSystem: true });
+    expect(completeJSON.mock.calls[0]![1]).toContain('"margin": 5'); // el prompt trae el contexto
   });
 
-  it('devuelve null cuando Groq devuelve null', async () => {
-    const { AdvisorService } = await import('@/application/advisor/advisor-service.js');
-    const svc = new AdvisorService();
-
-    mockCompleteJSON.mockResolvedValue(null);
-
-    const result = await svc.advise('macro', { usd: 1500 });
-    expect(result).toBeNull();
+  it('devuelve null cuando el LLM devuelve null', async () => {
+    completeJSON.mockResolvedValue(null);
+    expect(await new AdvisorService(fakeLlm).advise('macro', { usd: 1500 })).toBeNull();
   });
 
   it('devuelve null cuando el resultado no tiene headline', async () => {
-    const { AdvisorService } = await import('@/application/advisor/advisor-service.js');
-    const svc = new AdvisorService();
-
-    mockCompleteJSON.mockResolvedValue({ points: ['algo'] }); // falta headline
-
-    const result = await svc.advise('alerts', {});
-    expect(result).toBeNull();
+    completeJSON.mockResolvedValue({ points: ['algo'] });
+    expect(await new AdvisorService(fakeLlm).advise('alerts', {})).toBeNull();
   });
 
-  it('trunca points a 4 aunque Groq devuelva más', async () => {
-    const { AdvisorService } = await import('@/application/advisor/advisor-service.js');
-    const svc = new AdvisorService();
-
-    mockCompleteJSON.mockResolvedValue({
-      headline: 'Resumen',
-      points: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'],
-    });
-
-    const result = await svc.advise('reconciliation', {});
+  it('trunca points a 4 aunque el LLM devuelva más', async () => {
+    completeJSON.mockResolvedValue({ headline: 'Resumen', points: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] });
+    const result = await new AdvisorService(fakeLlm).advise('reconciliation', {});
     expect(result!.points).toHaveLength(4);
   });
 
-  it('devuelve points vacío cuando Groq no devuelve un array', async () => {
-    const { AdvisorService } = await import('@/application/advisor/advisor-service.js');
-    const svc = new AdvisorService();
-
-    mockCompleteJSON.mockResolvedValue({ headline: 'Título', points: 'no es array' });
-
-    const result = await svc.advise('cost_result', {});
+  it('devuelve points vacío cuando el LLM no devuelve un array', async () => {
+    completeJSON.mockResolvedValue({ headline: 'Título', points: 'no es array' });
+    const result = await new AdvisorService(fakeLlm).advise('cost_result', {});
     expect(result!.points).toEqual([]);
   });
 });

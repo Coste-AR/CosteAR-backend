@@ -73,7 +73,7 @@ describe('AnthropicLLMService.completeJSON', () => {
   it('no configurado devuelve null sin llamar al modelo', async () => {
     const model = textModel('{"x":1}');
     const spy = vi.spyOn(model, 'doGenerate');
-    const svc = new AnthropicLLMService(model, false);
+    const svc = new AnthropicLLMService(model, 'test-model', false);
     expect(await svc.completeJSON('sys', 'user')).toBeNull();
     expect(spy).not.toHaveBeenCalled();
   });

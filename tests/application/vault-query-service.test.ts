@@ -7,7 +7,7 @@ const mockDb = {
 vi.mock('@/infrastructure/database/prisma.js', () => ({ prisma: mockDb }));
 
 const mockRetriever = { retrieve: vi.fn() };
-const mockAi = { isConfigured: true, completeJSON: vi.fn() };
+const mockAi = { isConfigured: true, modelId: 'claude-sonnet-4-5', completeJSON: vi.fn() };
 
 /** Un `RetrievedChunk` con defaults; `distance` bajo = match semántico directo. */
 function chunk(over: Record<string, unknown> = {}) {
