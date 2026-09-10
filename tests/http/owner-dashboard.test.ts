@@ -28,7 +28,13 @@ async function app() {
   const Fastify = (await import('fastify')).default;
   const { registerOwnerDashboardRoutes } = await import('@/infrastructure/http/routes/owner-dashboard.routes.js');
   const { errorHandler } = await import('@/infrastructure/http/error-handler.js');
+  // La ruta declara `schema.response` con Zod (#282): sin estos dos compilers
+  // Fastify intenta leer el ZodObject como JSON Schema crudo y explota al
+  // construir la ruta. `app.ts` los setea igual, scoped al prefijo `/api`.
+  const { serializerCompiler, validatorCompiler } = await import('fastify-type-provider-zod');
   const server = Fastify({ logger: false });
+  server.setValidatorCompiler(validatorCompiler);
+  server.setSerializerCompiler(serializerCompiler);
   server.setErrorHandler(errorHandler);
   await server.register(registerOwnerDashboardRoutes);
   await server.ready();
