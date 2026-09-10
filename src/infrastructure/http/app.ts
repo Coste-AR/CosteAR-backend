@@ -5,6 +5,8 @@ import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import swagger from '@fastify/swagger';
+import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
 import { getRedisClient } from '../redis/client.js';
 import { getEnv } from '../config/env.js';
 import { errorHandler } from './error-handler.js';
@@ -186,6 +188,19 @@ export async function buildApp(): Promise<FastifyInstance> {
   const prefix = `/api/${env.API_VERSION}`;
   await app.register(
     async (api) => {
+      // --- Contrato tipado de respuestas (#282, fase 1) ---
+      // Solo las rutas convertidas declaran `schema.response` con Zod; el resto
+      // sigue igual — el type provider no exige schema en todos lados, valida
+      // donde se lo declaró. `@fastify/swagger` arma el documento OpenAPI a
+      // partir de esos mismos schemas (`scripts/generate-openapi.mjs` los usa
+      // para publicar `openapi/openapi.json` + `openapi/types.d.ts`).
+      api.setValidatorCompiler(validatorCompiler);
+      api.setSerializerCompiler(serializerCompiler);
+      await api.register(swagger, {
+        openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '0.1.0' } },
+        transform: jsonSchemaTransform,
+      });
+
       await registerAccessGateRoutes(api);
       await registerAuthRoutes(api);
       await registerCompanyRoutes(api);
