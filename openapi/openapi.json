@@ -1,0 +1,542 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CosteAR API",
+    "version": "0.1.0"
+  },
+  "components": {
+    "schemas": {}
+  },
+  "paths": {
+    "/periods/{id}/tablero-dueno": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "periodo": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "codigo": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "codigo"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "corrida": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "validada": {
+                              "type": "boolean"
+                            },
+                            "ejecutadaEn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "validada",
+                            "ejecutadaEn"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "pendientes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "area": {
+                                "type": "string",
+                                "enum": [
+                                  "calculo",
+                                  "imputacion",
+                                  "configuracion",
+                                  "produccion",
+                                  "ventas",
+                                  "costeo"
+                                ]
+                              },
+                              "dato": {
+                                "type": "string"
+                              },
+                              "periodo": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "codigo": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "codigo"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "area",
+                              "dato",
+                              "periodo"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "costoPorCajon": {
+                          "type": "object",
+                          "properties": {
+                            "variable": {
+                              "type": "object",
+                              "properties": {
+                                "valor": {
+                                  "type": "number",
+                                  "nullable": true
+                                },
+                                "completo": {
+                                  "type": "boolean"
+                                },
+                                "parametrosSinConfirmar": {
+                                  "type": "boolean"
+                                },
+                                "parametrosSinConfirmarDetalle": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "nombre": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "nombre"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "motivos": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "valor",
+                                "completo",
+                                "parametrosSinConfirmar",
+                                "parametrosSinConfirmarDetalle",
+                                "motivos"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "fijo": {
+                              "type": "object",
+                              "properties": {
+                                "valor": {
+                                  "type": "number",
+                                  "nullable": true
+                                },
+                                "completo": {
+                                  "type": "boolean"
+                                },
+                                "parametrosSinConfirmar": {
+                                  "type": "boolean"
+                                },
+                                "parametrosSinConfirmarDetalle": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "nombre": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "nombre"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "motivos": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "valor",
+                                "completo",
+                                "parametrosSinConfirmar",
+                                "parametrosSinConfirmarDetalle",
+                                "motivos"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "valor": {
+                                  "type": "number",
+                                  "nullable": true
+                                },
+                                "completo": {
+                                  "type": "boolean"
+                                },
+                                "parametrosSinConfirmar": {
+                                  "type": "boolean"
+                                },
+                                "parametrosSinConfirmarDetalle": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "nombre": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "nombre"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "motivos": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "valor",
+                                "completo",
+                                "parametrosSinConfirmar",
+                                "parametrosSinConfirmarDetalle",
+                                "motivos"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "variable",
+                            "fijo",
+                            "total"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "precioPromedioVenta": {
+                          "type": "object",
+                          "properties": {
+                            "valor": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "completo": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmar": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmarDetalle": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nombre": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "nombre"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "motivos": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "valor",
+                            "completo",
+                            "parametrosSinConfirmar",
+                            "parametrosSinConfirmarDetalle",
+                            "motivos"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "contribucionMarginalPorCajon": {
+                          "type": "object",
+                          "properties": {
+                            "valor": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "completo": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmar": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmarDetalle": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nombre": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "nombre"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "motivos": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "valor",
+                            "completo",
+                            "parametrosSinConfirmar",
+                            "parametrosSinConfirmarDetalle",
+                            "motivos"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "puntoEquilibrioCajones": {
+                          "type": "object",
+                          "properties": {
+                            "valor": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "completo": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmar": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmarDetalle": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nombre": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "nombre"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "motivos": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "fechaUltimoRecalculo": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "valor",
+                            "completo",
+                            "parametrosSinConfirmar",
+                            "parametrosSinConfirmarDetalle",
+                            "motivos",
+                            "fechaUltimoRecalculo"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "producidoCajones": {
+                          "type": "object",
+                          "properties": {
+                            "valor": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "completo": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmar": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmarDetalle": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nombre": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "nombre"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "motivos": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "valor",
+                            "completo",
+                            "parametrosSinConfirmar",
+                            "parametrosSinConfirmarDetalle",
+                            "motivos"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "resultadoPeriodo": {
+                          "type": "object",
+                          "properties": {
+                            "valor": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "completo": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmar": {
+                              "type": "boolean"
+                            },
+                            "parametrosSinConfirmarDetalle": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "nombre": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "nombre"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "motivos": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "valor",
+                            "completo",
+                            "parametrosSinConfirmar",
+                            "parametrosSinConfirmarDetalle",
+                            "motivos"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "periodo",
+                        "corrida",
+                        "pendientes",
+                        "costoPorCajon",
+                        "precioPromedioVenta",
+                        "contribucionMarginalPorCajon",
+                        "puntoEquilibrioCajones",
+                        "producidoCajones",
+                        "resultadoPeriodo"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

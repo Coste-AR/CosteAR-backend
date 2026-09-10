@@ -5,14 +5,14 @@ import { MockLanguageModelV4 } from 'ai/test';
 // `getEnv` valida el entorno completo (DATABASE_URL, etc.), que no está en el
 // proceso de la suite rápida. Se controla acá para probar la selección de
 // proveedor sin depender de un `.env`.
-const envValues: Record<string, string> = {
+const envValues: Record<string, string | undefined> = {
   LLM_PROVIDER_VAULT_QUERY: 'anthropic',
   LLM_PROVIDER_ADVISOR: 'anthropic',
   LLM_PROVIDER_CONTEXT: 'anthropic',
   LLM_PROVIDER_CLASSIFIER: 'groq',
   LLM_MODEL_ANTHROPIC_DEFAULT: 'claude-sonnet-4-5',
   LLM_MODEL_ANTHROPIC_CHEAP: 'claude-haiku-4-5',
-  ANTHROPIC_API_KEY: 'anthropic_placeholder',
+  ANTHROPIC_API_KEY: undefined,
 };
 vi.mock('@/infrastructure/config/env.js', () => ({
   getEnv: () => envValues,
@@ -130,7 +130,7 @@ describe('GroqLLMService.completeJSON', () => {
 describe('getLLMService (selección por caso de uso)', () => {
   beforeEach(() => {
     envValues.LLM_PROVIDER_VAULT_QUERY = 'anthropic';
-    envValues.ANTHROPIC_API_KEY = 'anthropic_placeholder';
+    envValues.ANTHROPIC_API_KEY = undefined;
     __resetLLMServiceState();
   });
 
@@ -138,7 +138,7 @@ describe('getLLMService (selección por caso de uso)', () => {
     expect(getLLMService('classifier')).toBeInstanceOf(GroqLLMService);
   });
 
-  it('vault_query cae a Groq cuando ANTHROPIC_API_KEY es el placeholder', () => {
+  it('vault_query cae a Groq cuando ANTHROPIC_API_KEY no está configurada', () => {
     expect(getLLMService('vault_query')).toBeInstanceOf(GroqLLMService);
   });
 
