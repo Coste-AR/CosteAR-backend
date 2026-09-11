@@ -24,11 +24,20 @@ const pendienteCierreSchema = z.object({
   periodo: periodoRefSchema,
 });
 
+const unidadGestionSchema = z.object({
+  codigo: z.string(),
+  nombre: z.string(),
+  factor: z.number(),
+});
+
 export const ownerDashboardResponseSchema = z.object({
   periodo: periodoRefSchema,
   corrida: z
     .object({ id: z.string(), validada: z.boolean(), ejecutadaEn: z.string() })
     .nullable(),
+  // La unidad de gestión que declaró la empresa (#274/#252). `null` explícito
+  // cuando no hay una declarada — nunca un default inventado.
+  unidadGestion: unidadGestionSchema.nullable(),
   pendientes: z.array(pendienteCierreSchema),
   costoPorCajon: z.object({
     variable: numeroTableroSchema,
