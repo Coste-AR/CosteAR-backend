@@ -3,7 +3,7 @@
 - **Issue:** #337
 - **Repo:** CosteAR-backend
 - **Rama:** `feat/issue-337-balance-tanda`
-- **PR:** pendiente de apertura
+- **PR:** #338
 - **Agente:** Codex
 
 ## Recursos
