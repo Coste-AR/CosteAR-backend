@@ -115,3 +115,4 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 323,,AlanArevalo1,dev,2026-09-10T17:49:28Z,2026-09-11T00:10:03Z,6.3,7,128,17,15,2,,,docs/sesiones/2026-09-10-252-unidad-tablero.md
 324,,AlanArevalo1,dev,2026-09-10T20:29:58Z,2026-09-10T23:23:53Z,2.9,8,168,10,9,0,,,docs/sesiones/2026-09-10-255-credenciales-honestas.md
 327,302,giuliannadr,dev,2026-09-10T23:08:13Z,2026-09-10T23:26:46Z,0.3,16,663,1,13,0,,,docs/sesiones/2026-09-10-302-eval-rag.md
+331,,giuliannadr,dev,2026-09-11T14:36:56Z,2026-09-11T14:46:04Z,0.2,3,98,3,10,0,,,docs/sesiones/2026-09-10-294-vaultignore-y-sourcetype.md
