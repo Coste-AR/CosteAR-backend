@@ -22,8 +22,12 @@ import { macroSyncQueue, nightlyLearningQueue, dailyRunQueue } from './queues.js
  * pueda volver a cambiar cuándo corre un job de negocio.
  */
 
-const TIMEZONE = 'America/Argentina/Buenos_Aires';
-const NIGHTLY_CRON = '0 2 * * *';
+export const TIMEZONE = 'America/Argentina/Buenos_Aires';
+// Exportado: nightly-learning.worker.ts lo reusa para el Sentry Cron Monitor,
+// para que el patrón que dispara el job y el que Sentry espera nunca puedan
+// desalinearse (es justo el bug que este archivo existe para evitar — ver el
+// comentario de arriba).
+export const NIGHTLY_CRON = '0 2 * * *';
 // Después del aprendizaje nocturno (02:00), para que el cálculo del día tome
 // cualquier corrección que ese pipeline haya dejado aplicada.
 const DAILY_RUN_CRON = '0 3 * * *';
