@@ -1,0 +1,67 @@
+name: Eval RAG
+
+# Gate de calidad del RAG (F1-13). Corre el set dorado contra el pipeline
+# completo (retriever hibrido + rerank + generacion) y falla si una metrica
+# cae por debajo de tests/rag/baseline.json (con tolerancia). La comparacion
+# vive en tests/rag/eval.test.ts; este workflow solo la ejecuta con las keys.
+#
+# Actualizar la baseline a proposito: correr local
+#   UPDATE_EVAL_BASELINE=1 npm run eval:rag
+# y commitear tests/rag/baseline.json en el mismo PR.
+
+on:
+  pull_request:
+    branches: [ "dev" ]
+    paths:
+      - "src/application/vault-query/**"
+      - "src/application/vault-indexer/**"
+      - "src/infrastructure/ai/**"
+      - "tests/rag/**"
+      - "vitest.eval.config.ts"
+
+jobs:
+  eval-rag:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: costear_test
+          POSTGRES_USER: costear
+          POSTGRES_PASSWORD: costear
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U costear"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MIGRATION_DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+      DATABASE_URL: postgresql://costear:costear@localhost:5432/costear_test
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma Generate
+        run: npx prisma generate
+
+      - name: Migrar y aplicar RLS
+        run: npm run db:setup
+
+      - name: Correr el eval del RAG
+        run: npm run eval:rag

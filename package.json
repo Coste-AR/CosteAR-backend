@@ -19,6 +19,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:db": "vitest run --config vitest.db.config.ts",
     "test:http": "vitest run tests/http",
+    "eval:rag": "vitest run --config vitest.eval.config.ts",
     "check:tests-base": "node scripts/check-tests-con-base.mjs",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "check:openapi": "node scripts/check-openapi.mjs",

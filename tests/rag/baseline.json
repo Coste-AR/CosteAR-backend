@@ -1,0 +1,10 @@
+{
+  "_comment": "Baseline de métricas del eval del RAG (F1-12). Placeholder con null hasta la primera corrida real: correr con VOYAGE_API_KEY + un LLM key y `UPDATE_EVAL_BASELINE=1 npm run eval:rag`. El gate de CI (F1-13) compara cada corrida contra estos números.",
+  "cases": null,
+  "recallAt5": null,
+  "refusalCorrectRate": null,
+  "sourceHallucinationRate": 0,
+  "exactCitationRate": null,
+  "criterionPassRate": null,
+  "criterionEvaluated": false
+}

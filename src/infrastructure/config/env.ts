@@ -33,8 +33,8 @@ const envSchema = z.object({
   GROQ_API_KEY: z.string().min(1).default('groq_placeholder'),
 
   // IA — Anthropic (Claude). Generación del Q&A de la bóveda y del consejero.
-  // Sin key válida, `getLLMService` cae a Groq y lo registra (degradación segura).
-  ANTHROPIC_API_KEY: z.string().min(1).default('anthropic_placeholder'),
+  // Sin configurar, `getLLMService` cae a Groq y lo registra (degradación segura).
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
   // Proveedor de LLM por caso de uso. `anthropic` para lo que sintetiza con
   // citas; `groq` para el clasificador (latencia).
   LLM_PROVIDER_VAULT_QUERY: z.enum(['anthropic', 'groq']).default('anthropic'),
@@ -48,8 +48,15 @@ const envSchema = z.object({
   // IA — Voyage AI (embeddings para indexar la bóveda de costeo)
   VOYAGE_API_KEY: z.string().min(1).default('voyage_placeholder'),
 
-  WHATSAPP_VERIFY_TOKEN: z.string().min(1).default('whatsapp_verify_placeholder'),
-  WHATSAPP_API_TOKEN: z.string().min(1).default('whatsapp_api_placeholder'),
+  // Token que Meta manda en el handshake de suscripción (GET /webhooks/whatsapp).
+  // Sin esto, el handshake rechaza todo con 403 (falla cerrado, no abierto).
+  WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
+  // Token de la Graph API para ENVIAR mensajes. #253 (proveedor de WhatsApp en
+  // standby) todavía no tiene ningún consumidor de esta variable.
+  WHATSAPP_API_TOKEN: z.string().min(1).optional(),
+  // Identificador del número emisor en la Cloud API. Como WHATSAPP_API_TOKEN,
+  // sin consumidor todavía — ver #253.
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
   // App Secret de Meta (App Dashboard → Settings → Basic) para verificar la
   // firma X-Hub-Signature-256 del webhook. Sin esto, el POST rechaza todo
   // (falla cerrado, no abierto).
