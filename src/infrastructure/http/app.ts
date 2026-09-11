@@ -52,6 +52,7 @@ import { registerWhatsappRoutes } from './routes/whatsapp.routes.js';
 import { registerTelegramRoutes } from './routes/telegram.routes.js';
 import { registerTermsRoutes } from './routes/terms.routes.js';
 import { registerIndustryProfileRoutes } from './routes/industry-profile.routes.js';
+import { registerModulosRubroRoutes } from './routes/modulos-rubro.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -225,6 +226,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerOwnerDashboardRoutes(api);
       await registerDesperdicioRoutes(api);
       await registerParametrosCosteoRoutes(api);
+      await registerModulosRubroRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerLotesProductivosRoutes(api);
