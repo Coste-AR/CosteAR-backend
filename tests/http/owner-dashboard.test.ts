@@ -8,7 +8,7 @@ const { db } = vi.hoisted(() => ({
   db: {
     costPeriod: { findFirst: vi.fn() },
     calculationRun: { findFirst: vi.fn() },
-    unidadMedida: { findFirst: vi.fn() },
+    company: { findFirst: vi.fn() },
     parametroCosteo: { findMany: vi.fn() },
   },
 }));
@@ -44,7 +44,7 @@ async function app() {
 beforeEach(() => {
   vi.clearAllMocks();
   db.costPeriod.findFirst.mockResolvedValue({ id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 24, salesQuantity: 24 });
-  db.unidadMedida.findFirst.mockResolvedValue({ factor: 12 });
+  db.company.findFirst.mockResolvedValue({ unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 } });
   db.parametroCosteo.findMany.mockResolvedValue([]);
   db.calculationRun.findFirst.mockResolvedValue({
     id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
@@ -69,7 +69,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data).toHaveProperty('puntoEquilibrioCajones');
     expect(body.data).toHaveProperty('producidoCajones');
     expect(body.data).toHaveProperty('resultadoPeriodo');
-    expect(body.data).toMatchObject({ pendientes: [] });
+    expect(body.data).toMatchObject({ pendientes: [], unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 } });
     expect(body.data.costoPorCajon).toMatchObject({
       variable: { parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] },
     });
@@ -104,7 +104,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
 
   it('devuelve los pendientes estructurados sin alterar los motivos de cada indicador', async () => {
     db.costPeriod.findFirst.mockResolvedValue({ id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 0, salesQuantity: 0 });
-    db.unidadMedida.findFirst.mockResolvedValue(null);
+    db.company.findFirst.mockResolvedValue({ unidadGestion: null });
     db.calculationRun.findFirst.mockResolvedValue({
       id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
       results: {
@@ -138,10 +138,11 @@ describe('GET /periods/:id/tablero-dueno', () => {
     const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
 
     expect(response.statusCode).toBe(200);
-    const body = JSON.parse(response.body) as { data: { pendientes: Array<{ area: string; dato: string; periodo: { id: string; codigo: string } }>; precioPromedioVenta: { motivos: string[] } } };
+    const body = JSON.parse(response.body) as { data: { pendientes: Array<{ area: string; dato: string; periodo: { id: string; codigo: string } }>; precioPromedioVenta: { motivos: string[] }; unidadGestion: unknown } };
+    expect(body.data.unidadGestion).toBeNull();
     expect(body.data.pendientes).toEqual(expect.arrayContaining([
       { area: 'imputacion', dato: 'Compra de prueba', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
-      { area: 'configuracion', dato: 'unidad de venta "cajon" con factor de conversión', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
+      { area: 'configuracion', dato: 'unidad de gestión de la empresa', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'produccion', dato: 'cantidad producida mayor a cero', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'ventas', dato: 'ventas del período', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'costeo', dato: 'clasificación frente al volumen del rubro Materia prima', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
@@ -159,10 +160,11 @@ describe('GET /periods/:id/tablero-dueno', () => {
     const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
 
     expect(response.statusCode).toBe(200);
-    const body = JSON.parse(response.body) as { data: { pendientes: unknown[]; resultadoPeriodo: { motivos: string[] } } };
+    const body = JSON.parse(response.body) as { data: { pendientes: unknown[]; resultadoPeriodo: { motivos: string[] }; unidadGestion: unknown } };
     expect(body.data.pendientes).toEqual([
       { area: 'calculo', dato: 'corrida de cálculo', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
     ]);
     expect(body.data.resultadoPeriodo.motivos).toEqual(['No hay una corrida de cálculo para este período.']);
+    expect(body.data.unidadGestion).toEqual({ codigo: 'cajon', nombre: 'Cajón', factor: 12 });
   });
 });

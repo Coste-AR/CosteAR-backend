@@ -68,6 +68,27 @@
                           "additionalProperties": false,
                           "nullable": true
                         },
+                        "unidadGestion": {
+                          "type": "object",
+                          "properties": {
+                            "codigo": {
+                              "type": "string"
+                            },
+                            "nombre": {
+                              "type": "string"
+                            },
+                            "factor": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "codigo",
+                            "nombre",
+                            "factor"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
                         "pendientes": {
                           "type": "array",
                           "items": {
@@ -516,6 +537,7 @@
                       "required": [
                         "periodo",
                         "corrida",
+                        "unidadGestion",
                         "pendientes",
                         "costoPorCajon",
                         "precioPromedioVenta",

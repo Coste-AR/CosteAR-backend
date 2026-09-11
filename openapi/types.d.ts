@@ -34,6 +34,11 @@ export interface paths {
                                     validada: boolean;
                                     ejecutadaEn: string;
                                 } | null;
+                                unidadGestion: {
+                                    codigo: string;
+                                    nombre: string;
+                                    factor: number;
+                                } | null;
                                 pendientes: {
                                     /** @enum {string} */
                                     area: "calculo" | "imputacion" | "configuracion" | "produccion" | "ventas" | "costeo";
