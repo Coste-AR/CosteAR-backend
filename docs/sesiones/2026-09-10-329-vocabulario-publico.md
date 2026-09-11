@@ -3,7 +3,7 @@
 - **Issue:** #329
 - **Repo:** CosteAR-backend
 - **Rama:** `fix/issue-329-seed-vocabulario-tenant`
-- **PR:** pendiente de creación
+- **PR:** #330
 - **Agente:** Codex · GPT-5
 - **Tanda:** B0
 
