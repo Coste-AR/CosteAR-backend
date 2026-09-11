@@ -40,6 +40,25 @@ describe('deriveSourceType', () => {
     expect(deriveSourceType('costeo-procesos/corpus-catedra/P2.md')).toBe('PROCESOS');
     expect(deriveSourceType('otra/carpeta/x.md')).toBeNull();
   });
+
+  it('reconoce la estructura "001.1 - Teoría de Costos/" que reorganizó la bóveda el 09/09 (F1-02)', () => {
+    expect(
+      deriveSourceType('001.1 - Teoría de Costos/001.1.1 - Costos I/Clases/Mirta/7. Materias primas.md'),
+    ).toBe('CATEDRA');
+    expect(
+      deriveSourceType('001.1 - Teoría de Costos/001.1.2 - Costos II/Material/Análisis Marginal (Yardín)/03 - El Punto de Equilibrio.md'),
+    ).toBe('CATEDRA');
+    expect(
+      deriveSourceType('001.1 - Teoría de Costos/001.1.3 - Ruta de Aprendizaje (Costos I + II)/000 - MOC Ruta de Aprendizaje.md'),
+    ).toBe('CATEDRA');
+    // el separador de Windows y la forma NFD del acento (macOS) no deben cambiar el resultado
+    expect(
+      deriveSourceType('001.1 - Teoría de Costos\\001.1.1 - Costos I\\000 - MOC Costos I (CosteAR).md'),
+    ).toBe('CATEDRA');
+    expect(
+      deriveSourceType('001.1 - Teoría de Costos/001.1.1 - Costos I/x.md'.normalize('NFD')),
+    ).toBe('CATEDRA');
+  });
 });
 
 describe('PrismaVaultChunkRepository.upsertChunk (integración, rol costear_app)', () => {
