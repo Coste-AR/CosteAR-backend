@@ -114,12 +114,14 @@ jobs:
       - name: Mergear lo que ya verifico todo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CIRCUITO_TOKEN: ${{ secrets.CIRCUITO_PAT }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           pendientes=$(gh pr list --repo "$REPO" --state open --limit 50 \
-            --json number,isDraft,labels,baseRefName,mergeStateStatus,title)
+            --json number,isDraft,labels,baseRefName,mergeStateStatus,title,createdAt \
+            | jq 'sort_by(.createdAt)')
 
           echo "$pendientes" | jq -c '.[]' | while read -r pr; do
             n=$(jq -r '.number'         <<<"$pr")
@@ -214,8 +216,11 @@ jobs:
 
             if [ "${atras:-0}" -gt 0 ]; then
               echo "SALTEADO: atrasado $atras commit(s) respecto de $base."
-              echo "Lo destraba una persona con: gh pr update-branch $n --repo $REPO"
-              echo "Tiene que ser un token de usuario real: el push del bot no dispara el CI."
+
+              if [ "$base" != "dev" ]; then
+                echo "No se actualiza automaticamente: update-branch con CIRCUITO_PAT solo aplica contra dev."
+                echo "::endgroup::"; continue
+              fi
 
               # LA ETIQUETA `necesita-mano`: QUE EL EMBUDO SE PUEDA CONSULTAR.
               #
@@ -234,18 +239,27 @@ jobs:
               # abrir nada.
               gh pr edit "$n" --repo "$REPO" --add-label necesita-mano >/dev/null 2>&1                 || echo "::warning::No se pudo poner la etiqueta necesita-mano en #$n. Falta crearla en este repo."
 
-              # POR QUE EL WORKFLOW NO ACTUALIZA LA RAMA EL MISMO.
+              # ACTUALIZAR CON UN TOKEN DE USUARIO, NUNCA CON GITHUB_TOKEN.
               #
-              # Lo hacia, y no funcionaba. El commit que genera `update-branch`
-              # lo firma `github-actions[bot]`, y GitHub deja las corridas de CI
-              # de un bot en `action_required` esperando aprobacion manual. O
-              # sea: la rama se actualizaba, el CI no corria nunca, y el PR
-              # quedaba trabado en silencio para siempre. Peor que no hacer nada,
-              # porque parecia que algo estaba pasando.
+              # Con GITHUB_TOKEN el push no dispara otro workflow. La rama queda
+              # actualizada pero sin CI, que es peor que dejarla quieta porque
+              # parece que el circuito avanzo. CIRCUITO_PAT es un token de usuario
+              # de la organizacion y el push que hace si vuelve a disparar el CI.
               #
-              # La alternativa era un PAT de larga vida como secret en los tres
-              # repos, para que el push quede a nombre de un usuario real. No
-              # vale un token permanente ahorrar un comando.
+              # UNO POR CORRIDA. Los PR vienen ordenados por createdAt; al salir
+              # despues del primero, dos atrasados no se actualizan a la vez y no
+              # vuelven a dejarse atrasados entre si.
+              if [ -z "${CIRCUITO_TOKEN:-}" ]; then
+                falla_pat="CIRCUITO_PAT no esta disponible. El PR #$n queda para una persona; no se intenta con GITHUB_TOKEN."
+              elif GH_TOKEN="$CIRCUITO_TOKEN" gh pr update-branch "$n" --repo "$REPO"; then
+                echo "ACTUALIZADO #$n con CIRCUITO_PAT. Termina esta corrida para que el CI nuevo se mida antes de seguir."
+                echo "::endgroup::"
+                exit 0
+              else
+                falla_pat="No se pudo actualizar #$n con CIRCUITO_PAT. Puede faltar, estar vencido o no tener permisos. El PR queda para una persona y no se reintenta con GITHUB_TOKEN."
+              fi
+
+              echo "::error::$falla_pat"
               #
               # UN COMENTARIO POR SHA, NO UNO POR CORRIDA. Este workflow se
               # despierta con cada tanda de checks y ademas cada 15 minutos.
@@ -281,7 +295,8 @@ jobs:
                 fi
               fi
 
-              echo "::endgroup::"; continue
+              echo "::endgroup::"
+              exit 1
             fi
 
             # YA NO ESTA ATRASADO: SE SACA LA ETIQUETA.
