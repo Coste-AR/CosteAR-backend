@@ -1,6 +1,10 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
+import {
+  crearConversorUnidadGestion,
+  type UnidadGestion,
+} from '../../domain/units/unidad-gestion.js';
 
 type ParametroSinConfirmar = {
   id: string;
@@ -24,8 +28,6 @@ type PendienteCierre = {
 };
 
 type FuentePendiente = Omit<PendienteCierre, 'periodo'>;
-
-type UnidadGestion = { codigo: string; nombre: string; factor: number };
 
 type ResultadoCorrida = {
   grossMargin?: number;
@@ -110,6 +112,7 @@ export class OwnerDashboardService {
     const unidadGestion: UnidadGestion | null = company?.unidadGestion
       ? { codigo: company.unidadGestion.codigo, nombre: company.unidadGestion.nombre, factor: Number(company.unidadGestion.factor) }
       : null;
+    const conversor = crearConversorUnidadGestion(unidadGestion);
 
     const sinCorrida = ['No hay una corrida de cálculo para este período.'];
     if (!run) {
@@ -179,19 +182,23 @@ export class OwnerDashboardService {
       : {
           variable: contribucion.costoVariableUnitario === null
             ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], parametrosSinConfirmar)
-            : completo(contribucion.costoVariableUnitario * factor, parametrosSinConfirmar, motivosBase),
+            : completo(conversor.importeUnitarioDesdeBase(contribucion.costoVariableUnitario), parametrosSinConfirmar, motivosBase),
           fijo: completo(
-            contribucion.componentes.filter((c) => c.comportamientoVolumen === 'FIJO').reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades * factor,
+            conversor.importeUnitarioDesdeBase(
+              contribucion.componentes
+                .filter((c) => c.comportamientoVolumen === 'FIJO')
+                .reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades,
+            ),
             parametrosSinConfirmar,
             motivosBase,
           ),
-          total: completo(resultado.detail.unitCost.unitFinishedGoodsCost * factor, parametrosSinConfirmar, motivosBase),
+          total: completo(conversor.importeUnitarioDesdeBase(resultado.detail.unitCost.unitFinishedGoodsCost), parametrosSinConfirmar, motivosBase),
         };
 
     const convertido = (numero: number | null, motivos: string[]): NumeroTablero =>
       numero === null || factor === null || motivos.length > 0
         ? incompleto([...motivos, ...sinUnidad], parametrosSinConfirmar)
-        : completo(numero * factor, parametrosSinConfirmar);
+        : completo(conversor.importeUnitarioDesdeBase(numero), parametrosSinConfirmar);
 
     return {
       periodo,
@@ -207,12 +214,12 @@ export class OwnerDashboardService {
       puntoEquilibrioCajones: {
         ...(equilibrio?.incompleta || unidadesEquilibrio === null || factor === null
           ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], parametrosSinConfirmar)
-          : completo(unidadesEquilibrio / factor, parametrosSinConfirmar, motivosBase)),
+          : completo(conversor.cantidadDesdeBase(unidadesEquilibrio), parametrosSinConfirmar, motivosBase)),
         fechaUltimoRecalculo: equilibrio?.fechaUltimoRecalculo ?? null,
       },
       producidoCajones: factor === null || baseUnidades <= 0
         ? incompleto([...sinProduccion, ...sinUnidad])
-        : completo(baseUnidades / factor),
+        : completo(conversor.cantidadDesdeBase(baseUnidades)),
       resultadoPeriodo: resultado.grossMargin == null || sinVentas.length > 0
         ? incompleto([...motivosBase, ...sinVentas], parametrosSinConfirmar)
         : completo(resultado.grossMargin, parametrosSinConfirmar, motivosBase),

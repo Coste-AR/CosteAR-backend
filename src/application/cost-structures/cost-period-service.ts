@@ -25,7 +25,13 @@ import {
   indirectCostConfigSchema,
   inventorySchema,
 } from '../../shared/schemas/cost.schema.js';
-import { comparePeriods, type PeriodSide, type MacroContrast } from './period-comparison.js';
+import {
+  comparePeriods,
+  proyectarComparacionEnUnidadGestion,
+  type PeriodSide,
+  type MacroContrast,
+} from './period-comparison.js';
+import type { UnidadGestion } from '../../domain/units/unidad-gestion.js';
 import { MacroService } from '../macro/macro-service.js';
 import { ProcessCalculationService } from './process-costing/process-calculation-service.js';
 import { freezeProcessPeriod } from '../../domain/calculations/freeze-process-period.js';
@@ -132,7 +138,7 @@ export class CostPeriodService {
   private async requireStructure(userId: string, structureId: string) {
     const s = await this.db.costStructure.findFirst({
       where: { id: structureId, userId, deletedAt: null },
-      include: { company: true },
+      include: { company: { include: { unidadGestion: true } } },
     });
     if (!s) throw new NotFoundError('Estructura de costos no encontrada');
     return s;
@@ -387,7 +393,18 @@ export class CostPeriodService {
       }
     }
 
-    return { ...comparison, macroContrast };
+    const unidadGestion: UnidadGestion | null = estructura.company.unidadGestion
+      ? {
+          codigo: estructura.company.unidadGestion.codigo,
+          nombre: estructura.company.unidadGestion.nombre,
+          factor: Number(estructura.company.unidadGestion.factor),
+        }
+      : null;
+
+    return proyectarComparacionEnUnidadGestion(
+      { ...comparison, macroContrast },
+      unidadGestion,
+    );
   }
 
   /** Un período tal como lo necesita la comparación, con sus números resueltos. */

@@ -480,11 +480,14 @@ model CostPeriod {
   indirectCostConfig Json?
   salesUnitPrice     Decimal? @db.Decimal(18, 4)
   /**
-   * Unidades VENDIDAS: con esto se factura (precio × cantidad) y sale el margen.
+   * Unidades VENDIDAS persistidas siempre en la unidad BASE del rubro: con esto
+   * se factura (precio × cantidad) y sale el margen. La unidad de gestión sólo
+   * transforma la proyección de salida; nunca este dato almacenado.
    */
   salesQuantity      Decimal? @db.Decimal(18, 4)
   /**
-   * Unidades PRODUCIDAS: con esto se saca el COSTO UNITARIO.
+   * Unidades PRODUCIDAS persistidas siempre en la unidad BASE del rubro: con
+   * esto se saca el COSTO UNITARIO.
    * No es lo mismo que lo vendido: si se producen 1.000 y se venden 800, dividir el
    * costo por 800 da un costo unitario inflado. Opcional: si no está cargado, se cae
    * a las vendidas (que es lo que hacía el sistema antes de tener este campo).
@@ -645,11 +648,13 @@ model CostStructure {
   // Datos de venta para el cálculo de margen.
   salesUnitPrice     Decimal? @db.Decimal(18, 4)
   /**
-   * Unidades VENDIDAS (facturación y margen).
+   * Unidades VENDIDAS persistidas siempre en la unidad BASE del rubro
+   * (facturación y margen). La unidad de gestión sólo transforma la salida.
    */
   salesQuantity      Decimal? @db.Decimal(18, 4)
   /**
-   * Unidades PRODUCIDAS (costo unitario). Si no está, se cae a las vendidas.
+   * Unidades PRODUCIDAS persistidas siempre en la unidad BASE del rubro (costo
+   * unitario). Si no está, se cae a las vendidas.
    */
   productionQuantity Decimal? @db.Decimal(18, 4)
 

@@ -258,7 +258,7 @@ export class CalculationRunService {
     // Si la estructura no trae `companyId` (mocks históricos), la ausencia de
     // clasificación queda marcada como incompleta sin intentar una consulta sin
     // tenant. En producción `companyId` siempre existe por el modelo Prisma.
-    const { results, incompletitud, periodId } = await enrichCalculationResult(this.db, {
+    const { results, resultsBase, incompletitud, periodId } = await enrichCalculationResult(this.db, {
       structureId,
       companyId: s.companyId,
       input,
@@ -275,7 +275,7 @@ export class CalculationRunService {
         periodId,
         trigger,
         inputsSnapshot: input,
-        results,
+        results: resultsBase,
         tree,
         audit: { actor, after: { grossMargin: output.grossMargin, grossMarginPct: output.grossMarginPct } },
       });
@@ -286,7 +286,7 @@ export class CalculationRunService {
         structureId,
         periodId,
         runId: run.id,
-        puntoEquilibrio: results.puntoEquilibrio,
+        puntoEquilibrio: resultsBase.puntoEquilibrio,
         fecha: new Date(),
       });
 
