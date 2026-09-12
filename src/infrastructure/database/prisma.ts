@@ -87,6 +87,7 @@ export const RLS_MODELS = new Set([
   'CorridaProduccion',
   'ConsumoCorrida',
   'PaqueteRubro',
+  'ConfiguracionModuloRubro',
   // S-03 y S-04.
   'ActivoAmortizable',
   'DesperdicioRegistro',

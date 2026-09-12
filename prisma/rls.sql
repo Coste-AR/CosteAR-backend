@@ -478,6 +478,13 @@ ALTER TABLE paquetes_rubro FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON paquetes_rubro;
 CREATE POLICY tenant_isolation ON paquetes_rubro USING ("userId" IS NULL OR "userId" = current_app_user_id()) WITH CHECK ("userId" IS NULL OR "userId" = current_app_user_id());
 
+ALTER TABLE configuracion_modulos_rubro ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_modulos_rubro FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON configuracion_modulos_rubro;
+CREATE POLICY tenant_isolation ON configuracion_modulos_rubro
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;

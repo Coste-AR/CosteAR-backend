@@ -7,8 +7,14 @@ describe('paquete avícola de postura', () => {
     expect(CATEGORIA_AVICOLA_POSTURA).toBe('AVICOLA_POSTURA');
     expect(PAQUETE_AVICOLA_POSTURA.lexicon.UnidadProductiva).toBe('Galpón');
     expect(PAQUETE_AVICOLA_POSTURA.variants.every((variante) => !variante.confirmado)).toBe(true);
-    expect(PAQUETE_AVICOLA_POSTURA.seedParameters.every((parametro) => !parametro.confirmado)).toBe(true);
     expect(PAQUETE_AVICOLA_POSTURA.alertRules).toHaveLength(5);
+    expect(PAQUETE_AVICOLA_POSTURA.modulos).toHaveLength(8);
+    expect(PAQUETE_AVICOLA_POSTURA.modulos.find((modulo) => modulo.clave === 'peso'))
+      .toMatchObject({ activoPorDefecto: false, dependeDe: ['plantel'] });
+    expect(PAQUETE_AVICOLA_POSTURA.modulos.filter((modulo) => modulo.activoPorDefecto).map((modulo) => modulo.clave))
+      .toEqual(['produccion', 'plantel']);
+    expect(PAQUETE_AVICOLA_POSTURA.seedParameters.find((parametro) => parametro.clave === 'unidad_carga'))
+      .toMatchObject({ tipo: 'texto', opciones: expect.arrayContaining([{ valor: 'cajon', etiqueta: 'Cajón' }]) });
   });
 
   it('no pisa un parámetro confirmado al reejecutar el seed', async () => {
