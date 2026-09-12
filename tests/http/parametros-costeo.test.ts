@@ -1,18 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { definicionDe } from '@/domain/parametros/parametros-costeo.js';
+import { PAQUETE_AVICOLA_POSTURA } from '@/application/operacion/paquete-avicola.js';
 
 const USER = 'user-1';
 const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
 const OTHER_COMPANY_ID = '00000000-0000-0000-0000-0000000000ff';
 const STRUCTURE_ID = '11111111-1111-1111-1111-111111111111';
-const COMPANY = { id: COMPANY_ID, userId: USER };
+const COMPANY = { id: COMPANY_ID, userId: USER, industry: 'AVICULTURA', unidadGestionId: null };
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
-    company: { findFirst: vi.fn() },
+    company: { findFirst: vi.fn(), update: vi.fn() },
     costStructure: { findFirst: vi.fn() },
     costPeriod: { findFirst: vi.fn() },
+    unidadMedida: { findFirst: vi.fn() },
+    paqueteRubro: { findMany: vi.fn() },
+    configuracionModuloRubro: { findMany: vi.fn() },
     parametroCosteo: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
@@ -57,6 +60,12 @@ async function buildTestApp() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockPrisma.company.findFirst.mockResolvedValue(COMPANY);
+  mockPrisma.paqueteRubro.findMany.mockResolvedValue([{
+    category: 'AVICOLA_POSTURA', userId: null, companyId: null, structureId: null, periodId: null,
+    ...PAQUETE_AVICOLA_POSTURA, scale: null,
+  }]);
+  mockPrisma.configuracionModuloRubro.findMany.mockResolvedValue([]);
+  mockPrisma.unidadMedida.findFirst.mockResolvedValue(null);
   mockPrisma.parametroCosteo.findMany.mockResolvedValue([]);
   mockPrisma.parametroCosteo.findFirst.mockResolvedValue(null);
 });
@@ -75,22 +84,16 @@ describe('GET /companies/:companyId/parametros-costeo', () => {
     expect(data.every((p) => p.origen === 'default')).toBe(true);
   });
 
-  it('expone los metadatos del catálogo sin duplicarlos en HTTP', async () => {
+  it('expone los metadatos del catálogo que declaró el paquete', async () => {
     const app = await buildTestApp();
     const res = await app.inject({
       method: 'GET',
       url: `/companies/${COMPANY_ID}/parametros-costeo`,
     });
 
-    const { data } = JSON.parse(res.body) as {
-      data: Array<{ clave: string; descripcion: string; unidad: string | null; valorDefault: number; seguro: boolean }>;
-    };
-    const esperado = definicionDe('huevos_por_cajon')!;
-    expect(data.find((p) => p.clave === esperado.clave)).toMatchObject({
-      descripcion: esperado.descripcion,
-      unidad: esperado.unidad ?? null,
-      valorDefault: esperado.valorDefault,
-      seguro: esperado.seguro,
+    const { data } = JSON.parse(res.body) as { data: Array<{ clave: string; opciones?: unknown[] }> };
+    expect(data.find((p) => p.clave === 'unidad_carga')).toMatchObject({
+      opciones: expect.arrayContaining([{ valor: 'cajon', etiqueta: 'Cajón' }]),
     });
   });
 
@@ -169,6 +172,57 @@ describe('PUT /companies/:companyId/parametros-costeo/:clave', () => {
     });
 
     expect(res.statusCode).toBe(422);
+  });
+
+  it('422 — rechaza una opción fuera de las declaradas por el paquete', async () => {
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/companies/${COMPANY_ID}/parametros-costeo/unidad_carga`,
+      payload: { valorTexto: 'bolsa', confirmado: true },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(mockPrisma.parametroCosteo.create).not.toHaveBeenCalled();
+  });
+
+  it('200 — guarda una opción válida como decisión confirmada', async () => {
+    mockPrisma.parametroCosteo.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({ id: 'pc-texto', ...data }),
+    );
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/companies/${COMPANY_ID}/parametros-costeo/unidad_carga`,
+      payload: { valorTexto: 'cajon', confirmado: false },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toMatchObject({ valorTexto: 'cajon', valorNum: null, confirmado: true });
+  });
+
+  it('422 — unidad_gestion no crea una unidad inexistente al vuelo', async () => {
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/companies/${COMPANY_ID}/parametros-costeo/unidad_gestion`,
+      payload: { valorTexto: 'cajon', confirmado: true },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(mockPrisma.company.update).not.toHaveBeenCalled();
+  });
+
+  it('200 — unidad_gestion apunta a una unidad propia existente', async () => {
+    mockPrisma.unidadMedida.findFirst.mockResolvedValue({ id: 'unidad-cajon', codigo: 'cajon' });
+    mockPrisma.company.update.mockResolvedValue({ id: COMPANY_ID, unidadGestionId: 'unidad-cajon' });
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/companies/${COMPANY_ID}/parametros-costeo/unidad_gestion`,
+      payload: { valorTexto: 'cajon', confirmado: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockPrisma.company.update).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID }, data: { unidadGestionId: 'unidad-cajon' },
+    });
   });
 
   it('404 cuando la estructura pasada no pertenece a la empresa', async () => {

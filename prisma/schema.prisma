@@ -198,6 +198,7 @@ enum CondicionIva {
 
 model Company {
   paquetesRubro        PaqueteRubro[]
+  modulosRubro         ConfiguracionModuloRubro[]
   reglasAlerta         ReglaAlerta[]
   movimientosDeposito  MovimientoDeposito[]
   eventosLote          EventoLote[]
@@ -2119,6 +2120,9 @@ model PaqueteRubro {
   seedParameters Json
   alertRules Json
   screens Json
+  /// Módulos declarativos del rubro. Cada uno informa qué habilita, qué
+  /// preguntas vuelven relevantes y su estado inicial para un tenant nuevo.
+  modulos Json @default("[]")
   // Escala de calibración del perfil: { value, unit }. Nullable hasta que el
   // rubro la declare; la cascada no inventa una si no hay dato.
   scale Json?
@@ -2127,6 +2131,24 @@ model PaqueteRubro {
   updatedAt DateTime @updatedAt @db.Timestamptz
   @@index([category, companyId, structureId, periodId], map: "paquetes_rubro_scope_idx")
   @@map("paquetes_rubro")
+}
+
+/// Estado configurable de un módulo de rubro para una empresa. No guarda ni
+/// borra datos operativos: sólo decide qué contenido declara el paquete.
+model ConfiguracionModuloRubro {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid
+  moduleId  String
+  activo    Boolean
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@unique([companyId, moduleId])
+  @@index([userId])
+  @@map("configuracion_modulos_rubro")
 }
 
 // ---------------------------------------------------------------------------

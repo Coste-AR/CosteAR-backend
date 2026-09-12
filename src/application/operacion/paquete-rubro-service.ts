@@ -18,7 +18,7 @@ export class PaqueteRubroService {
     eligible.sort((a, b) => rank(a) - rank(b));
     const result: Record<string, unknown> = {};
     for (const row of eligible) {
-      Object.assign(result, { lexicon: row.lexicon, icons: row.icons, variants: row.variants, seedParameters: row.seedParameters, alertRules: row.alertRules, screens: row.screens });
+      Object.assign(result, { lexicon: row.lexicon, icons: row.icons, variants: row.variants, seedParameters: row.seedParameters, alertRules: row.alertRules, screens: row.screens, modulos: row.modulos });
       // Un override sin escala no borra la calibración menos específica: la
       // ausencia es ausencia declarada, no un valor por defecto plausible.
       if (row.scale !== null) result.scale = row.scale;

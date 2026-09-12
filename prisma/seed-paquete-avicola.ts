@@ -3,12 +3,28 @@ import { CATEGORIA_AVICOLA_POSTURA, PAQUETE_AVICOLA_POSTURA } from '../src/appli
 
 const prisma = new PrismaClient();
 
-/** Inserta el paquete global una vez; nunca lo actualiza ni pisa overrides. */
+/** Inserta el paquete global una vez; actualiza sólo declaraciones del sistema, nunca overrides de tenant. */
 export async function seedPaqueteAvicola(db: PrismaClient = prisma) {
   const existente = await db.paqueteRubro.findFirst({
     where: { category: CATEGORIA_AVICOLA_POSTURA, companyId: null, structureId: null, periodId: null, userId: null },
   });
-  if (existente) return { created: false, paquete: existente };
+  if (existente) {
+    const paquete = await db.paqueteRubro.update({
+      where: { id: existente.id },
+      // Sólo se sincronizan declaraciones globales del paquete; los estados
+      // por empresa viven en `ConfiguracionModuloRubro` y no se pisan aquí.
+      data: {
+        lexicon: PAQUETE_AVICOLA_POSTURA.lexicon,
+        icons: PAQUETE_AVICOLA_POSTURA.icons,
+        variants: PAQUETE_AVICOLA_POSTURA.variants,
+        seedParameters: PAQUETE_AVICOLA_POSTURA.seedParameters,
+        alertRules: PAQUETE_AVICOLA_POSTURA.alertRules,
+        screens: PAQUETE_AVICOLA_POSTURA.screens,
+        modulos: PAQUETE_AVICOLA_POSTURA.modulos,
+      },
+    });
+    return { created: false, paquete };
+  }
   const paquete = await db.paqueteRubro.create({
     data: { category: CATEGORIA_AVICOLA_POSTURA, companyId: null, structureId: null, periodId: null, userId: null, ...PAQUETE_AVICOLA_POSTURA },
   });
@@ -22,6 +38,9 @@ export async function aplicarParametrosSemilla(
 ) {
   let creados = 0;
   for (const parametro of PAQUETE_AVICOLA_POSTURA.seedParameters) {
+    // Las preguntas de opción no reciben una respuesta inventada por el seed.
+    // Sólo los parámetros numéricos con default se materializan como filas.
+    if (!('valor' in parametro)) continue;
     const existente = await db.parametroCosteo.findFirst({
       where: { companyId: input.companyId, structureId: null, periodId: null, clave: parametro.clave, deletedAt: null },
     });
