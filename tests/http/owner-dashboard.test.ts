@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import {
+  CATEGORIA_AVICOLA_POSTURA,
+  PAQUETE_AVICOLA_POSTURA,
+} from '@/application/operacion/paquete-avicola.js';
 
 const USER = 'user-1';
 const PERIOD_ID = '00000000-0000-0000-0000-000000000001';
@@ -9,6 +13,7 @@ const { db } = vi.hoisted(() => ({
     costPeriod: { findFirst: vi.fn() },
     calculationRun: { findFirst: vi.fn() },
     company: { findFirst: vi.fn() },
+    paqueteRubro: { findMany: vi.fn() },
     parametroCosteo: { findMany: vi.fn() },
   },
 }));
@@ -44,7 +49,19 @@ async function app() {
 beforeEach(() => {
   vi.clearAllMocks();
   db.costPeriod.findFirst.mockResolvedValue({ id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 24, salesQuantity: 24 });
-  db.company.findFirst.mockResolvedValue({ unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 } });
+  db.company.findFirst.mockResolvedValue({
+    unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 },
+    paquetesRubro: [{ category: CATEGORIA_AVICOLA_POSTURA }],
+  });
+  db.paqueteRubro.findMany.mockResolvedValue([{
+    category: CATEGORIA_AVICOLA_POSTURA,
+    companyId: 'company-1',
+    structureId: null,
+    periodId: null,
+    userId: USER,
+    ...PAQUETE_AVICOLA_POSTURA,
+    scale: null,
+  }]);
   db.parametroCosteo.findMany.mockResolvedValue([]);
   db.calculationRun.findFirst.mockResolvedValue({
     id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
@@ -58,6 +75,44 @@ beforeEach(() => {
 });
 
 describe('GET /periods/:id/tablero-dueno', () => {
+  it('declara rubro ausente y su motivo sin inferirlo desde industry', async () => {
+    db.company.findFirst.mockResolvedValue({
+      industry: 'cualquier texto',
+      unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 },
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { data: { rubro?: unknown; pendientes: Array<{ area: string; dato: string }> } };
+    expect(body.data).toHaveProperty('rubro');
+    expect(body.data.rubro).toBeNull();
+    expect(body.data.pendientes).toContainEqual({
+      area: 'configuracion',
+      dato: 'La empresa no tiene un paquete de rubro declarado',
+      periodo: { id: PERIOD_ID, codigo: '2026-09' },
+    });
+  });
+
+  it('publica la clave y los íconos exactos del paquete avícola resuelto', async () => {
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { data: { rubro: unknown } };
+    expect(body.data.rubro).toEqual({
+      clave: CATEGORIA_AVICOLA_POSTURA,
+      icons: PAQUETE_AVICOLA_POSTURA.icons,
+    });
+    expect(db.paqueteRubro.findMany).toHaveBeenCalledWith({
+      where: {
+        category: CATEGORIA_AVICOLA_POSTURA,
+        OR: [{ userId: null }, { userId: USER }],
+      },
+    });
+  });
+
   it('devuelve en una llamada el contrato de los seis indicadores', async () => {
     const server = await app();
     const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
