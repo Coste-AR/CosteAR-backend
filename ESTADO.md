@@ -38,4 +38,4 @@
 - 📌 **#115 y #116 son el mismo patrón**: el dominio, la tabla y la RLS ya existen; falta el
   servicio o la ruta que los use. Ahora que la Fase 3 cerró, **no hay nada bloqueándolos**.
 
-**En curso:** Alan — #252, contrato de unidad en resultados de cálculo y comparación.
+**Entregado:** Alan — #252 en PR #341; listo para revisión, sin mergear.
