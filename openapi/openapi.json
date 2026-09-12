@@ -89,6 +89,26 @@
                           "additionalProperties": false,
                           "nullable": true
                         },
+                        "rubro": {
+                          "type": "object",
+                          "properties": {
+                            "clave": {
+                              "type": "string"
+                            },
+                            "icons": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "clave",
+                            "icons"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
                         "pendientes": {
                           "type": "array",
                           "items": {
@@ -538,6 +558,7 @@
                         "periodo",
                         "corrida",
                         "unidadGestion",
+                        "rubro",
                         "pendientes",
                         "costoPorCajon",
                         "precioPromedioVenta",

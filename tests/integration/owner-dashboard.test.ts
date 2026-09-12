@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OwnerDashboardService } from '@/application/cost-structures/owner-dashboard-service.js';
+import {
+  CATEGORIA_AVICOLA_POSTURA,
+  PAQUETE_AVICOLA_POSTURA,
+} from '@/application/operacion/paquete-avicola.js';
 import { withTenant } from '@/infrastructure/database/prisma.js';
 import { createTenant, disconnect, type Tenant } from './helpers/tenants.js';
 
@@ -10,6 +14,16 @@ beforeAll(async () => {
   A = await createTenant('tablero-dueno-a');
   B = await createTenant('tablero-dueno-b');
   await withTenant(A.userId, async (tx) => {
+    await tx.paqueteRubro.create({
+      data: {
+        category: CATEGORIA_AVICOLA_POSTURA,
+        companyId: A.companyId,
+        structureId: null,
+        periodId: null,
+        userId: A.userId,
+        ...PAQUETE_AVICOLA_POSTURA,
+      },
+    });
     const unidad = await tx.unidadMedida.create({
       data: { companyId: A.companyId, userId: A.userId, codigo: 'cajon', nombre: 'Cajón de prueba', factor: 12 },
     });
@@ -51,6 +65,10 @@ describe('A-07 — tablero del dueño por período', () => {
     expect(tablero.costoPorCajon.variable).toMatchObject({ parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] });
     expect(tablero.pendientes).toEqual([]);
     expect(tablero.unidadGestion).toEqual({ codigo: 'cajon', nombre: 'Cajón de prueba', factor: 12 });
+    expect(tablero.rubro).toEqual({
+      clave: CATEGORIA_AVICOLA_POSTURA,
+      icons: PAQUETE_AVICOLA_POSTURA.icons,
+    });
   });
 
   it('responde unidadGestion null, sin default, cuando la empresa no la declaró', async () => {
@@ -58,6 +76,12 @@ describe('A-07 — tablero del dueño por período', () => {
     // contrato con `unidadGestion: null` explícito, nunca un default inventado.
     const tablero = await new OwnerDashboardService().get(B.userId, B.periodId);
     expect(tablero.unidadGestion).toBeNull();
+    expect(tablero.rubro).toBeNull();
+    expect(tablero.pendientes).toContainEqual({
+      area: 'configuracion',
+      dato: 'La empresa no tiene un paquete de rubro declarado',
+      periodo: { id: B.periodId, codigo: expect.any(String) },
+    });
   });
 
   it('marca incompletos los indicadores comerciales si no hay ventas', async () => {
