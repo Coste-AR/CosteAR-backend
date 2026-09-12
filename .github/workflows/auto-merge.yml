@@ -123,7 +123,8 @@ jobs:
             --json number,isDraft,labels,baseRefName,mergeStateStatus,title,createdAt \
             | jq 'sort_by(.createdAt)')
 
-          echo "$pendientes" | jq -c '.[]' | while read -r pr; do
+          falla_pat_ocurrio=0
+          while read -r pr; do
             n=$(jq -r '.number'         <<<"$pr")
             base=$(jq -r '.baseRefName' <<<"$pr")
             draft=$(jq -r '.isDraft'    <<<"$pr")
@@ -296,7 +297,8 @@ jobs:
               fi
 
               echo "::endgroup::"
-              exit 1
+              falla_pat_ocurrio=1
+              continue
             fi
 
             # YA NO ESTA ATRASADO: SE SACA LA ETIQUETA.
@@ -396,4 +398,8 @@ jobs:
               echo "FALLO el merge de #$n. Queda abierto para que lo mire una persona."
             fi
             echo "::endgroup::"
-          done
+          done < <(echo "$pendientes" | jq -c '.[]')
+
+          if [ "$falla_pat_ocurrio" -ne 0 ]; then
+            exit 1
+          fi
