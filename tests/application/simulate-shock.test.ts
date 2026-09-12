@@ -68,6 +68,7 @@ function serviceWith() {
     costStructure: { findFirst: vi.fn(async () => structure) },
     dataPoint: { findMany: vi.fn(async () => []) },
     costPeriod: { findFirst: vi.fn(async () => null) },
+    company: { findFirst: vi.fn(async () => ({ unidadGestion: null })) },
     parametroCosteo: { findMany: vi.fn(async () => []) },
   };
   return new CostStructureService(db as never);
@@ -111,6 +112,7 @@ describe('Shock Test — con N materias primas', () => {
       costStructure: { findFirst: vi.fn(async () => structure) },
       dataPoint: { findMany: vi.fn(async () => []) },
       costPeriod: { findFirst: vi.fn(async () => null) },
+      company: { findFirst: vi.fn(async () => ({ unidadGestion: null })) },
       parametroCosteo: { findMany: vi.fn(async () => []) },
       costCalculation: { create: vi.fn() },
       $transaction: vi.fn(),
