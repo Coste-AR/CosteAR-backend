@@ -5,6 +5,7 @@ import {
   crearConversorUnidadGestion,
   type UnidadGestion,
 } from '../../domain/units/unidad-gestion.js';
+import { PaqueteRubroService } from '../operacion/paquete-rubro-service.js';
 
 type ParametroSinConfirmar = {
   id: string;
@@ -106,12 +107,26 @@ export class OwnerDashboardService {
       })),
       withTenant(userId, (tx) => tx.company.findFirst({
         where: { id: period.companyId },
-        select: { unidadGestion: { select: { codigo: true, nombre: true, factor: true } } },
+        select: {
+          unidadGestion: { select: { codigo: true, nombre: true, factor: true } },
+          paquetesRubro: { select: { category: true } },
+        },
       })),
     ]);
     const unidadGestion: UnidadGestion | null = company?.unidadGestion
       ? { codigo: company.unidadGestion.codigo, nombre: company.unidadGestion.nombre, factor: Number(company.unidadGestion.factor) }
       : null;
+    const categoriasRubro = [...new Set(company?.paquetesRubro?.map((paquete) => paquete.category) ?? [])];
+    const categoriaRubro = categoriasRubro.length === 1 ? categoriasRubro[0]! : null;
+    const paqueteRubro = categoriaRubro
+      ? await new PaqueteRubroService(this.db).resolve(userId, categoriaRubro, { companyId: period.companyId })
+      : null;
+    const rubro = paqueteRubro
+      ? { clave: paqueteRubro.category, icons: paqueteRubro.icons as Record<string, string> }
+      : null;
+    const pendienteRubro: FuentePendiente[] = rubro === null
+      ? [{ area: 'configuracion', dato: 'La empresa no tiene un paquete de rubro declarado' }]
+      : [];
     const conversor = crearConversorUnidadGestion(unidadGestion);
 
     const sinCorrida = ['No hay una corrida de cálculo para este período.'];
@@ -119,8 +134,11 @@ export class OwnerDashboardService {
       const falta = incompleto(sinCorrida);
       const periodo = { id: period.id, codigo: period.code };
       return {
-        periodo, corrida: null, unidadGestion,
-        pendientes: pendientesUnicos(periodo, [{ area: 'calculo', dato: 'corrida de cálculo' }]),
+        periodo, corrida: null, unidadGestion, rubro,
+        pendientes: pendientesUnicos(periodo, [
+          { area: 'calculo', dato: 'corrida de cálculo' },
+          ...pendienteRubro,
+        ]),
         costoPorCajon: { variable: falta, fijo: falta, total: falta },
         precioPromedioVenta: falta, contribucionMarginalPorCajon: falta,
         puntoEquilibrioCajones: { ...falta, fechaUltimoRecalculo: null },
@@ -168,6 +186,7 @@ export class OwnerDashboardService {
     const pendientes = pendientesUnicos(periodo, [
       ...pendientesBase,
       ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de gestión de la empresa' }] : []),
+      ...pendienteRubro,
       ...(baseUnidades <= 0 ? [{ area: 'produccion' as const, dato: 'cantidad producida mayor a cero' }] : []),
       ...(sinVentas.length > 0 ? [{ area: 'ventas' as const, dato: 'ventas del período' }] : []),
       ...pendientesClasificacion,
@@ -204,6 +223,7 @@ export class OwnerDashboardService {
       periodo,
       corrida: { id: run.id, validada: run.validated, ejecutadaEn: run.executedAt.toISOString() },
       unidadGestion,
+      rubro,
       pendientes,
       costoPorCajon: costos,
       precioPromedioVenta: convertido(contribucion?.precioUnitario ?? null, [...motivosBase, ...sinVentas]),

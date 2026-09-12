@@ -39,6 +39,12 @@ export interface paths {
                                     nombre: string;
                                     factor: number;
                                 } | null;
+                                rubro: {
+                                    clave: string;
+                                    icons: {
+                                        [key: string]: string;
+                                    };
+                                } | null;
                                 pendientes: {
                                     /** @enum {string} */
                                     area: "calculo" | "imputacion" | "configuracion" | "produccion" | "ventas" | "costeo";

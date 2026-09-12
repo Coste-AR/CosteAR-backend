@@ -16,7 +16,7 @@
   no gastan contexto de la sesión.
 -->
 
-**Actualizado: 11-09-2026**
+**Actualizado: 12-09-2026**
 
 - ✅ **La Fase 3 cerró.** El PR #144 entró y el #72 está cerrado: la deriva del schema ya no se
   filtra, se acabó. **`prisma/schema.prisma` vuelve a estar libre** — la prohibición de ayer no corre.
@@ -38,4 +38,4 @@
 - 📌 **#115 y #116 son el mismo patrón**: el dominio, la tabla y la RLS ya existen; falta el
   servicio o la ruta que los use. Ahora que la Fase 3 cerró, **no hay nada bloqueándolos**.
 
-**Entregado:** Alan — #252 en PR #341; listo para revisión, sin mergear.
+**Entregado:** Codex — #342 en PR #344; listo para revisión, sin mergear.
