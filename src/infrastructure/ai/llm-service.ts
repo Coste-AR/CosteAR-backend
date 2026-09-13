@@ -137,8 +137,7 @@ export function getLLMService(useCase: LlmUseCase): LLMService {
   let provider = providerByUseCase[useCase];
 
   const anthropicKey = env.ANTHROPIC_API_KEY;
-  const anthropicConfigured =
-    anthropicKey.length > 10 && anthropicKey !== 'anthropic_placeholder';
+  const anthropicConfigured = anthropicKey != null && anthropicKey.length > 10;
 
   if (provider === 'anthropic' && !anthropicConfigured) {
     if (!loggedAnthropicFallback) {

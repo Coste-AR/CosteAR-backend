@@ -1,6 +1,10 @@
 import { Decimal } from 'decimal.js';
 import type { FrozenCalculation } from '../../domain/calculations/calculate.js';
 import { materialsOf } from '../../domain/periods/closing-stock.js';
+import {
+  crearConversorUnidadGestion,
+  type UnidadGestion,
+} from '../../domain/units/unidad-gestion.js';
 
 /**
  * COMPARACIÓN ENTRE PERÍODOS (problema C — Fase 4).
@@ -119,6 +123,10 @@ export interface PeriodComparison {
   warnings: string[];
   macroContrast: MacroContrast | null;
 }
+
+export type PeriodComparisonWithUnit = PeriodComparison & {
+  unidadGestion: UnidadGestion | null;
+};
 
 export interface PeriodRef {
   code: string;
@@ -365,6 +373,44 @@ export function comparePeriods(from: PeriodSide, to: PeriodSide): PeriodComparis
     offsetting,
     warnings,
     macroContrast: null,
+  };
+}
+
+/** Proyecta sólo el plano por unidad; los totales monetarios nunca se convierten. */
+export function proyectarComparacionEnUnidadGestion(
+  comparison: PeriodComparison,
+  unidadGestion: UnidadGestion | null,
+): PeriodComparisonWithUnit {
+  const conversor = crearConversorUnidadGestion(unidadGestion);
+  const convertirDelta = <T extends Delta>(value: T): T => ({
+    ...value,
+    a: conversor.importeUnitarioDesdeBase(value.a),
+    b: conversor.importeUnitarioDesdeBase(value.b),
+    delta: conversor.importeUnitarioDesdeBase(value.delta),
+  });
+  const convertirTotals = (value: Totals): Totals => ({
+    rawMaterial: convertirDelta(value.rawMaterial),
+    directLabor: convertirDelta(value.directLabor),
+    indirectCosts: convertirDelta(value.indirectCosts),
+    productionCost: convertirDelta(value.productionCost),
+    costOfGoodsSold: convertirDelta(value.costOfGoodsSold),
+    grossMargin: convertirDelta(value.grossMargin),
+  });
+
+  return {
+    ...comparison,
+    unidadGestion: conversor.unidadGestion,
+    units: {
+      ...comparison.units,
+      from: comparison.units.from === null
+        ? null
+        : conversor.cantidadDesdeBase(comparison.units.from),
+      to: comparison.units.to === null
+        ? null
+        : conversor.cantidadDesdeBase(comparison.units.to),
+    },
+    unit: comparison.unit ? convertirTotals(comparison.unit) : null,
+    componentsUnit: comparison.componentsUnit?.map(convertirDelta) ?? null,
   };
 }
 

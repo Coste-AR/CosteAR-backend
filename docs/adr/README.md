@@ -70,5 +70,6 @@ adelante todo va a esta carpeta, un archivo por decisión.
 
 <!-- Se agrega una línea por ADR. Más reciente arriba. -->
 
+- [0015 — Proyectar resultados en la unidad de gestión](./0015-proyectar-resultados-en-unidad-de-gestion.md) — 11-09-2026 · **Aceptada**. El motor persiste en base y una sola abstracción de dominio proyecta la salida sin inferir unidades.
 - [0010 — Exponer pendientes de cierre desde el tablero](./0010-exponer-pendientes-de-cierre-desde-el-tablero.md) — 06-09-2026 · **Aceptada**. El tablero publica pendientes estructurados sin reemplazar los motivos existentes.
 - [0001 — Separar los tests en tres suites según el rol de Postgres que necesitan](./0001-tres-suites-de-test-segun-el-rol-de-postgres.md) — 15-08-2026 · **Aceptada**. 61 tests no corrían en ningún lado, entre ellos los 34 del aislamiento entre empresas.

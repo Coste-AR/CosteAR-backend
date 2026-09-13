@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { ParametrosCosteoService } from '@/application/parametros/parametros-costeo-service.js';
 import { NotFoundError, UnprocessableEntityError } from '@/domain/errors/domain-error.js';
+import { PAQUETE_AVICOLA_POSTURA } from '@/application/operacion/paquete-avicola.js';
 
 const recordTraceAudit = vi.fn(async () => undefined);
 vi.mock('@/application/audit/trace-audit.js', () => ({
@@ -27,7 +28,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
  */
 
 const USER = 'user-1';
-const COMPANY = { id: 'comp-1', userId: USER };
+const COMPANY = { id: 'comp-1', userId: USER, industry: 'AVICULTURA', unidadGestionId: null };
 
 let dbActual: Record<string, unknown>;
 
@@ -36,6 +37,14 @@ function makeDb(overrides: Record<string, unknown> = {}) {
     company: { findFirst: vi.fn(async () => COMPANY) },
     costStructure: { findFirst: vi.fn(async () => ({ id: 'est-1', companyId: 'comp-1' })) },
     costPeriod: { findFirst: vi.fn(async () => ({ id: 'per-1', companyId: 'comp-1' })) },
+    unidadMedida: { findFirst: vi.fn(async () => null) },
+    paqueteRubro: {
+      findMany: vi.fn(async () => [{
+        category: 'AVICOLA_POSTURA', userId: null, companyId: null, structureId: null, periodId: null,
+        ...PAQUETE_AVICOLA_POSTURA, scale: null,
+      }]),
+    },
+    configuracionModuloRubro: { findMany: vi.fn(async () => []) },
     parametroCosteo: {
       findMany: vi.fn(async () => []),
       findFirst: vi.fn(async () => null),
@@ -98,13 +107,14 @@ describe('#115 — resolución de parámetros de costeo', () => {
     ).rejects.toThrow(NotFoundError);
   });
 
-  it('`listar` resuelve las 10 claves del catálogo avícola', async () => {
+  it('`listar` pregunta sólo las claves habilitadas por módulos prendidos', async () => {
     const db = makeDb();
     const r = await service(db).listar(USER, 'comp-1');
-    expect(r).toHaveLength(10);
-    expect(r.map((p) => p.clave)).toContain('umbral_merma_normal_pct');
-    expect(r.map((p) => p.clave)).toContain('umbral_variacion_punto_equilibrio_pct');
-    expect(r.map((p) => p.clave)).toContain('vida_util_producto_dias');
+    expect(r.map((p) => p.clave)).toEqual(expect.arrayContaining([
+      'huevos_por_cajon', 'vida_util_lote_meses', 'unidad_carga', 'unidad_gestion',
+    ]));
+    expect(r.map((p) => p.clave)).not.toContain('umbral_merma_normal_pct');
+    expect(r.map((p) => p.clave)).not.toContain('gramaje_estandar_gr');
   });
 
   describe('set', () => {

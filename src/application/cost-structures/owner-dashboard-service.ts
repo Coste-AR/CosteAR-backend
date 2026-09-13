@@ -1,6 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
+import {
+  crearConversorUnidadGestion,
+  type UnidadGestion,
+} from '../../domain/units/unidad-gestion.js';
+import { PaqueteRubroService } from '../operacion/paquete-rubro-service.js';
 
 type ParametroSinConfirmar = {
   id: string;
@@ -80,7 +85,10 @@ const completo = (valor: number, parametrosSinConfirmarDetalle: ParametroSinConf
 /**
  * Compone los seis indicadores del tablero sin recalcularlos. Lee una foto de
  * CalculationRun del período y transforma solamente las unidades internas a la
- * unidad de venta configurada (`cajon`).
+ * unidad de gestión que la empresa declaró (`Company.unidadGestionId`, #274).
+ * Sin esa declaración no hay a qué unidad convertir: los indicadores por unidad
+ * quedan incompletos y la respuesta lo dice con `unidadGestion: null`, nunca con
+ * un default inventado (#252).
  */
 export class OwnerDashboardService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -92,24 +100,45 @@ export class OwnerDashboardService {
     }));
     if (!period) throw new NotFoundError('Período de costos no encontrado');
 
-    const [run, unidadVenta] = await Promise.all([
+    const [run, company] = await Promise.all([
       withTenant(userId, (tx) => tx.calculationRun.findFirst({
         where: { periodId }, orderBy: [{ validated: 'desc' }, { executedAt: 'desc' }],
         select: { id: true, validated: true, executedAt: true, results: true },
       })),
-      withTenant(userId, (tx) => tx.unidadMedida.findFirst({
-        where: { companyId: period.companyId, codigo: 'cajon', deletedAt: null },
-        select: { factor: true },
+      withTenant(userId, (tx) => tx.company.findFirst({
+        where: { id: period.companyId },
+        select: {
+          unidadGestion: { select: { codigo: true, nombre: true, factor: true } },
+          paquetesRubro: { select: { category: true } },
+        },
       })),
     ]);
+    const unidadGestion: UnidadGestion | null = company?.unidadGestion
+      ? { codigo: company.unidadGestion.codigo, nombre: company.unidadGestion.nombre, factor: Number(company.unidadGestion.factor) }
+      : null;
+    const categoriasRubro = [...new Set(company?.paquetesRubro?.map((paquete) => paquete.category) ?? [])];
+    const categoriaRubro = categoriasRubro.length === 1 ? categoriasRubro[0]! : null;
+    const paqueteRubro = categoriaRubro
+      ? await new PaqueteRubroService(this.db).resolve(userId, categoriaRubro, { companyId: period.companyId })
+      : null;
+    const rubro = paqueteRubro
+      ? { clave: paqueteRubro.category, icons: paqueteRubro.icons as Record<string, string> }
+      : null;
+    const pendienteRubro: FuentePendiente[] = rubro === null
+      ? [{ area: 'configuracion', dato: 'La empresa no tiene un paquete de rubro declarado' }]
+      : [];
+    const conversor = crearConversorUnidadGestion(unidadGestion);
 
     const sinCorrida = ['No hay una corrida de cálculo para este período.'];
     if (!run) {
       const falta = incompleto(sinCorrida);
       const periodo = { id: period.id, codigo: period.code };
       return {
-        periodo, corrida: null,
-        pendientes: pendientesUnicos(periodo, [{ area: 'calculo', dato: 'corrida de cálculo' }]),
+        periodo, corrida: null, unidadGestion, rubro,
+        pendientes: pendientesUnicos(periodo, [
+          { area: 'calculo', dato: 'corrida de cálculo' },
+          ...pendienteRubro,
+        ]),
         costoPorCajon: { variable: falta, fijo: falta, total: falta },
         precioPromedioVenta: falta, contribucionMarginalPorCajon: falta,
         puntoEquilibrioCajones: { ...falta, fechaUltimoRecalculo: null },
@@ -122,7 +151,7 @@ export class OwnerDashboardService {
     const contribucion = resultado.contribucionMarginal;
     const equilibrio = resultado.puntoEquilibrio;
     const unidadesEquilibrio = equilibrio?.unidadesEquilibrio ?? null;
-    const factor = unidadVenta ? Number(unidadVenta.factor) : null;
+    const factor = unidadGestion ? unidadGestion.factor : null;
     const motivosBase = resultado.incompletitud?.incompleto ? (resultado.incompletitud.motivos ?? []) : [];
     const datosPendientesBase = resultado.incompletitud?.datosPendientes ?? [];
     const idsParametros = contribucion?.componentes.map((c) => c.parametroId).filter((id): id is string => id !== null) ?? [];
@@ -136,7 +165,7 @@ export class OwnerDashboardService {
           nombre: parametro.descripcion?.trim() || parametro.clave,
         })))
       : [];
-    const sinUnidad = factor === null ? ['Falta configurar la unidad de venta "cajon" con su factor de conversión.'] : [];
+    const sinUnidad = factor === null ? ['La empresa no tiene declarada su unidad de gestión.'] : [];
     const baseUnidades = Number(period.productionQuantity ?? 0);
     const sinProduccion = baseUnidades <= 0 ? ['Falta cargar una cantidad producida mayor a cero para el período.'] : [];
     const sinVentas = !contribucion || contribucion.unidadesVendidas <= 0
@@ -156,7 +185,8 @@ export class OwnerDashboardService {
     }) ?? [];
     const pendientes = pendientesUnicos(periodo, [
       ...pendientesBase,
-      ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de venta "cajon" con factor de conversión' }] : []),
+      ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de gestión de la empresa' }] : []),
+      ...pendienteRubro,
       ...(baseUnidades <= 0 ? [{ area: 'produccion' as const, dato: 'cantidad producida mayor a cero' }] : []),
       ...(sinVentas.length > 0 ? [{ area: 'ventas' as const, dato: 'ventas del período' }] : []),
       ...pendientesClasificacion,
@@ -171,23 +201,29 @@ export class OwnerDashboardService {
       : {
           variable: contribucion.costoVariableUnitario === null
             ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], parametrosSinConfirmar)
-            : completo(contribucion.costoVariableUnitario * factor, parametrosSinConfirmar, motivosBase),
+            : completo(conversor.importeUnitarioDesdeBase(contribucion.costoVariableUnitario), parametrosSinConfirmar, motivosBase),
           fijo: completo(
-            contribucion.componentes.filter((c) => c.comportamientoVolumen === 'FIJO').reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades * factor,
+            conversor.importeUnitarioDesdeBase(
+              contribucion.componentes
+                .filter((c) => c.comportamientoVolumen === 'FIJO')
+                .reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades,
+            ),
             parametrosSinConfirmar,
             motivosBase,
           ),
-          total: completo(resultado.detail.unitCost.unitFinishedGoodsCost * factor, parametrosSinConfirmar, motivosBase),
+          total: completo(conversor.importeUnitarioDesdeBase(resultado.detail.unitCost.unitFinishedGoodsCost), parametrosSinConfirmar, motivosBase),
         };
 
     const convertido = (numero: number | null, motivos: string[]): NumeroTablero =>
       numero === null || factor === null || motivos.length > 0
         ? incompleto([...motivos, ...sinUnidad], parametrosSinConfirmar)
-        : completo(numero * factor, parametrosSinConfirmar);
+        : completo(conversor.importeUnitarioDesdeBase(numero), parametrosSinConfirmar);
 
     return {
       periodo,
       corrida: { id: run.id, validada: run.validated, ejecutadaEn: run.executedAt.toISOString() },
+      unidadGestion,
+      rubro,
       pendientes,
       costoPorCajon: costos,
       precioPromedioVenta: convertido(contribucion?.precioUnitario ?? null, [...motivosBase, ...sinVentas]),
@@ -198,12 +234,12 @@ export class OwnerDashboardService {
       puntoEquilibrioCajones: {
         ...(equilibrio?.incompleta || unidadesEquilibrio === null || factor === null
           ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], parametrosSinConfirmar)
-          : completo(unidadesEquilibrio / factor, parametrosSinConfirmar, motivosBase)),
+          : completo(conversor.cantidadDesdeBase(unidadesEquilibrio), parametrosSinConfirmar, motivosBase)),
         fechaUltimoRecalculo: equilibrio?.fechaUltimoRecalculo ?? null,
       },
       producidoCajones: factor === null || baseUnidades <= 0
         ? incompleto([...sinProduccion, ...sinUnidad])
-        : completo(baseUnidades / factor),
+        : completo(conversor.cantidadDesdeBase(baseUnidades)),
       resultadoPeriodo: resultado.grossMargin == null || sinVentas.length > 0
         ? incompleto([...motivosBase, ...sinVentas], parametrosSinConfirmar)
         : completo(resultado.grossMargin, parametrosSinConfirmar, motivosBase),

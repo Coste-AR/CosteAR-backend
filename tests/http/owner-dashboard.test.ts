@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import {
+  CATEGORIA_AVICOLA_POSTURA,
+  PAQUETE_AVICOLA_POSTURA,
+} from '@/application/operacion/paquete-avicola.js';
 
 const USER = 'user-1';
 const PERIOD_ID = '00000000-0000-0000-0000-000000000001';
@@ -8,7 +12,8 @@ const { db } = vi.hoisted(() => ({
   db: {
     costPeriod: { findFirst: vi.fn() },
     calculationRun: { findFirst: vi.fn() },
-    unidadMedida: { findFirst: vi.fn() },
+    company: { findFirst: vi.fn() },
+    paqueteRubro: { findMany: vi.fn() },
     parametroCosteo: { findMany: vi.fn() },
   },
 }));
@@ -28,7 +33,13 @@ async function app() {
   const Fastify = (await import('fastify')).default;
   const { registerOwnerDashboardRoutes } = await import('@/infrastructure/http/routes/owner-dashboard.routes.js');
   const { errorHandler } = await import('@/infrastructure/http/error-handler.js');
+  // La ruta declara `schema.response` con Zod (#282): sin estos dos compilers
+  // Fastify intenta leer el ZodObject como JSON Schema crudo y explota al
+  // construir la ruta. `app.ts` los setea igual, scoped al prefijo `/api`.
+  const { serializerCompiler, validatorCompiler } = await import('fastify-type-provider-zod');
   const server = Fastify({ logger: false });
+  server.setValidatorCompiler(validatorCompiler);
+  server.setSerializerCompiler(serializerCompiler);
   server.setErrorHandler(errorHandler);
   await server.register(registerOwnerDashboardRoutes);
   await server.ready();
@@ -38,7 +49,19 @@ async function app() {
 beforeEach(() => {
   vi.clearAllMocks();
   db.costPeriod.findFirst.mockResolvedValue({ id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 24, salesQuantity: 24 });
-  db.unidadMedida.findFirst.mockResolvedValue({ factor: 12 });
+  db.company.findFirst.mockResolvedValue({
+    unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 },
+    paquetesRubro: [{ category: CATEGORIA_AVICOLA_POSTURA }],
+  });
+  db.paqueteRubro.findMany.mockResolvedValue([{
+    category: CATEGORIA_AVICOLA_POSTURA,
+    companyId: 'company-1',
+    structureId: null,
+    periodId: null,
+    userId: USER,
+    ...PAQUETE_AVICOLA_POSTURA,
+    scale: null,
+  }]);
   db.parametroCosteo.findMany.mockResolvedValue([]);
   db.calculationRun.findFirst.mockResolvedValue({
     id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
@@ -52,6 +75,44 @@ beforeEach(() => {
 });
 
 describe('GET /periods/:id/tablero-dueno', () => {
+  it('declara rubro ausente y su motivo sin inferirlo desde industry', async () => {
+    db.company.findFirst.mockResolvedValue({
+      industry: 'cualquier texto',
+      unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 },
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { data: { rubro?: unknown; pendientes: Array<{ area: string; dato: string }> } };
+    expect(body.data).toHaveProperty('rubro');
+    expect(body.data.rubro).toBeNull();
+    expect(body.data.pendientes).toContainEqual({
+      area: 'configuracion',
+      dato: 'La empresa no tiene un paquete de rubro declarado',
+      periodo: { id: PERIOD_ID, codigo: '2026-09' },
+    });
+  });
+
+  it('publica la clave y los íconos exactos del paquete avícola resuelto', async () => {
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { data: { rubro: unknown } };
+    expect(body.data.rubro).toEqual({
+      clave: CATEGORIA_AVICOLA_POSTURA,
+      icons: PAQUETE_AVICOLA_POSTURA.icons,
+    });
+    expect(db.paqueteRubro.findMany).toHaveBeenCalledWith({
+      where: {
+        category: CATEGORIA_AVICOLA_POSTURA,
+        OR: [{ userId: null }, { userId: USER }],
+      },
+    });
+  });
+
   it('devuelve en una llamada el contrato de los seis indicadores', async () => {
     const server = await app();
     const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
@@ -63,7 +124,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data).toHaveProperty('puntoEquilibrioCajones');
     expect(body.data).toHaveProperty('producidoCajones');
     expect(body.data).toHaveProperty('resultadoPeriodo');
-    expect(body.data).toMatchObject({ pendientes: [] });
+    expect(body.data).toMatchObject({ pendientes: [], unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 12 } });
     expect(body.data.costoPorCajon).toMatchObject({
       variable: { parametrosSinConfirmar: false, parametrosSinConfirmarDetalle: [] },
     });
@@ -98,7 +159,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
 
   it('devuelve los pendientes estructurados sin alterar los motivos de cada indicador', async () => {
     db.costPeriod.findFirst.mockResolvedValue({ id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 0, salesQuantity: 0 });
-    db.unidadMedida.findFirst.mockResolvedValue(null);
+    db.company.findFirst.mockResolvedValue({ unidadGestion: null });
     db.calculationRun.findFirst.mockResolvedValue({
       id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
       results: {
@@ -132,10 +193,11 @@ describe('GET /periods/:id/tablero-dueno', () => {
     const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
 
     expect(response.statusCode).toBe(200);
-    const body = JSON.parse(response.body) as { data: { pendientes: Array<{ area: string; dato: string; periodo: { id: string; codigo: string } }>; precioPromedioVenta: { motivos: string[] } } };
+    const body = JSON.parse(response.body) as { data: { pendientes: Array<{ area: string; dato: string; periodo: { id: string; codigo: string } }>; precioPromedioVenta: { motivos: string[] }; unidadGestion: unknown } };
+    expect(body.data.unidadGestion).toBeNull();
     expect(body.data.pendientes).toEqual(expect.arrayContaining([
       { area: 'imputacion', dato: 'Compra de prueba', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
-      { area: 'configuracion', dato: 'unidad de venta "cajon" con factor de conversión', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
+      { area: 'configuracion', dato: 'unidad de gestión de la empresa', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'produccion', dato: 'cantidad producida mayor a cero', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'ventas', dato: 'ventas del período', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'costeo', dato: 'clasificación frente al volumen del rubro Materia prima', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
@@ -153,10 +215,11 @@ describe('GET /periods/:id/tablero-dueno', () => {
     const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
 
     expect(response.statusCode).toBe(200);
-    const body = JSON.parse(response.body) as { data: { pendientes: unknown[]; resultadoPeriodo: { motivos: string[] } } };
+    const body = JSON.parse(response.body) as { data: { pendientes: unknown[]; resultadoPeriodo: { motivos: string[] }; unidadGestion: unknown } };
     expect(body.data.pendientes).toEqual([
       { area: 'calculo', dato: 'corrida de cálculo', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
     ]);
     expect(body.data.resultadoPeriodo.motivos).toEqual(['No hay una corrida de cálculo para este período.']);
+    expect(body.data.unidadGestion).toEqual({ codigo: 'cajon', nombre: 'Cajón', factor: 12 });
   });
 });

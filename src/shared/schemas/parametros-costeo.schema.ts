@@ -10,17 +10,20 @@ import { z } from 'zod';
  */
 export const setParametroCosteoSchema = z.object({
   valor: z.number().finite().optional(),
+  valorTexto: z.string().min(1).max(120).optional(),
   comportamientoVolumen: z.enum(['VARIABLE', 'FIJO', 'SEMIFIJO']).optional(),
   confirmado: z.boolean(),
   /** Nivel al que aplica. Ausentes = vale para toda la empresa. */
   structureId: z.string().uuid().nullable().optional(),
   periodId: z.string().uuid().nullable().optional(),
 }).superRefine((value, ctx) => {
-  if (value.valor === undefined && value.comportamientoVolumen === undefined) {
+  const cargados = [value.valor !== undefined, value.valorTexto !== undefined, value.comportamientoVolumen !== undefined]
+    .filter(Boolean).length;
+  if (cargados === 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Indicá un valor o un comportamiento frente al volumen.' });
   }
-  if (value.valor !== undefined && value.comportamientoVolumen !== undefined) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Un parámetro numérico y una clasificación se guardan por separado.' });
+  if (cargados > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Un parámetro numérico, una respuesta de opción y una clasificación se guardan por separado.' });
   }
 });
 

@@ -99,14 +99,17 @@ function period(o: {
   };
 }
 
-function makeDb(periods: unknown[]) {
+function makeDb(
+  periods: unknown[],
+  unidadGestion: { codigo: string; nombre: string; factor: number } | null = null,
+) {
   return {
     costStructure: {
       findFirst: vi.fn(async () => ({
         id: STRUCTURE,
         userId: USER,
         period: '2026-06',
-        company: { periodicity: 'MONTHLY' },
+        company: { periodicity: 'MONTHLY', unidadGestion },
       })),
     },
     costPeriod: {
@@ -119,6 +122,33 @@ const mayo = period({ code: '2026-05', label: 'Mayo 2026', snap: snapshot(500000
 const junio = period({ code: '2026-06', label: 'Junio 2026', snap: snapshot(600000, 220000, 110000) });
 
 describe('COMPARAR períodos (servicio)', () => {
+  it('convierte el plano unitario y declara la unidad de gestión', async () => {
+    const db = makeDb([junio, mayo], {
+      codigo: 'bulto',
+      nombre: 'Bulto de prueba',
+      factor: 10,
+    });
+    const svc = new CostPeriodService(db as never, sinMacro() as never);
+
+    const c = await svc.compare(USER, STRUCTURE);
+
+    expect(c.unidadGestion).toEqual({ codigo: 'bulto', nombre: 'Bulto de prueba', factor: 10 });
+    expect(c.units).toMatchObject({ from: 10, to: 10, comparable: true });
+    expect(c.unit!.productionCost.a).toBe(80000);
+    expect(c.unit!.productionCost.b).toBe(93000);
+    expect(c.total.productionCost.a).toBe(800000);
+  });
+
+  it('sin unidad declarada conserva el plano base y devuelve null explícito', async () => {
+    const svc = new CostPeriodService(makeDb([junio, mayo]) as never, sinMacro() as never);
+
+    const c = await svc.compare(USER, STRUCTURE);
+
+    expect(c.unidadGestion).toBeNull();
+    expect(c.units).toMatchObject({ from: 100, to: 100, comparable: true });
+    expect(c.unit!.productionCost.a).toBe(8000);
+  });
+
   it('sin elegir nada, compara el último contra el anterior', async () => {
     // Vienen del más nuevo al más viejo, como los devuelve la base.
     const db = makeDb([junio, mayo]);

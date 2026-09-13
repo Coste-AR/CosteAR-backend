@@ -53,6 +53,17 @@ jobs:
     - name: Ningún test con base puede quedar sin suite
       run: npm run check:tests-base
 
+    # El contrato tipado de #282: si una ruta convertida cambió sin regenerar
+    # openapi/openapi.json y openapi/types.d.ts, esto falla antes de que el
+    # artefacto publicado mienta sobre lo que la API devuelve.
+    - name: El contrato de API no puede quedar desactualizado
+      run: npm run check:openapi
+
+    # Prueba que `openapi/types.d.ts` es consumible sin Fastify/Prisma/servidor:
+    # tiene su propio tsconfig, que no extiende el del backend.
+    - name: El consumidor type-only del contrato compila solo
+      run: npm run typecheck:openapi-consumer
+
     - name: Run Tests
       run: npm run test
 

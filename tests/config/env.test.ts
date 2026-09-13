@@ -45,4 +45,12 @@ describe('parseEnv', () => {
     const env = parseEnv({ ...valid, EMAIL_FROM: 'no-es-email' });
     expect(env.EMAIL_FROM).toBe('no-es-email');
   });
+
+  it('arranca sin ninguna credencial de WhatsApp ni de Anthropic: quedan ausentes, no con un default que parece real (#255)', () => {
+    const env = parseEnv(valid);
+    expect(env.WHATSAPP_VERIFY_TOKEN).toBeUndefined();
+    expect(env.WHATSAPP_API_TOKEN).toBeUndefined();
+    expect(env.WHATSAPP_PHONE_NUMBER_ID).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
 });

@@ -4,9 +4,18 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-const CATEGORY = 'AVICULTURA';
+export const CATEGORY = 'AVICULTURA';
 
-const terminos = [
+/**
+ * Filas que este seed retiró porque pertenecen al vocabulario de un tenant.
+ * Se conservan los IDs, no los términos: permiten limpiar instalaciones ya
+ * sembradas sin volver a publicar los datos que motivaron la retirada.
+ */
+export const EXTERNAL_IDS_RETIRADOS = [
+  'AV-061', 'AV-062', 'AV-063', 'AV-064', 'AV-065', 'AV-067', 'AV-068',
+] as const;
+
+export const terminos = [
   {
     externalId: 'AV-001', termino: 'cajón', variantes: ['cajón de huevo', 'cajones'],
     concepto: 'Unidad de gestión del negocio avícola: 360 huevos = 12 maples de 30.',
@@ -25,11 +34,11 @@ const terminos = [
   },
   {
     externalId: 'AV-003', termino: 'bachada', variantes: ['bachadas'],
-    concepto: 'Lote de mezcla de alimento balanceado producido de una vez. 200 kg reales sobre 250 admitidos; ciclo de ~6 min; salida en ~5 bolsas de 40 kg.',
-    entidadDominio: 'Bachada (§7.2) — la unidad de producción del Departamento 1',
+    concepto: 'Lote de mezcla de alimento balanceado producido en una única corrida.',
+    entidadDominio: 'Bachada — unidad de producción de una planta de alimento',
     seccion: 'COSTOS_INDIRECTOS', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Regionalismo del NOA. En castellano técnico general sería "batch" o "partida de mezcla". Sin esto el clasificador no entiende el documento de producción de la planta.',
-    cita: 'Bachadas de 200 kg (la máquina admite 250, se carga menos para asegurar buena mezcla) — 001.2.46',
+    desambiguacion: 'Regionalismo del NOA. En castellano técnico general equivale a "batch" o "partida de mezcla".',
+    cita: 'Definición técnica del rubro.',
   },
   {
     externalId: 'AV-004', termino: 'estiba', variantes: ['estiva', 'estiba de harina'],
@@ -81,11 +90,11 @@ const terminos = [
   },
   {
     externalId: 'AV-010', termino: 'postura', variantes: ['tasa de postura', '% de postura', 'porcentaje de postura'],
-    concepto: 'Huevos puestos ÷ aves vivas × 100. DOS métricas distintas: postura por LOTE y postura de PLANTEL. En el cliente del vertical las dos difieren varios puntos.',
+    concepto: 'Huevos puestos ÷ aves vivas × 100. Puede medirse por lote o por plantel.',
     entidadDominio: 'ProduccionDiaria → derivada · fórmula §8.1',
     seccion: 'NO_APLICA', yaEnPerfil: true, ambiguo: true,
-    desambiguacion: 'AMBIGÜEDAD INTERNA: "postura" sin calificar no dice cuál de las dos es, y son números distintos que llevan a decisiones distintas.',
-    cita: 'postura del 94-94,5% [por lote] — 001.2.46; 88,5 % de plantel derivado — §11 del plan',
+    desambiguacion: '"Postura" sin calificar no distingue entre la métrica por lote y la de plantel.',
+    cita: 'Definición productiva del rubro.',
   },
   {
     externalId: 'AV-011', termino: 'blanca', variantes: ['gallina blanca', 'huevo blanco', 'Highline White'],
@@ -105,11 +114,11 @@ const terminos = [
   },
   {
     externalId: 'AV-013', termino: 'faena', variantes: ['faenar', 'umbral de faena'],
-    concepto: 'Fin del ciclo productivo del lote: se faena cuando la postura baja de 83-85 %.',
+    concepto: 'Fin del ciclo productivo de un lote de aves.',
     entidadDominio: 'Lote.estado (en_faena) · BajaAve.motivo (faena) · ReglaAlerta "umbral de faena"',
     seccion: 'NO_APLICA', yaEnPerfil: true, ambiguo: true,
     desambiguacion: '⚠️ COLISIÓN YA RESUELTA EN CÓDIGO: "faena" está en AVICOLA_NO_RE, que EXCLUYE del rubro a frigoríficos y mataderos. Un documento de la avícola que diga "faena" no debe reclasificar la empresa. La exclusión aplica a la DESCRIPCIÓN de la empresa, no al contenido de sus comprobantes.',
-    cita: 'Se faena cuando la postura baja de 83-85% — 001.2.46',
+    cita: 'Definición productiva del rubro.',
   },
   {
     externalId: 'AV-014', termino: 'replume', variantes: ['repluma', 'muda forzada'],
@@ -457,11 +466,11 @@ const terminos = [
   },
   {
     externalId: 'AV-057', termino: 'capacidad instalada', variantes: ['capacidad real operativa'],
-    concepto: 'Planta de alimento: 3.000 kg/h instalada vs. 2.000-2.500 kg/h real. La misma máquina alimenta 160.000 gallinas.',
-    entidadDominio: 'Capacidad normal del centro (CIP) — brecha #11',
+    concepto: 'Máximo de producción teórico de una instalación, distinguible de su capacidad real operativa.',
+    entidadDominio: 'Capacidad normal del centro (CIP)',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: true,
-    desambiguacion: '⚠️ TRES niveles distintos de capacidad (bachada, ritmo horario, jornada) que dan 80 %, 75 % y 3,9 % de uso.',
-    cita: 'Capacidad instalada 3.000 kg/hora; real operativa 2.000-2.500 — 001.2.46',
+    desambiguacion: 'Distinguir capacidad por bachada, ritmo horario y jornada antes de calcular el uso.',
+    cita: 'Definición operativa del rubro.',
   },
   {
     externalId: 'AV-058', termino: 'contador de bachadas', variantes: ['contador de la máquina'],
@@ -473,92 +482,42 @@ const terminos = [
   },
   {
     externalId: 'AV-059', termino: 'punto de equilibrio', variantes: ['PE', 'equilibrio'],
-    concepto: 'Cajones/mes que cubren el costo fijo. Su planilla dice 572; recalculado da 630-631.',
+    concepto: 'Nivel de actividad o ventas que cubre los costos fijos del período.',
     entidadDominio: 'Fórmula §8.3 — debe recalcularse ante cada cambio de precio',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: true,
     desambiguacion: '⚠️ No confundir con AV-022 "punto de quiebre del lote", que es un umbral de rinde agrícola.',
-    cita: '§8.3 y §11 test 7 del plan',
+    cita: 'Definición de costos.',
   },
   {
     externalId: 'AV-060', termino: 'presupuestado vs real', variantes: ['variación presupuestaria'],
-    concepto: 'El módulo que más resonó con el cliente. Su frase: "esto es un detector de ineficiencias, no de ladrones".',
+    concepto: 'Comparación entre el presupuesto y la ejecución para identificar desvíos.',
     entidadDominio: 'Ya existe en el núcleo (comparación de períodos)',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Usar su frase textual en la UI: define el tono con el que hay que presentar las alertas.',
-    cita: '001.2.43',
-  },
-  {
-    externalId: 'AV-061', termino: 'Ticucho', variantes: [],
-    concepto: 'Localidad donde está la planta de alimento.',
-    entidadDominio: 'Ubicación de la unidad de negocio "planta"',
-    seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Topónimo tucumano. Útil para desambiguar remitos.',
-    cita: '001.2.43',
-  },
-  {
-    externalId: 'AV-062', termino: 'Choromoro', variantes: [],
-    concepto: 'Localidad donde está la granja.',
-    entidadDominio: 'Ubicación de la unidad de negocio "granja"',
-    seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Topónimo tucumano.',
-    cita: '001.2.43',
-  },
-  {
-    externalId: 'AV-063', termino: 'Lule', variantes: [],
-    concepto: 'Origen de compras de maíz local; referencia de flete corto (~20.000-25.000 $/t).',
-    entidadDominio: 'LoteMateriaPrima.flete_unitario',
-    seccion: 'MATERIA_PRIMA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Topónimo tucumano.',
-    cita: '001.2.46',
-  },
-  {
-    externalId: 'AV-064', termino: 'local Ejército', variantes: ['local Belgrano', 'canal gastronómico'],
-    concepto: 'Canales de venta propios del cliente más el canal gastronómico.',
-    entidadDominio: 'Venta.canal (enum)',
-    seccion: 'VENTAS', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Nombres de avenidas de San Miguel de Tucumán.',
-    cita: 'local propio en Ejército y Belgrano — 001.2.43',
-  },
-  {
-    externalId: 'AV-065', termino: 'AGD', variantes: ['Bunge', 'Cargill', 'Roagro'],
-    concepto: 'Acopios/exportadoras. AGD tiene plataforma con descargas, carta de porte, cuenta corriente granaria, calidad y merma.',
-    entidadDominio: 'FUERA de Fase 1 · integración futura',
-    seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'Verificar si expone API pública.',
-    cita: '001.2.46',
+    desambiguacion: 'Los desvíos requieren contexto operativo antes de atribuir una causa.',
+    cita: 'Definición de control presupuestario.',
   },
   {
     externalId: 'AV-066', termino: 'IVA a favor', variantes: ['saldo técnico'],
-    concepto: 'Situación estructural: compra al 10,5 % y vende al 21 %. Quiere anticipar 15 días antes del cierre cuánto comprar/vender para optimizarlo.',
+    concepto: 'Crédito fiscal acumulado que puede surgir al comparar débitos y créditos de IVA.',
     entidadDominio: 'Fuera del costeo (R4: el IVA no es costo para RI)',
     seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: true,
     desambiguacion: '⚠️ NO debe entrar al costo. R4 del ground-truth: para RI el costeo corre sobre el neto.',
-    cita: '001.2.43',
-  },
-  {
-    externalId: 'AV-067', termino: 'apicultura', variantes: ['colmenas'],
-    concepto: 'Unidad de negocio con 60 colmenas desde octubre. Candidata a piloto por ser más simple.',
-    entidadDominio: 'FUERA de Fase 1',
-    seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'El plan la excluye de Fase 1. Ojo: AGRO_RE matchea "apicult", así que una factura de colmenas reclasificaría la empresa a AGRO.',
-    cita: '001.2.43 · industry-profile.ts:697',
-  },
-  {
-    externalId: 'AV-068', termino: 'vinagre de higo', variantes: ['finca de higos', 'Timbó'],
-    concepto: 'Unidad de negocio de arriendo de finca, con potencial de exportación.',
-    entidadDominio: 'FUERA de Fase 1',
-    seccion: 'NO_APLICA', yaEnPerfil: false, ambiguo: false,
-    desambiguacion: 'El plan la excluye (§4). El bot del cliente ya tiene un canal "higos".',
-    cita: '001.2.43',
+    cita: 'Criterio contable general.',
   },
 ];
 
-async function main() {
+export async function seedVocabularioAvicola(db: PrismaClient = prisma) {
   console.log(`Seeding vocabulario avícola (${terminos.length} términos)…`);
+
+  // El seed anterior ya pudo haber insertado estas filas. Limpiarlas por ID es
+  // idempotente y evita que desaparezcan del código pero sobrevivan en la base.
+  await db.vocabularioTermino.deleteMany({
+    where: { industryCategory: CATEGORY, externalId: { in: [...EXTERNAL_IDS_RETIRADOS] } },
+  });
 
   let upserted = 0;
   for (const t of terminos) {
-    await prisma.vocabularioTermino.upsert({
+    await db.vocabularioTermino.upsert({
       where: { industryCategory_termino: { industryCategory: CATEGORY, termino: t.termino } },
       update: { ...t, industryCategory: CATEGORY },
       create: { ...t, industryCategory: CATEGORY },
@@ -569,6 +528,8 @@ async function main() {
   console.log(`Done. ${upserted} términos upserted para ${CATEGORY}.`);
 }
 
-main()
-  .catch((e) => { console.error(e); process.exit(1); })
-  .finally(() => prisma.$disconnect());
+if (process.argv[1]?.endsWith('seed-vocabulario-avicola.ts')) {
+  seedVocabularioAvicola()
+    .catch((e) => { console.error(e); process.exit(1); })
+    .finally(() => prisma.$disconnect());
+}

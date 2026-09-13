@@ -1,0 +1,82 @@
+{
+  "_comment": "Set dorado STARTER de evaluación del RAG (F1-12). Ampliar con la auditoría de la cátedra (F1-03) y con los RAG_MISS históricos de daily_signals. Cada caso: id, question, expectedFiles (deben aparecer en el top-5), mustAnswer (false = trampa: el RAG debe negarse), criterion (lo evalúa un juez Claude).",
+  "cases": [
+    {
+      "id": "cm-definicion",
+      "question": "¿Qué es la contribución marginal?",
+      "expectedFiles": ["conocimiento/catedra/contribucion-marginal.md"],
+      "mustAnswer": true,
+      "criterion": "Explica que es el precio de venta unitario menos el costo variable unitario, y que sirve para cubrir costos fijos y luego generar ganancia."
+    },
+    {
+      "id": "cm-ratio",
+      "question": "¿Cómo se calcula el ratio de contribución marginal?",
+      "expectedFiles": ["conocimiento/catedra/contribucion-marginal.md"],
+      "mustAnswer": true,
+      "criterion": "Indica que es la contribución marginal dividida por el precio de venta."
+    },
+    {
+      "id": "cm-semifijo",
+      "question": "¿Cómo trato un costo semifijo para calcular la contribución marginal?",
+      "expectedFiles": ["conocimiento/catedra/contribucion-marginal.md"],
+      "mustAnswer": true,
+      "criterion": "Dice que hay que separar la parte fija de la variable y que solo la parte variable entra en la contribución; si no se conoce el tramo variable, el caso queda incompleto."
+    },
+    {
+      "id": "pe-unidades",
+      "question": "¿Cuál es la fórmula del punto de equilibrio en unidades?",
+      "expectedFiles": ["conocimiento/catedra/punto-de-equilibrio.md"],
+      "mustAnswer": true,
+      "criterion": "Da la fórmula costos fijos dividido contribución marginal unitaria."
+    },
+    {
+      "id": "pe-margen-seguridad",
+      "question": "¿Qué es el margen de seguridad?",
+      "expectedFiles": ["conocimiento/catedra/punto-de-equilibrio.md"],
+      "mustAnswer": true,
+      "criterion": "Explica que es la diferencia entre las ventas reales o proyectadas y las ventas del punto de equilibrio."
+    },
+    {
+      "id": "cip-base",
+      "question": "¿Qué base conviene para prorratear la energía de las máquinas?",
+      "expectedFiles": ["conocimiento/catedra/prorrateo-cip.md"],
+      "mustAnswer": true,
+      "criterion": "Recomienda horas máquina, porque la base debe tener relación de causa con el consumo del recurso."
+    },
+    {
+      "id": "cip-primario-secundario",
+      "question": "¿Qué diferencia hay entre prorrateo primario y secundario?",
+      "expectedFiles": ["conocimiento/catedra/prorrateo-cip.md"],
+      "mustAnswer": true,
+      "criterion": "El primario reparte los CIP entre todos los centros; el secundario redistribuye los centros de servicio hacia los productivos."
+    },
+    {
+      "id": "abs-var-diferencia",
+      "question": "¿Cuándo difieren el resultado por costeo por absorción y por costeo variable?",
+      "expectedFiles": ["conocimiento/catedra/absorcion-vs-variable.md"],
+      "mustAnswer": true,
+      "criterion": "Cuando la producción difiere de las ventas; si producción es igual a ventas, los dos métodos dan el mismo resultado."
+    },
+    {
+      "id": "fifo-inflacion",
+      "question": "¿Qué efecto tiene PEPS sobre la utilidad cuando los precios suben?",
+      "expectedFiles": ["conocimiento/catedra/valuacion-inventarios-fifo.md"],
+      "mustAnswer": true,
+      "criterion": "Costo de ventas más bajo y utilidad más alta, con el inventario final valuado cerca del costo de reposición."
+    },
+    {
+      "id": "trampa-fx",
+      "question": "¿Cuál es la cotización del dólar blue hoy?",
+      "expectedFiles": [],
+      "mustAnswer": false,
+      "criterion": "El RAG debe negarse: no es metodología de costeo y no está en la bóveda."
+    },
+    {
+      "id": "trampa-color-logo",
+      "question": "¿Qué color le pongo al logo de la empresa?",
+      "expectedFiles": [],
+      "mustAnswer": false,
+      "criterion": "El RAG debe negarse por no encontrar información relevante en la bóveda."
+    }
+  ]
+}

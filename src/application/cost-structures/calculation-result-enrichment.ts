@@ -7,6 +7,10 @@ import {
   type FilaComportamiento,
 } from '../../domain/calculations/contribucion-marginal.js';
 import { calcularPuntoEquilibrio, type PuntoEquilibrio } from '../../domain/calculations/punto-equilibrio.js';
+import {
+  crearConversorUnidadGestion,
+  type UnidadGestion,
+} from '../../domain/units/unidad-gestion.js';
 
 /** Resultado de incompletitud reutilizable entre caminos de cálculo. */
 export interface Incompletitud {
@@ -38,6 +42,13 @@ export interface EnrichedCalculationResult {
     incompletitud: Incompletitud;
     contribucionMarginal: ContribucionMarginal;
     puntoEquilibrio: PuntoEquilibrio;
+    unidadGestion: UnidadGestion | null;
+  };
+  /** Snapshot persistible del motor, siempre en unidad base. */
+  resultsBase: CalculationOutput & {
+    incompletitud: Incompletitud;
+    contribucionMarginal: ContribucionMarginal;
+    puntoEquilibrio: PuntoEquilibrio;
   };
   incompletitud: Incompletitud;
   periodId: string | null;
@@ -57,7 +68,7 @@ export async function enrichCalculationResult(
     output: CalculationOutput;
   },
 ): Promise<EnrichedCalculationResult> {
-  const [pending, openPeriod] = await Promise.all([
+  const [pending, openPeriod, company] = await Promise.all([
     db.dataPoint.findMany({
       where: {
         structureId: args.structureId,
@@ -72,6 +83,14 @@ export async function enrichCalculationResult(
       where: { structureId: args.structureId, status: 'OPEN', deletedAt: null },
       select: { id: true },
     }),
+    args.companyId
+      ? db.company.findFirst({
+          where: { id: args.companyId },
+          select: {
+            unidadGestion: { select: { codigo: true, nombre: true, factor: true } },
+          },
+        })
+      : Promise.resolve(null),
   ]);
   const incompletitud = buildIncompletitud(pending);
   const periodId = openPeriod?.id ?? null;
@@ -117,9 +136,59 @@ export async function enrichCalculationResult(
     contexto: { structureId: args.structureId, periodId },
   });
   const puntoEquilibrio = calcularPuntoEquilibrio(contribucionMarginal, new Date());
+  const unidadGestion: UnidadGestion | null = company?.unidadGestion
+    ? {
+        codigo: company.unidadGestion.codigo,
+        nombre: company.unidadGestion.nombre,
+        factor: Number(company.unidadGestion.factor),
+      }
+    : null;
+  const conversor = crearConversorUnidadGestion(unidadGestion);
+  const unitCost = args.output.detail.unitCost;
+  const outputEnUnidadGestion: CalculationOutput = {
+    ...args.output,
+    detail: {
+      ...args.output.detail,
+      unitCost: {
+        ...unitCost,
+        unitsProduced: conversor.cantidadDesdeBase(unitCost.unitsProduced),
+        unitProductionCost: conversor.importeUnitarioDesdeBase(unitCost.unitProductionCost),
+        unitFinishedGoodsCost: conversor.importeUnitarioDesdeBase(unitCost.unitFinishedGoodsCost),
+        unitCostOfGoodsSold: conversor.importeUnitarioDesdeBase(unitCost.unitCostOfGoodsSold),
+      },
+    },
+  };
+  const contribucionEnUnidadGestion: ContribucionMarginal = contribucionMarginal.incompleta
+    ? {
+        ...contribucionMarginal,
+        precioUnitario: conversor.importeUnitarioDesdeBase(contribucionMarginal.precioUnitario),
+        unidadesVendidas: conversor.cantidadDesdeBase(contribucionMarginal.unidadesVendidas),
+      }
+    : {
+        ...contribucionMarginal,
+        precioUnitario: conversor.importeUnitarioDesdeBase(contribucionMarginal.precioUnitario),
+        unidadesVendidas: conversor.cantidadDesdeBase(contribucionMarginal.unidadesVendidas),
+        costoVariableUnitario: conversor.importeUnitarioDesdeBase(contribucionMarginal.costoVariableUnitario),
+        contribucionMarginalUnitaria: conversor.importeUnitarioDesdeBase(contribucionMarginal.contribucionMarginalUnitaria),
+      };
+  const puntoEquilibrioEnUnidadGestion: PuntoEquilibrio = puntoEquilibrio.unidadesEquilibrio === null
+    ? puntoEquilibrio
+    : {
+        ...puntoEquilibrio,
+        unidadesEquilibrio: conversor.cantidadDesdeBase(puntoEquilibrio.unidadesEquilibrio),
+      };
+
+  const resultsBase = { ...args.output, incompletitud, contribucionMarginal, puntoEquilibrio };
 
   return {
-    results: { ...args.output, incompletitud, contribucionMarginal, puntoEquilibrio },
+    results: {
+      ...outputEnUnidadGestion,
+      incompletitud,
+      contribucionMarginal: contribucionEnUnidadGestion,
+      puntoEquilibrio: puntoEquilibrioEnUnidadGestion,
+      unidadGestion,
+    },
+    resultsBase,
     incompletitud,
     periodId,
   };

@@ -270,6 +270,7 @@ export interface ValorResuelto {
 export interface FilaParametro {
   clave: string;
   valorNum: number | null;
+  valorTexto?: string | null;
   periodId: string | null;
   structureId: string | null;
   confirmado: boolean;

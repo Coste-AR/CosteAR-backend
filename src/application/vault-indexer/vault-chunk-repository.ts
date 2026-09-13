@@ -23,12 +23,24 @@ export interface UpsertChunkInput {
 
 /**
  * Deriva el namespace de un chunk a partir del primer segmento de su ruta.
- * Cubre la estructura nueva (`conocimiento/<ns>/…`) y la previa a F1-02.
+ * Cubre tres formas de la bóveda:
+ *  - el objetivo de F1-02 (`conocimiento/<ns>/…`),
+ *  - la reorganización del 09/09/2026 (`001.1 - Teoría de Costos/…`, con
+ *    `Costos I`, `Costos II` y la Ruta de Aprendizaje — todo metodología de
+ *    cátedra),
+ *  - la previa (`001.1 - Clases (Mirta)/…`, `costeo-procesos/…`).
+ * Normaliza a NFC porque un checkout en macOS puede entregar el acento de
+ * "Teoría" descompuesto y `startsWith` no lo matchearía.
  * Devuelve `null` si la carpeta no matchea ninguna conocida.
  */
 export function deriveSourceType(sourceFile: string): VaultSourceType | null {
-  const p = sourceFile.replace(/\\/g, '/');
-  if (p.startsWith('conocimiento/catedra/') || p.startsWith('001.1 - Clases')) return 'CATEDRA';
+  const p = sourceFile.replace(/\\/g, '/').normalize('NFC');
+  if (
+    p.startsWith('conocimiento/catedra/') ||
+    p.startsWith('001.1 - Clases') ||
+    p.startsWith('001.1 - Teoría de Costos/')
+  )
+    return 'CATEDRA';
   if (p.startsWith('conocimiento/procesos/') || p.startsWith('costeo-procesos/')) return 'PROCESOS';
   if (p.startsWith('conocimiento/aprendizaje/')) return 'APRENDIZAJE';
   return null;
