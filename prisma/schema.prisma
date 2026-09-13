@@ -737,6 +737,7 @@ enum MacroSource {
   ARCA
   PARITARIA
   DOLARAPI
+  CAPIA
 }
 
 // Inmutable: nunca se edita, solo se insertan nuevos snapshots.
