@@ -5,7 +5,7 @@ import { authenticate } from '../plugins/authenticate.js';
 import { macroSyncQueue } from '../../workers/queues.js';
 
 const historyQuery = z.object({
-  source: z.enum(['BCRA', 'INDEC', 'ARCA', 'PARITARIA']).optional(),
+  source: z.enum(['BCRA', 'INDEC', 'ARCA', 'PARITARIA', 'DOLARAPI', 'CAPIA']).optional(),
   indicator: z.string().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
@@ -39,6 +39,11 @@ export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/macro/latest', { preHandler: authenticate }, async () => {
     const data = await service.latest();
+    return { data };
+  });
+
+  app.get('/indicadores/capia/vigentes', { preHandler: authenticate }, async () => {
+    const data = await service.latestCapia();
     return { data };
   });
 

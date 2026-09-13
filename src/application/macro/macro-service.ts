@@ -25,6 +25,49 @@ export class MacroService {
     return rows;
   }
 
+  /** Precios de la última semana CAPIA guardada, sin rellenar semanas ausentes. */
+  async latestCapia() {
+    const latest = await this.db.macroSnapshot.findFirst({
+      where: { source: 'CAPIA' },
+      orderBy: { effectiveDate: 'desc' },
+    });
+    if (!latest) return { semana: null, items: [] };
+
+    const rows = await this.db.macroSnapshot.findMany({
+      where: { source: 'CAPIA', effectiveDate: latest.effectiveDate },
+      orderBy: { indicatorCode: 'asc' },
+    });
+    const items = rows.map((row) => {
+      const metadata = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+        ? row.metadata as Record<string, unknown>
+        : {};
+      return {
+        indicatorCode: row.indicatorCode,
+        value: Number(row.value),
+        unit: typeof metadata.unit === 'string' ? metadata.unit : null,
+        ivaPct: typeof metadata.ivaPct === 'number' ? metadata.ivaPct : null,
+        priceIncludesIva: metadata.priceIncludesIva === true,
+        effectiveFrom: row.effectiveDate,
+        effectiveTo: typeof metadata.effectiveTo === 'string' ? new Date(metadata.effectiveTo) : null,
+        source: 'CAPIA' as const,
+        sourceLabel: typeof metadata.sourceLabel === 'string' ? metadata.sourceLabel : null,
+        productId: typeof metadata.productId === 'number' ? metadata.productId : null,
+        product: typeof metadata.product === 'string' ? metadata.product : null,
+        category: typeof metadata.category === 'string' ? metadata.category : null,
+      };
+    });
+
+    const first = items[0];
+    return {
+      semana: first ? {
+        sourceLabel: first.sourceLabel,
+        effectiveFrom: first.effectiveFrom,
+        effectiveTo: first.effectiveTo,
+      } : null,
+      items,
+    };
+  }
+
   /**
    * Métricas públicas para la vitrina de la landing (sin login).
    * Devuelve el dólar blue y el IPC mensual con su fecha. Si algún indicador
