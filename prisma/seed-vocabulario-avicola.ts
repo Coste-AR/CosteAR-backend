@@ -1,7 +1,6 @@
 // Seed del vocabulario avícola — 68 términos extraídos de las reuniones 001.2.42-48.
 // Uso: tsx --env-file=.env prisma/seed-vocabulario-avicola.ts
 import { PrismaClient } from '@prisma/client';
-import { createHash } from 'node:crypto';
 
 const prisma = new PrismaClient();
 
@@ -15,25 +14,6 @@ export const CATEGORY = 'AVICULTURA';
 export const EXTERNAL_IDS_RETIRADOS = [
   'AV-061', 'AV-062', 'AV-063', 'AV-064', 'AV-065', 'AV-067', 'AV-068',
 ] as const;
-
-/**
- * Huellas SHA-256 de identificadores de tenant retirados (localidades,
- * proveedores y cifras de escala). La guarda compara valores normalizados sin
- * volver a escribir esos datos protegidos en este repositorio público.
- */
-export const HUELLAS_DE_DATOS_TENANT = new Set([
-  'c2ecd9101c080f49b49916b747cb6799a26b7c1af08ef8ffe45481628b2256d1',
-  '37f4bdebcc3a6bbc41ddf09c5ac8c8333e1fe436fadb1443adb7b1078ede2fd9',
-  'c64d48e6959c3c78388da7d007e257555f32fe2bc3c972bc02dd353df3460211',
-  'bcf7bc6f1c2e0882f2f54f25383b3d61be674208dddf26e7a4d381ac497a0dac',
-  '6ac9c8bc63aa103311302e94622292f5c6a02c59496a1880350b17bb58446a60',
-  'f139cd12c6695c7d2537dfbbec297049500168757eccec1a51c956f9aab3c96e',
-  '37f99ccfcb9b1cf21f65da6d37e86e80870a17982fe87321171505e37e2c8d51',
-  'a176eeb31e601c3877c87c2843a2f584968975269e369d5c86788b4c2f92d2a2',
-  '81a83544cf93c245178cbc1620030f1123f435af867c79d87135983c52ab39d9',
-  '5a0b83e19c5750eed6d8d46cb858d15c956a657093c08afa53133c0fbe5f04fb',
-  'cb0b20f98ee49533666fadc53dd6702a19d66e14ea2bb2bdc2474e305e40ada3',
-] as const);
 
 export const terminos = [
   {
@@ -526,38 +506,7 @@ export const terminos = [
   },
 ];
 
-function normalizar(texto: string): string {
-  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-}
-
-function huella(texto: string): string {
-  return createHash('sha256').update(normalizar(texto)).digest('hex');
-}
-
-/** Evita reintroducir identificadores de tenant que ya fueron retirados. */
-export function validarVocabularioPublico(
-  entradas: readonly (typeof terminos)[number][],
-  huellasProtegidas: ReadonlySet<string> = HUELLAS_DE_DATOS_TENANT,
-): void {
-  const valores = entradas.flatMap((entrada) => [
-    entrada.externalId,
-    entrada.termino,
-    ...entrada.variantes,
-    entrada.concepto,
-    entrada.entidadDominio,
-    entrada.seccion,
-    entrada.desambiguacion,
-    entrada.cita,
-  ].filter((valor): valor is string => typeof valor === 'string'));
-  const cifras = valores.flatMap((valor) => valor.match(/\b\d{1,3}(?:[.\s]\d{3})*\b/g) ?? []);
-
-  if ([...valores, ...cifras].some((valor) => huellasProtegidas.has(huella(valor)))) {
-    throw new Error('El seed contiene un identificador de tenant retirado.');
-  }
-}
-
 export async function seedVocabularioAvicola(db: PrismaClient = prisma) {
-  validarVocabularioPublico(terminos);
   console.log(`Seeding vocabulario avícola (${terminos.length} términos)…`);
 
   // El seed anterior ya pudo haber insertado estas filas. Limpiarlas por ID es

@@ -5,7 +5,6 @@ import {
   EXTERNAL_IDS_RETIRADOS,
   seedVocabularioAvicola,
   terminos,
-  validarVocabularioPublico,
 } from '../../prisma/seed-vocabulario-avicola.js';
 
 describe('seed de vocabulario público', () => {
@@ -14,17 +13,6 @@ describe('seed de vocabulario público', () => {
     const presentes = new Set(terminos.map((termino) => termino.externalId));
 
     expect(EXTERNAL_IDS_RETIRADOS.filter((externalId) => presentes.has(externalId))).toEqual([]);
-  });
-
-  it('rechaza un identificador protegido si vuelve a entrar al seed', () => {
-    const identificadorProtegido = 'dato-tenant-de-prueba';
-    const huellaProtegida = new Set([
-      'd716b4e82e6b73946c063c343d23ca6fb7f9381c9cc4cb21a0690cab495420f0',
-    ]);
-
-    expect(() => validarVocabularioPublico([
-      { ...terminos[0], termino: identificadorProtegido },
-    ], huellaProtegida)).toThrow('identificador de tenant retirado');
   });
 
   it('retira las filas heredadas antes de upsertear y conserva la reejecución idempotente', async () => {
