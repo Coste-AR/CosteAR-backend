@@ -23,6 +23,9 @@ de `origin/dev`, qué PRs tuyos hay abiertos, qué issues tenés asignados, y el
 que está pasando esta semana — incluidos los tests flaky conocidos, para que no pierdas media hora
 re-corriendo una suite que ya sabemos que falla 1 de cada 4 veces.
 
+El briefing también trae el modo de trabajo y los mensajes `/agente` de la orquestación. Un mensaje
+`/agente` en el issue que vas a tomar se lee **antes de tocar código**.
+
 Existe porque la trazabilidad escrita en documentos depende de que alguien se acuerde de leerlos,
 y además envejece: un documento dice qué pasaba el 22 de agosto, no qué pasa hoy. Esto sale de
 git y de `gh` en el momento.
@@ -213,4 +216,5 @@ y no declara qué cambió queda esperando a una persona.
 
 |Fecha|Qué cambió|Fuente|
 |---|---|---|
+|2026-09-13|**El briefing declara el modo de trabajo y muestra el canal `/agente`.** Los mensajes de la orquestación en issues accionables y PRs abiertos se leen antes de tocar código; si GitHub no responde, la ausencia se declara y el arranque continúa.|Santiago, issue #351|
 |2026-09-04|**Se agrega "Antes de decir que algo ya está resuelto".** Un triage recomendó cerrar un issue afirmando que el commit ya estaba en `dev`; estaba sólo en una rama sin PR, y cerrarlo habría perdido 125 líneas y un ADR. Se agregan los tres comandos que lo comprueban y qué hacer al encontrar una rama huérfana. **Y se inaugura esta tabla**, que no existía: sin ella ningún cambio a este archivo se podía auto-etiquetar.|Santiago|

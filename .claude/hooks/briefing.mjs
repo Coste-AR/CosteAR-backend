@@ -92,9 +92,42 @@ function correr(cmd, args, timeout = 5000) {
   }
 }
 
-const git = (...args) => correr('git', args);
+// El shim permite probar el script completo sin depender del git/gh ni de la
+// cuenta de la máquina. En uso normal no existe y se ejecutan los binarios reales.
+const commandShim = process.env.BRIEFING_COMMAND_SHIM;
+const runTool = (tool, args, timeout) => commandShim
+  ? correr(process.execPath, [commandShim, tool, ...args], timeout)
+  : correr(tool, args, timeout);
+const git = (...args) => runTool('git', args, 5000);
 /** `gh` puede no estar instalado o no estar autenticado: los dos casos son `null`. */
-const gh = (...args) => correr('gh', args, 8000);
+const gh = (...args) => runTool('gh', args, 8000);
+
+function parseJson(output) {
+  if (output === null) return null;
+  try {
+    return JSON.parse(output);
+  } catch {
+    return null;
+  }
+}
+
+function numeroDesdeIssueUrl(url) {
+  if (typeof url !== 'string') return null;
+  const match = /\/issues\/(\d+)$/.exec(url);
+  return match ? Number(match[1]) : null;
+}
+
+function fechaArgentina(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type) => parts.find((item) => item.type === type)?.value ?? '??';
+  return `${part('day')}/${part('month')}/${part('year')} ${part('hour')}:${part('minute')} ART`;
+}
 
 const lineas = [];
 const agregar = (l = '') => lineas.push(l);
@@ -107,6 +140,15 @@ if (!rama) {
   process.exit(0);
 }
 
+const repo = process.env.GITHUB_REPOSITORY
+  ?? gh('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner');
+const modo = gh(
+  'variable', 'get', 'MODO_TRABAJO',
+  ...(repo ? ['-R', repo] : []),
+);
+agregar(modo
+  ? `Modo de trabajo: ${modo.toLocaleLowerCase('es-AR')}`
+  : 'Modo de trabajo: NO DECLARADO (no se pudo leer la variable)');
 agregar('━━━ CosteAR · briefing de sesión ━━━');
 agregar();
 
@@ -174,8 +216,76 @@ if (yo) {
 
 // ── El mensaje del orquestador ──────────────────────────────────────────────
 //
-// Lo único de todo esto que escribe una persona. Va último para que quede lo
-// más cerca posible del principio de la conversación.
+// Los comentarios de PR también salen por la API de issues. Se consulta una
+// sola ventana y se filtra contra los asuntos que siguen accionables hoy.
+const erroresMensajes = [];
+const issueOutput = gh(
+  'issue', 'list', '--state', 'open', '--limit', '1000',
+  '--json', 'number,labels',
+);
+const issueRows = parseJson(issueOutput);
+const issueNumbers = new Set();
+if (!Array.isArray(issueRows)) {
+  erroresMensajes.push('No se pudieron leer los issues `listo`/`bloqueado`.');
+} else {
+  for (const issue of issueRows) {
+    const labels = Array.isArray(issue?.labels) ? issue.labels.map((label) => label?.name) : [];
+    if (typeof issue?.number === 'number' && labels.some((label) => label === 'listo' || label === 'bloqueado')) {
+      issueNumbers.add(issue.number);
+    }
+  }
+}
+
+const prOutput = gh('pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number');
+const prRows = parseJson(prOutput);
+const prNumbers = new Set();
+if (!Array.isArray(prRows)) {
+  erroresMensajes.push('No se pudieron leer los PRs abiertos para buscar mensajes.');
+} else {
+  for (const pr of prRows) if (typeof pr?.number === 'number') prNumbers.add(pr.number);
+}
+
+let commentRows = null;
+if (!repo) {
+  erroresMensajes.push('No se pudo determinar el repositorio para leer comentarios.');
+} else {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const commentsOutput = gh(
+    'api', `repos/${repo}/issues/comments?since=${since}&per_page=100`,
+    '--paginate', '--slurp',
+  );
+  const pages = parseJson(commentsOutput);
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+    erroresMensajes.push('No se pudieron leer los comentarios de los últimos 7 días.');
+  } else {
+    commentRows = pages.flat();
+  }
+}
+
+const mensajes = (commentRows ?? [])
+  .filter((comment) => typeof comment?.body === 'string' && comment.body.startsWith('/agente'))
+  .map((comment) => ({ ...comment, number: numeroDesdeIssueUrl(comment.issue_url) }))
+  .filter((comment) => comment.number !== null && (issueNumbers.has(comment.number) || prNumbers.has(comment.number)))
+  .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+agregar();
+if (mensajes.length === 0 && erroresMensajes.length === 0) {
+  agregar('Mensajes para vos: ninguno');
+} else {
+  agregar('Mensajes para vos:');
+  for (const error of erroresMensajes) agregar(`  ⚠️ ${error}`);
+  for (const mensaje of mensajes) {
+    const target = prNumbers.has(mensaje.number) ? `PR #${mensaje.number}` : `#${mensaje.number}`;
+    const author = mensaje.user?.login ?? 'autor desconocido';
+    agregar(`  ${fechaArgentina(mensaje.created_at)} · ${author} · ${target}`);
+    const bodyLines = mensaje.body.split('\n');
+    while (bodyLines.at(-1) === '') bodyLines.pop();
+    for (const line of bodyLines) agregar(`    ${line}`);
+  }
+}
+
+// ESTADO.md es lo único de todo esto que escribe una persona. Va último para
+// quedar lo más cerca posible del principio de la conversación.
 const estadoPath = join(RAIZ, 'ESTADO.md');
 if (existsSync(estadoPath)) {
   try {
