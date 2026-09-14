@@ -134,7 +134,10 @@ export class DailyRunService {
       const result =
         period.structure.costingSystem === 'PROCESSES'
           ? await this.processCalc.calculate(userId, structureId, period.id, actor, 'AUTO_DAILY')
-          : await this.ordersCalc.calculate(userId, structureId, actor, 'AUTO_DAILY');
+          // El período va explícito: esta corrida recorre períodos, así que sabe
+          // cuál está calculando y no puede dejar que lo adivine el fallback del
+          // período abierto — con dos abiertos elegía cualquiera (MX-04).
+          : await this.ordersCalc.calculate(userId, structureId, actor, 'AUTO_DAILY', period.id);
 
       // La marca se mueve SOLO cuando hubo corrida. Si falló, mañana se
       // reintenta desde el mismo punto en vez de dar por visto un dato que
