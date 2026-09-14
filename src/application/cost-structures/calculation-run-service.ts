@@ -179,6 +179,13 @@ export class CalculationRunService {
     structureId: string,
     actor: TraceActor,
     trigger: RunTrigger = 'MANUAL',
+    /**
+     * El período que se está calculando, cuando el llamador lo conoce. La corrida
+     * diaria recorre períodos, así que sabe cuál es y lo pasa; el botón manual
+     * calcula «la estructura» y lo deja en `undefined` para que resuelva contra
+     * el período abierto, que es el que el costista tiene delante (MX-04).
+     */
+    periodId?: string,
   ) {
     const s = await this.requireStructure(userId, structureId);
 
@@ -258,9 +265,10 @@ export class CalculationRunService {
     // Si la estructura no trae `companyId` (mocks históricos), la ausencia de
     // clasificación queda marcada como incompleta sin intentar una consulta sin
     // tenant. En producción `companyId` siempre existe por el modelo Prisma.
-    const { results, resultsBase, incompletitud, periodId } = await enrichCalculationResult(this.db, {
+    const { results, resultsBase, incompletitud, periodId: periodoDeLaCorrida } = await enrichCalculationResult(this.db, {
       structureId,
       companyId: s.companyId,
+      periodId,
       input,
       output,
     });
@@ -272,7 +280,7 @@ export class CalculationRunService {
         structureId,
         engineVersion: engine.engineVersion,
         executedBy: actor.id,
-        periodId,
+        periodId: periodoDeLaCorrida,
         trigger,
         inputsSnapshot: input,
         results: resultsBase,
@@ -284,7 +292,7 @@ export class CalculationRunService {
         userId,
         companyId: s.companyId,
         structureId,
-        periodId,
+        periodId: periodoDeLaCorrida,
         runId: run.id,
         puntoEquilibrio: resultsBase.puntoEquilibrio,
         fecha: new Date(),

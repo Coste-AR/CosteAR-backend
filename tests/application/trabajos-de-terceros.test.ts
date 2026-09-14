@@ -174,6 +174,30 @@ describe('#90 — trabajos de terceros en el estado de costos', () => {
       expect(r.realProductionCost).toBeCloseTo(r.productionCost, 6);
     });
 
+    /**
+     * M0-01 (plan de análisis marginal v2, `CosteAR-admin`). `netProductionCost`
+     * (renglón 7f del Estado de Costos) ya lo calcula `calcCostStatement` —está
+     * probado a mano más arriba, "clave a mano con todos los renglones a la
+     * vez"— pero `runCalculation()` no lo exponía: `calculation-result-enrichment.ts`
+     * (el consumidor que arma la contribución marginal) no tenía forma de
+     * anclar su control de suma al costo REAL NETO, solo al normal.
+     *
+     * Igual que `realProductionCost`: opcional, porque una corrida anterior a
+     * que esto existiera no lo tiene, y "cero" sería afirmar algo que nunca se
+     * midió.
+     */
+    it('expone netProductionCost (7f), y sin terceros coincide con el costo normal', () => {
+      const r = runCalculation(caso());
+      expect(r.netProductionCost).toBeCloseTo(r.productionCost, 6);
+    });
+
+    it('netProductionCost sube con los terceros, igual que el costo real', () => {
+      const sin = runCalculation(caso());
+      const con = runCalculation(caso(25000));
+      expect(con.netProductionCost! - sin.netProductionCost!).toBeCloseTo(25000, 2);
+      expect(con.netProductionCost).toBeCloseTo(con.realProductionCost!, 6);
+    });
+
     it('el endpoint rechaza un importe negativo', () => {
       expect(() => updateThirdPartyWorkSchema.parse({ thirdPartyWork: -100 })).toThrow();
       expect(updateThirdPartyWorkSchema.parse({ thirdPartyWork: 25000 }).thirdPartyWork).toBe(25000);

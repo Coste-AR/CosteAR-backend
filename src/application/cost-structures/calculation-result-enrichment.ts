@@ -64,11 +64,23 @@ export async function enrichCalculationResult(
   args: {
     structureId: string;
     companyId: string | null;
+    /**
+     * El período que se está calculando. Es lo que fija contra qué fila resuelve
+     * la cascada `período → estructura → empresa` de `resolverComportamiento`,
+     * así que quien lo sepa TIENE que pasarlo (MX-04).
+     *
+     * Omitirlo cae al período abierto de la estructura. No es un error: hay dos
+     * caminos que legítimamente calculan «la estructura» y no un período —el
+     * botón de calcular de órdenes y la simulación—, y ahí el abierto es el que
+     * el costista está mirando. Lo que no puede pasar es que un llamador que SÍ
+     * conoce su período deje que lo adivine el fallback.
+     */
+    periodId?: string | null;
     input: CalculationInput;
     output: CalculationOutput;
   },
 ): Promise<EnrichedCalculationResult> {
-  const [pending, openPeriod, company] = await Promise.all([
+  const [pending, periodoDelFallback, company] = await Promise.all([
     db.dataPoint.findMany({
       where: {
         structureId: args.structureId,
@@ -79,10 +91,17 @@ export async function enrichCalculationResult(
       select: { id: true, label: true },
       take: 20,
     }),
-    db.costPeriod.findFirst({
-      where: { structureId: args.structureId, status: 'OPEN', deletedAt: null },
-      select: { id: true },
-    }),
+    // `orderBy` explícito porque una estructura PUEDE tener más de un período
+    // abierto: `CostPeriodService.reopen()` reabre uno cerrado sin comprobar que
+    // no haya otro OPEN, y el schema no lo impide. Sin orden, la base elegía
+    // cualquiera. Se ordena igual que `CostPeriodService.getOpen()`.
+    args.periodId
+      ? Promise.resolve(null)
+      : db.costPeriod.findFirst({
+          where: { structureId: args.structureId, status: 'OPEN', deletedAt: null },
+          select: { id: true },
+          orderBy: { code: 'desc' },
+        }),
     args.companyId
       ? db.company.findFirst({
           where: { id: args.companyId },
@@ -93,7 +112,7 @@ export async function enrichCalculationResult(
       : Promise.resolve(null),
   ]);
   const incompletitud = buildIncompletitud(pending);
-  const periodId = openPeriod?.id ?? null;
+  const periodId = args.periodId ?? periodoDelFallback?.id ?? null;
 
   // Sin empresa sólo existen mocks históricos: no se consulta un tenant
   // inexistente y la contribución informa las clasificaciones faltantes.

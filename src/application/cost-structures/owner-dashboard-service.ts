@@ -221,26 +221,52 @@ export class OwnerDashboardService {
     const costosBase = [...motivosBase, ...sinUnidad, ...sinProduccion];
     const sinDatosDeCorrida = !contribucion || factor === null || baseUnidades <= 0 || resultado.detail?.unitCost?.unitFinishedGoodsCost == null;
     const costosMotivosPorFalta = costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'];
+    // Con la clasificación incompleta los tres indicadores de esta fila salen
+    // incompletos, no solo `variable` (MX-03).
+    //
+    // Antes `fijo` llamaba a `completo(...)` sin mirar la incompletitud: sumaba
+    // ÚNICAMENTE los componentes que sí se habían clasificado como FIJO y
+    // publicaba ese subtotal como si fuera el costo fijo del período. El rubro
+    // sin clasificar desaparecía del número sin dejar rastro — un dato parcial
+    // presentado como completo, que es peor que un dato faltante: el dueño no
+    // tiene manera de saber que le falta plata adentro.
+    //
+    // `total` también, aunque salga del motor y no dependa de la clasificación:
+    // los tres se leen como una descomposición (`variable + fijo = total`), y un
+    // total exacto al lado de dos partes desconocidas invita a deducir la que
+    // falta restando. Es la precisión falsa que R13 prohíbe.
+    //
+    // La ZONA de equilibrio que R13 pide en lugar del punto llega en M1-03; acá
+    // el alcance es solamente dejar de mentir.
+    const motivosContribucion = [...motivosBase, ...(contribucion?.motivos ?? [])];
+    const clasificacionIncompleta = !sinDatosDeCorrida && contribucion!.costoVariableUnitario === null;
     // Total de componentes FIJO, SIN dividir por unidades — la magnitud que R10
-    // exige para controlar fijos. A diferencia de `costoPorCajon.fijo`, es un
-    // importe en pesos: no depende de la unidad de gestión, así que no pasa por
-    // `conversor.importeUnitarioDesdeBase` (eso convierte precios POR unidad).
-    const totalFijoBase: number | null = sinDatosDeCorrida
+    // exige para controlar fijos (MX-02). A diferencia de `costoPorCajon.fijo`,
+    // es un importe en pesos: no depende de la unidad de gestión, así que no
+    // pasa por `conversor.importeUnitarioDesdeBase` (eso convierte precios POR
+    // unidad). Solo tiene sentido cuando la clasificación cerró: con algún
+    // rubro sin clasificar, el total FIJO también es parcial (mismo motivo que
+    // MX-03), así que viaja incompleto igual que el resto de la fila.
+    const totalFijoBase: number | null = sinDatosDeCorrida || clasificacionIncompleta
       ? null
-      : contribucion.componentes
+      : contribucion!.componentes
           .filter((c) => c.comportamientoVolumen === 'FIJO')
           .reduce((sum, c) => sum + c.importeAbsorcion, 0);
     const costos = sinDatosDeCorrida
       ? { variable: incompleto(costosMotivosPorFalta, parametrosSinConfirmar), fijo: marcarComoUnitarioDeFijo(incompleto(costosMotivosPorFalta, parametrosSinConfirmar)), total: incompleto(costosMotivosPorFalta, parametrosSinConfirmar) }
-      : {
-          variable: contribucion.costoVariableUnitario === null
-            ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], parametrosSinConfirmar)
-            : completo(conversor.importeUnitarioDesdeBase(contribucion.costoVariableUnitario), parametrosSinConfirmar, motivosBase),
-          fijo: marcarComoUnitarioDeFijo(
-            completo(conversor.importeUnitarioDesdeBase(totalFijoBase! / baseUnidades), parametrosSinConfirmar, motivosBase),
-          ),
-          total: completo(conversor.importeUnitarioDesdeBase(resultado.detail!.unitCost!.unitFinishedGoodsCost!), parametrosSinConfirmar, motivosBase),
-        };
+      : clasificacionIncompleta
+        ? {
+            variable: incompleto(motivosContribucion, parametrosSinConfirmar),
+            fijo: marcarComoUnitarioDeFijo(incompleto(motivosContribucion, parametrosSinConfirmar)),
+            total: incompleto(motivosContribucion, parametrosSinConfirmar),
+          }
+        : {
+            variable: completo(conversor.importeUnitarioDesdeBase(contribucion!.costoVariableUnitario!), parametrosSinConfirmar, motivosBase),
+            fijo: marcarComoUnitarioDeFijo(
+              completo(conversor.importeUnitarioDesdeBase(totalFijoBase! / baseUnidades), parametrosSinConfirmar, motivosBase),
+            ),
+            total: completo(conversor.importeUnitarioDesdeBase(resultado.detail!.unitCost!.unitFinishedGoodsCost!), parametrosSinConfirmar, motivosBase),
+          };
 
     const convertido = (numero: number | null, motivos: string[]): NumeroTablero =>
       numero === null || factor === null || motivos.length > 0

@@ -131,6 +131,68 @@ describe('GET /periods/:id/tablero-dueno', () => {
   });
 
   /**
+   * MX-03 del plan de análisis marginal. La rama `fijo` llamaba a `completo(...)`
+   * sin mirar la incompletitud de la contribución: con un rubro sin clasificar,
+   * `.variable` salía «falta clasificar» y al lado `.fijo` mostraba un número
+   * seguro que sumaba SOLO los rubros que sí se habían clasificado.
+   *
+   * Un dato parcial presentado como completo es peor que un dato faltante: el
+   * dueño no tiene forma de saber que ese número le falta plata adentro. Regla
+   * dura R13 del corpus — con costos sin clasificar se informa una zona, nunca
+   * un punto falsamente preciso. (La zona en sí llega en M1-03; acá solamente
+   * deja de mentir.)
+   */
+  it('no reporta el costo fijo como completo cuando la clasificación está incompleta (MX-03)', async () => {
+    db.calculationRun.findFirst.mockResolvedValue({
+      id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
+      results: {
+        grossMargin: 12, incompletitud: { incompleto: false, motivos: [] },
+        detail: { unitCost: { unitFinishedGoodsCost: 5, basadoEn: 'producidas' } },
+        contribucionMarginal: {
+          incompleta: true,
+          precioUnitario: 4,
+          unidadesVendidas: 24,
+          costoVariableUnitario: null,
+          contribucionMarginalUnitaria: null,
+          motivos: ['Falta clasificar frente al volumen el rubro Costos indirectos de producción.'],
+          componentes: [
+            { etiqueta: 'Materia prima', importeAbsorcion: 60, comportamientoVolumen: 'VARIABLE', parametroId: null },
+            { etiqueta: 'Mano de obra directa', importeAbsorcion: 36, comportamientoVolumen: 'FIJO', parametroId: null },
+            { etiqueta: 'Costos indirectos de producción', importeAbsorcion: 24, comportamientoVolumen: null, parametroId: null },
+          ],
+        },
+        puntoEquilibrio: { incompleta: true, unidadesEquilibrio: null, fechaUltimoRecalculo: '2026-09-02T00:00:00.000Z' },
+      },
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      data: {
+        costoPorCajon: Record<'variable' | 'fijo' | 'total', { valor: number | null; completo: boolean; motivos: string[] }>;
+        pendientes: Array<{ area: string; dato: string }>;
+      };
+    };
+
+    const motivo = 'Falta clasificar frente al volumen el rubro Costos indirectos de producción.';
+    for (const clave of ['variable', 'fijo', 'total'] as const) {
+      expect(body.data.costoPorCajon[clave], `costoPorCajon.${clave}`).toMatchObject({ valor: null, completo: false });
+      expect(body.data.costoPorCajon[clave].motivos, `motivos de ${clave}`).toContain(motivo);
+    }
+
+    // La acción se ofrece una sola vez, aunque los tres indicadores dependan de ella.
+    const declasificacion = body.data.pendientes.filter((p) => p.area === 'costeo' && p.dato.includes('Costos indirectos de producción'));
+    expect(declasificacion).toHaveLength(1);
+
+    // MX-02: con la clasificación incompleta, `fijo` sigue marcado como
+    // unitario aunque el valor mismo sea null — el flag no depende de que
+    // haya un número, es un rasgo del propio indicador.
+    expect(body.data.costoPorCajon.fijo).toMatchObject({ esUnitarioDeFijo: true });
+  });
+
+  /**
    * MX-02 del plan de análisis marginal. `costoPorCajon.fijo` es un COSTO FIJO
    * UNITARIO — `AM4` (bóveda) lo llama "una entidad inexistente en la realidad,
    * porque establece una comparación entre dos magnitudes independientes entre
