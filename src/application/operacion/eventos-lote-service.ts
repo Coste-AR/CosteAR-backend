@@ -3,6 +3,7 @@ import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { NotFoundError } from '../../domain/errors/domain-error.js';
 import type { EventoLoteCreateInput } from '../../shared/schemas/eventos-lote.schema.js';
+import { revisionBaja, saldoVivo } from '../../domain/operacion/revision-carga-campo.js';
 
 const A_BASE: Record<EventoLoteCreateInput['tipo'], TipoEventoLote> = {
   alta: 'ALTA',
@@ -40,6 +41,13 @@ export class EventosLoteService {
   async create(userId: string, loteId: string, input: EventoLoteCreateInput, actor: TraceActor) {
     const lote = await this.loteDe(userId, loteId);
     return withTenant(userId, async (tx) => {
+      const fecha = new Date(`${input.fecha}T00:00:00.000Z`);
+      const eventos = await tx.eventoLote.findMany({
+        where: { companyId: lote.companyId, loteId, fecha: { lte: fecha }, deletedAt: null },
+      });
+      const revision = input.tipo === 'baja'
+        ? revisionBaja(input.cantidad, saldoVivo(eventos))
+        : { requiereRevision: false, motivoRevision: null };
       const creado = await tx.eventoLote.create({
         data: {
           companyId: lote.companyId,
@@ -50,8 +58,9 @@ export class EventosLoteService {
           // Prisma representa también una columna DATE con DateTime. Al fijar
           // UTC evitamos que el huso horario del servidor cambie el día que
           // eligió quien cargó el evento.
-          fecha: new Date(`${input.fecha}T00:00:00.000Z`),
+          fecha,
           motivo: input.tipo === 'baja' ? MOTIVO_A_BASE[input.motivo] : null,
+          ...revision,
         },
       });
       await recordTraceAudit(

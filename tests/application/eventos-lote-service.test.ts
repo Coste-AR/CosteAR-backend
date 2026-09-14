@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { EventosLoteService } from '@/application/operacion/eventos-lote-service.js';
 import { eventoLoteCreateSchema } from '@/shared/schemas/eventos-lote.schema.js';
+import { BAJA_SUPERA_PLANTEL } from '@/domain/operacion/revision-carga-campo.js';
 
 const withTenant = vi.fn(async (_userId: string, fn: (tx: unknown) => unknown) => fn(dbActual));
 vi.mock('@/infrastructure/database/prisma.js', () => ({
@@ -40,6 +41,20 @@ describe('#194 — eventos de lote y saldo derivado', () => {
     expect(resultado).toMatchObject({ tipo: 'ALTA', cantidad: 12, motivo: null });
     const create = (dbActual.eventoLote as { create: ReturnType<typeof vi.fn> }).create;
     expect(create.mock.calls[0]![0].data).not.toHaveProperty('cantidadViva');
+    expect(create.mock.calls[0]![0].data).toMatchObject({ requiereRevision: false, motivoRevision: null });
+  });
+
+  it('guarda una baja imposible y la marca para revisiÃ³n', async () => {
+    const resultado = await service([
+      { tipo: 'ALTA', cantidad: 100, motivo: null },
+    ]).create(USER, LOTE.id, {
+      tipo: 'baja', cantidad: 101, fecha: '2026-09-01', motivo: 'mortalidad',
+    }, ACTOR);
+
+    expect(resultado).toMatchObject({
+      requiereRevision: true,
+      motivoRevision: BAJA_SUPERA_PLANTEL,
+    });
   });
 
   it('deriva el saldo y deja fuera una baja importada sin motivo', async () => {

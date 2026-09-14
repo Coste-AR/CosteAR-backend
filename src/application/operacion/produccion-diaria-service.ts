@@ -3,6 +3,7 @@ import { prisma, withTenant } from '../../infrastructure/database/prisma.js';
 import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import { ConflictError, NotFoundError } from '../../domain/errors/domain-error.js';
 import type { ProduccionDiariaCreateInput } from '../../shared/schemas/produccion-diaria.schema.js';
+import { revisionProduccion, saldoVivo } from '../../domain/operacion/revision-carga-campo.js';
 
 const inicioDelDia = (fecha: string) => new Date(`${fecha}T00:00:00.000Z`);
 
@@ -31,6 +32,10 @@ export class ProduccionDiariaService {
     const lote = await this.loteDe(userId, loteId);
     const fecha = inicioDelDia(input.fecha);
     return withTenant(userId, async (tx) => {
+      const eventos = await tx.eventoLote.findMany({
+        where: { companyId: lote.companyId, loteId, fecha: { lte: fecha }, deletedAt: null },
+      });
+      const revision = revisionProduccion(input.unidadesProducidas, saldoVivo(eventos));
       const existente = await tx.produccionDiaria.findFirst({
         where: { companyId: lote.companyId, loteId, fecha, variante: input.variante, deletedAt: null },
       });
@@ -47,6 +52,7 @@ export class ProduccionDiariaService {
           unidadesProducidas: input.unidadesProducidas,
           roturas: input.roturas,
           descartes: input.descartes,
+          ...revision,
         },
       });
       await recordTraceAudit(
@@ -85,12 +91,7 @@ export class ProduccionDiariaService {
         },
       }),
     );
-    return eventos.reduce((saldo, evento) => {
-      if (evento.tipo === 'ALTA') return saldo + Number(evento.cantidad);
-      // Una baja sin motivo conserva el hecho para revisión, pero no participa
-      // hasta que se clasifique (la misma regla de A-10).
-      return evento.motivo === null ? saldo : saldo - Number(evento.cantidad);
-    }, 0);
+    return saldoVivo(eventos);
   }
 
   /**
