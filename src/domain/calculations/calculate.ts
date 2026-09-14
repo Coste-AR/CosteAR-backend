@@ -149,6 +149,19 @@ export interface CalculationOutput {
   /** Costo REAL = normal + trabajos de terceros + amortización + variación presupuesto (#90, #116). */
   realProductionCost?: number;
   /**
+   * (7f) Costo NETO de producción = real − recupero de merma − merma
+   * extraordinaria. El renglón al que se ancla el control de suma de la
+   * contribución marginal (M0-01, plan de análisis marginal v2): es el costo
+   * que efectivamente sigue camino hacia el producto terminado, después de
+   * sacarle lo que nunca llega a ser costo de nada.
+   *
+   * `calcCostStatement` ya lo calculaba; esto solo lo expone. OPCIONAL por el
+   * mismo motivo que `realProductionCost`: una corrida anterior a que este
+   * renglón existiera no lo tiene, y "cero" sería afirmar algo que nunca se
+   * midió.
+   */
+  netProductionCost?: number;
+  /**
    * Desperdicio del período imputado según R5 (#92). Las dos cifras van
    * SEPARADAS a propósito: una es costo del producto y la otra es pérdida de la
    * empresa, y mezclarlas esconde exactamente lo que el costista tiene que ver.
@@ -917,6 +930,7 @@ export function runCalculation(input: CalculationInput): CalculationOutput {
     assetDepreciation: statement.assetDepreciation.toNumber(),
     budgetVariance: statement.budgetVariance.toNumber(),
     realProductionCost: statement.realProductionCost.toNumber(),
+    netProductionCost: statement.netProductionCost.toNumber(),
     desperdicio,
     costOfGoodsSold: statement.costOfGoodsSold.toNumber(),
     grossMargin: margin.grossMargin.toNumber(),
