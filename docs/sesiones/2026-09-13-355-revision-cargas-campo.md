@@ -1,7 +1,7 @@
 ---
 issue: 355
 repo: CosteAR-backend
-pr: pendiente
+pr: 357
 rama: feat/revision-cargas-fuera-rango
 agente: codex
 modelo: gpt-5
