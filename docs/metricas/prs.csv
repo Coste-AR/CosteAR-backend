@@ -129,3 +129,5 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 349,,SantiagoBriz,staging,2026-09-13T19:23:35Z,2026-09-13T20:06:40Z,0.7,92,5004,208,14,0,,,docs/sesiones/2026-09-10-252-unidad-tablero.md
 352,350,AlanArevalo1,dev,2026-09-13T20:10:35Z,2026-09-13T20:13:53Z,0.1,14,509,3,8,0,,,docs/sesiones/2026-09-13-350-precios-semanales-capia.md
 353,351,AlanArevalo1,dev,2026-09-13T20:24:47Z,2026-09-13T20:28:05Z,0.1,4,273,4,8,0,,,docs/sesiones/2026-09-13-351-briefing-modo-mensajes.md
+357,355,AlanArevalo1,dev,2026-09-14T02:05:07Z,2026-09-14T02:07:26Z,0.0,10,316,7,8,0,,,docs/sesiones/2026-09-13-355-revision-cargas-campo.md
+358,,SantiagoBriz,staging,2026-09-14T02:16:40Z,2026-09-14T04:00:21Z,1.7,27,1098,14,8,0,,,docs/sesiones/2026-09-13-350-precios-semanales-capia.md
