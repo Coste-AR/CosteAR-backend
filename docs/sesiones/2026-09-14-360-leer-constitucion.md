@@ -1,7 +1,7 @@
 ---
 issue: 360
 repo: CosteAR-backend
-pr: pendiente
+pr: 364
 rama: chore/360-leer-constitucion
 agente: codex
 modelo: gpt-5
