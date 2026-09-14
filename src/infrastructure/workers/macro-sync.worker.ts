@@ -4,11 +4,13 @@ import { getConnection, QUEUE_NAMES, recalculateQueue } from './queues.js';
 import { BcraClient } from '../external-apis/bcra.js';
 import { IndecClient } from '../external-apis/indec.js';
 import { DolarApiClient } from '../external-apis/dolarapi.js';
+import { CapiaClient } from '../external-apis/capia.js';
 import { MacroService } from '../../application/macro/macro-service.js';
+import { syncCapiaPrices } from '../../application/macro/capia-sync.js';
 import { prisma } from '../database/prisma.js';
 
 /**
- * Worker de sincronización macro. Trae los últimos valores de BCRA e INDEC,
+ * Worker de sincronización macro. Trae los últimos valores externos, incluido CAPIA,
  * los persiste como snapshots y, si hay un cambio significativo (>1%) respecto
  * del valor previo, encola un recálculo de las estructuras afectadas.
  */
@@ -17,6 +19,7 @@ export function startMacroSyncWorker(): Worker {
   const bcra = new BcraClient();
   const indec = new IndecClient();
   const dolarapi = new DolarApiClient();
+  const capia = new CapiaClient();
 
   const worker = new Worker(
     QUEUE_NAMES.macroSync,
@@ -41,6 +44,9 @@ export function startMacroSyncWorker(): Worker {
         await macro.record({ source: 'DOLARAPI', ...blue });
       }
 
+      // CAPIA es una referencia informativa: no modifica costeo ni dispara recálculo.
+      await syncCapiaPrices(macro, capia, (message) => job.log?.(message));
+
       if (significantChange) {
         await recalculateQueue.add('recalculate', { trigger: 'macro-sync' });
       }
@@ -49,7 +55,7 @@ export function startMacroSyncWorker(): Worker {
     },
     {
       connection: getConnection(),
-      // Sync macro: llama a 3 APIs externas. 2 min es generoso para redes lentas.
+      // Sync macro: llama a 4 APIs externas. 2 min es generoso para redes lentas.
       lockDuration: 2 * 60 * 1000,
       maxStalledCount: 1,
     },

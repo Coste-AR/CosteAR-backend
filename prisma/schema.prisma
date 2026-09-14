@@ -737,6 +737,7 @@ enum MacroSource {
   ARCA
   PARITARIA
   DOLARAPI
+  CAPIA
 }
 
 // Inmutable: nunca se edita, solo se insertan nuevos snapshots.
@@ -2444,6 +2445,8 @@ model EventoLote {
   cantidad Decimal          @db.Decimal(18, 4)
   motivo   MotivoBajaLote?
   fecha    DateTime         @db.Date
+  requiereRevision Boolean  @default(false)
+  motivoRevision   String?
 
   createdAt DateTime  @default(now()) @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
@@ -2471,6 +2474,8 @@ model ProduccionDiaria {
   unidadesProducidas  Decimal  @db.Decimal(18, 4)
   roturas             Decimal  @default(0) @db.Decimal(18, 4)
   descartes           Decimal  @default(0) @db.Decimal(18, 4)
+  requiereRevision    Boolean  @default(false)
+  motivoRevision      String?
 
   egresosProducto EgresoProducto[]
 
