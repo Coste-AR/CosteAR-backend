@@ -20,6 +20,16 @@ type NumeroTablero = {
   motivos: string[];
 };
 
+/**
+ * `costoPorCajon.fijo` es un COSTO FIJO UNITARIO: `AM4` (bóveda) lo llama "una
+ * entidad inexistente en la realidad… establece una comparación entre dos
+ * magnitudes absolutamente independientes entre sí". Regla dura R10: los
+ * fijos se controlan en TOTALES, no por unidad. Se conserva en el contrato
+ * (hay consumidores) pero marcado, para que quien lo lea sepa que no es una
+ * magnitud económica y baje su jerarquía visual (MX-02).
+ */
+type NumeroTableroFijo = NumeroTablero & { esUnitarioDeFijo: true };
+
 type AreaPendienteCierre = 'calculo' | 'imputacion' | 'configuracion' | 'produccion' | 'ventas' | 'costeo';
 
 type PendienteCierre = {
@@ -82,6 +92,17 @@ const completo = (valor: number, parametrosSinConfirmarDetalle: ParametroSinConf
   motivos,
 });
 
+const ADVERTENCIA_FIJO_UNITARIO =
+  'El "costo fijo por cajón" no es una magnitud económica: compara un total fijo contra una ' +
+  'cantidad que no lo originó. Se mantiene por compatibilidad; para controlar los fijos usá ' +
+  '«costosFijosDelPeriodo» (el total) y para saber qué volumen los cubre, «cajonesQueTapanLosFijos».';
+
+const marcarComoUnitarioDeFijo = (numero: NumeroTablero): NumeroTableroFijo => ({
+  ...numero,
+  esUnitarioDeFijo: true,
+  motivos: numero.completo ? [ADVERTENCIA_FIJO_UNITARIO, ...numero.motivos] : numero.motivos,
+});
+
 /**
  * Compone los seis indicadores del tablero sin recalcularlos. Lee una foto de
  * CalculationRun del período y transforma solamente las unidades internas a la
@@ -139,7 +160,9 @@ export class OwnerDashboardService {
           { area: 'calculo', dato: 'corrida de cálculo' },
           ...pendienteRubro,
         ]),
-        costoPorCajon: { variable: falta, fijo: falta, total: falta },
+        costoPorCajon: { variable: falta, fijo: marcarComoUnitarioDeFijo(falta), total: falta },
+        costosFijosDelPeriodo: falta,
+        cajonesQueTapanLosFijos: falta,
         precioPromedioVenta: falta, contribucionMarginalPorCajon: falta,
         puntoEquilibrioCajones: { ...falta, fechaUltimoRecalculo: null },
         producidoCajones: falta, resultadoPeriodo: falta,
@@ -196,28 +219,58 @@ export class OwnerDashboardService {
         : []),
     ]);
     const costosBase = [...motivosBase, ...sinUnidad, ...sinProduccion];
-    const costos = !contribucion || factor === null || baseUnidades <= 0 || resultado.detail?.unitCost?.unitFinishedGoodsCost == null
-      ? { variable: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], parametrosSinConfirmar), fijo: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], parametrosSinConfirmar), total: incompleto(costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'], parametrosSinConfirmar) }
+    const sinDatosDeCorrida = !contribucion || factor === null || baseUnidades <= 0 || resultado.detail?.unitCost?.unitFinishedGoodsCost == null;
+    const costosMotivosPorFalta = costosBase.length > 0 ? costosBase : ['Falta el resultado de costos de la corrida.'];
+    // Total de componentes FIJO, SIN dividir por unidades — la magnitud que R10
+    // exige para controlar fijos. A diferencia de `costoPorCajon.fijo`, es un
+    // importe en pesos: no depende de la unidad de gestión, así que no pasa por
+    // `conversor.importeUnitarioDesdeBase` (eso convierte precios POR unidad).
+    const totalFijoBase: number | null = sinDatosDeCorrida
+      ? null
+      : contribucion.componentes
+          .filter((c) => c.comportamientoVolumen === 'FIJO')
+          .reduce((sum, c) => sum + c.importeAbsorcion, 0);
+    const costos = sinDatosDeCorrida
+      ? { variable: incompleto(costosMotivosPorFalta, parametrosSinConfirmar), fijo: marcarComoUnitarioDeFijo(incompleto(costosMotivosPorFalta, parametrosSinConfirmar)), total: incompleto(costosMotivosPorFalta, parametrosSinConfirmar) }
       : {
           variable: contribucion.costoVariableUnitario === null
             ? incompleto([...motivosBase, ...(contribucion.motivos ?? [])], parametrosSinConfirmar)
             : completo(conversor.importeUnitarioDesdeBase(contribucion.costoVariableUnitario), parametrosSinConfirmar, motivosBase),
-          fijo: completo(
-            conversor.importeUnitarioDesdeBase(
-              contribucion.componentes
-                .filter((c) => c.comportamientoVolumen === 'FIJO')
-                .reduce((sum, c) => sum + c.importeAbsorcion, 0) / baseUnidades,
-            ),
-            parametrosSinConfirmar,
-            motivosBase,
+          fijo: marcarComoUnitarioDeFijo(
+            completo(conversor.importeUnitarioDesdeBase(totalFijoBase! / baseUnidades), parametrosSinConfirmar, motivosBase),
           ),
-          total: completo(conversor.importeUnitarioDesdeBase(resultado.detail.unitCost.unitFinishedGoodsCost), parametrosSinConfirmar, motivosBase),
+          total: completo(conversor.importeUnitarioDesdeBase(resultado.detail!.unitCost!.unitFinishedGoodsCost!), parametrosSinConfirmar, motivosBase),
         };
 
     const convertido = (numero: number | null, motivos: string[]): NumeroTablero =>
       numero === null || factor === null || motivos.length > 0
         ? incompleto([...motivos, ...sinUnidad], parametrosSinConfirmar)
         : completo(conversor.importeUnitarioDesdeBase(numero), parametrosSinConfirmar);
+
+    const contribucionMarginalPorCajonCalculada = convertido(
+      contribucion?.incompleta ? null : (contribucion?.contribucionMarginalUnitaria ?? null),
+      [...motivosBase, ...sinVentas, ...(contribucion?.motivos ?? [])],
+    );
+    // Es la pregunta real que alguien hace cuando mira un fijo "por cajón":
+    // no "cuánto fijo carga cada cajón" (R10 lo prohíbe), sino "cuántos cajones
+    // hay que vender para cubrir el fijo total" — CF / cm, igual que MX-01.
+    // Con CM <= 0 ningún volumen alcanza: cada cajón vendido agranda la
+    // pérdida, así que sale incompleto con motivo, nunca un infinito.
+    const cmValor = contribucionMarginalPorCajonCalculada.completo ? contribucionMarginalPorCajonCalculada.valor : null;
+    const sinCMPositiva = cmValor !== null && cmValor <= 0
+      ? ['La contribución marginal no es positiva: ningún volumen de ventas cubre los costos fijos.']
+      : [];
+    const cajonesQueTapanLosFijos: NumeroTablero =
+      totalFijoBase === null || cmValor === null || cmValor <= 0
+        ? incompleto(
+            [
+              ...(totalFijoBase === null ? costosMotivosPorFalta : []),
+              ...contribucionMarginalPorCajonCalculada.motivos,
+              ...sinCMPositiva,
+            ],
+            parametrosSinConfirmar,
+          )
+        : completo(totalFijoBase / cmValor, parametrosSinConfirmar, motivosBase);
 
     return {
       periodo,
@@ -226,11 +279,12 @@ export class OwnerDashboardService {
       rubro,
       pendientes,
       costoPorCajon: costos,
+      costosFijosDelPeriodo: totalFijoBase === null
+        ? incompleto(costosMotivosPorFalta, parametrosSinConfirmar)
+        : completo(totalFijoBase, parametrosSinConfirmar, motivosBase),
+      cajonesQueTapanLosFijos,
       precioPromedioVenta: convertido(contribucion?.precioUnitario ?? null, [...motivosBase, ...sinVentas]),
-      contribucionMarginalPorCajon: convertido(
-        contribucion?.incompleta ? null : (contribucion?.contribucionMarginalUnitaria ?? null),
-        [...motivosBase, ...sinVentas, ...(contribucion?.motivos ?? [])],
-      ),
+      contribucionMarginalPorCajon: contribucionMarginalPorCajonCalculada,
       puntoEquilibrioCajones: {
         ...(equilibrio?.incompleta || unidadesEquilibrio === null || factor === null
           ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], parametrosSinConfirmar)
