@@ -131,3 +131,7 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 353,351,AlanArevalo1,dev,2026-09-13T20:24:47Z,2026-09-13T20:28:05Z,0.1,4,273,4,8,0,,,docs/sesiones/2026-09-13-351-briefing-modo-mensajes.md
 357,355,AlanArevalo1,dev,2026-09-14T02:05:07Z,2026-09-14T02:07:26Z,0.0,10,316,7,8,0,,,docs/sesiones/2026-09-13-355-revision-cargas-campo.md
 358,,SantiagoBriz,staging,2026-09-14T02:16:40Z,2026-09-14T04:00:21Z,1.7,27,1098,14,8,0,,,docs/sesiones/2026-09-13-350-precios-semanales-capia.md
+356,,AlanArevalo1,dev,2026-09-14T01:55:02Z,2026-09-14T22:52:30Z,21.0,2,134,0,22,0,,,docs/sesiones/2026-09-13-348-veredicto-g7.md
+359,,giuliannadr,dev,2026-09-14T21:47:08Z,2026-09-14T22:50:37Z,1.1,3,165,14,5,0,,,docs/sesiones/2026-09-14-mx-03-costo-fijo-incompleto.md
+361,,giuliannadr,dev,2026-09-14T21:55:06Z,2026-09-14T22:55:12Z,1.0,6,307,10,11,0,,,docs/sesiones/2026-09-14-mx-04-clasificacion-del-periodo-calculado.md
+363,,giuliannadr,dev,2026-09-14T22:25:25Z,2026-09-14T22:57:15Z,0.5,3,120,0,8,0,,,docs/sesiones/2026-09-14-m0-01a-net-production-cost.md
