@@ -1,10 +1,21 @@
 import { Money } from '../value-objects/money.js';
 
-/** Claves estables de los totales que ya consolida el motor de absorción. */
+/**
+ * Claves estables de los totales que ya consolida el motor de absorción.
+ *
+ * Las dos últimas son de M2-01 (plan de análisis marginal v2): gastos de no
+ * fabricación (`CostElement.VENTA`, hasta ahora sin dónde cargarse). Las dos
+ * llegan con `comportamientoVolumenForzado` — a diferencia de MP/MOD/CIP, no
+ * necesitan clasificación humana: un gasto variable de comercialización "por
+ * unidad vendida" es variable por cómo se mide, y un gasto de administración
+ * del período es fijo del período, sin que nadie tenga que decidirlo.
+ */
 export const CLAVES_COMPORTAMIENTO_CONTRIBUCION = {
   materiaPrima: 'comportamiento_materia_prima',
   manoObraDirecta: 'comportamiento_mano_obra_directa',
   costosIndirectos: 'comportamiento_costos_indirectos',
+  gastosComercializacion: 'comportamiento_gastos_comercializacion',
+  gastosAdministracion: 'comportamiento_gastos_administracion',
 } as const;
 
 export type ComportamientoVolumen = 'VARIABLE' | 'FIJO' | 'SEMIFIJO';
@@ -23,6 +34,17 @@ export interface ComponenteAbsorcion {
   clave: string;
   etiqueta: string;
   importeAbsorcion: number;
+  /**
+   * M2-01. Para componentes cuyo comportamiento es fijo/variable por
+   * DEFINICIÓN, no por decisión del costista (un "gasto variable de
+   * comercialización por unidad vendida" es variable por cómo se mide, no
+   * porque alguien lo haya elegido). Cuando viene, se usa DIRECTO y se
+   * saltea la cascada de `ParametroCosteo` — ni siquiera hace falta que
+   * exista una fila, y si existiera una (por error o por intento de
+   * anularlo) no gana: lo forzado es una propiedad del componente, no una
+   * clasificación que se pueda pisar.
+   */
+  comportamientoVolumenForzado?: ComportamientoVolumen;
 }
 
 export interface ContribucionMarginalInput {
@@ -90,6 +112,16 @@ export function resolverComportamiento(
 /** Vista de costeo variable sobre importes ya emitidos por absorción. */
 export function calcularContribucionMarginal(input: ContribucionMarginalInput): ContribucionMarginal {
   const componentes = input.componentes.map((componente): TrazaComponenteContribucion => {
+    if (componente.comportamientoVolumenForzado) {
+      return {
+        ...componente,
+        comportamientoVolumen: componente.comportamientoVolumenForzado,
+        origen: null,
+        parametroId: null,
+        clasificadoPorUserId: null,
+        clasificadoEn: null,
+      };
+    }
     const resuelta = resolverComportamiento(componente.clave, input.clasificaciones, input.contexto);
     return {
       ...componente,

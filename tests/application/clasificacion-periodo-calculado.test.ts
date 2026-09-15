@@ -83,8 +83,13 @@ describe('de qué período sale la clasificación de comportamiento (MX-04)', ()
     expect(cip(result).comportamientoVolumen).toBe('FIJO');
     expect(cip(result).parametroId).toBe('p-cip-agosto');
     expect(result.periodId).toBe(AGOSTO);
-    // Si ya sabemos el período, no hay por qué salir a buscar el abierto.
-    expect(prisma.costPeriod.findFirst).not.toHaveBeenCalled();
+    // Si ya sabemos el período, no hay por qué SALIR A BUSCAR el abierto —
+    // pero sí se consulta ESE período puntual (M2-01: para leer sus gastos de
+    // no fabricación). La diferencia es la forma del where, no si se llama.
+    expect(prisma.costPeriod.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.costPeriod.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: AGOSTO } }),
+    );
   });
 
   it('sigue resolviendo contra el período abierto cuando no se le pasa ninguno', async () => {

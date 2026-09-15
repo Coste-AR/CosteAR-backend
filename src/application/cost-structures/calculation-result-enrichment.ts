@@ -80,7 +80,20 @@ export async function enrichCalculationResult(
     output: CalculationOutput;
   },
 ): Promise<EnrichedCalculationResult> {
-  const [pending, periodoDelFallback, company] = await Promise.all([
+  // M2-01. Gastos de no fabricación del período (`CostElement.VENTA`, hasta
+  // ahora sin dónde cargarse — el punto de equilibrio del tablero era un
+  // equilibrio DE PRODUCCIÓN, no de la empresa). Se leen del período ya
+  // resuelto, igual que `unidadGestion` se lee de la empresa: el llamador no
+  // tiene que acordarse de pasarlos, así que ningún caller nuevo puede
+  // olvidarse de cablearlos (era exactamente el problema con `thirdPartyWork`
+  // en `CalculationRunService.calculate()` — ver bitácora de esta tarea).
+  //
+  // A propósito NO pasan por `CalculationInput`/`calculate.ts`: no son un
+  // costo de producción, nunca tocan el Estado de Costos ni el CPV — son
+  // gasto del período, por debajo de esa línea. Meterlos en el motor
+  // auditado sería tocar algo que estructuralmente no le corresponde
+  // modelar (regla dura 1 del plan: "no se toca el motor auditado").
+  const [pending, periodoResuelto, company] = await Promise.all([
     db.dataPoint.findMany({
       where: {
         structureId: args.structureId,
@@ -91,15 +104,18 @@ export async function enrichCalculationResult(
       select: { id: true, label: true },
       take: 20,
     }),
-    // `orderBy` explícito porque una estructura PUEDE tener más de un período
-    // abierto: `CostPeriodService.reopen()` reabre uno cerrado sin comprobar que
-    // no haya otro OPEN, y el schema no lo impide. Sin orden, la base elegía
-    // cualquiera. Se ordena igual que `CostPeriodService.getOpen()`.
     args.periodId
-      ? Promise.resolve(null)
-      : db.costPeriod.findFirst({
+      ? db.costPeriod.findFirst({
+          where: { id: args.periodId },
+          select: { id: true, gastoVariableComercializacionPorUnidad: true, gastoFijoAdministracion: true },
+        })
+      : // `orderBy` explícito porque una estructura PUEDE tener más de un período
+        // abierto: `CostPeriodService.reopen()` reabre uno cerrado sin comprobar
+        // que no haya otro OPEN, y el schema no lo impide. Sin orden, la base
+        // elegía cualquiera. Se ordena igual que `CostPeriodService.getOpen()`.
+        db.costPeriod.findFirst({
           where: { structureId: args.structureId, status: 'OPEN', deletedAt: null },
-          select: { id: true },
+          select: { id: true, gastoVariableComercializacionPorUnidad: true, gastoFijoAdministracion: true },
           orderBy: { code: 'desc' },
         }),
     args.companyId
@@ -112,7 +128,11 @@ export async function enrichCalculationResult(
       : Promise.resolve(null),
   ]);
   const incompletitud = buildIncompletitud(pending);
-  const periodId = args.periodId ?? periodoDelFallback?.id ?? null;
+  const periodId = args.periodId ?? periodoResuelto?.id ?? null;
+  const gastosDeNoFabricacion = {
+    gastoVariableComercializacionPorUnidad: Number(periodoResuelto?.gastoVariableComercializacionPorUnidad ?? 0),
+    gastoFijoAdministracion: Number(periodoResuelto?.gastoFijoAdministracion ?? 0),
+  };
 
   // Sin empresa sólo existen mocks históricos: no se consulta un tenant
   // inexistente y la contribución informa las clasificaciones faltantes.
@@ -149,6 +169,20 @@ export async function enrichCalculationResult(
         clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
         etiqueta: 'Costos indirectos de producción',
         importeAbsorcion: args.output.indirectCostsApplied,
+      },
+      // M2-01. Forzados: no pasan por la cascada de ParametroCosteo (ver el
+      // comentario de comportamientoVolumenForzado en el dominio).
+      {
+        clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.gastosComercializacion,
+        etiqueta: 'Gastos de comercialización',
+        importeAbsorcion: gastosDeNoFabricacion.gastoVariableComercializacionPorUnidad * args.input.sales.quantity,
+        comportamientoVolumenForzado: 'VARIABLE',
+      },
+      {
+        clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.gastosAdministracion,
+        etiqueta: 'Gastos de administración',
+        importeAbsorcion: gastosDeNoFabricacion.gastoFijoAdministracion,
+        comportamientoVolumenForzado: 'FIJO',
       },
     ],
     clasificaciones,
