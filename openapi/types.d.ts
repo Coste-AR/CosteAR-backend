@@ -74,6 +74,8 @@ export interface paths {
                                             nombre: string;
                                         }[];
                                         motivos: string[];
+                                        /** @enum {boolean} */
+                                        esUnitarioDeFijo: true;
                                     };
                                     total: {
                                         valor: number | null;
@@ -85,6 +87,26 @@ export interface paths {
                                         }[];
                                         motivos: string[];
                                     };
+                                };
+                                costosFijosDelPeriodo: {
+                                    valor: number | null;
+                                    completo: boolean;
+                                    parametrosSinConfirmar: boolean;
+                                    parametrosSinConfirmarDetalle: {
+                                        id: string;
+                                        nombre: string;
+                                    }[];
+                                    motivos: string[];
+                                };
+                                cajonesQueTapanLosFijos: {
+                                    valor: number | null;
+                                    completo: boolean;
+                                    parametrosSinConfirmar: boolean;
+                                    parametrosSinConfirmarDetalle: {
+                                        id: string;
+                                        nombre: string;
+                                    }[];
+                                    motivos: string[];
                                 };
                                 precioPromedioVenta: {
                                     valor: number | null;
