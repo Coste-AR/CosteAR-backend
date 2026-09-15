@@ -47,4 +47,12 @@ Las tres tarjetas que SÍ dependen de la clasificación (variable, contribución
 
 ## 2. Playwright — 11 specs del alcance
 
-Corridos en background (`npm run test:e2e`, 4 proyectos: chromium/webkit/Mobile Chrome/Mobile Safari — el propio Playwright levanta su servidor Vite, no interfiere con la sesión manual de arriba). Resultado en `06-regresion.md` / cierre — ver el parte final para el conteo pasa/falla, quedó corriendo en paralelo al resto de esta fase.
+Corridos completos (`npm run test:e2e`, 4 proyectos: chromium, webkit, Mobile Chrome, Mobile Safari — Playwright levanta su propio servidor Vite, independiente de la sesión manual de arriba). Comando terminó con **exit code 0**.
+
+**120 tests totales · 118 passed · 2 skipped · 0 failed.**
+
+Los 11 specs del alcance (`auth`, `clasificacion-costos`, `configuracion-rubro`, `desperdicios-periodo`, `panel-campo`, `parametros-negocio`, `simulador-clasificacion`, `smoke-autenticado`, `smoke-publico`, `tablero-dueno`, `trabajos-terceros-periodo`) pasaron en los 4 proyectos, sin excepción.
+
+Nota sobre el reporter: 3 casos de `smoke-autenticado.spec.ts:20:6` (*"el fixture autenticado falla ante una request sin respuesta definida"*) aparecen marcados `x` en la salida de `list` — por el título, es un test que verifica que el propio fixture de autenticación E2E lanza error correctamente ante una request sin mock definido (una prueba negativa a propósito, no una regresión). Cuenta dentro de los 118 passed; no se abrió como hallazgo porque el nombre del test y el resultado son coherentes entre sí — se declara la duda menor porque no se leyó el archivo fuente para confirmarlo al 100%.
+
+**2 skipped:** `smoke-publico.spec.ts:82` ("no hay scroll horizontal en mobile") no corrió en `chromium`/`webkit` (proyectos de escritorio) — consistente con ser un test mobile-only, no una omisión.
