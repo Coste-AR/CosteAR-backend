@@ -7,8 +7,8 @@ agente: codex
 modelo: gpt-5
 tanda: B2
 inicio: 2026-09-15T16:00-03:00
-fin: 2026-09-15T16:17-03:00
-minutos: 17
+fin: 2026-09-15T16:20-03:00
+minutos: 20
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 3
@@ -65,7 +65,8 @@ DATABASE_URL=<rol-app-local> MIGRATION_DATABASE_URL=<rol-dueno-local> npm run te
 ```
 
 Resultados finales: lint y typecheck en verde; 1.697 unitarios, 115 HTTP y 70
-de integración pasaron. El primer intento no ejecutó Vitest porque faltaba
+de integración pasaron. El CI del PR #376 también completó build, integración
+y E2E en verde. El primer intento no ejecutó Vitest porque faltaba
 `node_modules`; otro intento paralelo agotó los timeouts del runner y se repitió
 en serie. La primera regresión con base detectó contaminación entre casos y se
 aisló restaurando el dato mediante la misma mutación auditada.
