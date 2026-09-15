@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CostPeriodService } from '../../../application/cost-structures/cost-period-service.js';
 import { CostPeriodPropagationService } from '../../../application/cost-structures/cost-period-propagation-service.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
+import { updateGastosDeNoFabricacionSchema } from '../../../shared/schemas/cost.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -93,5 +94,20 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
     const { reason } = reopenSchema.parse(request.body);
     const reopened = await service.reopen(request.authUser!.id, id, reason, auditContext(request));
     return { data: reopened };
+  });
+
+  // Gastos de no fabricación del período (M2-01): comercialización variable
+  // por unidad vendida + administración fija. Alimentan la contribución
+  // marginal y el punto de equilibrio de la EMPRESA, no solo de producción.
+  app.put('/periods/:id/gastos-no-fabricacion', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const input = updateGastosDeNoFabricacionSchema.parse(request.body);
+    const updated = await service.setGastosDeNoFabricacion(
+      request.authUser!.id,
+      id,
+      input,
+      auditContext(request),
+    );
+    return { data: updated };
   });
 }

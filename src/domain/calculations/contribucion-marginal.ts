@@ -3,10 +3,10 @@ import { Money } from '../value-objects/money.js';
 /**
  * Claves estables de los totales que ya consolida el motor de absorción.
  *
- * Las cuatro últimas son de M0-01 (plan de análisis marginal v2): además de
- * MP/MOD/CIP, el costo REAL neto de producción (renglón 7f, `netProductionCost`)
- * incluye trabajos de terceros, amortización de activos, variación presupuesto
- * y el neto de desperdicio — hasta ahora ninguno llegaba al costeo variable.
+ * Las cuatro de M0-01 (plan de análisis marginal v2): además de MP/MOD/CIP, el
+ * costo REAL neto de producción (renglón 7f, `netProductionCost`) incluye
+ * trabajos de terceros, amortización de activos, variación presupuesto y el
+ * neto de desperdicio — hasta ahora ninguno llegaba al costeo variable.
  *
  * `amortizacionActivos` tiene una regla dura propia: 🔴 R6/R8 — la
  * amortización de un bien de uso es FIJA cuando la causa es el tiempo, y
@@ -14,6 +14,13 @@ import { Money } from '../value-objects/money.js';
  * El guard vive en `parametros-costeo-service.ts` (rechaza con 422 si alguien
  * intenta clasificarla VARIABLE), no acá: esta capa es pura y no decide qué
  * clasificaciones se aceptan, solo qué pasa con la que ya llegó.
+ *
+ * Las dos últimas son de M2-01: gastos de no fabricación (`CostElement.VENTA`,
+ * hasta ahora sin dónde cargarse). Las dos llegan con
+ * `comportamientoVolumenForzado` — a diferencia de MP/MOD/CIP, no necesitan
+ * clasificación humana: un gasto variable de comercialización "por unidad
+ * vendida" es variable por cómo se mide, y un gasto de administración del
+ * período es fijo del período, sin que nadie tenga que decidirlo.
  */
 export const CLAVES_COMPORTAMIENTO_CONTRIBUCION = {
   materiaPrima: 'comportamiento_materia_prima',
@@ -23,6 +30,8 @@ export const CLAVES_COMPORTAMIENTO_CONTRIBUCION = {
   trabajosDeTerceros: 'comportamiento_trabajos_de_terceros',
   amortizacionActivos: 'comportamiento_amortizacion_activos',
   desperdicioAlCosto: 'comportamiento_desperdicio_al_costo',
+  gastosComercializacion: 'comportamiento_gastos_comercializacion',
+  gastosAdministracion: 'comportamiento_gastos_administracion',
 } as const;
 
 export type ComportamientoVolumen = 'VARIABLE' | 'FIJO' | 'SEMIFIJO';
@@ -41,6 +50,17 @@ export interface ComponenteAbsorcion {
   clave: string;
   etiqueta: string;
   importeAbsorcion: number;
+  /**
+   * M2-01. Para componentes cuyo comportamiento es fijo/variable por
+   * DEFINICIÓN, no por decisión del costista (un "gasto variable de
+   * comercialización por unidad vendida" es variable por cómo se mide, no
+   * porque alguien lo haya elegido). Cuando viene, se usa DIRECTO y se
+   * saltea la cascada de `ParametroCosteo` — ni siquiera hace falta que
+   * exista una fila, y si existiera una (por error o por intento de
+   * anularlo) no gana: lo forzado es una propiedad del componente, no una
+   * clasificación que se pueda pisar.
+   */
+  comportamientoVolumenForzado?: ComportamientoVolumen;
 }
 
 export interface ContribucionMarginalInput {
@@ -117,6 +137,16 @@ export function resolverComportamiento(
 /** Vista de costeo variable sobre importes ya emitidos por absorción. */
 export function calcularContribucionMarginal(input: ContribucionMarginalInput): ContribucionMarginal {
   const componentes = input.componentes.map((componente): TrazaComponenteContribucion => {
+    if (componente.comportamientoVolumenForzado) {
+      return {
+        ...componente,
+        comportamientoVolumen: componente.comportamientoVolumenForzado,
+        origen: null,
+        parametroId: null,
+        clasificadoPorUserId: null,
+        clasificadoEn: null,
+      };
+    }
     const resuelta = resolverComportamiento(componente.clave, input.clasificaciones, input.contexto);
     return {
       ...componente,

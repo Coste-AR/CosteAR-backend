@@ -127,6 +127,61 @@ describe('contribución marginal por unidad', () => {
     expect(resultado.totalAbsorcion).toBe(72); // el componente en $0 no cambia nada
   });
 
+  /**
+   * M2-01 (plan de análisis marginal v2). Los gastos de no fabricación
+   * (comercialización, administración) son fijos/variables por DEFINICIÓN —
+   * a diferencia de MP/MOD/CIP, no hay una decisión humana que tomar sobre
+   * si un "gasto variable de comercialización por unidad vendida" es fijo o
+   * variable: lo dice el propio nombre. `comportamientoVolumenForzado` deja
+   * que un componente llegue YA clasificado, sin pasar por la cascada de
+   * `ParametroCosteo` — ni siquiera necesita que exista una fila.
+   */
+  it('un componente forzado no pasa por la cascada de clasificación', () => {
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 15,
+      unidadesVendidas: 6,
+      componentes: [
+        ...componentes,
+        { clave: 'gastos_comercializacion', etiqueta: 'Gastos de comercialización', importeAbsorcion: 18, comportamientoVolumenForzado: 'VARIABLE' },
+      ],
+      clasificaciones: [
+        clasificacion(CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima, 'VARIABLE'),
+        clasificacion(CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta, 'FIJO'),
+        clasificacion(CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos, 'VARIABLE'),
+        // 'gastos_comercializacion' NO tiene fila — ninguna clasificación la respalda.
+      ],
+      contexto,
+    });
+
+    expect(resultado.incompleta).toBe(false);
+    if (resultado.incompleta) return;
+    expect(resultado.componentes.find((c) => c.clave === 'gastos_comercializacion')).toMatchObject({
+      comportamientoVolumen: 'VARIABLE',
+      origen: null, // no lo respalda ninguna fila real — es forzado, no elegido
+      parametroId: null,
+    });
+    // 48 (variable de siempre) + 18 (forzado variable) = 66
+    expect(resultado.costoVariableTotal).toBe(66);
+  });
+
+  it('una fila real de clasificación NO puede pisar lo forzado', () => {
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 15,
+      unidadesVendidas: 6,
+      componentes: [
+        { clave: 'gastos_administracion', etiqueta: 'Gastos de administración', importeAbsorcion: 20, comportamientoVolumenForzado: 'FIJO' },
+      ],
+      // Alguien clasificó (por error, o por intentar anularlo) esta clave como VARIABLE.
+      clasificaciones: [clasificacion('gastos_administracion', 'VARIABLE')],
+      contexto,
+    });
+
+    expect(resultado.incompleta).toBe(false);
+    if (resultado.incompleta) return;
+    expect(resultado.componentes[0]).toMatchObject({ comportamientoVolumen: 'FIJO' });
+    expect(resultado.costoVariableTotal).toBe(0); // no entró al variable pese a la fila
+  });
+
   it('un semifijo queda pendiente hasta que se declare su tramo variable', () => {
     const resultado = calcularContribucionMarginal({
       precioUnitario: 15,

@@ -507,6 +507,26 @@ model CostPeriod {
    */
   thirdPartyWork Decimal @default(0) @db.Decimal(18, 4)
 
+  /**
+   * GASTOS DE NO FABRICACIÓN del período (M2-01, plan de análisis marginal v2).
+   * `CostElement.VENTA` existe hace tiempo en el enum de abajo pero nunca tuvo
+   * dónde cargarse como gasto propio del período — hasta ahora el punto de
+   * equilibrio del tablero era un equilibrio DE PRODUCCIÓN, no de la empresa.
+   *
+   * Los dos son de naturaleza fija/variable por DEFINICIÓN, no por elección del
+   * costista (a diferencia de MP/MOD/CIP, que sí requieren clasificación
+   * humana): un gasto de comercialización "por unidad vendida" es variable por
+   * cómo se mide, y un gasto de administración de un período es fijo del
+   * período. Por eso viven acá directo, sin pasar por `ParametroCosteo`.
+   *
+   * Solo en `CostPeriod`, sin mirror en `CostStructure` (a diferencia de
+   * `thirdPartyWork`): son gastos SG&A que naturalmente se re-cargan cada
+   * período (alquiler, sueldos administrativos, comisiones), no una
+   * configuración que tenga sentido "heredar" de un período al siguiente.
+   */
+  gastoVariableComercializacionPorUnidad Decimal @default(0) @db.Decimal(18, 4)
+  gastoFijoAdministracion                Decimal @default(0) @db.Decimal(18, 4)
+
   // Cierre: congela el período. `closedRunId` apunta al cálculo que quedó fijo.
   closedAt    DateTime? @db.Timestamptz
   closedBy    String?   @db.Uuid
