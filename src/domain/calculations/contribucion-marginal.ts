@@ -61,11 +61,27 @@ export interface ComponenteAbsorcion {
    * clasificación que se pueda pisar.
    */
   comportamientoVolumenForzado?: ComportamientoVolumen;
+  /**
+   * M0-02. De qué elemento del costo es este componente: `'produccion'`
+   * (MP/MOD/CIP y los cuatro renglones de M0-01 — todo lo que compone el
+   * costo REAL de producción) divide por unidades PRODUCIDAS; `'venta'`
+   * (`CostElement.VENTA`, M2-01) divide por unidades VENDIDAS. Default
+   * `'produccion'` cuando se omite: todos los componentes de antes de M0-02
+   * eran de producción, así que no hace falta tocar ningún llamador viejo.
+   */
+  elemento?: 'produccion' | 'venta';
 }
 
 export interface ContribucionMarginalInput {
   precioUnitario: number;
   unidadesVendidas: number;
+  /**
+   * M0-02. Unidades PRODUCIDAS del período — divisor del costo variable de
+   * producción. Opcional: si falta o es `<= 0`, se cae a `unidadesVendidas`
+   * (mismo criterio que `detail.unitCost.basadoEn` del motor auditado) y el
+   * resultado lo dice con `basadoEn: 'vendidas'`. No se falla, se avisa.
+   */
+  unidadesProducidas?: number | null;
   componentes: ComponenteAbsorcion[];
   clasificaciones: FilaComportamiento[];
   contexto: { structureId: string; periodId: string | null };
@@ -92,8 +108,17 @@ export interface ContribucionMarginalCompleta {
   incompleta: false;
   precioUnitario: number;
   unidadesVendidas: number;
+  /** M0-02. El valor efectivamente usado: `unidadesProducidas` si es válido, si no `unidadesVendidas` (ver `basadoEn`). */
+  unidadesProducidas: number;
+  /** M0-02. `'vendidas'` cuando no había cantidad producida cargada — mismo significado que `detail.unitCost.basadoEn`. */
+  basadoEn: 'producidas' | 'vendidas';
   totalAbsorcion: number;
   costoVariableTotal: number;
+  /** M0-02. Componentes de elemento 'produccion' ÷ `unidadesProducidas`. */
+  costoVariableUnitarioProduccion: number;
+  /** M0-02. Componentes de elemento 'venta' ÷ `unidadesVendidas`. */
+  costoVariableUnitarioComercializacion: number;
+  /** Suma de los dos anteriores — mismo campo de siempre, mismo nombre. */
   costoVariableUnitario: number;
   contribucionMarginalUnitaria: number;
   componentes: TrazaComponenteContribucion[];
@@ -103,8 +128,12 @@ export interface ContribucionMarginalIncompleta {
   incompleta: true;
   precioUnitario: number;
   unidadesVendidas: number;
+  unidadesProducidas: number;
+  basadoEn: 'producidas' | 'vendidas';
   totalAbsorcion: number;
   costoVariableTotal: null;
+  costoVariableUnitarioProduccion: null;
+  costoVariableUnitarioComercializacion: null;
   costoVariableUnitario: null;
   contribucionMarginalUnitaria: null;
   componentes: TrazaComponenteContribucion[];
@@ -191,9 +220,19 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
     }
   }
 
+  // M0-02. Sin cantidad producida cargada, se cae a vendidas — mismo criterio
+  // que `detail.unitCost.basadoEn` del motor auditado (`calculate.ts`). No es
+  // un motivo que bloquee: el costo variable de producción se puede seguir
+  // calculando, solo que con un divisor distinto del ideal.
+  const hayProducidas = input.unidadesProducidas != null && input.unidadesProducidas > 0;
+  const unidadesProducidas = hayProducidas ? input.unidadesProducidas! : input.unidadesVendidas;
+  const basadoEn: 'producidas' | 'vendidas' = hayProducidas ? 'producidas' : 'vendidas';
+
   const base = {
     precioUnitario: Money.of(input.precioUnitario).toNumber(),
     unidadesVendidas: input.unidadesVendidas,
+    unidadesProducidas,
+    basadoEn,
     totalAbsorcion: totalAbsorcion.toNumber(),
     componentes,
   };
@@ -202,22 +241,39 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
       incompleta: true,
       ...base,
       costoVariableTotal: null,
+      costoVariableUnitarioProduccion: null,
+      costoVariableUnitarioComercializacion: null,
       costoVariableUnitario: null,
       contribucionMarginalUnitaria: null,
       motivos,
     };
   }
 
-  const costoVariableTotal = Money.sum(
-    componentes
-      .filter((componente) => componente.comportamientoVolumen === 'VARIABLE')
-      .map((componente) => Money.of(componente.importeAbsorcion)),
+  // M0-02. Issue #88 reaparecido en esta capa: todo dividía por vendidas,
+  // incluido el costo variable de PRODUCCIÓN. Ahora cada elemento divide por
+  // la cantidad que le corresponde — `elemento` default 'produccion' cubre
+  // MP/MOD/CIP y los cuatro renglones de M0-01 sin que ningún llamador viejo
+  // tenga que declararlo.
+  const variablesDeProduccion = componentes.filter(
+    (c) => c.comportamientoVolumen === 'VARIABLE' && (c.elemento ?? 'produccion') === 'produccion',
   );
-  const costoVariableUnitario = costoVariableTotal.divide(input.unidadesVendidas);
+  const variablesDeComercializacion = componentes.filter(
+    (c) => c.comportamientoVolumen === 'VARIABLE' && c.elemento === 'venta',
+  );
+  const costoVariableProduccionTotal = Money.sum(variablesDeProduccion.map((c) => Money.of(c.importeAbsorcion)));
+  const costoVariableComercializacionTotal = Money.sum(variablesDeComercializacion.map((c) => Money.of(c.importeAbsorcion)));
+  const costoVariableTotal = costoVariableProduccionTotal.add(costoVariableComercializacionTotal);
+  const costoVariableUnitarioProduccion = costoVariableProduccionTotal.divide(unidadesProducidas);
+  // `input.unidadesVendidas > 0` está garantizado acá: si no, el motivo de
+  // arriba ya hubiera vuelto `incompleta` antes de llegar a este punto.
+  const costoVariableUnitarioComercializacion = costoVariableComercializacionTotal.divide(input.unidadesVendidas);
+  const costoVariableUnitario = costoVariableUnitarioProduccion.add(costoVariableUnitarioComercializacion);
   return {
     incompleta: false,
     ...base,
     costoVariableTotal: costoVariableTotal.toNumber(),
+    costoVariableUnitarioProduccion: costoVariableUnitarioProduccion.toNumber(),
+    costoVariableUnitarioComercializacion: costoVariableUnitarioComercializacion.toNumber(),
     costoVariableUnitario: costoVariableUnitario.toNumber(),
     contribucionMarginalUnitaria: Money.of(input.precioUnitario).subtract(costoVariableUnitario).toNumber(),
   };

@@ -234,12 +234,16 @@ export async function enrichCalculationResult(
       etiqueta: 'Gastos de comercialización',
       importeAbsorcion: gastosDeNoFabricacion.gastoVariableComercializacionPorUnidad * args.input.sales.quantity,
       comportamientoVolumenForzado: 'VARIABLE' as const,
+      // M0-02: elemento 'venta' — divide por VENDIDAS, no por producidas.
+      elemento: 'venta' as const,
     },
     {
       clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.gastosAdministracion,
       etiqueta: 'Gastos de administración',
       importeAbsorcion: gastosDeNoFabricacion.gastoFijoAdministracion,
       comportamientoVolumenForzado: 'FIJO' as const,
+      // Fijo: no participa de ningún divisor, pero 'venta' documenta su origen.
+      elemento: 'venta' as const,
     },
   ];
   const incompletitud = buildIncompletitud(pending);
@@ -250,6 +254,10 @@ export async function enrichCalculationResult(
   const contribucionMarginal = calcularContribucionMarginal({
     precioUnitario: args.input.sales.unitPrice,
     unidadesVendidas: args.input.sales.quantity,
+    // M0-02: el costo variable de producción divide por PRODUCIDAS. Mismo
+    // dato que ya usa `detail.unitCost` del motor auditado — no es un valor
+    // nuevo, es que esta capa no lo recibía.
+    unidadesProducidas: args.input.sales.productionQuantity,
     componentes,
     clasificaciones,
     contexto: { structureId: args.structureId, periodId },

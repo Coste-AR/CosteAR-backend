@@ -74,11 +74,14 @@ async function contribucionDe(gastos: { gastoVariableComercializacionPorUnidad: 
 }
 
 describe('los gastos de no fabricación entran a la contribución marginal (M2-01)', () => {
-  it('SIN gastos de no fabricación: cv = 300, cm = 200 (caso base de este fixture)', async () => {
+  it('SIN gastos de no fabricación: cv = 240, cm = 260 (caso base de este fixture)', async () => {
     const cm = await contribucionDe(undefined);
-    // MP 150.000 + CIP 90.000 (los dos VARIABLE) = 240.000 / 800 vendidas = 300
-    expect(cm.costoVariableUnitario).toBe(300);
-    expect(cm.contribucionMarginalUnitaria).toBe(200);
+    // MP 150.000 + CIP 90.000 (los dos VARIABLE, elemento producción) = 240.000
+    // ÷ 1.000 PRODUCIDAS = 240 (M0-02: no ÷ 800 vendidas — ese era el bug #88
+    // reaparecido en esta capa, que M0-02 corrigió).
+    expect(cm.costoVariableUnitarioProduccion).toBe(240);
+    expect(cm.costoVariableUnitario).toBe(240);
+    expect(cm.contribucionMarginalUnitaria).toBe(260);
     // MOD 60.000 es el único FIJO — sin gastos de administración todavía.
     const fijoTotal = cm.componentes.filter((c) => c.comportamientoVolumen === 'FIJO').reduce((s, c) => s + c.importeAbsorcion, 0);
     expect(fijoTotal).toBe(60000);
@@ -86,9 +89,12 @@ describe('los gastos de no fabricación entran a la contribución marginal (M2-0
 
   it('CON gastos de no fabricación: el costo variable y los fijos SUBEN, y el PE cambia', async () => {
     const cm = await contribucionDe({ gastoVariableComercializacionPorUnidad: 30, gastoFijoAdministracion: 56000 });
-    // cv sube en 30 (30 x 800 = 24.000 / 800 vendidas = 30 por unidad)
-    expect(cm.costoVariableUnitario).toBe(330);
-    expect(cm.contribucionMarginalUnitaria).toBe(170);
+    // cv_producción sigue en 240 (M0-02: no lo toca la comercialización).
+    // cv_comercialización = 24.000 / 800 VENDIDAS = 30. cv = 240 + 30 = 270.
+    expect(cm.costoVariableUnitarioProduccion).toBe(240);
+    expect(cm.costoVariableUnitarioComercializacion).toBe(30);
+    expect(cm.costoVariableUnitario).toBe(270);
+    expect(cm.contribucionMarginalUnitaria).toBe(230);
     // MOD 60.000 + administración 56.000 = 116.000 de fijos
     const fijoTotal = cm.componentes.filter((c) => c.comportamientoVolumen === 'FIJO').reduce((s, c) => s + c.importeAbsorcion, 0);
     expect(fijoTotal).toBe(116000);
@@ -109,12 +115,12 @@ describe('los gastos de no fabricación entran a la contribución marginal (M2-0
     const peSinVenta = fijoTotalSinVenta / sinVenta.contribucionMarginalUnitaria; // PE de producción
     const peConVenta = fijoTotalConVenta / conVenta.contribucionMarginalUnitaria; // PE de la empresa
 
-    // 60.000/200 = 300 vs. 116.000/170 = 682,35 — el PE "de producción" que el
-    // tablero mostraba hasta ahora subestima en más de un 100% lo que la
+    // 60.000/260 = 230,77 vs. 116.000/230 = 504,35 — el PE "de producción" que
+    // el tablero mostraba hasta ahora subestima más del doble de lo que la
     // empresa realmente necesita vender para no perder plata.
-    expect(peSinVenta).toBeCloseTo(300, 2);
+    expect(peSinVenta).toBeCloseTo(230.77, 1);
     expect(peConVenta).toBeGreaterThan(peSinVenta);
-    expect(peConVenta).toBeCloseTo(682.35, 1);
+    expect(peConVenta).toBeCloseTo(504.35, 1);
   });
 
   it('sin gastos de no fabricación (undefined), el comportamiento es exactamente el de antes de M2-01', async () => {
