@@ -280,3 +280,94 @@ describe('control de suma contra el costo neto de producción (renglón 7f)', ()
     expect(resultado.incompleta).toBe(false);
   });
 });
+
+/**
+ * M0-02 (plan de análisis marginal v2, `CosteAR-admin`). `costoVariableUnitario`
+ * dividía TODO por `unidadesVendidas` — issue #88 reaparecido en la capa nueva.
+ * Ese bug ya se había corregido en `detail.unitCost` (producción divide por
+ * PRODUCIDAS, no por vendidas); esta capa no había heredado la corrección.
+ *
+ * Fixture canónico del plan (`AM-01`): 1.000 producidas, 800 vendidas, costo
+ * variable de producción 214.000, gasto variable de comercialización 30 por
+ * unidad vendida (elemento VENTA, M2-01).
+ */
+describe('costo variable de producción (÷producidas) vs. comercialización (÷vendidas) — M0-02', () => {
+  const componentesAM01 = [
+    { clave: 'mp', etiqueta: 'Materia prima', importeAbsorcion: 214000 }, // elemento 'produccion' por default
+    { clave: 'gastos_comercializacion', etiqueta: 'Gastos de comercialización', importeAbsorcion: 24000, comportamientoVolumenForzado: 'VARIABLE' as const, elemento: 'venta' as const },
+  ];
+  const clasificacionesAM01 = [clasificacion('mp', 'VARIABLE')];
+
+  it('cv_producción divide por PRODUCIDAS, cv_comercialización por VENDIDAS', () => {
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 500,
+      unidadesVendidas: 800,
+      unidadesProducidas: 1000,
+      componentes: componentesAM01,
+      clasificaciones: clasificacionesAM01,
+      contexto,
+    });
+
+    expect(resultado.incompleta).toBe(false);
+    if (resultado.incompleta) return;
+    expect(resultado.costoVariableUnitarioProduccion).toBe(214); // 214.000 / 1.000
+    expect(resultado.costoVariableUnitarioComercializacion).toBe(30); // 24.000 / 800
+    expect(resultado.costoVariableUnitario).toBe(244); // 214 + 30, no 297,50 (=238.000/800)
+    expect(resultado.basadoEn).toBe('producidas');
+    expect(resultado.unidadesProducidas).toBe(1000);
+  });
+
+  it('sin cantidad producida, cae a vendidas y lo dice en basadoEn — no falla', () => {
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 500,
+      unidadesVendidas: 800,
+      // unidadesProducidas ausente.
+      componentes: componentesAM01,
+      clasificaciones: clasificacionesAM01,
+      contexto,
+    });
+
+    expect(resultado.incompleta).toBe(false);
+    if (resultado.incompleta) return;
+    expect(resultado.basadoEn).toBe('vendidas');
+    expect(resultado.unidadesProducidas).toBe(800);
+    // Con producidas = vendidas (el fallback), cv_producción = 214.000/800 = 267,50
+    expect(resultado.costoVariableUnitarioProduccion).toBe(267.5);
+  });
+
+  it('el error frecuente que el criterio del plan pide atrapar: comercialización no se cuela en cv_producción', () => {
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 500,
+      unidadesVendidas: 800,
+      unidadesProducidas: 1000,
+      componentes: componentesAM01,
+      clasificaciones: clasificacionesAM01,
+      contexto,
+    });
+
+    if (resultado.incompleta) throw new Error('no debería estar incompleta');
+    // Existencia final de 200 unidades valuada a cv de PRODUCCIÓN: 200 x 214 =
+    // 42.800. Si cv_producción incluyera comercialización (300,26), daría 60.052.
+    expect(200 * resultado.costoVariableUnitarioProduccion).toBe(42800);
+  });
+
+  it('sin unidadesProducidas ni elemento explícito, el comportamiento es exactamente el de antes de M0-02', () => {
+    // Los tests de arriba (sin elemento/unidadesProducidas) siguen dando lo
+    // mismo: elemento default 'produccion' + fallback a vendidas reproduce
+    // exactamente costoVariableTotal.divide(unidadesVendidas) de siempre.
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 15,
+      unidadesVendidas: 6,
+      componentes,
+      clasificaciones: [
+        clasificacion(CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima, 'VARIABLE'),
+        clasificacion(CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta, 'FIJO'),
+        clasificacion(CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos, 'VARIABLE'),
+      ],
+      contexto,
+    });
+    expect(resultado.incompleta).toBe(false);
+    if (resultado.incompleta) return;
+    expect(resultado.costoVariableUnitario).toBe(8); // idéntico al primer test del archivo
+  });
+});
