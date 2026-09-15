@@ -220,6 +220,7 @@ model Company {
   operationScaleValue  Decimal?              @db.Decimal(18, 4)
   operationScaleUnit   String?
   parametrosCosteo     ParametroCosteo[]
+  conceptosCosteo      ConceptoCosteo[]
   unidadesProductivas  UnidadProductiva[]
   lotesProductivos     LoteProductivo[]
   id                   String                @id @default(uuid()) @db.Uuid
@@ -450,6 +451,7 @@ model LateDataDecision {
 model CostPeriod {
   desperdicioRegistros DesperdicioRegistro[]
   parametrosCosteo     ParametroCosteo[]
+  conceptosCosteo      ConceptoCosteo[]
   // DEFAULT gen_random_uuid() a nivel SQL (migración 20260712000000) — ver AllocationBase.id.
   id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   structureId          String                @db.Uuid
@@ -582,6 +584,7 @@ model CostStructure {
   ventasProducto      VentaProducto[]
   activosAmortizables ActivoAmortizable[]
   parametrosCosteo    ParametroCosteo[]
+  conceptosCosteo     ConceptoCosteo[]
   // Lado inverso de la FK que ya existía en la base — ver CostConfigVersion.structure.
   configVersions      CostConfigVersion[]
   id                  String              @id @default(uuid()) @db.Uuid
@@ -2317,6 +2320,116 @@ model ParametroCosteo {
   @@index([structureId, clave])
   @@index([periodId])
   @@map("parametros_costeo")
+}
+
+/**
+ * M1-01 (plan de análisis marginal v2). Por qué un costo se clasifica de una
+ * forma y no de otra — la causa, no la observación (R4). Sin esto,
+ * `comportamientoVolumen = VARIABLE` es una etiqueta sin fundamento: la
+ * amortización del plantel "parecía" variable porque crecía con la
+ * producción, pero la CAUSA (el tiempo) la hace fija (R6) — `AM17` la llama
+ * "el error más caro del proyecto".
+ *
+ * `otra` existe para no forzar una causa falsa cuando ninguna de las
+ * conocidas aplica; el costista todavía puede declarar el comportamiento sin
+ * necesidad de inventar una causa que no es.
+ */
+enum CausaVariabilidad {
+  volumen
+  tiempo
+  intensidad_de_uso
+  precio
+  contrato
+  otra
+}
+
+/**
+ * M1-01 (plan de análisis marginal v2). Clasificación de costos POR CONCEPTO,
+ * por debajo de los tres baldes de `ParametroCosteo`.
+ *
+ * Por qué existe: `ParametroCosteo.comportamientoVolumen` clasifica el CIP
+ * ENTERO con una sola etiqueta. Un CIP real mezcla energía (variable) con
+ * depreciación (fija) — con un solo balde hay que elegir una de las dos para
+ * las dos. `ConceptoCosteo` permite bajar la clasificación a cada concepto.
+ *
+ * 🔴 Compatibilidad (regla dura de la tarea): una empresa sin ningún
+ * `ConceptoCosteo` cargado resuelve EXACTAMENTE como hoy, contra los tres
+ * baldes. Esta tabla nace vacía — el onboarding la puebla cuando el cliente
+ * desagrega, la migración no crea ningún concepto.
+ *
+ * Cascada idéntica a `ParametroCosteo`: `período → estructura → empresa`,
+ * NULL en los dos primeros vale "para todo lo de arriba".
+ *
+ * Los cuatro campos nuevos que la v1 del plan no tenía, cada uno con su regla
+ * dura:
+ *   - `causaVariabilidad` → R4 (la clasificación es por causalidad, no por
+ *     variabilidad observada) y R6 (amortización: tiempo = fija, intensidad
+ *     de uso = variable).
+ *   - `horizonteErogableMeses` → R7 ("erogable" sin horizonte no significa
+ *     nada: depende del plazo del análisis).
+ *   - `evitable` → R19 (los fijos indirectos evitables van en fila propia,
+ *     antes de los inevitables) y R25 (fabricar-vs-comprar: el numerador es
+ *     el fijo EVITABLE). NO es sinónimo de `erogable`: un alquiler con
+ *     contrato es erogable e inevitable a la vez.
+ *   - `rangoActividadDesde/Hasta` → R5 (todo costo declarado fijo tiene que
+ *     declarar el rango de actividad en el que esa afirmación vale).
+ */
+model ConceptoCosteo {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  /** NULL = vale para toda la empresa. */
+  structureId String?        @db.Uuid
+  structure   CostStructure? @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  /** NULL = default de la estructura; con valor, aplica solo a ese período. */
+  periodId String?     @db.Uuid
+  period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  /** Estable, en snake_case: "amortizacion_plantel", "energia_planta". */
+  clave       String
+  descripcion String?
+
+  /** A qué renglón del motor ancla este concepto. */
+  elemento CostElement
+
+  comportamientoVolumen ComportamientoCosto?
+  causaVariabilidad     CausaVariabilidad?
+
+  erogable               Boolean?
+  horizonteErogableMeses Int?
+
+  evitable Boolean?
+
+  /** Para segmentación futura (M4-01): a qué nivel aplica este concepto. */
+  nivelSegmentacion String?
+  segmentoId        String? @db.Uuid
+
+  /** R5: rango de actividad dentro del cual la clasificación FIJO vale. */
+  rangoActividadDesde Decimal? @db.Decimal(18, 6)
+  rangoActividadHasta Decimal? @db.Decimal(18, 6)
+
+  /**
+   * `false` mientras nadie lo confirmó con el cliente. Mismo criterio que
+   * `ParametroCosteo.confirmado` (REV-03): un valor cargado para poder
+   * avanzar no es lo mismo que el cliente confirmándolo.
+   */
+  confirmado Boolean @default(false)
+
+  clasificadoPorUserId String?   @db.Uuid
+  clasificadoEn        DateTime? @db.Timestamptz
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, structureId, periodId, clave])
+  @@index([companyId, clave])
+  @@index([structureId, clave])
+  @@index([periodId])
+  @@map("conceptos_costeo")
 }
 
 // ---------------------------------------------------------------------------
