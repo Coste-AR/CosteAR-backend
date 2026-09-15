@@ -171,20 +171,97 @@ export async function enrichCalculationResult(
   // Sin empresa sólo existen mocks históricos: no se consulta un tenant
   // inexistente y la contribución informa las clasificaciones faltantes.
   const clavesComportamiento = Object.values(CLAVES_COMPORTAMIENTO_CONTRIBUCION);
-  const clasificaciones: FilaComportamiento[] = args.companyId
-    ? await db.parametroCosteo.findMany({
-        where: { companyId: args.companyId, clave: { in: clavesComportamiento }, deletedAt: null },
-        select: {
-          id: true,
-          clave: true,
-          comportamientoVolumen: true,
-          structureId: true,
-          periodId: true,
-          clasificadoPorUserId: true,
-          clasificadoEn: true,
-        },
-      })
-    : [];
+  const [parametros, conceptosSemifijos] = args.companyId
+    ? await Promise.all([
+        db.parametroCosteo.findMany({
+          where: { companyId: args.companyId, clave: { in: clavesComportamiento }, deletedAt: null },
+          select: {
+            id: true,
+            clave: true,
+            comportamientoVolumen: true,
+            structureId: true,
+            periodId: true,
+            clasificadoPorUserId: true,
+            clasificadoEn: true,
+          },
+        }),
+        db.conceptoCosteo.findMany({
+          where: {
+            companyId: args.companyId,
+            deletedAt: null,
+            comportamientoVolumen: 'SEMIFIJO',
+          },
+          include: {
+            tramosSemifijos: {
+              where: { deletedAt: null },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+          orderBy: { clasificadoEn: 'desc' },
+        }),
+      ])
+    : [[], []];
+
+  // M1-02. `ConceptoCosteo` vive por debajo de los baldes históricos. Mientras
+  // el motor conserva un único importe por elemento, una separación puede
+  // reemplazar al balde solo cuando hay UN concepto semifijo resuelto para ese
+  // elemento. Con dos o más, no se inventa cómo repartir el total agregado: se
+  // conserva la clasificación del balde y el tablero sigue marcando la falta.
+  const porClave = new Map<string, typeof conceptosSemifijos>();
+  for (const concepto of conceptosSemifijos) {
+    const existentes = porClave.get(concepto.clave) ?? [];
+    existentes.push(concepto);
+    porClave.set(concepto.clave, existentes);
+  }
+  const resueltos = [...porClave.values()].flatMap((candidatos) => {
+    const porPeriodo = periodId
+      ? candidatos.find((c) => c.periodId === periodId)
+      : undefined;
+    const porEstructura = candidatos.find(
+      (c) => c.periodId === null && c.structureId === args.structureId,
+    );
+    const porEmpresa = candidatos.find(
+      (c) => c.periodId === null && c.structureId === null,
+    );
+    const resuelto = porPeriodo ?? porEstructura ?? porEmpresa;
+    return resuelto ? [resuelto] : [];
+  });
+  const clavePorElemento: Partial<Record<string, string>> = {
+    MP: CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,
+    MOD: CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta,
+    CIP: CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+  };
+  const conceptosSinteticos: FilaComportamiento[] = [];
+  for (const elemento of ['MP', 'MOD', 'CIP'] as const) {
+    const delElemento = resueltos.filter((c) => c.elemento === elemento);
+    if (delElemento.length !== 1) continue;
+    const concepto = delElemento[0]!;
+    const tramo = concepto.tramosSemifijos[0];
+    if (!tramo) continue;
+    const clave = clavePorElemento[elemento];
+    if (!clave) continue;
+    conceptosSinteticos.push({
+      id: concepto.id,
+      clave,
+      comportamientoVolumen: 'SEMIFIJO',
+      structureId: concepto.structureId,
+      periodId: concepto.periodId,
+      clasificadoPorUserId: concepto.clasificadoPorUserId,
+      clasificadoEn: concepto.clasificadoEn,
+      fuente: 'concepto',
+      porcionFijaSemifija: Number(tramo.porcionFija),
+      porcionVariableSemifija: Number(tramo.porcionVariable),
+      metodoSemifijo: tramo.metodo,
+      observacionesBaseSemifija: Array.isArray(tramo.observacionesBase)
+        ? tramo.observacionesBase as Array<{ volumen: number; importe: number }>
+        : [],
+    });
+  }
+  const clasificaciones: FilaComportamiento[] = [
+    ...conceptosSinteticos,
+    ...parametros.map((parametro) => ({ ...parametro, fuente: 'parametro' as const })),
+  ];
   const componentes = [
     {
       clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,

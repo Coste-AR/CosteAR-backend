@@ -67,6 +67,7 @@ function db() {
         { id: 'p-cip-septiembre', clave: 'comportamiento_costos_indirectos', comportamientoVolumen: 'VARIABLE', structureId: null, periodId: SEPTIEMBRE, clasificadoPorUserId: null, clasificadoEn: null },
       ]),
     },
+    conceptoCosteo: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
