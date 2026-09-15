@@ -212,6 +212,21 @@ export class CalculationRunService {
       throw new MissingInputError('indirectCosts', 'Falta cargar la sección de Costos Indirectos antes de calcular.');
     }
 
+    // #367 — trabajos de terceros pertenecen al período. La estructura conserva
+    // un espejo para retrocompatibilidad y para calcular antes de que exista un
+    // período, pero una corrida con período conocido tiene que usar la foto de
+    // ese período (y el cálculo manual, el período abierto más reciente).
+    const periodoDelCalculo = periodId
+      ? await this.db.costPeriod.findFirst({
+          where: { id: periodId, structureId, deletedAt: null },
+          select: { thirdPartyWork: true },
+        })
+      : await this.db.costPeriod.findFirst({
+          where: { structureId, status: 'OPEN', deletedAt: null },
+          select: { thirdPartyWork: true },
+          orderBy: { code: 'desc' },
+        });
+
     // Doble período (spec D.3): un dato sin decisión de imputación no se puede
     // asignar con certeza a este mes. F04 — decisión: el cálculo NO se bloquea
     // (bloquearlo sin una pantalla para imputar dejaría al costista sin acción
@@ -226,6 +241,7 @@ export class CalculationRunService {
       rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
+      thirdPartyWork: Number(periodoDelCalculo?.thirdPartyWork ?? s.thirdPartyWork ?? 0),
       inventory: inventorySchema.parse({}),
       sales: {
         unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
