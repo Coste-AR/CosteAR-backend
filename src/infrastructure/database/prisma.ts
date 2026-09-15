@@ -93,6 +93,8 @@ export const RLS_MODELS = new Set([
   'DesperdicioRegistro',
   // S-05b.
   'ReglaAlerta',
+  // M1-01: clasificación de costos por concepto.
+  'ConceptoCosteo',
 ]);
 
 /**
