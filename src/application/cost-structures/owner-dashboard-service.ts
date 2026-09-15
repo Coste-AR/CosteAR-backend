@@ -21,6 +21,15 @@ type NumeroTablero = {
 };
 
 /**
+ * `diferenciaPorVariacionDeInventarios` (M0-03) lleva, además del importe, una
+ * frase en castellano que explica de dónde sale — no alcanza con el número: es
+ * la brecha entre dos vistas del mismo período, y sin texto nadie sabe si es un
+ * error o algo esperado. `null` cuando está incompleta o cuando da $0 (con
+ * producción = venta no hay nada que explicar).
+ */
+type NumeroTableroConExplicacion = NumeroTablero & { explicacion: string | null };
+
+/**
  * `costoPorCajon.fijo` es un COSTO FIJO UNITARIO: `AM4` (bóveda) lo llama "una
  * entidad inexistente en la realidad… establece una comparación entre dos
  * magnitudes absolutamente independientes entre sí". Regla dura R10: los
@@ -166,6 +175,8 @@ export class OwnerDashboardService {
         precioPromedioVenta: falta, contribucionMarginalPorCajon: falta,
         puntoEquilibrioCajones: { ...falta, fechaUltimoRecalculo: null },
         producidoCajones: falta, resultadoPeriodo: falta,
+        resultadoPeriodoCosteoVariable: falta,
+        diferenciaPorVariacionDeInventarios: { ...falta, explicacion: null },
       };
     }
 
@@ -298,6 +309,51 @@ export class OwnerDashboardService {
           )
         : completo(totalFijoBase / cmValor, parametrosSinConfirmar, motivosBase);
 
+    /**
+     * M0-03. El tablero se presenta como la vista de costeo VARIABLE del
+     * negocio, pero su cifra de cierre (`resultado.grossMargin`) es de
+     * ABSORCIÓN. Coinciden solo cuando se vende todo lo producido — `AM4` nota
+     * CosteAR: "el costeo por absorción es una vista de salida para cumplir la
+     * RT 17; el motor razona en costeo variable, y la derivación es
+     * unidireccional". Ninguna de las dos se esconde (RT 17 exige que la de
+     * absorción exista igual): se agrega la variable al lado, no en su lugar.
+     *
+     * Fórmula: ventas − cv de lo vendido − fijos del período. Como
+     * `contribucionMarginalUnitaria = precio − cv`, eso es exactamente
+     * `cm × vendidas − fijos` — no hace falta separar el cv de producción del
+     * de comercialización (eso es M0-02/M2-01) para llegar a este número: la
+     * separación importaría para DESGLOSAR el cv, no para el resultado total.
+     */
+    const resultadoPeriodoCosteoVariable: NumeroTablero = sinDatosDeCorrida
+      ? incompleto(costosMotivosPorFalta, parametrosSinConfirmar)
+      : clasificacionIncompleta
+        ? incompleto(motivosContribucion, parametrosSinConfirmar)
+        : completo(
+            contribucion!.contribucionMarginalUnitaria! * contribucion!.unidadesVendidas - totalFijoBase!,
+            parametrosSinConfirmar,
+            motivosBase,
+          );
+    const resultadoPeriodoField: NumeroTablero = resultado.grossMargin == null || sinVentas.length > 0
+      ? incompleto([...motivosBase, ...sinVentas], parametrosSinConfirmar)
+      : completo(resultado.grossMargin, parametrosSinConfirmar, motivosBase);
+    const diferenciaPorVariacionDeInventarios: NumeroTableroConExplicacion =
+      resultadoPeriodoField.completo && resultadoPeriodoCosteoVariable.completo
+        ? (() => {
+            const diferencia = resultadoPeriodoField.valor! - resultadoPeriodoCosteoVariable.valor!;
+            const unidadesProducidas = baseUnidades;
+            const unidadesVendidas = contribucion!.unidadesVendidas;
+            const explicacion = Math.abs(diferencia) < 0.01
+              ? null
+              : unidadesProducidas > unidadesVendidas
+                ? `La producción (${unidadesProducidas}) superó a la venta (${unidadesVendidas}): parte del costo fijo del período quedó en el inventario final y todavía no impactó en el resultado por costeo variable — por eso el de absorción da más alto.`
+                : `La venta (${unidadesVendidas}) superó a la producción (${unidadesProducidas}): el costeo variable ya reconoce el costo fijo del período completo, mientras que el de absorción incluye además el que traía el inventario inicial — por eso da más bajo.`;
+            return { ...completo(diferencia, [], []), explicacion };
+          })()
+        : {
+            ...incompleto([...resultadoPeriodoField.motivos, ...resultadoPeriodoCosteoVariable.motivos], parametrosSinConfirmar),
+            explicacion: null,
+          };
+
     return {
       periodo,
       corrida: { id: run.id, validada: run.validated, ejecutadaEn: run.executedAt.toISOString() },
@@ -320,9 +376,11 @@ export class OwnerDashboardService {
       producidoCajones: factor === null || baseUnidades <= 0
         ? incompleto([...sinProduccion, ...sinUnidad])
         : completo(conversor.cantidadDesdeBase(baseUnidades)),
-      resultadoPeriodo: resultado.grossMargin == null || sinVentas.length > 0
-        ? incompleto([...motivosBase, ...sinVentas], parametrosSinConfirmar)
-        : completo(resultado.grossMargin, parametrosSinConfirmar, motivosBase),
+      // "resultado por costeo completo (absorción)" — se conserva íntegro
+      // (RT 17), la cifra destacada del tablero es `resultadoPeriodoCosteoVariable`.
+      resultadoPeriodo: resultadoPeriodoField,
+      resultadoPeriodoCosteoVariable,
+      diferenciaPorVariacionDeInventarios,
     };
   }
 }
