@@ -406,6 +406,15 @@ CREATE POLICY tenant_isolation ON parametros_costeo
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- conceptos_costeo (M1-01): mismo patrón que parametros_costeo — `userId`
+-- denormalizado, aislamiento de Postgres, no de TypeScript (DOM-07).
+ALTER TABLE conceptos_costeo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conceptos_costeo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON conceptos_costeo;
+CREATE POLICY tenant_isolation ON conceptos_costeo
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- Operación física genérica: ambas tablas tienen `userId` denormalizado para
 -- que el aislamiento se aplique sin joins adicionales.
 ALTER TABLE unidades_productivas ENABLE ROW LEVEL SECURITY;
