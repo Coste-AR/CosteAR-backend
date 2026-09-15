@@ -3,17 +3,33 @@ import { Money } from '../value-objects/money.js';
 /**
  * Claves estables de los totales que ya consolida el motor de absorción.
  *
- * Las dos últimas son de M2-01 (plan de análisis marginal v2): gastos de no
- * fabricación (`CostElement.VENTA`, hasta ahora sin dónde cargarse). Las dos
- * llegan con `comportamientoVolumenForzado` — a diferencia de MP/MOD/CIP, no
- * necesitan clasificación humana: un gasto variable de comercialización "por
- * unidad vendida" es variable por cómo se mide, y un gasto de administración
- * del período es fijo del período, sin que nadie tenga que decidirlo.
+ * Las cuatro de M0-01 (plan de análisis marginal v2): además de MP/MOD/CIP, el
+ * costo REAL neto de producción (renglón 7f, `netProductionCost`) incluye
+ * trabajos de terceros, amortización de activos, variación presupuesto y el
+ * neto de desperdicio — hasta ahora ninguno llegaba al costeo variable.
+ *
+ * `amortizacionActivos` tiene una regla dura propia: 🔴 R6/R8 — la
+ * amortización de un bien de uso es FIJA cuando la causa es el tiempo, y
+ * NUNCA puede entrar al costo variable por vía de una cuota de aplicación.
+ * El guard vive en `parametros-costeo-service.ts` (rechaza con 422 si alguien
+ * intenta clasificarla VARIABLE), no acá: esta capa es pura y no decide qué
+ * clasificaciones se aceptan, solo qué pasa con la que ya llegó.
+ *
+ * Las dos últimas son de M2-01: gastos de no fabricación (`CostElement.VENTA`,
+ * hasta ahora sin dónde cargarse). Las dos llegan con
+ * `comportamientoVolumenForzado` — a diferencia de MP/MOD/CIP, no necesitan
+ * clasificación humana: un gasto variable de comercialización "por unidad
+ * vendida" es variable por cómo se mide, y un gasto de administración del
+ * período es fijo del período, sin que nadie tenga que decidirlo.
  */
 export const CLAVES_COMPORTAMIENTO_CONTRIBUCION = {
   materiaPrima: 'comportamiento_materia_prima',
   manoObraDirecta: 'comportamiento_mano_obra_directa',
   costosIndirectos: 'comportamiento_costos_indirectos',
+  variacionPresupuesto: 'comportamiento_variacion_presupuesto',
+  trabajosDeTerceros: 'comportamiento_trabajos_de_terceros',
+  amortizacionActivos: 'comportamiento_amortizacion_activos',
+  desperdicioAlCosto: 'comportamiento_desperdicio_al_costo',
   gastosComercializacion: 'comportamiento_gastos_comercializacion',
   gastosAdministracion: 'comportamiento_gastos_administracion',
 } as const;
@@ -53,6 +69,15 @@ export interface ContribucionMarginalInput {
   componentes: ComponenteAbsorcion[];
   clasificaciones: FilaComportamiento[];
   contexto: { structureId: string; periodId: string | null };
+  /**
+   * Control de suma (M0-01): el costo neto de producción real que `componentes`
+   * debería sumar (`netProductionCost`, renglón 7f del Estado de Costos).
+   * Opcional — sin él el comportamiento es exactamente el de antes de M0-01.
+   * Con él, si `totalAbsorcion` no coincide, el resultado sale incompleto con
+   * el faltante nombrado en pesos: la descomposición no puede confiarse si no
+   * reconstruye el total que el motor auditado ya certificó.
+   */
+  totalEsperado?: number;
 }
 
 export interface TrazaComponenteContribucion extends ComponenteAbsorcion {
@@ -135,6 +160,14 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
 
   const totalAbsorcion = Money.sum(componentes.map((componente) => Money.of(componente.importeAbsorcion)));
   const motivos = componentes.flatMap((componente) => {
+    // Un rubro en CERO no necesita clasificación: sea FIJO, VARIABLE o
+    // SEMIFIJO, aporta $0 al costo variable igual. Exigirla sería fricción
+    // sin beneficio — y desde M0-01 (que suma variación presupuesto, terceros,
+    // amortización y desperdicio) es el caso común: la mayoría de los
+    // períodos no tiene ninguno de esos cuatro, y antes de esto cada uno sin
+    // clasificar dejaba la contribución marginal entera incompleta por un
+    // rubro que ni siquiera participaba.
+    if (componente.importeAbsorcion === 0) return [];
     if (componente.comportamientoVolumen === null) {
       return [`Falta clasificar frente al volumen el rubro ${componente.etiqueta}.`];
     }
@@ -145,6 +178,17 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
   });
   if (input.unidadesVendidas <= 0) {
     motivos.push('Falta una cantidad vendida mayor a cero para obtener el costo variable unitario.');
+  }
+  // Control de suma (M0-01). Tolerancia de un centavo: Money opera con 2
+  // decimales y una diferencia de redondeo no es una descomposición rota.
+  if (input.totalEsperado !== undefined) {
+    const diferencia = Money.of(input.totalEsperado).subtract(totalAbsorcion);
+    if (Math.abs(diferencia.toNumber()) >= 0.01) {
+      const signo = diferencia.toNumber() > 0 ? 'faltan' : 'sobran';
+      motivos.push(
+        `El control de suma no cierra: ${signo} $${Math.abs(diferencia.toNumber()).toFixed(2)} respecto del costo neto de producción (renglón 7f). Revisá qué componente no se está pasando, o se pasó con otro importe.`,
+      );
+    }
   }
 
   const base = {

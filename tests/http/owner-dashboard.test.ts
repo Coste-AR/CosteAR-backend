@@ -287,6 +287,109 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data.cajonesQueTapanLosFijos.motivos.length).toBeGreaterThan(0);
   });
 
+  /**
+   * M0-03 del plan de análisis marginal. El sexto indicador (`resultadoPeriodo`)
+   * se componía con `resultado.grossMargin`, que es el margen de ABSORCIÓN. El
+   * tablero se presenta como la vista de costeo variable del negocio, y cuando
+   * producción ≠ venta las dos cifras difieren — nada en pantalla lo avisaba.
+   *
+   * Doctrina (`AM4` nota CosteAR): "el costeo por absorción es una vista de
+   * salida para cumplir la RT 17; el motor razona en costeo variable, y la
+   * derivación es unidireccional". Las dos coinciden SOLO cuando se vende todo
+   * lo producido.
+   *
+   * `resultadoPeriodoCosteoVariable = cm × vendidas − costos fijos del período`.
+   * Con el fixture canónico del plan (`AM-01`): cm 256 × 800 vendidas − 192.000
+   * de fijos = 12.800.
+   */
+  it('agrega el resultado por costeo variable junto al de absorción, con la diferencia explicada (M0-03)', async () => {
+    db.costPeriod.findFirst.mockResolvedValue({
+      id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 1000, salesQuantity: 800,
+    });
+    db.company.findFirst.mockResolvedValue({
+      unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 1 },
+      paquetesRubro: [{ category: CATEGORIA_AVICOLA_POSTURA }],
+    });
+    db.calculationRun.findFirst.mockResolvedValue({
+      id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
+      results: {
+        // 51.200 de absorción: 12.800 (variable) + 200 unidades en stock final
+        // x 192 de costo fijo unitario de absorción (192.000 / 1.000) = 38.400.
+        grossMargin: 51200,
+        incompletitud: { incompleto: false, motivos: [] },
+        detail: { unitCost: { unitFinishedGoodsCost: 350, basadoEn: 'producidas' } },
+        contribucionMarginal: {
+          incompleta: false,
+          precioUnitario: 500,
+          unidadesVendidas: 800,
+          costoVariableUnitario: 244,
+          contribucionMarginalUnitaria: 256,
+          componentes: [
+            { etiqueta: 'Materia prima', importeAbsorcion: 150000, comportamientoVolumen: 'VARIABLE', parametroId: null },
+            { etiqueta: 'Mano de obra directa', importeAbsorcion: 60000, comportamientoVolumen: 'FIJO', parametroId: null },
+            { etiqueta: 'Costos indirectos de producción', importeAbsorcion: 132000, comportamientoVolumen: 'FIJO', parametroId: null },
+          ],
+        },
+        puntoEquilibrio: { incompleta: false, unidadesEquilibrio: 750, fechaUltimoRecalculo: '2026-09-02T00:00:00.000Z' },
+      },
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      data: {
+        resultadoPeriodo: { valor: number; completo: boolean };
+        resultadoPeriodoCosteoVariable: { valor: number; completo: boolean };
+        diferenciaPorVariacionDeInventarios: { valor: number; completo: boolean; explicacion: string | null };
+      };
+    };
+
+    // Ninguno de los dos se esconde — se conservan los dos.
+    expect(body.data.resultadoPeriodo).toMatchObject({ valor: 51200, completo: true });
+    expect(body.data.resultadoPeriodoCosteoVariable).toMatchObject({ valor: 12800, completo: true });
+    expect(body.data.diferenciaPorVariacionDeInventarios).toMatchObject({ valor: 38400, completo: true });
+    expect(body.data.diferenciaPorVariacionDeInventarios.explicacion).toMatch(/producción|producidas/i);
+  });
+
+  it('con producción igual a venta, las dos cifras coinciden y la diferencia da 0', async () => {
+    db.costPeriod.findFirst.mockResolvedValue({
+      id: PERIOD_ID, code: '2026-09', companyId: 'company-1', productionQuantity: 800, salesQuantity: 800,
+    });
+    db.company.findFirst.mockResolvedValue({
+      unidadGestion: { codigo: 'cajon', nombre: 'Cajón', factor: 1 },
+      paquetesRubro: [{ category: CATEGORIA_AVICOLA_POSTURA }],
+    });
+    db.calculationRun.findFirst.mockResolvedValue({
+      id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
+      results: {
+        grossMargin: 12800, // sin stock final, absorción y variable coinciden
+        incompletitud: { incompleto: false, motivos: [] },
+        detail: { unitCost: { unitFinishedGoodsCost: 350, basadoEn: 'producidas' } },
+        contribucionMarginal: {
+          incompleta: false, precioUnitario: 500, unidadesVendidas: 800,
+          costoVariableUnitario: 244, contribucionMarginalUnitaria: 256,
+          componentes: [
+            { etiqueta: 'Materia prima', importeAbsorcion: 150000, comportamientoVolumen: 'VARIABLE', parametroId: null },
+            { etiqueta: 'Mano de obra directa', importeAbsorcion: 60000, comportamientoVolumen: 'FIJO', parametroId: null },
+            { etiqueta: 'Costos indirectos de producción', importeAbsorcion: 132000, comportamientoVolumen: 'FIJO', parametroId: null },
+          ],
+        },
+        puntoEquilibrio: { incompleta: false, unidadesEquilibrio: 750, fechaUltimoRecalculo: '2026-09-02T00:00:00.000Z' },
+      },
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    const body = JSON.parse(response.body) as {
+      data: { diferenciaPorVariacionDeInventarios: { valor: number; completo: boolean; explicacion: string | null } };
+    };
+    expect(body.data.diferenciaPorVariacionDeInventarios).toMatchObject({ valor: 0, completo: true });
+    expect(body.data.diferenciaPorVariacionDeInventarios.explicacion).toBeNull();
+  });
+
   it('enumera los parámetros sin confirmar sin consultas por indicador', async () => {
     db.calculationRun.findFirst.mockResolvedValue({
       id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),

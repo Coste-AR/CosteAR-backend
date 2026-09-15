@@ -159,6 +159,27 @@ export interface paths {
                                     }[];
                                     motivos: string[];
                                 };
+                                resultadoPeriodoCosteoVariable: {
+                                    valor: number | null;
+                                    completo: boolean;
+                                    parametrosSinConfirmar: boolean;
+                                    parametrosSinConfirmarDetalle: {
+                                        id: string;
+                                        nombre: string;
+                                    }[];
+                                    motivos: string[];
+                                };
+                                diferenciaPorVariacionDeInventarios: {
+                                    valor: number | null;
+                                    completo: boolean;
+                                    parametrosSinConfirmar: boolean;
+                                    parametrosSinConfirmarDetalle: {
+                                        id: string;
+                                        nombre: string;
+                                    }[];
+                                    motivos: string[];
+                                    explicacion: string | null;
+                                };
                             };
                         };
                     };

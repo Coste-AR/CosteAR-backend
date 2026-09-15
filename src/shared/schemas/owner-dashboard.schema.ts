@@ -22,6 +22,12 @@ const numeroTableroFijoSchema = numeroTableroSchema.extend({
   esUnitarioDeFijo: z.literal(true),
 });
 
+// `diferenciaPorVariacionDeInventarios` (M0-03): además del importe, la
+// explicación en castellano de por qué absorción y costeo variable difieren.
+const numeroTableroConExplicacionSchema = numeroTableroSchema.extend({
+  explicacion: z.string().nullable(),
+});
+
 const periodoRefSchema = z.object({ id: z.string(), codigo: z.string() });
 
 const pendienteCierreSchema = z.object({
@@ -69,7 +75,11 @@ export const ownerDashboardResponseSchema = z.object({
     fechaUltimoRecalculo: z.string().nullable(),
   }),
   producidoCajones: numeroTableroSchema,
+  // Resultado por costeo COMPLETO (absorción) — se conserva íntegro, RT 17.
   resultadoPeriodo: numeroTableroSchema,
+  // Resultado por costeo VARIABLE (M0-03) — la cifra destacada del tablero.
+  resultadoPeriodoCosteoVariable: numeroTableroSchema,
+  diferenciaPorVariacionDeInventarios: numeroTableroConExplicacionSchema,
 });
 
 export const ownerDashboardEnvelopeSchema = z.object({ data: ownerDashboardResponseSchema });
