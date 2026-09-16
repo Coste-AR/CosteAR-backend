@@ -1,14 +1,14 @@
 ---
 issue: 377
 repo: CosteAR-backend
-pr: pendiente
+pr: 383
 rama: feat/377-familia-equilibrio
 agente: codex
 modelo: gpt-5
 tanda: B2
 inicio: 2026-09-16T11:14:38-03:00
-fin: 2026-09-16T11:20:11-03:00
-minutos: 5.55
+fin: 2026-09-16T11:23:17-03:00
+minutos: 8.66
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 2
