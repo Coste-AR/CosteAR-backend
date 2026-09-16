@@ -7,8 +7,8 @@ agente: codex
 modelo: gpt-5
 tanda: B2
 inicio: 2026-09-16T11:14:38-03:00
-fin: 2026-09-16T11:23:17-03:00
-minutos: 8.66
+fin: 2026-09-16T11:26:58-03:00
+minutos: 12.34
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 2
@@ -90,3 +90,12 @@ npm run check:tests-base — verde
 npm run check:openapi — verde
 npm run typecheck:openapi-consumer — verde
 ```
+
+## Entrega y CI
+
+PR #383 contra dev, actualizado con gh pr update-branch. Commit funcional d8c377d;
+cierre de metadatos de92fb5. CI completo verde en la corrida 35108225735:
+build-and-test, integration-tests y e2e-tests. Se agrega este cierre documental
+y se comprueban sus checks antes de marcar listo. El fin medido corresponde a
+esta redacción después del CI; el monitoreo posterior se registra en memoria
+de la automation. Etiqueta codex; codex-automation no existe en el repositorio.
