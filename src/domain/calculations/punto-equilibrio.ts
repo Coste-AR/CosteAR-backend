@@ -102,11 +102,117 @@ export function calcularFormulaPuntoEquilibrio(
   }
 }
 
+export interface ConceptoQueEnsanchaZona {
+  clave: string;
+  etiqueta: string;
+  importe: number;
+  /** Unidades que agrega este concepto al ancho, en orden estable por clave. */
+  aporteAlAncho: number;
+}
+
 /** Vista de costeo variable persistible; nunca modifica el resultado por absorción. */
 export type PuntoEquilibrio = (
   | { incompleta: true; unidadesEquilibrio: null; fechaUltimoRecalculo: string; motivos: string[] }
-  | { incompleta: false; unidadesEquilibrio: number | null; fechaUltimoRecalculo: string; motivoSinEquilibrio?: string }
-) & { /** Opcional al leer fotos históricas anteriores a M3-01. */ basadoEn?: ContextoFormulaEquilibrio['basadoEn']; tramoValidez?: null };
+  | {
+      incompleta: false;
+      tipo: 'punto';
+      unidadesEquilibrio: number | null;
+      fechaUltimoRecalculo: string;
+      motivoSinEquilibrio?: string;
+    }
+  | {
+      incompleta: false;
+      tipo: 'zona';
+      unidadesEquilibrio: null;
+      qMin: number;
+      qMax: number;
+      conceptosQueLaEnsanchan: ConceptoQueEnsanchaZona[];
+      fechaUltimoRecalculo: string;
+    }
+) & { basadoEn?: ContextoFormulaEquilibrio['basadoEn']; tramoValidez?: null };
+
+const motivoClasificacion = (etiqueta: string): string =>
+  `Falta clasificar frente al volumen el rubro ${etiqueta}.`;
+
+/** R13: acota la incertidumbre sin inventar una clasificación. */
+function calcularZona(
+  contribucion: Extract<ContribucionMarginal, { incompleta: true }>,
+  fecha: string,
+): PuntoEquilibrio | null {
+  const sinClasificar = contribucion.componentes
+    .filter((componente) => componente.importeAbsorcion !== 0 && componente.comportamientoVolumen === null)
+    .sort((a, b) => a.clave.localeCompare(b.clave));
+  const soloFaltaClasificar = sinClasificar.length > 0
+    && contribucion.motivos.length === sinClasificar.length
+    && sinClasificar.every((componente) => contribucion.motivos.includes(motivoClasificacion(componente.etiqueta)));
+  if (
+    !soloFaltaClasificar
+    || contribucion.precioUnitario <= 0
+    || contribucion.unidadesVendidas <= 0
+    || contribucion.unidadesProducidas <= 0
+  ) return null;
+
+  const variablesConocidos = contribucion.componentes.filter(
+    (componente) => componente.comportamientoVolumen === 'VARIABLE',
+  );
+  const costoVariableUnitario = (componentes: typeof contribucion.componentes): Decimal => {
+    const produccion = Money.sum(
+      componentes
+        .filter((componente) => (componente.elemento ?? 'produccion') === 'produccion')
+        .map((componente) => Money.of(componente.importeAbsorcion)),
+    ).divide(contribucion.unidadesProducidas);
+    const venta = Money.sum(
+      componentes
+        .filter((componente) => componente.elemento === 'venta')
+        .map((componente) => Money.of(componente.importeAbsorcion)),
+    ).divide(contribucion.unidadesVendidas);
+    return new Decimal(produccion.add(venta).toNumber());
+  };
+  const costosFijosConocidos = Money.sum(
+    contribucion.componentes
+      .filter((componente) => componente.comportamientoVolumen === 'FIJO')
+      .map((componente) => Money.of(componente.importeAbsorcion)),
+  );
+  const precio = new Decimal(contribucion.precioUnitario);
+  const cmConTodosVariables = precio.minus(costoVariableUnitario([...variablesConocidos, ...sinClasificar]));
+  const cmConTodosFijos = precio.minus(costoVariableUnitario(variablesConocidos));
+  if (cmConTodosVariables.lte(0) || cmConTodosFijos.lte(0)) return null;
+
+  const qMin = new Decimal(costosFijosConocidos.toNumber()).dividedBy(cmConTodosVariables);
+  const qMax = new Decimal(
+    costosFijosConocidos.add(Money.sum(sinClasificar.map((componente) => Money.of(componente.importeAbsorcion)))).toNumber(),
+  ).dividedBy(cmConTodosFijos);
+
+  // Se pasan las claves a FIJO en orden estable. Cada diferencia es auditable
+  // y los aportes suman exactamente el ancho de la zona.
+  let fijosAcumulados = costosFijosConocidos;
+  let variablesPendientes = [...sinClasificar];
+  let puntoAnterior = qMin;
+  const conceptosQueLaEnsanchan = sinClasificar.map((componente) => {
+    fijosAcumulados = fijosAcumulados.add(Money.of(componente.importeAbsorcion));
+    variablesPendientes = variablesPendientes.filter((pendiente) => pendiente !== componente);
+    const cm = precio.minus(costoVariableUnitario([...variablesConocidos, ...variablesPendientes]));
+    const punto = new Decimal(fijosAcumulados.toNumber()).dividedBy(cm);
+    const concepto = {
+      clave: componente.clave,
+      etiqueta: componente.etiqueta,
+      importe: Money.of(componente.importeAbsorcion).toNumber(),
+      aporteAlAncho: punto.minus(puntoAnterior).toNumber(),
+    };
+    puntoAnterior = punto;
+    return concepto;
+  });
+
+  return {
+    incompleta: false,
+    tipo: 'zona',
+    unidadesEquilibrio: null,
+    qMin: qMin.toNumber(),
+    qMax: qMax.toNumber(),
+    conceptosQueLaEnsanchan,
+    fechaUltimoRecalculo: fecha,
+  };
+}
 
 export function calcularPuntoEquilibrio(
   contribucion: ContribucionMarginal,
@@ -115,6 +221,8 @@ export function calcularPuntoEquilibrio(
   const fecha = fechaUltimoRecalculo.toISOString();
   const traza = { basadoEn: contribucion.componentes.map(({ clave, etiqueta }) => ({ clave, etiqueta })), tramoValidez: null };
   if (contribucion.incompleta) {
+    const zona = calcularZona(contribucion, fecha);
+    if (zona) return { ...traza, ...zona };
     return { ...traza, incompleta: true, unidadesEquilibrio: null, fechaUltimoRecalculo: fecha, motivos: contribucion.motivos };
   }
 
@@ -122,6 +230,7 @@ export function calcularPuntoEquilibrio(
     return {
       ...traza,
       incompleta: false,
+      tipo: 'punto',
       unidadesEquilibrio: null,
       fechaUltimoRecalculo: fecha,
       motivoSinEquilibrio: 'La contribución marginal unitaria es cero o negativa; no existe punto de equilibrio.',
@@ -142,6 +251,7 @@ export function calcularPuntoEquilibrio(
   return {
     ...traza,
     incompleta: false,
+    tipo: 'punto',
     unidadesEquilibrio: costosFijos.divide(contribucion.contribucionMarginalUnitaria).toNumber(),
     fechaUltimoRecalculo: fecha,
   };

@@ -192,6 +192,56 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data.costoPorCajon.fijo).toMatchObject({ esUnitarioDeFijo: true });
   });
 
+  it('publica la zona completa sin fabricar un único punto (M1-03)', async () => {
+    db.calculationRun.findFirst.mockResolvedValue({
+      id: 'run-1', validated: true, executedAt: new Date('2026-09-02T00:00:00.000Z'),
+      results: {
+        grossMargin: 12, incompletitud: { incompleto: false, motivos: [] },
+        detail: { unitCost: { unitFinishedGoodsCost: 5, basadoEn: 'producidas' } },
+        contribucionMarginal: {
+          incompleta: true,
+          precioUnitario: 500,
+          unidadesVendidas: 800,
+          costoVariableUnitario: null,
+          contribucionMarginalUnitaria: null,
+          motivos: ['Falta clasificar frente al volumen el rubro Costos indirectos de producción.'],
+          componentes: [
+            { etiqueta: 'Costos indirectos de producción', importeAbsorcion: 90000, comportamientoVolumen: null, parametroId: null },
+          ],
+        },
+        puntoEquilibrio: {
+          incompleta: false,
+          tipo: 'zona',
+          unidadesEquilibrio: null,
+          qMin: 709.09,
+          qMax: 793.55,
+          conceptosQueLaEnsanchan: [{
+            clave: 'cip', etiqueta: 'Costos indirectos de producción', importe: 90000, aporteAlAncho: 84.46,
+          }],
+          fechaUltimoRecalculo: '2026-09-02T00:00:00.000Z',
+        },
+      },
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.puntoEquilibrioCajones).toMatchObject({
+      tipo: 'zona',
+      valor: null,
+      completo: true,
+      qMin: 709.09 / 12,
+      qMax: 793.55 / 12,
+      conceptosQueLaEnsanchan: [{
+        clave: 'cip',
+        etiqueta: 'Costos indirectos de producción',
+        importe: 90000,
+        aporteAlAncho: 84.46 / 12,
+      }],
+    });
+  });
+
   /**
    * MX-02 del plan de análisis marginal. `costoPorCajon.fijo` es un COSTO FIJO
    * UNITARIO — `AM4` (bóveda) lo llama "una entidad inexistente en la realidad,

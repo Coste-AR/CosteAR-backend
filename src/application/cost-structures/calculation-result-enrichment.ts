@@ -386,9 +386,19 @@ export async function enrichCalculationResult(
         costoVariableUnitario: conversor.importeUnitarioDesdeBase(contribucionMarginal.costoVariableUnitario),
         contribucionMarginalUnitaria: conversor.importeUnitarioDesdeBase(contribucionMarginal.contribucionMarginalUnitaria),
       };
-  const puntoEquilibrioEnUnidadGestion: PuntoEquilibrio = puntoEquilibrio.unidadesEquilibrio === null
-    ? puntoEquilibrio
-    : {
+  const puntoEquilibrioEnUnidadGestion: PuntoEquilibrio = !puntoEquilibrio.incompleta && puntoEquilibrio.tipo === 'zona'
+    ? {
+        ...puntoEquilibrio,
+        qMin: conversor.cantidadDesdeBase(puntoEquilibrio.qMin),
+        qMax: conversor.cantidadDesdeBase(puntoEquilibrio.qMax),
+        conceptosQueLaEnsanchan: puntoEquilibrio.conceptosQueLaEnsanchan.map((concepto) => ({
+          ...concepto,
+          aporteAlAncho: conversor.cantidadDesdeBase(concepto.aporteAlAncho),
+        })),
+      }
+    : puntoEquilibrio.unidadesEquilibrio === null
+      ? puntoEquilibrio
+      : {
         ...puntoEquilibrio,
         unidadesEquilibrio: conversor.cantidadDesdeBase(puntoEquilibrio.unidadesEquilibrio),
       };

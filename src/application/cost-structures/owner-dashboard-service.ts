@@ -72,7 +72,11 @@ type ResultadoCorrida = {
   };
   puntoEquilibrio?: {
     incompleta: boolean;
+    tipo?: 'punto' | 'zona';
     unidadesEquilibrio: number | null;
+    qMin?: number;
+    qMax?: number;
+    conceptosQueLaEnsanchan?: Array<{ clave: string; etiqueta: string; importe: number; aporteAlAncho: number }>;
     fechaUltimoRecalculo: string;
     motivos?: string[];
     motivoSinEquilibrio?: string;
@@ -399,10 +403,30 @@ export class OwnerDashboardService {
       cajonesQueTapanLosFijos,
       precioPromedioVenta: convertido(contribucion?.precioUnitario ?? null, [...motivosBase, ...sinVentas]),
       contribucionMarginalPorCajon: contribucionMarginalPorCajonCalculada,
-      puntoEquilibrioCajones: {
+      puntoEquilibrioCajones: equilibrio?.tipo === 'zona'
+        && equilibrio.qMin !== undefined
+        && equilibrio.qMax !== undefined
+        && factor !== null
+        ? {
+            tipo: 'zona' as const,
+            valor: null,
+            completo: motivosBase.length === 0,
+            parametrosSinConfirmar: parametrosSinConfirmar.length > 0,
+            parametrosSinConfirmarDetalle: parametrosSinConfirmar,
+            motivos: motivosBase,
+            qMin: conversor.cantidadDesdeBase(equilibrio.qMin),
+            qMax: conversor.cantidadDesdeBase(equilibrio.qMax),
+            conceptosQueLaEnsanchan: (equilibrio.conceptosQueLaEnsanchan ?? []).map((concepto) => ({
+              ...concepto,
+              aporteAlAncho: conversor.cantidadDesdeBase(concepto.aporteAlAncho),
+            })),
+            fechaUltimoRecalculo: equilibrio.fechaUltimoRecalculo,
+          }
+        : {
         ...(equilibrio?.incompleta || unidadesEquilibrio === null || factor === null
           ? incompleto([...motivosBase, ...(equilibrio?.motivos ?? []), ...(equilibrio?.motivoSinEquilibrio ? [equilibrio.motivoSinEquilibrio] : []), ...sinUnidad], parametrosSinConfirmar)
           : completo(conversor.cantidadDesdeBase(unidadesEquilibrio), parametrosSinConfirmar, motivosBase)),
+        ...(equilibrio?.tipo ? { tipo: equilibrio.tipo } : {}),
         fechaUltimoRecalculo: equilibrio?.fechaUltimoRecalculo ?? null,
       },
       producidoCajones: factor === null || baseUnidades <= 0
