@@ -12,6 +12,7 @@ import {
   type OrigenParametro,
 } from '../../domain/parametros/parametros-costeo.js';
 import type { SetParametroCosteoInput } from '../../shared/schemas/parametros-costeo.schema.js';
+import { CLAVES_COMPORTAMIENTO_CONTRIBUCION } from '../../domain/calculations/contribucion-marginal.js';
 import { CATEGORY_BY_INDUSTRY } from '../operacion/paquete-avicola.js';
 import { PaqueteRubroService } from '../operacion/paquete-rubro-service.js';
 import { ModulosRubroService } from '../operacion/modulos-rubro-service.js';
@@ -282,6 +283,19 @@ export class ParametrosCosteoService {
     if (definicionComportamiento && input.comportamientoVolumen === undefined) {
       throw new UnprocessableEntityError(
         `La clasificación "${clave}" requiere un comportamiento frente al volumen.`,
+        { field: 'comportamientoVolumen' },
+      );
+    }
+    // 🔴 R6/R8 (M0-01, plan de análisis marginal v2). La amortización de un
+    // bien de uso es FIJA cuando la causa es el tiempo, nunca la intensidad
+    // de uso — y ningún costo fijo puede entrar al costo variable por vía de
+    // una cuota de aplicación. No es un default que se propone y se puede
+    // pisar: es una regla que se RECHAZA si alguien la viola. `AM17` la llama
+    // "el error más caro del proyecto" — tratarla como variable cambió la
+    // contribución marginal un 24,9 %.
+    if (clave === CLAVES_COMPORTAMIENTO_CONTRIBUCION.amortizacionActivos && input.comportamientoVolumen === 'VARIABLE') {
+      throw new UnprocessableEntityError(
+        'La amortización de un bien de uso es fija cuando la causa es el tiempo (R6): no puede clasificarse como variable (R8).',
         { field: 'comportamientoVolumen' },
       );
     }

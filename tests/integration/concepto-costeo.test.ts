@@ -1,0 +1,105 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ConceptoCosteoService } from '@/application/parametros/concepto-costeo-service.js';
+import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
+import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
+
+/**
+ * M1-01 (plan de análisis marginal v2) — `ConceptoCosteo` contra Postgres real.
+ *
+ * Lo que un test con Prisma mockeado no puede probar (DOM-07): que el
+ * aislamiento entre empresas lo garantice RLS, no una condición `WHERE` que
+ * alguien podría olvidar. `RLS_MODELS` ya tiene a `ConceptoCosteo` — este test
+ * es lo que hubiera fallado si no lo tuviera (ver `tests/config/rls-coverage.test.ts`
+ * para la parte estática).
+ */
+
+const actor = (userId: string) => ({ id: userId, role: 'COSTISTA', area: 'costista', method: 'manual' }) as const;
+
+let A: Tenant;
+let B: Tenant;
+
+beforeAll(async () => {
+  A = await createTenant('concepto-costeo-a');
+  B = await createTenant('concepto-costeo-b');
+});
+
+afterAll(disconnect);
+
+describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
+  it('crea, resuelve por cascada y borra lógicamente', async () => {
+    const service = new ConceptoCosteoService(db);
+
+    const creado = await withTenantContext(A.userId, () =>
+      service.crear(
+        A.userId,
+        A.companyId,
+        { clave: 'energia_planta', elemento: 'CIP', comportamientoVolumen: 'VARIABLE', causaVariabilidad: 'volumen', confirmado: true },
+        actor(A.userId),
+      ),
+    );
+    expect(creado.clave).toBe('energia_planta');
+
+    const listado = await withTenantContext(A.userId, () => service.listar(A.userId, A.companyId));
+    expect(listado).toHaveLength(1);
+    expect(listado[0]).toMatchObject({ clave: 'energia_planta', origen: 'empresa' });
+
+    await withTenantContext(A.userId, () => service.eliminar(A.userId, A.companyId, creado.id, actor(A.userId)));
+    const trasBorrar = await withTenantContext(A.userId, () => service.listar(A.userId, A.companyId));
+    expect(trasBorrar).toHaveLength(0);
+  });
+
+  it('período le gana a empresa en la cascada real', async () => {
+    const service = new ConceptoCosteoService(db);
+    await withTenantContext(A.userId, () =>
+      service.crear(A.userId, A.companyId, { clave: 'flete_venta', elemento: 'VENTA', comportamientoVolumen: 'FIJO', confirmado: true }, actor(A.userId)),
+    );
+    await withTenantContext(A.userId, () =>
+      service.crear(
+        A.userId, A.companyId,
+        { clave: 'flete_venta', elemento: 'VENTA', comportamientoVolumen: 'VARIABLE', causaVariabilidad: 'volumen', confirmado: true, periodId: A.periodId },
+        actor(A.userId),
+      ),
+    );
+
+    const resuelto = await withTenantContext(A.userId, () =>
+      service.listar(A.userId, A.companyId, { periodId: A.periodId }),
+    );
+    const flete = resuelto.find((c) => c.clave === 'flete_venta');
+    expect(flete).toMatchObject({ comportamientoVolumen: 'VARIABLE', origen: 'periodo' });
+  });
+
+  it('rechaza con 422 la amortización cargada como VARIABLE con causa tiempo (R4/R6/R8)', async () => {
+    const service = new ConceptoCosteoService(db);
+    await expect(
+      withTenantContext(A.userId, () =>
+        service.crear(
+          A.userId, A.companyId,
+          { clave: 'amortizacion_plantel', elemento: 'CIP', comportamientoVolumen: 'VARIABLE', causaVariabilidad: 'tiempo', confirmado: true },
+          actor(A.userId),
+        ),
+      ),
+    ).rejects.toThrow(/R4|R6|R8/);
+  });
+
+  it('la empresa B no ve ni puede tocar los conceptos de la empresa A — RLS real', async () => {
+    const service = new ConceptoCosteoService(db);
+    await withTenantContext(A.userId, () =>
+      service.crear(A.userId, A.companyId, { clave: 'solo_de_a', elemento: 'CIP', confirmado: false }, actor(A.userId)),
+    );
+
+    const vistoPorB = await withTenantContext(B.userId, () => service.listar(B.userId, B.companyId));
+    expect(vistoPorB.find((c) => c.clave === 'solo_de_a')).toBeUndefined();
+
+    // Ni siquiera adivinando el companyId de A: la empresa no es "de" B.
+    await expect(
+      withTenantContext(B.userId, () => service.listar(B.userId, A.companyId)),
+    ).rejects.toThrow(/empresa no encontrada/i);
+  });
+
+  it('empresa sin ningún ConceptoCosteo: listar devuelve vacío, no rompe nada (compatibilidad hacia atrás)', async () => {
+    const solitaria = await createTenant('concepto-costeo-solitaria');
+    const service = new ConceptoCosteoService(db);
+    const listado = await withTenantContext(solitaria.userId, () => service.listar(solitaria.userId, solitaria.companyId));
+    expect(listado).toEqual([]);
+  });
+});

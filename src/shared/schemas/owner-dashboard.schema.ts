@@ -16,6 +16,18 @@ const numeroTableroSchema = z.object({
   motivos: z.array(z.string()),
 });
 
+// `costoPorCajon.fijo` (MX-02): un costo fijo unitario no es una magnitud
+// económica válida (R10, `AM4`) — se conserva por compatibilidad pero marcado.
+const numeroTableroFijoSchema = numeroTableroSchema.extend({
+  esUnitarioDeFijo: z.literal(true),
+});
+
+// `diferenciaPorVariacionDeInventarios` (M0-03): además del importe, la
+// explicación en castellano de por qué absorción y costeo variable difieren.
+const numeroTableroConExplicacionSchema = numeroTableroSchema.extend({
+  explicacion: z.string().nullable(),
+});
+
 const periodoRefSchema = z.object({ id: z.string(), codigo: z.string() });
 
 const pendienteCierreSchema = z.object({
@@ -49,16 +61,25 @@ export const ownerDashboardResponseSchema = z.object({
   pendientes: z.array(pendienteCierreSchema),
   costoPorCajon: z.object({
     variable: numeroTableroSchema,
-    fijo: numeroTableroSchema,
+    fijo: numeroTableroFijoSchema,
     total: numeroTableroSchema,
   }),
+  // Total de costos fijos del período, SIN dividir por unidades (R10, MX-02).
+  costosFijosDelPeriodo: numeroTableroSchema,
+  // Cuántas unidades de gestión cubren el fijo total = CF / contribución
+  // marginal unitaria. La pregunta real detrás de "costo fijo por cajón".
+  cajonesQueTapanLosFijos: numeroTableroSchema,
   precioPromedioVenta: numeroTableroSchema,
   contribucionMarginalPorCajon: numeroTableroSchema,
   puntoEquilibrioCajones: numeroTableroSchema.extend({
     fechaUltimoRecalculo: z.string().nullable(),
   }),
   producidoCajones: numeroTableroSchema,
+  // Resultado por costeo COMPLETO (absorción) — se conserva íntegro, RT 17.
   resultadoPeriodo: numeroTableroSchema,
+  // Resultado por costeo VARIABLE (M0-03) — la cifra destacada del tablero.
+  resultadoPeriodoCosteoVariable: numeroTableroSchema,
+  diferenciaPorVariacionDeInventarios: numeroTableroConExplicacionSchema,
 });
 
 export const ownerDashboardEnvelopeSchema = z.object({ data: ownerDashboardResponseSchema });

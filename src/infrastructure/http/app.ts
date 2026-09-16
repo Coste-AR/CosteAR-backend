@@ -35,6 +35,7 @@ import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 import { registerOwnerDashboardRoutes } from './routes/owner-dashboard.routes.js';
 import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
 import { registerParametrosCosteoRoutes } from './routes/parametros-costeo.routes.js';
+import { registerConceptoCosteoRoutes } from './routes/concepto-costeo.routes.js';
 import { registerActivoAmortizableRoutes } from './routes/activo-amortizable.routes.js';
 import { registerEventosLoteRoutes } from './routes/eventos-lote.routes.js';
 import { registerLotesProductivosRoutes } from './routes/lotes-productivos.routes.js';
@@ -226,6 +227,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerOwnerDashboardRoutes(api);
       await registerDesperdicioRoutes(api);
       await registerParametrosCosteoRoutes(api);
+      await registerConceptoCosteoRoutes(api);
       await registerModulosRubroRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);

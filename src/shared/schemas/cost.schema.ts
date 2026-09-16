@@ -471,6 +471,16 @@ export const updateThirdPartyWorkSchema = z.object({
   thirdPartyWork: nonNeg,
 });
 
+/**
+ * GASTOS DE NO FABRICACIÓN del período (M2-01): el gasto variable de
+ * comercialización (por unidad vendida) y el gasto fijo de administración.
+ * `CostElement.VENTA` existía en el schema hace tiempo sin dónde cargarse.
+ */
+export const updateGastosDeNoFabricacionSchema = z.object({
+  gastoVariableComercializacionPorUnidad: nonNeg,
+  gastoFijoAdministracion: nonNeg,
+});
+
 export const updateSalesSchema = z.object({
   salesUnitPrice: nonNeg,
   /** Unidades VENDIDAS: facturación (precio × cantidad) y margen. */

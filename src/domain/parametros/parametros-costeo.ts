@@ -176,6 +176,45 @@ export const CLASIFICACIONES_AVICOLA: DefinicionComportamiento[] = [
     propuesta: null,
     fundamento: 'El rubro mezcla componentes variables, como energía, y fijos, como depreciación.',
   },
+  // Las cuatro siguientes son de M0-01 (plan de análisis marginal v2): además
+  // de MP/MOD/CIP, el costo real neto de producción (renglón 7f) incluye
+  // trabajos de terceros, amortización de activos, variación presupuesto y el
+  // neto de desperdicio. Ninguna trae `propuesta`: nacen sin clasificar, igual
+  // que MOD y CIP hoy — el costista las clasifica cuando corresponda.
+  {
+    clave: 'comportamiento_variacion_presupuesto',
+    descripcion: 'Comportamiento frente al volumen de la variación presupuesto incorporada al costo.',
+    propuesta: null,
+    fundamento: 'Depende de qué la generó: puede ser una diferencia de precio (fija) o de eficiencia (variable).',
+  },
+  {
+    clave: 'comportamiento_trabajos_de_terceros',
+    descripcion: 'Comportamiento frente al volumen de los trabajos de terceros del período.',
+    propuesta: null,
+    fundamento: 'Depende del contrato: un flete por unidad es variable, un servicio mensual fijo es fijo.',
+  },
+  {
+    clave: 'comportamiento_amortizacion_activos',
+    descripcion: 'Comportamiento frente al volumen de la amortización de activos del período.',
+    // Sin propuesta automática: nace sin clasificar, igual que el resto — la
+    // decisión que SÍ es no negociable (nunca VARIABLE) no se resuelve acá
+    // con un default, sino con un rechazo explícito en el servicio que
+    // escribe la clasificación (parametros-costeo-service.ts, R6/R8).
+    propuesta: null,
+    fundamento:
+      'R6: la amortización es fija cuando la causa es el tiempo (línea recta a N meses), no la ' +
+      'intensidad de uso. R8: ningún fijo entra al costo variable por cuota de aplicación. ' +
+      '`AM17` la llama "el error más caro del proyecto" — tratarla como variable cambió la ' +
+      'contribución marginal un 24,9 %.',
+  },
+  {
+    clave: 'comportamiento_desperdicio_al_costo',
+    descripcion:
+      'Comportamiento frente al volumen del ajuste neto de desperdicio (recupero + merma ' +
+      'extraordinaria) que resta del costo real para llegar al neto.',
+    propuesta: null,
+    fundamento: 'El recupero de merma normal reduce materia prima (variable); la extraordinaria es un hecho del período (fijo). Depende de cuál domine.',
+  },
 ];
 
 const CATALOGO = new Map(PARAMETROS_AVICOLA.map((p) => [p.clave, p]));

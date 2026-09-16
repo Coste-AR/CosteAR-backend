@@ -80,7 +80,20 @@ export async function enrichCalculationResult(
     output: CalculationOutput;
   },
 ): Promise<EnrichedCalculationResult> {
-  const [pending, periodoDelFallback, company] = await Promise.all([
+  // M2-01. Gastos de no fabricación del período (`CostElement.VENTA`, hasta
+  // ahora sin dónde cargarse — el punto de equilibrio del tablero era un
+  // equilibrio DE PRODUCCIÓN, no de la empresa). Se leen del período ya
+  // resuelto, igual que `unidadGestion` se lee de la empresa: el llamador no
+  // tiene que acordarse de pasarlos, así que ningún caller nuevo puede
+  // olvidarse de cablearlos (era exactamente el problema con `thirdPartyWork`
+  // en `CalculationRunService.calculate()` — ver bitácora de esta tarea).
+  //
+  // A propósito NO pasan por `CalculationInput`/`calculate.ts`: no son un
+  // costo de producción, nunca tocan el Estado de Costos ni el CPV — son
+  // gasto del período, por debajo de esa línea. Meterlos en el motor
+  // auditado sería tocar algo que estructuralmente no le corresponde
+  // modelar (regla dura 1 del plan: "no se toca el motor auditado").
+  const [pending, periodoResuelto, company] = await Promise.all([
     db.dataPoint.findMany({
       where: {
         structureId: args.structureId,
@@ -91,15 +104,18 @@ export async function enrichCalculationResult(
       select: { id: true, label: true },
       take: 20,
     }),
-    // `orderBy` explícito porque una estructura PUEDE tener más de un período
-    // abierto: `CostPeriodService.reopen()` reabre uno cerrado sin comprobar que
-    // no haya otro OPEN, y el schema no lo impide. Sin orden, la base elegía
-    // cualquiera. Se ordena igual que `CostPeriodService.getOpen()`.
     args.periodId
-      ? Promise.resolve(null)
-      : db.costPeriod.findFirst({
+      ? db.costPeriod.findFirst({
+          where: { id: args.periodId },
+          select: { id: true, gastoVariableComercializacionPorUnidad: true, gastoFijoAdministracion: true },
+        })
+      : // `orderBy` explícito porque una estructura PUEDE tener más de un período
+        // abierto: `CostPeriodService.reopen()` reabre uno cerrado sin comprobar
+        // que no haya otro OPEN, y el schema no lo impide. Sin orden, la base
+        // elegía cualquiera. Se ordena igual que `CostPeriodService.getOpen()`.
+        db.costPeriod.findFirst({
           where: { structureId: args.structureId, status: 'OPEN', deletedAt: null },
-          select: { id: true },
+          select: { id: true, gastoVariableComercializacionPorUnidad: true, gastoFijoAdministracion: true },
           orderBy: { code: 'desc' },
         }),
     args.companyId
@@ -111,8 +127,46 @@ export async function enrichCalculationResult(
         })
       : Promise.resolve(null),
   ]);
-  const incompletitud = buildIncompletitud(pending);
-  const periodId = args.periodId ?? periodoDelFallback?.id ?? null;
+  const periodId = args.periodId ?? periodoResuelto?.id ?? null;
+  const gastosDeNoFabricacion = {
+    gastoVariableComercializacionPorUnidad: Number(periodoResuelto?.gastoVariableComercializacionPorUnidad ?? 0),
+    gastoFijoAdministracion: Number(periodoResuelto?.gastoFijoAdministracion ?? 0),
+  };
+
+  // M0-01. Cuatro renglones del costo REAL (#90, #116, #92) que hasta acá
+  // nunca llegaban al costeo variable: variación presupuesto, trabajos de
+  // terceros, amortización de activos, y el neto de desperdicio (recupero +
+  // merma extraordinaria, ambos RESTAN del costo — ver `cost-statement.ts`).
+  //
+  // Los cuatro son OPCIONALES en `CalculationOutput` por retrocompatibilidad
+  // con corridas guardadas antes de que existieran (#90/#92/#116). En la
+  // práctica `runCalculation()` siempre los completa —`calcCostStatement`
+  // los defaultea a cero internamente—, así que acá adentro nunca deberían
+  // faltar; el chequeo es defensivo. Si alguna vez faltan, NO se computan
+  // como cero (afirmaría una medición que no se hizo): se omiten del
+  // control de suma y el faltante queda en `incompletitud`, visible aparte
+  // de la clasificación de cada componente.
+  const rubrosAusentes: string[] = [];
+  const componenteOpcional = (
+    valor: number | undefined,
+    clave: string,
+    etiqueta: string,
+    motivoAusencia: string,
+  ) => {
+    if (valor === undefined) {
+      rubrosAusentes.push(motivoAusencia);
+      return [];
+    }
+    return [{ clave, etiqueta, importeAbsorcion: valor }];
+  };
+  const desperdicioAlCosto = args.output.desperdicio === undefined
+    ? undefined
+    // `|| 0` normaliza el -0 que da `-(0 + 0)` en IEEE 754: sin recupero ni
+    // merma extraordinaria el componente es cero, no "menos cero" — un
+    // detalle invisible en memoria que un `results` persistido como JSON
+    // delata (Postgres normaliza -0 a 0 al volver, y entonces el snapshot
+    // deja de coincidir bit a bit con lo que se acaba de calcular).
+    : -(args.output.desperdicio.recuperoAplicado + args.output.desperdicio.alResultado) || 0;
 
   // Sin empresa sólo existen mocks históricos: no se consulta un tenant
   // inexistente y la contribución informa las clasificaciones faltantes.
@@ -131,28 +185,93 @@ export async function enrichCalculationResult(
         },
       })
     : [];
+  const componentes = [
+    {
+      clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,
+      etiqueta: 'Materia prima',
+      importeAbsorcion: args.output.rawMaterialConsumed,
+    },
+    {
+      clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta,
+      etiqueta: 'Mano de obra directa',
+      importeAbsorcion: args.output.directLaborTotal,
+    },
+    {
+      clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+      etiqueta: 'Costos indirectos de producción',
+      importeAbsorcion: args.output.indirectCostsApplied,
+    },
+    ...componenteOpcional(
+      args.output.budgetVariance,
+      CLAVES_COMPORTAMIENTO_CONTRIBUCION.variacionPresupuesto,
+      'Variación presupuesto',
+      'Este cálculo es anterior a que se midiera la variación presupuesto: no entra al costeo variable.',
+    ),
+    ...componenteOpcional(
+      args.output.thirdPartyWork,
+      CLAVES_COMPORTAMIENTO_CONTRIBUCION.trabajosDeTerceros,
+      'Trabajos de terceros',
+      'Este cálculo es anterior a que se midieran los trabajos de terceros: no entran al costeo variable.',
+    ),
+    ...componenteOpcional(
+      args.output.assetDepreciation,
+      CLAVES_COMPORTAMIENTO_CONTRIBUCION.amortizacionActivos,
+      'Amortización de activos',
+      'Este cálculo es anterior a que se midiera la amortización de activos: no entra al costeo variable.',
+    ),
+    ...componenteOpcional(
+      desperdicioAlCosto,
+      CLAVES_COMPORTAMIENTO_CONTRIBUCION.desperdicioAlCosto,
+      'Desperdicio (neto de recupero y merma extraordinaria)',
+      'Este cálculo es anterior a que se midiera el desperdicio: no entra al costeo variable.',
+    ),
+    // M2-01. Forzados: no pasan por la cascada de ParametroCosteo (ver el
+    // comentario de comportamientoVolumenForzado en el dominio). A diferencia
+    // de los `componenteOpcional` de arriba, siempre están presentes (el
+    // período los trae en 0 por default, nunca undefined).
+    {
+      clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.gastosComercializacion,
+      etiqueta: 'Gastos de comercialización',
+      importeAbsorcion: gastosDeNoFabricacion.gastoVariableComercializacionPorUnidad * args.input.sales.quantity,
+      comportamientoVolumenForzado: 'VARIABLE' as const,
+      // M0-02: elemento 'venta' — divide por VENDIDAS, no por producidas.
+      elemento: 'venta' as const,
+    },
+    {
+      clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.gastosAdministracion,
+      etiqueta: 'Gastos de administración',
+      importeAbsorcion: gastosDeNoFabricacion.gastoFijoAdministracion,
+      comportamientoVolumenForzado: 'FIJO' as const,
+      // Fijo: no participa de ningún divisor, pero 'venta' documenta su origen.
+      elemento: 'venta' as const,
+    },
+  ];
+  const incompletitud = buildIncompletitud(pending);
+  if (rubrosAusentes.length > 0) {
+    incompletitud.incompleto = true;
+    incompletitud.motivos.push(...rubrosAusentes);
+  }
   const contribucionMarginal = calcularContribucionMarginal({
     precioUnitario: args.input.sales.unitPrice,
     unidadesVendidas: args.input.sales.quantity,
-    componentes: [
-      {
-        clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,
-        etiqueta: 'Materia prima',
-        importeAbsorcion: args.output.rawMaterialConsumed,
-      },
-      {
-        clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta,
-        etiqueta: 'Mano de obra directa',
-        importeAbsorcion: args.output.directLaborTotal,
-      },
-      {
-        clave: CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
-        etiqueta: 'Costos indirectos de producción',
-        importeAbsorcion: args.output.indirectCostsApplied,
-      },
-    ],
+    // M0-02: el costo variable de producción divide por PRODUCIDAS. Mismo
+    // dato que ya usa `detail.unitCost` del motor auditado — no es un valor
+    // nuevo, es que esta capa no lo recibía.
+    unidadesProducidas: args.input.sales.productionQuantity,
+    componentes,
     clasificaciones,
     contexto: { structureId: args.structureId, periodId },
+    // Control de suma (M0-01): solo se aplica si TODOS los componentes
+    // llegaron — con alguno ausente ya no hay nada contra qué reconciliar.
+    // M2-01: comercialización/administración SIEMPRE están (el período los
+    // trae en 0 por default, no opcionales), así que siempre suman al total
+    // esperado — a diferencia de los 4 de M0-01, no tienen su propio "si
+    // faltan, no reconciliar".
+    totalEsperado: rubrosAusentes.length === 0 && args.output.netProductionCost !== undefined
+      ? args.output.netProductionCost
+        + gastosDeNoFabricacion.gastoFijoAdministracion
+        + gastosDeNoFabricacion.gastoVariableComercializacionPorUnidad * args.input.sales.quantity
+      : undefined,
   });
   const puntoEquilibrio = calcularPuntoEquilibrio(contribucionMarginal, new Date());
   const unidadGestion: UnidadGestion | null = company?.unidadGestion
