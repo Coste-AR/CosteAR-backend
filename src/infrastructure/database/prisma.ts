@@ -95,6 +95,8 @@ export const RLS_MODELS = new Set([
   'ReglaAlerta',
   // M1-01: clasificación de costos por concepto.
   'ConceptoCosteo',
+  // M1-02: separación versionada de conceptos semifijos.
+  'TramoSemifijo',
 ]);
 
 /**

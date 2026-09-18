@@ -1,11 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ConceptoCosteoService } from '../../../application/parametros/concepto-costeo-service.js';
+import { TramoSemifijoService } from '../../../application/parametros/tramo-semifijo-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import {
   crearConceptoCosteoSchema,
   actualizarConceptoCosteoSchema,
 } from '../../../shared/schemas/concepto-costeo.schema.js';
+import { separarTramoSemifijoSchema } from '../../../shared/schemas/tramo-semifijo.schema.js';
 
 /**
  * CONCEPTOS DE COSTEO (M1-01, plan de análisis marginal v2).
@@ -40,6 +42,7 @@ function actorFrom(request: FastifyRequest) {
 
 export async function registerConceptoCosteoRoutes(app: FastifyInstance): Promise<void> {
   const service = new ConceptoCosteoService();
+  const tramoService = new TramoSemifijoService();
 
   app.get(
     '/companies/:companyId/conceptos-costeo',
@@ -82,6 +85,38 @@ export async function registerConceptoCosteoRoutes(app: FastifyInstance): Promis
       const { companyId, id } = conceptoParams.parse(request.params);
       await service.eliminar(request.authUser!.id, companyId, id, actorFrom(request));
       return { data: null };
+    },
+  );
+
+  app.post(
+    '/companies/:companyId/conceptos-costeo/:id/tramo-semifijo/calcular',
+    { preHandler: authenticate },
+    async (request) => {
+      const { companyId, id } = conceptoParams.parse(request.params);
+      const body = separarTramoSemifijoSchema.parse(request.body);
+      const data = await tramoService.previsualizar(request.authUser!.id, companyId, id, body);
+      return { data };
+    },
+  );
+
+  app.get(
+    '/companies/:companyId/conceptos-costeo/:id/tramo-semifijo',
+    { preHandler: authenticate },
+    async (request) => {
+      const { companyId, id } = conceptoParams.parse(request.params);
+      const data = await tramoService.obtener(request.authUser!.id, companyId, id);
+      return { data };
+    },
+  );
+
+  app.put(
+    '/companies/:companyId/conceptos-costeo/:id/tramo-semifijo',
+    { preHandler: authenticate },
+    async (request) => {
+      const { companyId, id } = conceptoParams.parse(request.params);
+      const body = separarTramoSemifijoSchema.parse(request.body);
+      const data = await tramoService.guardar(request.authUser!.id, companyId, id, body, actorFrom(request));
+      return { data };
     },
   );
 }

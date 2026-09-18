@@ -27,8 +27,14 @@ export function calcularPuntoEquilibrio(
 
   const costosFijos = Money.sum(
     contribucion.componentes
-      .filter((componente) => componente.comportamientoVolumen === 'FIJO')
-      .map((componente) => Money.of(componente.importeAbsorcion)),
+      .filter((componente) =>
+        componente.comportamientoVolumen === 'FIJO' || componente.comportamientoVolumen === 'SEMIFIJO',
+      )
+      .map((componente) => Money.of(
+        componente.comportamientoVolumen === 'SEMIFIJO'
+          ? (componente.porcionFijaSemifija ?? 0)
+          : componente.importeAbsorcion,
+      )),
   );
   return {
     incompleta: false,

@@ -59,6 +59,7 @@ function db(gastos: { gastoVariableComercializacionPorUnidad: number; gastoFijoA
         { id: 'p-cip', clave: 'comportamiento_costos_indirectos', comportamientoVolumen: 'VARIABLE', structureId: null, periodId: null, clasificadoPorUserId: null, clasificadoEn: null },
       ]),
     },
+    conceptoCosteo: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 

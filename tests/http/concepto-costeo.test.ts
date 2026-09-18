@@ -16,6 +16,11 @@ const { mockPrisma } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    tramoSemifijo: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
   },
 }));
 
@@ -145,5 +150,73 @@ describe('DELETE /companies/:companyId/conceptos-costeo/:id', () => {
       url: `/companies/${COMPANY_ID}/conceptos-costeo/${CONCEPTO_ID}`,
     });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('tramo semifijo de un concepto', () => {
+  const concepto = {
+    id: CONCEPTO_ID,
+    companyId: COMPANY_ID,
+    clave: 'energia_planta',
+    comportamientoVolumen: 'SEMIFIJO',
+    deletedAt: null,
+  };
+
+  it('POST calcular — muestra PUNTOS_EXTREMOS antes de guardar', async () => {
+    mockPrisma.conceptoCosteo.findFirst.mockResolvedValue(concepto);
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/companies/${COMPANY_ID}/conceptos-costeo/${CONCEPTO_ID}/tramo-semifijo/calcular`,
+      payload: {
+        importe: 90000,
+        metodo: 'PUNTOS_EXTREMOS',
+        observacionesBase: [
+          { volumen: 100, importe: 60000 },
+          { volumen: 200, importe: 90000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data).toMatchObject({
+      porcionFija: 30000,
+      porcionVariable: 60000,
+      costoVariableUnitario: 300,
+    });
+    expect(mockPrisma.tramoSemifijo.create).not.toHaveBeenCalled();
+  });
+
+  it('PUT — 422 si fija + variable no da el importe', async () => {
+    mockPrisma.conceptoCosteo.findFirst.mockResolvedValue(concepto);
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/companies/${COMPANY_ID}/conceptos-costeo/${CONCEPTO_ID}/tramo-semifijo`,
+      payload: { importe: 90000, metodo: 'DECLARADO', porcionFija: 54000, porcionVariable: 35000 },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.message).toMatch(/no se ajusta en silencio/i);
+    expect(mockPrisma.tramoSemifijo.create).not.toHaveBeenCalled();
+  });
+
+  it('PUT — guarda 54.000 / 36.000 y conserva el método', async () => {
+    mockPrisma.conceptoCosteo.findFirst.mockResolvedValue(concepto);
+    mockPrisma.tramoSemifijo.findFirst.mockResolvedValue(null);
+    mockPrisma.tramoSemifijo.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: 'tramo-1',
+      ...data,
+      createdAt: new Date(),
+      deletedAt: null,
+    }));
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/companies/${COMPANY_ID}/conceptos-costeo/${CONCEPTO_ID}/tramo-semifijo`,
+      payload: { importe: 90000, metodo: 'DECLARADO', porcionFija: 54000, porcionVariable: 36000 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data).toMatchObject({
+      metodo: 'DECLARADO', porcionFija: 54000, porcionVariable: 36000,
+    });
   });
 });

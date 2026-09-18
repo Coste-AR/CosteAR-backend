@@ -59,7 +59,15 @@ type ResultadoCorrida = {
     unidadesVendidas: number;
     costoVariableUnitario: number | null;
     contribucionMarginalUnitaria: number | null;
-    componentes: Array<{ etiqueta: string; importeAbsorcion: number; comportamientoVolumen: string | null; parametroId: string | null }>;
+    componentes: Array<{
+      etiqueta: string;
+      importeAbsorcion: number;
+      comportamientoVolumen: string | null;
+      parametroId: string | null;
+      conceptoId?: string | null;
+      porcionFijaSemifija?: number | null;
+      porcionVariableSemifija?: number | null;
+    }>;
     motivos?: string[];
   };
   puntoEquilibrio?: {
@@ -189,15 +197,32 @@ export class OwnerDashboardService {
     const motivosBase = resultado.incompletitud?.incompleto ? (resultado.incompletitud.motivos ?? []) : [];
     const datosPendientesBase = resultado.incompletitud?.datosPendientes ?? [];
     const idsParametros = contribucion?.componentes.map((c) => c.parametroId).filter((id): id is string => id !== null) ?? [];
-    const parametrosSinConfirmar = idsParametros.length > 0
-      ? await withTenant(userId, async (tx) => (await tx.parametroCosteo.findMany({
-          where: { id: { in: idsParametros }, confirmado: false, deletedAt: null },
-          select: { id: true, clave: true, descripcion: true },
-          orderBy: [{ clave: 'asc' }, { id: 'asc' }],
-        })).map((parametro) => ({
-          id: parametro.id,
-          nombre: parametro.descripcion?.trim() || parametro.clave,
-        })))
+    const idsConceptos = contribucion?.componentes
+      .map((c) => c.conceptoId)
+      .filter((id): id is string => id != null) ?? [];
+    const parametrosSinConfirmar = idsParametros.length > 0 || idsConceptos.length > 0
+      ? await withTenant(userId, async (tx) => {
+          const [parametros, conceptos] = await Promise.all([
+            idsParametros.length > 0
+              ? tx.parametroCosteo.findMany({
+                  where: { id: { in: idsParametros }, confirmado: false, deletedAt: null },
+                  select: { id: true, clave: true, descripcion: true },
+                  orderBy: [{ clave: 'asc' }, { id: 'asc' }],
+                })
+              : [],
+            idsConceptos.length > 0
+              ? tx.conceptoCosteo.findMany({
+                  where: { id: { in: idsConceptos }, confirmado: false, deletedAt: null },
+                  select: { id: true, clave: true, descripcion: true },
+                  orderBy: [{ clave: 'asc' }, { id: 'asc' }],
+                })
+              : [],
+          ]);
+          return [...parametros, ...conceptos].map((parametro) => ({
+            id: parametro.id,
+            nombre: parametro.descripcion?.trim() || parametro.clave,
+          }));
+        })
       : [];
     const sinUnidad = factor === null ? ['La empresa no tiene declarada su unidad de gestión.'] : [];
     const baseUnidades = Number(period.productionQuantity ?? 0);
@@ -213,7 +238,9 @@ export class OwnerDashboardService {
         return [{ area: 'costeo' as const, dato: `clasificación frente al volumen del rubro ${componente.etiqueta}` }];
       }
       if (componente.comportamientoVolumen === 'SEMIFIJO') {
-        return [{ area: 'costeo' as const, dato: `tramo variable del rubro ${componente.etiqueta}` }];
+        return componente.porcionVariableSemifija == null
+          ? [{ area: 'costeo' as const, dato: `tramo variable del rubro ${componente.etiqueta}` }]
+          : [];
       }
       return [];
     }) ?? [];
@@ -261,8 +288,13 @@ export class OwnerDashboardService {
     const totalFijoBase: number | null = sinDatosDeCorrida || clasificacionIncompleta
       ? null
       : contribucion!.componentes
-          .filter((c) => c.comportamientoVolumen === 'FIJO')
-          .reduce((sum, c) => sum + c.importeAbsorcion, 0);
+          .filter((c) => c.comportamientoVolumen === 'FIJO' || c.comportamientoVolumen === 'SEMIFIJO')
+          .reduce(
+            (sum, c) => sum + (c.comportamientoVolumen === 'SEMIFIJO'
+              ? (c.porcionFijaSemifija ?? 0)
+              : c.importeAbsorcion),
+            0,
+          );
     const costos = sinDatosDeCorrida
       ? { variable: incompleto(costosMotivosPorFalta, parametrosSinConfirmar), fijo: marcarComoUnitarioDeFijo(incompleto(costosMotivosPorFalta, parametrosSinConfirmar)), total: incompleto(costosMotivosPorFalta, parametrosSinConfirmar) }
       : clasificacionIncompleta

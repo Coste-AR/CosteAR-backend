@@ -61,6 +61,7 @@ function db(clasificaciones: Array<{ clave: string; comportamientoVolumen: strin
         })),
       ),
     },
+    conceptoCosteo: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -141,5 +142,62 @@ describe('el costeo variable pasa a usar el costo REAL neto (M0-01)', () => {
     expect(result.incompletitud.motivos.join(' ')).toMatch(/amortización de activos/i);
     // Lo que sí llegó (MP/MOD/CIP) sigue sumando como siempre.
     expect(result.results.contribucionMarginal.totalAbsorcion).toBe(300000);
+  });
+});
+
+describe('M1-02 — el tramo semifijo llega al cálculo real', () => {
+  it('un único concepto CIP con 54.000 fijo / 36.000 variable reemplaza el balde semifijo', async () => {
+    const prisma = db(TODAS_CLASIFICADAS.filter(
+      (c) => c.clave !== CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+    ));
+    prisma.conceptoCosteo.findMany.mockResolvedValue([{
+      id: 'concepto-cip', clave: 'energia_planta', elemento: 'CIP',
+      comportamientoVolumen: 'SEMIFIJO', structureId: null, periodId: null,
+      clasificadoPorUserId: 'usuario-1', clasificadoEn: new Date('2026-09-15T11:00:00Z'),
+      tramosSemifijos: [{
+        id: 'tramo-1', porcionFija: 54000, porcionVariable: 36000,
+        metodo: 'DECLARADO', observacionesBase: [], createdAt: new Date('2026-09-15T12:00:00Z'),
+      }],
+    } as never]);
+
+    const result = await enrichCalculationResult(prisma as never, {
+      structureId: 'estructura-1', companyId: 'empresa-1', periodId: 'periodo-1', input, output: output as never,
+    });
+
+    expect(result.results.contribucionMarginal.incompleta).toBe(false);
+    if (result.results.contribucionMarginal.incompleta) return;
+    expect(result.results.contribucionMarginal.componentes.find(
+      (c) => c.clave === CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+    )).toMatchObject({
+      comportamientoVolumen: 'SEMIFIJO',
+      conceptoId: 'concepto-cip',
+      porcionFijaSemifija: 54000,
+      porcionVariableSemifija: 36000,
+    });
+  });
+
+  it('con dos conceptos CIP no inventa cómo repartir el balde agregado', async () => {
+    const prisma = db(TODAS_CLASIFICADAS.filter(
+      (c) => c.clave !== CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+    ));
+    prisma.conceptoCosteo.findMany.mockResolvedValue([
+      {
+        id: 'c-1', clave: 'energia', elemento: 'CIP', comportamientoVolumen: 'SEMIFIJO',
+        structureId: null, periodId: null, clasificadoPorUserId: null, clasificadoEn: null,
+        tramosSemifijos: [{ porcionFija: 30000, porcionVariable: 20000, metodo: 'DECLARADO', observacionesBase: [] }],
+      },
+      {
+        id: 'c-2', clave: 'mantenimiento', elemento: 'CIP', comportamientoVolumen: 'SEMIFIJO',
+        structureId: null, periodId: null, clasificadoPorUserId: null, clasificadoEn: null,
+        tramosSemifijos: [{ porcionFija: 24000, porcionVariable: 16000, metodo: 'DECLARADO', observacionesBase: [] }],
+      },
+    ] as never);
+
+    const result = await enrichCalculationResult(prisma as never, {
+      structureId: 'estructura-1', companyId: 'empresa-1', periodId: 'periodo-1', input, output: output as never,
+    });
+    expect(result.results.contribucionMarginal.incompleta).toBe(true);
+    if (!result.results.contribucionMarginal.incompleta) return;
+    expect(result.results.contribucionMarginal.motivos.join(' ')).toMatch(/costos indirectos/i);
   });
 });
