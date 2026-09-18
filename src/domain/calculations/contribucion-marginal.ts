@@ -44,6 +44,12 @@ export interface FilaComportamiento {
   periodId: string | null;
   clasificadoPorUserId: string | null;
   clasificadoEn: Date | null;
+  /** M1-02: distingue el balde histórico del concepto que lo desagrega. */
+  fuente?: 'parametro' | 'concepto';
+  porcionFijaSemifija?: number | null;
+  porcionVariableSemifija?: number | null;
+  metodoSemifijo?: 'PUNTOS_EXTREMOS' | 'CORRELACION' | 'DISPERSION_GRAFICA' | 'DECLARADO' | null;
+  observacionesBaseSemifija?: Array<{ volumen: number; importe: number }> | null;
 }
 
 export interface ComponenteAbsorcion {
@@ -100,8 +106,13 @@ export interface TrazaComponenteContribucion extends ComponenteAbsorcion {
   comportamientoVolumen: ComportamientoVolumen | null;
   origen: 'periodo' | 'estructura' | 'empresa' | null;
   parametroId: string | null;
+  conceptoId: string | null;
   clasificadoPorUserId: string | null;
   clasificadoEn: string | null;
+  porcionFijaSemifija: number | null;
+  porcionVariableSemifija: number | null;
+  metodoSemifijo: FilaComportamiento['metodoSemifijo'];
+  observacionesBaseSemifija: FilaComportamiento['observacionesBaseSemifija'];
 }
 
 export interface ContribucionMarginalCompleta {
@@ -172,8 +183,13 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
         comportamientoVolumen: componente.comportamientoVolumenForzado,
         origen: null,
         parametroId: null,
+        conceptoId: null,
         clasificadoPorUserId: null,
         clasificadoEn: null,
+        porcionFijaSemifija: null,
+        porcionVariableSemifija: null,
+        metodoSemifijo: null,
+        observacionesBaseSemifija: null,
       };
     }
     const resuelta = resolverComportamiento(componente.clave, input.clasificaciones, input.contexto);
@@ -181,9 +197,14 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
       ...componente,
       comportamientoVolumen: resuelta?.fila.comportamientoVolumen ?? null,
       origen: resuelta?.origen ?? null,
-      parametroId: resuelta?.fila.id ?? null,
+      parametroId: resuelta?.fila.fuente === 'concepto' ? null : (resuelta?.fila.id ?? null),
+      conceptoId: resuelta?.fila.fuente === 'concepto' ? resuelta.fila.id : null,
       clasificadoPorUserId: resuelta?.fila.clasificadoPorUserId ?? null,
       clasificadoEn: resuelta?.fila.clasificadoEn?.toISOString() ?? null,
+      porcionFijaSemifija: resuelta?.fila.porcionFijaSemifija ?? null,
+      porcionVariableSemifija: resuelta?.fila.porcionVariableSemifija ?? null,
+      metodoSemifijo: resuelta?.fila.metodoSemifijo ?? null,
+      observacionesBaseSemifija: resuelta?.fila.observacionesBaseSemifija ?? null,
     };
   });
 
@@ -201,7 +222,21 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
       return [`Falta clasificar frente al volumen el rubro ${componente.etiqueta}.`];
     }
     if (componente.comportamientoVolumen === 'SEMIFIJO') {
-      return [`El rubro ${componente.etiqueta} es semifijo y todavía no tiene separado su tramo variable.`];
+      if (componente.porcionFijaSemifija === null || componente.porcionVariableSemifija === null) {
+        return [`El rubro ${componente.etiqueta} es semifijo y todavía no tiene separado su tramo variable.`];
+      }
+      const diferencia = Money.of(componente.porcionFijaSemifija)
+        .add(Money.of(componente.porcionVariableSemifija))
+        .subtract(Money.of(componente.importeAbsorcion))
+        .toNumber();
+      if (Math.abs(diferencia) >= 0.01) {
+        return [
+          `La separación semifija de ${componente.etiqueta} suma $${(
+            componente.porcionFijaSemifija + componente.porcionVariableSemifija
+          ).toFixed(2)}, pero el importe del cálculo es $${componente.importeAbsorcion.toFixed(2)}. ` +
+          'Volvé a separar el importe vigente; no se ajusta en silencio.',
+        ];
+      }
     }
     return [];
   });
@@ -255,13 +290,17 @@ export function calcularContribucionMarginal(input: ContribucionMarginalInput): 
   // MP/MOD/CIP y los cuatro renglones de M0-01 sin que ningún llamador viejo
   // tenga que declararlo.
   const variablesDeProduccion = componentes.filter(
-    (c) => c.comportamientoVolumen === 'VARIABLE' && (c.elemento ?? 'produccion') === 'produccion',
+    (c) => (c.comportamientoVolumen === 'VARIABLE' || c.comportamientoVolumen === 'SEMIFIJO') &&
+      (c.elemento ?? 'produccion') === 'produccion',
   );
   const variablesDeComercializacion = componentes.filter(
-    (c) => c.comportamientoVolumen === 'VARIABLE' && c.elemento === 'venta',
+    (c) => (c.comportamientoVolumen === 'VARIABLE' || c.comportamientoVolumen === 'SEMIFIJO') &&
+      c.elemento === 'venta',
   );
-  const costoVariableProduccionTotal = Money.sum(variablesDeProduccion.map((c) => Money.of(c.importeAbsorcion)));
-  const costoVariableComercializacionTotal = Money.sum(variablesDeComercializacion.map((c) => Money.of(c.importeAbsorcion)));
+  const importeVariable = (c: TrazaComponenteContribucion) =>
+    c.comportamientoVolumen === 'SEMIFIJO' ? (c.porcionVariableSemifija ?? 0) : c.importeAbsorcion;
+  const costoVariableProduccionTotal = Money.sum(variablesDeProduccion.map((c) => Money.of(importeVariable(c))));
+  const costoVariableComercializacionTotal = Money.sum(variablesDeComercializacion.map((c) => Money.of(importeVariable(c))));
   const costoVariableTotal = costoVariableProduccionTotal.add(costoVariableComercializacionTotal);
   const costoVariableUnitarioProduccion = costoVariableProduccionTotal.divide(unidadesProducidas);
   // `input.unidadesVendidas > 0` está garantizado acá: si no, el motivo de

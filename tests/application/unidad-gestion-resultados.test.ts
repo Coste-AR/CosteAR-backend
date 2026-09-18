@@ -46,6 +46,7 @@ function db(unidadGestion: { codigo: string; nombre: string; factor: number } | 
         { id: 'p-3', clave: 'comportamiento_costos_indirectos', comportamientoVolumen: 'FIJO', structureId: null, periodId: null, clasificadoPorUserId: null, clasificadoEn: null },
       ]),
     },
+    conceptoCosteo: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 

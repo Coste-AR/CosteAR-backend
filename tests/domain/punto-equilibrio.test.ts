@@ -21,6 +21,28 @@ describe('punto de equilibrio', () => {
     expect(calcularPuntoEquilibrio(contribucion, new Date()).unidadesEquilibrio).toBeNull();
   });
 
+  it('suma la porción fija de un semifijo y no su importe completo', () => {
+    const contribucion = calcularContribucionMarginal({
+      precioUnitario: 500,
+      unidadesVendidas: 800,
+      unidadesProducidas: 1000,
+      componentes: [
+        { clave: 'mp', etiqueta: 'MP', importeAbsorcion: 150000 },
+        { clave: 'cip', etiqueta: 'CIP', importeAbsorcion: 90000 },
+      ],
+      clasificaciones: [
+        { ...filas[0], clave: 'mp' },
+        {
+          ...filas[1], clave: 'cip', comportamientoVolumen: 'SEMIFIJO',
+          porcionFijaSemifija: 54000, porcionVariableSemifija: 36000,
+        },
+      ],
+      contexto: { structureId: 's', periodId: null },
+    });
+    // cm = 500 - (150000 + 36000) / 1000 = 314; PE = 54000 / 314.
+    expect(calcularPuntoEquilibrio(contribucion, new Date()).unidadesEquilibrio).toBe(171.97);
+  });
+
   it('mide el movimiento porcentual absoluto contra la corrida anterior', () => {
     const contribucion = calcularContribucionMarginal({ precioUnitario: 12, unidadesVendidas: 6, componentes: [{ clave: 'mp', etiqueta: 'MP', importeAbsorcion: 18 }, { clave: 'cif', etiqueta: 'CIF', importeAbsorcion: 18 }], clasificaciones: filas, contexto: { structureId: 's', periodId: null } });
     const anterior = calcularPuntoEquilibrio(contribucion, new Date('2026-01-01T00:00:00.000Z'));

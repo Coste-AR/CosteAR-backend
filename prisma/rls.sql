@@ -415,6 +415,14 @@ CREATE POLICY tenant_isolation ON conceptos_costeo
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- tramos_semifijos (M1-02): versiones de la separación por concepto.
+ALTER TABLE tramos_semifijos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tramos_semifijos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON tramos_semifijos;
+CREATE POLICY tenant_isolation ON tramos_semifijos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- Operación física genérica: ambas tablas tienen `userId` denormalizado para
 -- que el aislamiento se aplique sin joins adicionales.
 ALTER TABLE unidades_productivas ENABLE ROW LEVEL SECURITY;

@@ -221,6 +221,7 @@ model Company {
   operationScaleUnit   String?
   parametrosCosteo     ParametroCosteo[]
   conceptosCosteo      ConceptoCosteo[]
+  tramosSemifijos      TramoSemifijo[]
   unidadesProductivas  UnidadProductiva[]
   lotesProductivos     LoteProductivo[]
   id                   String                @id @default(uuid()) @db.Uuid
@@ -2343,6 +2344,14 @@ enum CausaVariabilidad {
   otra
 }
 
+/** Método usado para separar un costo semifijo entre su porción fija y variable. */
+enum MetodoTramoSemifijo {
+  PUNTOS_EXTREMOS
+  CORRELACION
+  DISPERSION_GRAFICA
+  DECLARADO
+}
+
 /**
  * M1-01 (plan de análisis marginal v2). Clasificación de costos POR CONCEPTO,
  * por debajo de los tres baldes de `ParametroCosteo`.
@@ -2425,11 +2434,49 @@ model ConceptoCosteo {
   updatedAt DateTime  @updatedAt @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
 
+  /** Versiones de la separación semifija. La vigente es la que no tiene deletedAt. */
+  tramosSemifijos TramoSemifijo[]
+
   @@unique([companyId, structureId, periodId, clave])
   @@index([companyId, clave])
   @@index([structureId, clave])
   @@index([periodId])
   @@map("conceptos_costeo")
+}
+
+/**
+ * M1-02. Separación auditable de un `ConceptoCosteo` SEMIFIJO.
+ *
+ * Las observaciones conservan los pares (volumen, importe) que justificaron
+ * el método. Las correcciones son append-only: guardar otra separación marca
+ * la anterior como reemplazada, pero nunca pisa sus importes ni su evidencia.
+ */
+model TramoSemifijo {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid // denormalizado para RLS
+
+  conceptoId String         @db.Uuid
+  concepto   ConceptoCosteo @relation(fields: [conceptoId], references: [id], onDelete: Cascade)
+
+  porcionFija     Decimal @db.Decimal(18, 6)
+  porcionVariable Decimal @db.Decimal(18, 6)
+  metodo          MetodoTramoSemifijo
+  observacionesBase Json
+
+  /** Derivados del método, persistidos para que el cálculo sea auditable. */
+  costoVariableUnitario  Decimal? @db.Decimal(18, 6)
+  coeficienteCorrelacion Decimal? @db.Decimal(18, 6)
+
+  creadoPorUserId String   @db.Uuid
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  /** NULL = versión vigente; con fecha = reemplazada lógicamente. */
+  deletedAt       DateTime? @db.Timestamptz
+
+  @@index([companyId, conceptoId])
+  @@index([conceptoId, deletedAt])
+  @@map("tramos_semifijos")
 }
 
 // ---------------------------------------------------------------------------

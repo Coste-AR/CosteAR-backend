@@ -197,6 +197,48 @@ describe('contribución marginal por unidad', () => {
     if (!resultado.incompleta) return;
     expect(resultado.motivos.join(' ')).toMatch(/semifijo/i);
   });
+
+  it('AM-01: el tramo 54.000 fijo / 36.000 variable deja de vaciar la contribución y da cm = 256', () => {
+    const resultado = calcularContribucionMarginal({
+      precioUnitario: 500,
+      unidadesVendidas: 800,
+      unidadesProducidas: 1000,
+      componentes: [
+        { clave: 'mp', etiqueta: 'Materia prima', importeAbsorcion: 150000 },
+        { clave: 'otros_variables', etiqueta: 'Otros variables de producción', importeAbsorcion: 28000 },
+        { clave: 'mod', etiqueta: 'Mano de obra directa', importeAbsorcion: 60000 },
+        { clave: 'cip', etiqueta: 'Costos indirectos de producción', importeAbsorcion: 90000 },
+        {
+          clave: 'venta', etiqueta: 'Gastos variables de venta', importeAbsorcion: 24000,
+          comportamientoVolumenForzado: 'VARIABLE', elemento: 'venta',
+        },
+      ],
+      clasificaciones: [
+        clasificacion('mp', 'VARIABLE'),
+        clasificacion('otros_variables', 'VARIABLE'),
+        clasificacion('mod', 'FIJO'),
+        {
+          ...clasificacion('cip', 'SEMIFIJO'),
+          fuente: 'concepto',
+          porcionFijaSemifija: 54000,
+          porcionVariableSemifija: 36000,
+          metodoSemifijo: 'DECLARADO',
+          observacionesBaseSemifija: [],
+        },
+      ],
+      contexto,
+    });
+
+    expect(resultado.incompleta).toBe(false);
+    if (resultado.incompleta) return;
+    expect(resultado.costoVariableUnitario).toBe(244); // (150k + 28k + 36k) / 1000 + 24k / 800
+    expect(resultado.contribucionMarginalUnitaria).toBe(256);
+    expect(resultado.componentes.find((c) => c.clave === 'cip')).toMatchObject({
+      conceptoId: expect.any(String),
+      porcionFijaSemifija: 54000,
+      porcionVariableSemifija: 36000,
+    });
+  });
 });
 
 /**

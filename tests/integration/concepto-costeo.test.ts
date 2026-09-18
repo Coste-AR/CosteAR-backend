@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConceptoCosteoService } from '@/application/parametros/concepto-costeo-service.js';
+import { TramoSemifijoService } from '@/application/parametros/tramo-semifijo-service.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
+import { withTenant } from '@/infrastructure/database/prisma.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
 
 /**
@@ -101,5 +103,52 @@ describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
     const service = new ConceptoCosteoService(db);
     const listado = await withTenantContext(solitaria.userId, () => service.listar(solitaria.userId, solitaria.companyId));
     expect(listado).toEqual([]);
+  });
+
+  it('TramoSemifijo: guarda versiones, audita observaciones y RLS impide acceso cruzado', async () => {
+    const conceptos = new ConceptoCosteoService(db);
+    const tramos = new TramoSemifijoService(db);
+    const concepto = await withTenantContext(A.userId, () =>
+      conceptos.crear(
+        A.userId,
+        A.companyId,
+        { clave: 'energia_semifija', elemento: 'CIP', comportamientoVolumen: 'SEMIFIJO', confirmado: true },
+        actor(A.userId),
+      ),
+    );
+
+    const primero = await withTenantContext(A.userId, () => tramos.guardar(
+      A.userId,
+      A.companyId,
+      concepto.id,
+      {
+        importe: 90000,
+        metodo: 'PUNTOS_EXTREMOS',
+        observacionesBase: [{ volumen: 100, importe: 60000 }, { volumen: 200, importe: 90000 }],
+      },
+      actor(A.userId),
+    ));
+    expect(primero).toMatchObject({ porcionFija: expect.anything(), porcionVariable: expect.anything() });
+
+    const segundo = await withTenantContext(A.userId, () => tramos.guardar(
+      A.userId,
+      A.companyId,
+      concepto.id,
+      { importe: 90000, metodo: 'DECLARADO', porcionFija: 54000, porcionVariable: 36000 },
+      actor(A.userId),
+    ));
+    expect(Number(segundo.porcionVariable)).toBe(36000);
+
+    const versiones = await withTenant(A.userId, (tx) => tx.tramoSemifijo.findMany({
+      where: { conceptoId: concepto.id },
+      orderBy: { createdAt: 'asc' },
+    }));
+    expect(versiones).toHaveLength(2);
+    expect(versiones[0].deletedAt).not.toBeNull();
+    expect(versiones[1].deletedAt).toBeNull();
+
+    await expect(withTenantContext(B.userId, () =>
+      tramos.obtener(B.userId, A.companyId, concepto.id),
+    )).rejects.toThrow(/empresa no encontrada/i);
   });
 });
