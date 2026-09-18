@@ -81,6 +81,53 @@ beforeAll(async () => {
 afterAll(disconnect);
 
 describe('A-05 — contribución marginal persistida por período', () => {
+  it('cargar trabajos de terceros mueve el costo real y el margen del tablero', async () => {
+    const structures = new CostStructureService(db);
+    const runs = new CalculationRunService(db);
+    const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
+
+    const sinTerceros = await withTenantContext(tenant.userId, () =>
+      runs.calculate(tenant.userId, tenant.structureId, actor, 'MANUAL', tenant.periodId),
+    );
+
+    await withTenantContext(tenant.userId, () =>
+      structures.updateThirdPartyWork(tenant.userId, tenant.structureId, 25, {
+        userId: tenant.userId,
+        ipAddress: '127.0.0.1',
+        userAgent: 'vitest',
+      }),
+    );
+
+    // Distingue el origen: una corrida asociada a un período debe leer su foto,
+    // aunque el espejo vigente de la estructura ya tenga otro importe.
+    await withTenant(tenant.userId, (tx) =>
+      tx.costStructure.update({ where: { id: tenant.structureId }, data: { thirdPartyWork: 999 } }),
+    );
+
+    try {
+      const conTerceros = await withTenantContext(tenant.userId, () =>
+        runs.calculate(tenant.userId, tenant.structureId, actor, 'MANUAL', tenant.periodId),
+      );
+
+      expect(conTerceros.results.thirdPartyWork).toBe(25);
+      expect(conTerceros.results.realProductionCost! - sinTerceros.results.realProductionCost!)
+        .toBeCloseTo(25, 6);
+      expect(sinTerceros.results.grossMargin - conTerceros.results.grossMargin)
+        .toBeCloseTo(25, 6);
+    } finally {
+      // Este archivo comparte tenant entre casos. La restauración pasa por la
+      // mutación productiva (con versión y auditoría), no por un UPDATE de test
+      // que podría ocultar un problema en ese camino.
+      await withTenantContext(tenant.userId, () =>
+        structures.updateThirdPartyWork(tenant.userId, tenant.structureId, 0, {
+          userId: tenant.userId,
+          ipAddress: '127.0.0.1',
+          userAgent: 'vitest',
+        }),
+      );
+    }
+  });
+
   it('persiste la vista y cambia sólo al cambiar una clasificación', async () => {
     const service = new CalculationRunService(db);
     const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
