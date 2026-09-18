@@ -206,7 +206,39 @@ describe('A-05 — contribución marginal persistida por período', () => {
       simulator.simulate(tenant.userId, tenant.structureId, {}),
     );
     expect(incompleta.result.contribucionMarginal.incompleta).toBe(true);
-    expect(incompleta.result.puntoEquilibrio.incompleta).toBe(true);
+    expect(incompleta.result.puntoEquilibrio).toMatchObject({
+      incompleta: false,
+      tipo: 'zona',
+      unidadesEquilibrio: null,
+    });
+    const zona = incompleta.result.puntoEquilibrio;
+    if (zona.incompleta || zona.tipo !== 'zona') throw new Error('Se esperaba una zona acotada');
+    expect(Number.isFinite(zona.qMin)).toBe(true);
+    expect(zona.qMax).toBeGreaterThan(zona.qMin);
+    expect(zona.conceptosQueLaEnsanchan.map(({ clave }) => clave).sort())
+      .toEqual([
+        CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,
+        CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta,
+        CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+      ].sort());
+    expect(zona.basadoEn).toEqual(incompleta.result.contribucionMarginal.componentes
+      .map(({ clave, etiqueta }) => ({ clave, etiqueta })));
+    const sinClasificar = await withTenantContext(tenant.userId, () =>
+      runs.calculate(tenant.userId, tenant.structureId, actor),
+    );
+    expect(sinClasificar.results.puntoEquilibrio).toMatchObject({
+      tipo: 'zona',
+      qMin: zona.qMin,
+      qMax: zona.qMax,
+      conceptosQueLaEnsanchan: zona.conceptosQueLaEnsanchan,
+    });
+    const sinPrecio = await withTenantContext(tenant.userId, () =>
+      simulator.simulate(tenant.userId, tenant.structureId, { sales: -1 }),
+    );
+    expect(sinPrecio.result.puntoEquilibrio).toMatchObject({
+      incompleta: true,
+      unidadesEquilibrio: null,
+    });
     expect(incompleta.result.contribucionMarginal.motivos.length).toBeGreaterThan(0);
   });
 });

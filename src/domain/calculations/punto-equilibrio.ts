@@ -129,7 +129,7 @@ export type PuntoEquilibrio = (
       conceptosQueLaEnsanchan: ConceptoQueEnsanchaZona[];
       fechaUltimoRecalculo: string;
     }
-) & { basadoEn?: ContextoFormulaEquilibrio['basadoEn']; tramoValidez?: null };
+) & { /** Opcional al leer fotos históricas anteriores a M3-01. */ basadoEn?: ContextoFormulaEquilibrio['basadoEn']; tramoValidez?: null };
 
 const motivoClasificacion = (etiqueta: string): string =>
   `Falta clasificar frente al volumen el rubro ${etiqueta}.`;
