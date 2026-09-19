@@ -545,6 +545,46 @@
                                 "type": "string"
                               }
                             },
+                            "tipo": {
+                              "type": "string",
+                              "enum": [
+                                "punto",
+                                "zona"
+                              ]
+                            },
+                            "qMin": {
+                              "type": "number"
+                            },
+                            "qMax": {
+                              "type": "number"
+                            },
+                            "conceptosQueLaEnsanchan": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "clave": {
+                                    "type": "string"
+                                  },
+                                  "etiqueta": {
+                                    "type": "string"
+                                  },
+                                  "importe": {
+                                    "type": "number"
+                                  },
+                                  "aporteAlAncho": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "clave",
+                                  "etiqueta",
+                                  "importe",
+                                  "aporteAlAncho"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
                             "fechaUltimoRecalculo": {
                               "type": "string",
                               "nullable": true

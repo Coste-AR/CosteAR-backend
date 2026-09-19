@@ -76,4 +76,23 @@ describe('proyección de resultados de cálculo a unidad de gestión', () => {
     expect(result.results.detail.unitCost.unitProductionCost).toBe(2.5);
     expect(result.results.detail.unitCost.unitsProduced).toBe(24);
   });
+
+  it('convierte ambos extremos y el aporte al ancho de una zona', async () => {
+    const database = db({ codigo: 'bulto', nombre: 'Bulto de prueba', factor: 12 });
+    database.parametroCosteo.findMany.mockResolvedValue([
+      { id: 'p-1', clave: 'comportamiento_materia_prima', comportamientoVolumen: 'VARIABLE', structureId: null, periodId: null, clasificadoPorUserId: null, clasificadoEn: null },
+      { id: 'p-2', clave: 'comportamiento_mano_obra_directa', comportamientoVolumen: 'FIJO', structureId: null, periodId: null, clasificadoPorUserId: null, clasificadoEn: null },
+    ]);
+    const result = await enrichCalculationResult(database as never, {
+      structureId: 'estructura-1', companyId: 'empresa-1', input, output: output as never,
+    });
+
+    expect(result.resultsBase.puntoEquilibrio).toMatchObject({ tipo: 'zona', qMin: 4, qMax: 9 });
+    expect(result.results.puntoEquilibrio).toMatchObject({
+      tipo: 'zona',
+      qMin: 4 / 12,
+      qMax: 9 / 12,
+      conceptosQueLaEnsanchan: [{ aporteAlAncho: 5 / 12 }],
+    });
+  });
 });

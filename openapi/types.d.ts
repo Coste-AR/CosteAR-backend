@@ -137,6 +137,16 @@ export interface paths {
                                         nombre: string;
                                     }[];
                                     motivos: string[];
+                                    /** @enum {string} */
+                                    tipo?: "punto" | "zona";
+                                    qMin?: number;
+                                    qMax?: number;
+                                    conceptosQueLaEnsanchan?: {
+                                        clave: string;
+                                        etiqueta: string;
+                                        importe: number;
+                                        aporteAlAncho: number;
+                                    }[];
                                     fechaUltimoRecalculo: string | null;
                                 };
                                 producidoCajones: {

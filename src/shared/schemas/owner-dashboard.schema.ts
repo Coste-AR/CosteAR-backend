@@ -72,6 +72,15 @@ export const ownerDashboardResponseSchema = z.object({
   precioPromedioVenta: numeroTableroSchema,
   contribucionMarginalPorCajon: numeroTableroSchema,
   puntoEquilibrioCajones: numeroTableroSchema.extend({
+    tipo: z.enum(['punto', 'zona']).optional(),
+    qMin: z.number().optional(),
+    qMax: z.number().optional(),
+    conceptosQueLaEnsanchan: z.array(z.object({
+      clave: z.string(),
+      etiqueta: z.string(),
+      importe: z.number(),
+      aporteAlAncho: z.number(),
+    })).optional(),
     fechaUltimoRecalculo: z.string().nullable(),
   }),
   producidoCajones: numeroTableroSchema,
