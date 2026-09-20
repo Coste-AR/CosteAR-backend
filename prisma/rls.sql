@@ -525,3 +525,12 @@ DROP POLICY IF EXISTS tenant_isolation ON reglas_alerta;
 CREATE POLICY tenant_isolation ON reglas_alerta
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+-- panel_telemetry_events (#354): eventos anónimos por persona, aislados por
+-- tenant. La columna userId identifica al dueño de la empresa, no al actor.
+ALTER TABLE panel_telemetry_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE panel_telemetry_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON panel_telemetry_events;
+CREATE POLICY tenant_isolation ON panel_telemetry_events
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());

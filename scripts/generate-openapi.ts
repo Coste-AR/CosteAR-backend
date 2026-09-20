@@ -25,6 +25,7 @@ import { registerCompanyRoutes } from '../src/infrastructure/http/routes/company
 import { registerCostStructureRoutes } from '../src/infrastructure/http/routes/cost-structure.routes.js';
 import { registerCostPeriodRoutes } from '../src/infrastructure/http/routes/cost-period.routes.js';
 import { registerValidacionesRoutes } from '../src/infrastructure/http/routes/validaciones.routes.js';
+import { registerTelemetriaPanelRoutes } from '../src/infrastructure/http/routes/telemetria-panel.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -36,6 +37,7 @@ const CONVERTED_ROUTES = [
   registerCostPeriodRoutes,
   registerOwnerDashboardRoutes,
   registerValidacionesRoutes,
+  registerTelemetriaPanelRoutes,
 ];
 
 async function buildSchemaOnlyApp() {

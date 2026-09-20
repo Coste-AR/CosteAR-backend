@@ -197,6 +197,7 @@ enum CondicionIva {
 }
 
 model Company {
+  panelTelemetryEvents PanelTelemetryEvent[]
   paquetesRubro        PaqueteRubro[]
   modulosRubro         ConfiguracionModuloRubro[]
   reglasAlerta         ReglaAlerta[]
@@ -264,6 +265,32 @@ model Company {
 
   @@index([userId])
   @@map("companies")
+}
+
+enum PanelTelemetryEventType {
+  ACCION_TOCADA
+  CARGA_INICIADA
+  CARGA_ABANDONADA
+  CARGA_COMPLETADA
+}
+
+/// Evento de uso anónimo del panel de campo. `userId` identifica al tenant para
+/// RLS, no a la persona que realizó la acción: no se persiste actorId, nombre,
+/// email, IP, user-agent ni ningún valor cargado en el formulario.
+model PanelTelemetryEvent {
+  id            String                  @id @default(uuid()) @db.Uuid
+  companyId     String                  @db.Uuid
+  company       Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId        String                  @db.Uuid
+  type          PanelTelemetryEventType
+  action        String                  @db.VarChar(120)
+  durationMs    Int?
+  technicalRole String                  @db.VarChar(40)
+  createdAt     DateTime                @default(now()) @db.Timestamptz
+
+  @@index([companyId, createdAt])
+  @@index([userId])
+  @@map("panel_telemetry_events")
 }
 
 enum DestinoCorrida {
