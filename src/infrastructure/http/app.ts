@@ -200,7 +200,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       api.setValidatorCompiler(validatorCompiler);
       api.setSerializerCompiler(serializerCompiler);
       await api.register(swagger, {
-        openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '0.1.0' } },
+        openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '1.0.0' } },
         transform: jsonSchemaTransform,
       });
 

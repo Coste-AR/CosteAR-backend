@@ -14,6 +14,14 @@ import {
   updateThirdPartyWorkSchema,
 } from '../../../shared/schemas/cost.schema.js';
 import { captureMethodSchema } from '../../../shared/schemas/trazabilidad.schema.js';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import {
+  apiErrorResponses,
+  calculationEnvelopeSchema,
+  costStructureEnvelopeSchema,
+  costStructuresEnvelopeSchema,
+  simulationEnvelopeSchema,
+} from '../../../shared/schemas/api-contract.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const companyIdParam = z.object({ companyId: z.string().uuid() });
@@ -42,12 +50,17 @@ function saveTrace(request: FastifyRequest): SaveTrace {
 }
 
 export async function registerCostStructureRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
   const service = new CostStructureService();
   const deletionService = new CostStructureDeletionService();
+  const contract = app.withTypeProvider<ZodTypeProvider>();
 
-  app.get(
+  contract.get(
     '/companies/:companyId/cost-structures',
-    { preHandler: authenticate },
+    {
+      preHandler: authenticate,
+      schema: { response: { 200: costStructuresEnvelopeSchema, ...apiErrorResponses } },
+    },
     async (request) => {
       const { companyId } = companyIdParam.parse(request.params);
       const { includeDeleted, cursor, limit } = z
@@ -79,7 +92,10 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     },
   );
 
-  app.get('/cost-structures/:id', { preHandler: authenticate }, async (request) => {
+  contract.get('/cost-structures/:id', {
+    preHandler: authenticate,
+    schema: { response: { 200: costStructureEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id } = idParam.parse(request.params);
     const structure = await service.getById(request.authUser!.id, id);
     return { data: structure };
@@ -190,9 +206,12 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
         : section === 'direct-labor'
           ? 'directLabor'
           : 'indirectCosts';
-    app.put(
+    contract.put(
       `/cost-structures/:id/${section}`,
-      { preHandler: authenticate },
+      {
+        preHandler: authenticate,
+        schema: { response: { 200: costStructureEnvelopeSchema, ...apiErrorResponses } },
+      },
       async (request) => {
         const { id } = idParam.parse(request.params);
         const updated = await service.updateConfig(
@@ -239,7 +258,10 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     },
   );
 
-  app.post('/cost-structures/:id/calculate', { preHandler: authenticate }, async (request) => {
+  contract.post('/cost-structures/:id/calculate', {
+    preHandler: authenticate,
+    schema: { response: { 200: calculationEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id } = idParam.parse(request.params);
     const { result, calculation } = await service.calculate(
       request.authUser!.id,
@@ -250,7 +272,10 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     return { data: { result, calculationId: calculation.id } };
   });
 
-  app.post('/cost-structures/:id/simulate', { preHandler: authenticate }, async (request) => {
+  contract.post('/cost-structures/:id/simulate', {
+    preHandler: authenticate,
+    schema: { response: { 200: simulationEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id } = idParam.parse(request.params);
     const shocksSchema = z.object({
       rawMaterial: z.number().optional(),
@@ -261,7 +286,7 @@ export async function registerCostStructureRoutes(app: FastifyInstance): Promise
     const shocks = shocksSchema.parse(request.body);
 
     const { result } = await service.simulate(request.authUser!.id, id, shocks);
-    return { data: { result, simulated: true } };
+    return { data: { result, simulated: true as const } };
   });
 
   app.get('/cost-structures/:id/calculations', { preHandler: authenticate }, async (request) => {

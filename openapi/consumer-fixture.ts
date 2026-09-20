@@ -18,6 +18,20 @@ import type { paths } from './types.js';
 type TableroResponse =
   paths['/periods/{id}/tablero-dueno']['get']['responses'][200]['content']['application/json'];
 
+type LoginResponse =
+  paths['/auth/login']['post']['responses'][200]['content']['application/json'];
+
+type CalculationResponse =
+  paths['/cost-structures/{id}/calculate']['post']['responses'][200]['content']['application/json'];
+
+export function sesionIniciada(response: LoginResponse): string {
+  return `${response.data.user.name} · ${response.data.user.role}`;
+}
+
+export function margenCalculado(response: CalculationResponse): string {
+  return `${response.data.result.grossMarginPct.toFixed(2)}%`;
+}
+
 export function resumenTablero(tablero: TableroResponse): string {
   const { data } = tablero;
   if (!data.corrida) return `Período ${data.periodo.codigo}: sin corrida de cálculo.`;
