@@ -27,6 +27,7 @@ import { companyRhythm } from '../../domain/periods/effective-rhythm.js';
 import type { IndirectCostConfig } from '../../shared/schemas/cost.schema.js';
 import type { TraceActor } from '../audit/trace-audit.js';
 import type { CaptureMethod } from '../../shared/schemas/trazabilidad.schema.js';
+import { prepararMateriaPrimaHomogenea } from '../../domain/calculations/moneda-homogenea.js';
 import { reconcileSectionDataPoints } from '../trazabilidad/datapoint-reconciler.js';
 import {
   rawMaterialPoints,
@@ -736,8 +737,27 @@ export class CostStructureService {
       );
     }
 
+    const priceIndexDelegate = (this.db as unknown as {
+      priceIndexSeriesVersion?: { findFirst(args: unknown): Promise<{ id: string; values: { periodCode: string; indexValue: unknown }[] } | null> };
+    }).priceIndexSeriesVersion;
+    const priceIndexVersion = priceIndexDelegate
+      ? await priceIndexDelegate.findFirst({
+          where: { companyId: s.companyId }, orderBy: { version: 'desc' }, include: { values: true },
+        })
+      : null;
+    const rawMaterial = prepararMateriaPrimaHomogenea(
+      rawMaterialSectionSchema.parse(s.rawMaterialConfig),
+      priceIndexVersion
+        ? {
+            destinationPeriodCode: s.period,
+            seriesVersionId: priceIndexVersion.id,
+            indices: Object.fromEntries(priceIndexVersion.values.map((value) => [value.periodCode, Number(value.indexValue)])),
+          }
+        : null,
+    );
+
     const input: CalculationInput = {
-      rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
+      rawMaterial: rawMaterial.rawMaterial,
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
       // #90 — dato propio del período, no parte de los costos indirectos.
@@ -750,21 +770,23 @@ export class CostStructureService {
       },
     };
 
-    const result = runCalculation(input);
+    const baseResult = runCalculation(input);
+    const result = { ...baseResult, currency: rawMaterial.currency };
 
     const calculation = await this.db.$transaction(async (tx) => {
       const created = await tx.costCalculation.create({
         data: {
           costStructureId: id,
           userId,
-          rawMaterialConsumed: result.rawMaterialConsumed,
+          priceIndexSeriesVersionId: rawMaterial.currency.seriesVersionId,
+          rawMaterialConsumed: baseResult.rawMaterialConsumed,
           directLaborTotal: result.directLaborTotal,
           indirectCostsApplied: result.indirectCostsApplied,
           productionCost: result.productionCost,
           costOfGoodsSold: result.costOfGoodsSold,
           grossMargin: result.grossMargin,
           grossMarginPct: result.grossMarginPct,
-          detail: result.detail as object,
+          detail: baseResult.detail as object,
         },
       });
       await recordAudit(

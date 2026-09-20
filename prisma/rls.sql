@@ -423,6 +423,28 @@ CREATE POLICY tenant_isolation ON tramos_semifijos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- M11-01: serie de índices y snapshots append-only por empresa.
+ALTER TABLE price_index_series ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_index_series FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON price_index_series;
+CREATE POLICY tenant_isolation ON price_index_series
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE price_index_series_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_index_series_versions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON price_index_series_versions;
+CREATE POLICY tenant_isolation ON price_index_series_versions
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE price_index_values ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_index_values FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON price_index_values;
+CREATE POLICY tenant_isolation ON price_index_values
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- Operación física genérica: ambas tablas tienen `userId` denormalizado para
 -- que el aislamiento se aplique sin joins adicionales.
 ALTER TABLE unidades_productivas ENABLE ROW LEVEL SECURITY;

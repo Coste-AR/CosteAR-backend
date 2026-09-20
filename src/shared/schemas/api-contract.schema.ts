@@ -89,8 +89,16 @@ const calculationResultSchema: z.ZodType<CalculationResultContract> = z.object({
   grossMarginPct: z.number(),
 }).passthrough();
 
+const currencyMetadataSchema = z.object({
+  kind: z.enum(['NOMINAL', 'HOMOGENEA']),
+  periodCode: z.string().nullable(),
+  index: z.number().nullable(),
+  seriesVersionId: z.string().nullable(),
+  missingPeriodCodes: z.array(z.string()),
+});
+
 export const calculationEnvelopeSchema = z.object({
-  data: z.object({ result: calculationResultSchema, calculationId: z.string() }),
+  data: z.object({ result: calculationResultSchema.and(z.object({ currency: currencyMetadataSchema })), calculationId: z.string() }),
 });
 
 export const simulationEnvelopeSchema = z.object({
@@ -111,6 +119,13 @@ export const periodEnvelopeSchema = z.object({ data: periodSchema.nullable() });
 type PeriodComparisonContract = {
   unidadGestion: { codigo: string; nombre: string; factor: number } | null;
   units: { from: number | null; to: number | null; comparable: boolean };
+  currency: {
+    kind: 'NOMINAL' | 'HOMOGENEA';
+    periodCode: string | null;
+    index: number | null;
+    seriesVersionId: string | null;
+    missingPeriodCodes: string[];
+  };
 };
 
 const periodComparisonSchema: z.ZodType<PeriodComparisonContract> = z.object({
@@ -124,6 +139,7 @@ const periodComparisonSchema: z.ZodType<PeriodComparisonContract> = z.object({
     to: z.number().nullable(),
     comparable: z.boolean(),
   }),
+  currency: currencyMetadataSchema,
 }).passthrough();
 
 export const periodComparisonEnvelopeSchema = z.object({

@@ -422,9 +422,25 @@ export class CostPeriodService {
     const [older, newer] = from.code < to.code ? [from, to] : [to, from];
 
     const estructura = await this.requireStructure(userId, structureId);
+    const priceIndexDelegate = (this.db as unknown as {
+      priceIndexSeriesVersion?: { findFirst(args: unknown): Promise<{ id: string; values: { periodCode: string; indexValue: unknown }[] } | null> };
+    }).priceIndexSeriesVersion;
+    const priceIndexVersion = priceIndexDelegate
+      ? await priceIndexDelegate.findFirst({
+          where: { companyId: older.companyId },
+          orderBy: { version: 'desc' },
+          include: { values: true },
+        })
+      : null;
     const comparison = comparePeriods(
       await this.toSide(older, estructura),
       await this.toSide(newer, estructura),
+      priceIndexVersion
+        ? {
+            seriesVersionId: priceIndexVersion.id,
+            values: Object.fromEntries(priceIndexVersion.values.map((value) => [value.periodCode, Number(value.indexValue)])),
+          }
+        : undefined,
     );
 
     let macroContrast: MacroContrast | null = null;

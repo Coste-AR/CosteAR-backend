@@ -17,6 +17,8 @@ const positive = z.number().finite().positive();
 
 export const stockMovementSchema = z.object({
   date: z.string().min(1),
+  /** Período económico explícito del precio. Ausente = no se homogeneiza. */
+  periodCode: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
   type: z.enum(['purchase', 'consumption']),
   detail: z.string().min(1).max(200),
   quantity: positive,
@@ -44,7 +46,12 @@ export const rawMaterialConfigSchema = z.object({
     maxLeadTime: nonNeg,
     safetyStock: nonNeg,
   }),
-  initialStock: z.object({ quantity: nonNeg, unitCost: nonNeg }),
+  initialStock: z.object({
+    quantity: nonNeg,
+    unitCost: nonNeg,
+    /** No se infiere: una existencia vieja puede venir de más de un período. */
+    periodCode: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
+  }),
   movements: z.array(stockMovementSchema).max(500),
 });
 export type RawMaterialConfig = z.infer<typeof rawMaterialConfigSchema>;
