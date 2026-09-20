@@ -141,7 +141,15 @@ afterAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks();
   db.costStructure.findFirst.mockResolvedValue(structureRow());
-  db.costStructure.update.mockImplementation(async ({ data }: { data: object }) => ({ id: STRUCTURE, ...data }));
+  db.costStructure.update.mockImplementation(async ({ data }: { data: object }) => ({
+    id: STRUCTURE,
+    companyId: 'comp-1',
+    productName: 'Mesa',
+    period: '2026-09',
+    status: 'DRAFT',
+    costingSystem: 'ORDERS',
+    ...data,
+  }));
   db.costPeriod.findFirst.mockResolvedValue(null);
   db.costPeriod.update.mockResolvedValue({});
   db.costConfigVersion.findFirst.mockResolvedValue(null);

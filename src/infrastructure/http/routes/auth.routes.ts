@@ -12,6 +12,13 @@ import {
 import { z } from 'zod';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
 import { getEnv } from '../../config/env.js';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import {
+  apiErrorResponses,
+  sessionEnvelopeSchema,
+  successEnvelopeSchema,
+  tokenEnvelopeSchema,
+} from '../../../shared/schemas/api-contract.schema.js';
 
 const REFRESH_COOKIE = 'costear_rt';
 
@@ -40,12 +47,13 @@ function clearRefreshCookie(reply: FastifyReply): void {
 }
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
   const auth = new AuthService();
-  const email = new EmailService();
+  const contract = app.withTypeProvider<ZodTypeProvider>();
 
   // Rate limit estricto para los endpoints sensibles EN PRODUCCIÓN.
   // En desarrollo se relaja para no bloquear las pruebas del equipo.
-  const isProd = getEnv().NODE_ENV === 'production';
+  const isProd = process.env.NODE_ENV === 'production';
   const loginLimit = {
     rateLimit: { max: isProd ? 5 : 100, timeWindow: '15 minutes' },
   };
@@ -91,7 +99,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  app.post('/auth/login', { config: loginLimit }, async (request, reply) => {
+  contract.post('/auth/login', {
+    config: loginLimit,
+    schema: { response: { 200: sessionEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
     const input = loginSchema.parse(request.body);
     const result = await auth.login(input, auditContext(request));
     setRefreshCookie(reply, result.tokens);
@@ -104,7 +115,9 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  app.post('/auth/refresh', async (request, reply) => {
+  contract.post('/auth/refresh', {
+    schema: { response: { 200: tokenEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
     // Primero intentar desde cookie firmada; si no, desde body (clientes cross-origin)
     const raw = request.cookies[REFRESH_COOKIE];
     const unsigned = raw ? request.unsignCookie(raw) : null;
@@ -127,7 +140,9 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  app.post('/auth/logout', async (request, reply) => {
+  contract.post('/auth/logout', {
+    schema: { response: { 200: successEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
     const raw = request.cookies[REFRESH_COOKIE];
     const unsigned = raw ? request.unsignCookie(raw) : null;
     const tokenFromCookie = unsigned?.valid ? unsigned.value : null;
@@ -144,6 +159,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   // → envía un mail de prueba REAL y devuelve el resultado (id o error exacto).
   app.get('/auth/email-health', async (request) => {
     const { to } = (request.query ?? {}) as { to?: string };
+    const email = new EmailService();
     if (to) return { data: await email.sendTest(to) };
     return { data: await email.verifyConnection() };
   });
@@ -152,6 +168,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const input = forgotPasswordSchema.parse(request.body);
     const token = await auth.createPasswordReset(input.email);
     if (token) {
+      const email = new EmailService();
       // Fire-and-forget: NO bloqueamos la respuesta esperando al SMTP. Si el envío
       // es lento o falla, la request igual responde al instante (no deja colgado el
       // botón del front). Los errores quedan logueados.

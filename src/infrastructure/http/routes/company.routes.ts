@@ -8,14 +8,24 @@ import {
 } from '../../../shared/schemas/company.schema.js';
 import { updateTargetBudgetSchema } from '../../../shared/schemas/target-budget.schema.js';
 import { z } from 'zod';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import {
+  apiErrorResponses,
+  companiesEnvelopeSchema,
+} from '../../../shared/schemas/api-contract.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
 export async function registerCompanyRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
   const service = new CompanyService();
   const deviation = new DeviationService();
+  const contract = app.withTypeProvider<ZodTypeProvider>();
 
-  app.get('/companies', { preHandler: authenticate }, async (request) => {
+  contract.get('/companies', {
+    preHandler: authenticate,
+    schema: { response: { 200: companiesEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const companies = await service.list(request.authUser!.id);
     return { data: companies };
   });
