@@ -3,6 +3,16 @@ import nodemailer from 'nodemailer';
 import { getEnv } from '../config/env.js';
 import { emailLayout, emailButton, emailCodeBox } from './email-templates.js';
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[char]!);
+}
+
 /**
  * Envío de emails transaccionales vía Resend o SMTP. En test y development (sin API
  * key o SMTP real) cae a un modo "log only" que no hace llamadas de red.
@@ -210,6 +220,23 @@ export class EmailService {
         bodyHtml:
           `<p style="margin:0 0 10px">El margen de <strong>${productName}</strong> en <strong>${companyName}</strong> cayó a <strong style="color:#B91C1C">${marginPct.toFixed(1)}%</strong>, por debajo de tu umbral de ${thresholdPct.toFixed(1)}%.</p>` +
           `<p style="margin:0">Revisá la estructura de costos antes de que el cliente venda sin margen.</p>`,
+      }),
+    );
+  }
+
+  async sendIndicatorAlert(to: string, companyName: string, message: string): Promise<void> {
+    const empresa = escapeHtml(companyName);
+    const detalle = escapeHtml(message);
+    await this.send(
+      to,
+      `CosteAR — Alerta de indicador: ${companyName}`,
+      emailLayout({
+        heading: 'Alerta de indicador físico',
+        preheader: `Hay un indicador para revisar en ${companyName}.`,
+        bodyHtml:
+          `<p style="margin:0 0 10px">En <strong>${empresa}</strong> se detectó una condición que requiere revisión:</p>` +
+          `<p style="margin:0 0 10px;color:#B91C1C"><strong>${detalle}</strong></p>` +
+          '<p style="margin:0">La alerta no modifica ningún costo. Revisá el dato antes de tomar una decisión.</p>',
       }),
     );
   }
