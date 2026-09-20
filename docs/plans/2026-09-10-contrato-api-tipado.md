@@ -25,6 +25,11 @@ que validan en runtime + `openapi-typescript@7.13.0` para el `.d.ts` type-only.
 
 ## Fases
 
+> **Estado 2026-09-20:** las fases 2–5 quedaron integradas en una única entrega de cierre de
+> #282 porque Santiago volvió a poner el issue primero en la cola B3. El alcance se mantuvo en el
+> recorrido principal: 19 operaciones tipadas; las demás rutas de esos mismos archivos no se
+> publican hasta declarar su respuesta.
+
 - **Fase 1 (este PR):** wiring completo del mecanismo (compilers, `@fastify/swagger`, scripts de
   generación y de chequeo de deriva, gate de CI, fixture de consumidor type-only) + UNA ruta real
   convertida de punta a punta: `GET /periods/:id/tablero-dueno`.
@@ -35,6 +40,18 @@ que validan en runtime + `openapi-typescript@7.13.0` para el `.d.ts` type-only.
   `trazabilidad.routes.ts` — el endpoint `/structures/:id/calculate`).
 - **Fase 5 (PR separado):** períodos restantes (`cost-period.routes.ts` — list/open/compare/close)
   y validaciones/carga de datos (`validaciones.routes.ts`).
+
+### Entrega de cierre
+
+- Auth/sesión: login, refresh y logout.
+- Cartera/configuración: listado de empresas, listado/detalle de estructuras y carga de MP, MOD y
+  CIP.
+- Cálculo: cálculo persistido y simulación.
+- Períodos: listado, período abierto, comparación, cierre y tablero del dueño.
+- Validaciones/carga: envío con API key, bandeja pendiente y revisión.
+- Todas publican sobres de error para 400/401/403/404/409/422/429/500. El generador descarta
+  cualquier operación que no tenga una respuesta JSON declarada, aunque comparta archivo con una
+  ruta convertida.
 
 Cada fase agrega su(s) archivo(s) a `CONVERTED_ROUTES` en `scripts/generate-openapi.ts` y su(s)
 schema(s) de respuesta a `src/shared/schemas/`. El PR de cada fase corre el mismo procedimiento de
