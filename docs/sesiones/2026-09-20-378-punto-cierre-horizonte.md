@@ -1,17 +1,17 @@
 ---
 issue: 378
 repo: Coste-AR/CosteAR-backend
-pr: pendiente
+pr: 395
 rama: feat/378-punto-cierre
 agente: codex
 modelo: gpt-5
 tanda: B3
 inicio: 2026-09-20T16:00:00-03:00
-fin: pendiente
-minutos: pendiente
+fin: 2026-09-20T16:15:08-03:00
+minutos: 15
 tokens: no-informado
 clears: 0
-intentos_hasta_verde: pendiente
+intentos_hasta_verde: 2
 rojos_deliberados: 1
 rebotes_de_guarda: 0
 ---
@@ -23,7 +23,11 @@ rebotes_de_guarda: 0
 - Preparación: `npm ci`, `npm run prisma:generate`.
 - Verificación focal: `tests/domain/punto-cierre.test.ts`, familia M3-01, punto de equilibrio y
   contribución marginal.
-- Verificación general: se completa antes del PR.
+- Verificación general: `npm run lint`, `npm run typecheck`, `npm test -- --maxWorkers=1`,
+  `npm run check:tests-base`, `npm run check:openapi`, `npm run build`, `git diff --check`.
+- Resultado final: 1.832 tests verdes y 4 skipped existentes; 22 operaciones OpenAPI coinciden.
+- La primera general con dos workers tuvo un timeout de `owner-dashboard`; el archivo aislado pasó
+  12/12 en 1,79 s y la general con un worker quedó verde sin cambiar tests ni límites.
 
 ## Rojo antes que verde
 
@@ -55,6 +59,8 @@ funcional porque el worktree todavía no tenía `node_modules` y Vitest no lleg�
 
 ## Qué quedó afuera
 
-- UI y endpoint de planeamiento que consuman estas funciones.
+- UI: seguimiento `Coste-AR/CosteAR-frontend#194`, sin etiqueta `listo` hasta que exista contrato
+  HTTP consumible.
+- Endpoint de planeamiento que consuma estas funciones.
 - Persistencia/versionado de importes por `ConceptoCosteo`.
 - Cualquier reparto de los baldes agregados del motor.
