@@ -40,6 +40,8 @@ export interface PersistCalculationRunParams {
   inputsSnapshot: unknown;
   /** Resultado consolidado del motor (JSON). */
   results: unknown;
+  /** Snapshot de índices efectivamente aplicado; null cuando el cálculo quedó nominal. */
+  priceIndexSeriesVersionId?: string | null;
   /** Árbol de derivación a persistir en `calculation_nodes`. */
   tree: TreeNode[];
   /** Auditoría de la corrida: quién y el resumen (`runId`/`runN` se agregan acá). */
@@ -85,7 +87,7 @@ export interface PersistCalculationRunParams {
 export async function persistCalculationRun(
   tx: Prisma.TransactionClient,
   params: PersistCalculationRunParams,
-): Promise<{ run: { id: string; runN: number }; runN: number }> {
+): Promise<{ run: { id: string; runN: number }; runN: number; priceIndexSeriesVersionId: string | null }> {
   // Lock de la fila de la estructura. Tiene que ir ANTES de leer el máximo:
   // si va después, la lectura ya ocurrió y la carrera está perdida.
   await tx.$queryRaw`SELECT id FROM cost_structures WHERE id = ${params.structureId}::uuid FOR UPDATE`;
@@ -95,6 +97,7 @@ export async function persistCalculationRun(
     orderBy: { runN: 'desc' },
   });
   const runN = (last?.runN ?? 0) + 1;
+  const priceIndexSeriesVersionId = params.priceIndexSeriesVersionId ?? null;
 
   // La validación se DERIVA del disparador, no la elige quien llama.
   //
@@ -123,6 +126,7 @@ export async function persistCalculationRun(
       validatedBy: validated ? params.executedBy : null,
       inputsSnapshot: params.inputsSnapshot as Prisma.InputJsonValue,
       results: params.results as Prisma.InputJsonValue,
+      priceIndexSeriesVersionId,
     },
   });
 
@@ -139,7 +143,7 @@ export async function persistCalculationRun(
     tx,
   );
 
-  return { run, runN };
+  return { run, runN, priceIndexSeriesVersionId };
 }
 
 /**
