@@ -73,6 +73,12 @@ export interface HallazgoAlerta {
   explicacion: string[];
 }
 
+export type ResultadoEvaluacionRegla =
+  | { estado: 'INACTIVA'; motivo: string }
+  | { estado: 'NO_EVALUABLE'; motivo: string }
+  | { estado: 'NORMAL'; motivo: string }
+  | { estado: 'ALERTA'; hallazgo: HallazgoAlerta };
+
 /** Formato determinístico: `toLocaleString` depende del ICU del runtime. */
 function num(v: number, decimales = 2): string {
   const s = new Decimal(v).toFixed(decimales);
@@ -112,11 +118,50 @@ export function cumpleCondicion(regla: ReglaAlerta, lectura: Lectura): boolean {
  * Devuelve `null` cuando no hay que decir nada — que es la mayoría de las veces,
  * y está bien: una pantalla que alerta siempre es una pantalla que nadie mira.
  */
-export function evaluarRegla(regla: ReglaAlerta, lecturas: Lectura[]): HallazgoAlerta | null {
-  if (!regla.activa) return null;
-  if (lecturas.length === 0) return null;
+export function evaluarReglaDetallada(
+  regla: ReglaAlerta,
+  lecturas: Lectura[],
+): ResultadoEvaluacionRegla {
+  if (!regla.activa) {
+    return { estado: 'INACTIVA', motivo: 'La regla está desactivada.' };
+  }
+  if (lecturas.length === 0) {
+    return {
+      estado: 'NO_EVALUABLE',
+      motivo: `Falta una lectura de ${regla.descripcion.toLocaleLowerCase('es-AR')}.`,
+    };
+  }
 
   const ordenadas = [...lecturas].sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+
+  // Para afirmar que una condición es sostenida hacen falta N observaciones
+  // evaluables. La ausencia no equivale a que el indicador esté normal.
+  for (let i = 0; i < regla.lecturasSostenidas; i++) {
+    const lectura = ordenadas[i];
+    if (!lectura) {
+      return {
+        estado: 'NO_EVALUABLE',
+        motivo:
+          `Faltan ${regla.lecturasSostenidas - i} lectura(s) para evaluar ` +
+          `las ${regla.lecturasSostenidas} consecutivas que pide la regla.`,
+      };
+    }
+    if (
+      regla.condicion === 'FUERA_DE_RANGO_PCT' &&
+      (lectura.referencia === null || lectura.referencia === undefined || lectura.referencia === 0)
+    ) {
+      return {
+        estado: 'NO_EVALUABLE',
+        motivo: 'Falta el valor de referencia necesario para comparar esta lectura.',
+      };
+    }
+    if (!cumpleCondicion(regla, lectura)) {
+      return {
+        estado: 'NORMAL',
+        motivo: 'La lectura más reciente no completa la condición configurada.',
+      };
+    }
+  }
 
   // Se cuenta desde la más nueva hacia atrás: la racha tiene que llegar hasta hoy.
   // Una racha que terminó hace una semana ya no es un problema abierto.
@@ -125,8 +170,6 @@ export function evaluarRegla(regla: ReglaAlerta, lecturas: Lectura[]): HallazgoA
     if (!cumpleCondicion(regla, l)) break;
     consecutivas++;
   }
-
-  if (consecutivas < regla.lecturasSostenidas) return null;
 
   const ultima = ordenadas[0]!;
   const u = unidadDe(regla);
@@ -167,15 +210,28 @@ export function evaluarRegla(regla: ReglaAlerta, lecturas: Lectura[]): HallazgoA
   explicacion.push('Esta alerta no modifica ningún costo: requiere que una persona la evalúe.');
 
   return {
-    reglaId: regla.id,
-    indicador: regla.indicador,
-    severidad: regla.severidad,
-    valor: ultima.valor,
-    umbral: regla.umbral,
-    lecturasEnCondicion: consecutivas,
-    mensaje,
-    explicacion,
+    estado: 'ALERTA',
+    hallazgo: {
+      reglaId: regla.id,
+      indicador: regla.indicador,
+      severidad: regla.severidad,
+      valor: ultima.valor,
+      umbral: regla.umbral,
+      lecturasEnCondicion: consecutivas,
+      mensaje,
+      explicacion,
+    },
   };
+}
+
+/**
+ * Compatibilidad con los consumidores que sólo necesitan saber si alertar.
+ * Para interfaces de usuario y contratos HTTP usar `evaluarReglaDetallada`:
+ * allí la ausencia de datos queda explícita y no se confunde con normalidad.
+ */
+export function evaluarRegla(regla: ReglaAlerta, lecturas: Lectura[]): HallazgoAlerta | null {
+  const resultado = evaluarReglaDetallada(regla, lecturas);
+  return resultado.estado === 'ALERTA' ? resultado.hallazgo : null;
 }
 
 /** Evalúa varias reglas de una. Devuelve solo lo que hay que decir. */

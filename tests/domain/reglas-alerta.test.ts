@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   evaluarRegla,
+  evaluarReglaDetallada,
   evaluarReglas,
   cumpleCondicion,
   REGLAS_AVICOLA_SEMILLA,
@@ -43,6 +44,13 @@ describe('S-05b — cuándo NO hay que decir nada', () => {
     expect(evaluarRegla(regla(), [])).toBeNull();
   });
 
+  it('sin lecturas declara que no se puede evaluar en vez de parecer normal', () => {
+    expect(evaluarReglaDetallada(regla(), [])).toEqual({
+      estado: 'NO_EVALUABLE',
+      motivo: expect.stringMatching(/falta una lectura/i),
+    });
+  });
+
   it('una regla desactivada no dispara aunque la lectura esté fuera de rango', () => {
     expect(evaluarRegla(regla({ activa: false }), [{ fecha: dia(10), valor: 25 }])).toBeNull();
   });
@@ -51,6 +59,14 @@ describe('S-05b — cuándo NO hay que decir nada', () => {
     const r = regla({ condicion: 'FUERA_DE_RANGO_PCT', umbral: 10, indicador: 'peso_muestreo' });
     expect(evaluarRegla(r, [{ fecha: dia(10), valor: 1800 }])).toBeNull();
     expect(cumpleCondicion(r, { fecha: dia(10), valor: 1800, referencia: null })).toBe(false);
+  });
+
+  it('sin referencia explica qué dato falta', () => {
+    const r = regla({ condicion: 'FUERA_DE_RANGO_PCT', umbral: 10, indicador: 'peso_muestreo' });
+    expect(evaluarReglaDetallada(r, [{ fecha: dia(10), valor: 1800 }])).toEqual({
+      estado: 'NO_EVALUABLE',
+      motivo: expect.stringMatching(/falta el valor de referencia/i),
+    });
   });
 });
 
@@ -71,6 +87,17 @@ describe('S-05b — la racha sostenida', () => {
       { fecha: dia(10), valor: 88 },
     ];
     expect(evaluarRegla(postura, l)).toBeNull();
+  });
+
+  it('dos lecturas sostenidas no se presentan como normalidad si la regla pide tres', () => {
+    const resultado = evaluarReglaDetallada(postura, [
+      { fecha: dia(12), valor: 82 },
+      { fecha: dia(11), valor: 83 },
+    ]);
+    expect(resultado).toEqual({
+      estado: 'NO_EVALUABLE',
+      motivo: expect.stringMatching(/falta.*1 lectura/i),
+    });
   });
 
   it('tres seguidos sí, y dice cuántas venían', () => {
