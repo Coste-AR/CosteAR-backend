@@ -67,6 +67,7 @@ export const PAQUETE_AVICOLA_POSTURA = {
       clave: 'produccion',
       nombre: 'Producción diaria',
       descripcion: 'Registrá lo que produjo cada lote durante el día.',
+      superficies: ['carga.produccion-diaria'],
       parametros: ['huevos_por_cajon', 'huevos_por_maple', 'maples_por_cajon', 'costo_maple', 'unidad_carga', 'unidad_gestion'],
       alertas: [],
       dependeDe: [],
@@ -76,6 +77,7 @@ export const PAQUETE_AVICOLA_POSTURA = {
       clave: 'plantel',
       nombre: 'Plantel',
       descripcion: 'Registrá bajas y otros eventos del lote.',
+      superficies: ['carga.bajas-plantel'],
       parametros: ['vida_util_lote_meses'],
       alertas: ['postura_media_movil'],
       dependeDe: [],
@@ -83,27 +85,27 @@ export const PAQUETE_AVICOLA_POSTURA = {
     },
     {
       clave: 'variantes', nombre: 'Tipos de producto', descripcion: 'Separá la producción por tipo y repartí el costo entre ellos.',
-      parametros: [], alertas: [], dependeDe: ['produccion'], activoPorDefecto: false,
+      superficies: ['tablero.variantes'], parametros: [], alertas: [], dependeDe: ['produccion'], activoPorDefecto: false,
     },
     {
       clave: 'depositos', nombre: 'Silos', descripcion: 'Registrá el nivel del depósito y sus alertas de reposición.',
-      parametros: [], alertas: ['nivel_deposito_bajo', 'humedad_ingreso', 'antiguedad_stock'], dependeDe: [], activoPorDefecto: false,
+      superficies: ['carga.depositos'], parametros: [], alertas: ['nivel_deposito_bajo', 'humedad_ingreso', 'antiguedad_stock'], dependeDe: [], activoPorDefecto: false,
     },
     {
       clave: 'alimento', nombre: 'Alimento propio', descripcion: 'Registrá bachadas, fórmulas activas y consumo por lote.',
-      parametros: ['gramaje_estandar_gr', 'alimento_origen'], alertas: ['desvio_consumo'], dependeDe: [], activoPorDefecto: false,
+      superficies: ['carga.alimento-propio'], parametros: ['gramaje_estandar_gr', 'alimento_origen'], alertas: ['desvio_consumo'], dependeDe: [], activoPorDefecto: false,
     },
     {
       clave: 'peso', nombre: 'Muestreo de peso', descripcion: 'Registrá peso por muestreo contra tabla estándar.',
-      parametros: [], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
+      superficies: ['carga.muestreo-peso'], parametros: [], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
     },
     {
       clave: 'amortizacion_plantel', nombre: 'Plantel como activo', descripcion: 'Amortizá el lote en vez de imputarlo al período.',
-      parametros: ['vida_util_lote_meses'], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
+      superficies: ['costeo.amortizacion-plantel'], parametros: ['vida_util_lote_meses'], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
     },
     {
       clave: 'desperdicio', nombre: 'Desperdicio', descripcion: 'Registrá mermas con su naturaleza declarada.',
-      parametros: ['umbral_merma_normal_pct'], alertas: [], dependeDe: [], activoPorDefecto: false,
+      superficies: ['carga.desperdicio'], parametros: ['umbral_merma_normal_pct'], alertas: [], dependeDe: [], activoPorDefecto: false,
     },
   ],
 } as const;
