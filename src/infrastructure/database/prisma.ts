@@ -97,6 +97,8 @@ export const RLS_MODELS = new Set([
   'ConceptoCosteo',
   // M1-02: separación versionada de conceptos semifijos.
   'TramoSemifijo',
+  'TramoCosto',
+  'EquilibrioTramosCalculo',
   'PriceIndexSeries',
   'PriceIndexSeriesVersion',
   'PriceIndexValue',

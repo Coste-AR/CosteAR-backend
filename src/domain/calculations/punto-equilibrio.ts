@@ -1,6 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { Money } from '../value-objects/money.js';
 import type { ContribucionMarginal } from './contribucion-marginal.js';
+import { calcularEquilibrioPorTramos, type TramoCostoCalculo } from './tramos.js';
 
 /** Conceptos declarados por el llamador; no se infieren desde importes agregados. */
 export interface ContextoFormulaEquilibrio {
@@ -129,7 +130,13 @@ export type PuntoEquilibrio = (
       conceptosQueLaEnsanchan: ConceptoQueEnsanchaZona[];
       fechaUltimoRecalculo: string;
     }
-) & { /** Opcional al leer fotos históricas anteriores a M3-01. */ basadoEn?: ContextoFormulaEquilibrio['basadoEn']; tramoValidez?: null };
+) & {
+  /** Opcional al leer fotos históricas anteriores a M3-01. */
+  basadoEn?: ContextoFormulaEquilibrio['basadoEn'];
+  tramoValidez?: null | { tramoId: string; desde: number; hasta: number | null; techo: number | null };
+  motivoFueraDeTramo?: string;
+  equilibrioTramoSiguiente?: number | null;
+};
 
 const motivoClasificacion = (etiqueta: string): string =>
   `Falta clasificar frente al volumen el rubro ${etiqueta}.`;
@@ -217,6 +224,7 @@ function calcularZona(
 export function calcularPuntoEquilibrio(
   contribucion: ContribucionMarginal,
   fechaUltimoRecalculo: Date,
+  tramosCosto: readonly TramoCostoCalculo[] = [],
 ): PuntoEquilibrio {
   const fecha = fechaUltimoRecalculo.toISOString();
   const traza = { basadoEn: contribucion.componentes.map(({ clave, etiqueta }) => ({ clave, etiqueta })), tramoValidez: null };
@@ -248,11 +256,30 @@ export function calcularPuntoEquilibrio(
           : componente.importeAbsorcion,
       )),
   );
+  const unidadesEquilibrio = costosFijos.divide(contribucion.contribucionMarginalUnitaria).toNumber();
+  if (tramosCosto.length > 0) {
+    const porTramos = calcularEquilibrioPorTramos(tramosCosto);
+    const vigente = porTramos.tramos[0];
+    if (vigente) {
+      return {
+        ...traza,
+        incompleta: false,
+        tipo: 'punto',
+        unidadesEquilibrio: vigente.q,
+        fechaUltimoRecalculo: fecha,
+        tramoValidez: { tramoId: vigente.tramoId, desde: vigente.desde, hasta: vigente.hasta, techo: vigente.techo },
+        ...(vigente.q === null ? {
+          motivoFueraDeTramo: vigente.motivoFueraDeTramo,
+          equilibrioTramoSiguiente: porTramos.tramos.slice(1).find((tramo) => tramo.q !== null)?.q ?? null,
+        } : {}),
+      };
+    }
+  }
   return {
     ...traza,
     incompleta: false,
     tipo: 'punto',
-    unidadesEquilibrio: costosFijos.divide(contribucion.contribucionMarginalUnitaria).toNumber(),
+    unidadesEquilibrio,
     fechaUltimoRecalculo: fecha,
   };
 }

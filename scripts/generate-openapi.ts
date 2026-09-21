@@ -29,6 +29,7 @@ import { registerTelemetriaPanelRoutes } from '../src/infrastructure/http/routes
 import { registerPriceIndexRoutes } from '../src/infrastructure/http/routes/price-index.routes.js';
 import { registerModulosRubroRoutes } from '../src/infrastructure/http/routes/modulos-rubro.routes.js';
 import { registerMacroRoutes } from '../src/infrastructure/http/routes/macro.routes.js';
+import { registerConceptoCosteoRoutes } from '../src/infrastructure/http/routes/concepto-costeo.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -44,6 +45,7 @@ const CONVERTED_ROUTES = [
   registerPriceIndexRoutes,
   registerModulosRubroRoutes,
   registerMacroRoutes,
+  registerConceptoCosteoRoutes,
 ];
 
 async function buildSchemaOnlyApp() {

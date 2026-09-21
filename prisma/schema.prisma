@@ -226,6 +226,8 @@ model Company {
   parametrosCosteo     ParametroCosteo[]
   conceptosCosteo      ConceptoCosteo[]
   tramosSemifijos      TramoSemifijo[]
+  tramosCosto          TramoCosto[]
+  calculosEquilibrioTramos EquilibrioTramosCalculo[]
   unidadesProductivas  UnidadProductiva[]
   lotesProductivos     LoteProductivo[]
   id                   String                @id @default(uuid()) @db.Uuid
@@ -2442,6 +2444,11 @@ enum MetodoTramoSemifijo {
   DECLARADO
 }
 
+enum TipoTramoCosto {
+  REEMPLAZA
+  ACUMULA
+}
+
 /**
  * M1-01 (plan de análisis marginal v2). Clasificación de costos POR CONCEPTO,
  * por debajo de los tres baldes de `ParametroCosteo`.
@@ -2526,12 +2533,58 @@ model ConceptoCosteo {
 
   /** Versiones de la separación semifija. La vigente es la que no tiene deletedAt. */
   tramosSemifijos TramoSemifijo[]
+  tramosCosto     TramoCosto[]
 
   @@unique([companyId, structureId, periodId, clave])
   @@index([companyId, clave])
   @@index([structureId, clave])
   @@index([periodId])
   @@map("conceptos_costeo")
+}
+
+/** M10-01: versión append-only de una estructura de costos/capacidad. */
+model TramoCosto {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid
+
+  conceptoId String?         @db.Uuid
+  concepto   ConceptoCosteo? @relation(fields: [conceptoId], references: [id], onDelete: Restrict)
+  segmentoId String?         @db.Uuid
+
+  desde       Decimal        @db.Decimal(18, 6)
+  hasta       Decimal?       @db.Decimal(18, 6)
+  tipo        TipoTramoCosto
+  importeFijo Decimal        @db.Decimal(18, 6)
+  cmUnitaria  Decimal        @db.Decimal(18, 6)
+  techoFisico Decimal?       @db.Decimal(18, 6)
+  techoFuente String?
+
+  techoDeclaradoEn    DateTime? @db.Timestamptz
+  techoDeclaradoPorId String?   @db.Uuid
+  creadoPorUserId     String    @db.Uuid
+  createdAt           DateTime  @default(now()) @db.Timestamptz
+  deletedAt           DateTime? @db.Timestamptz
+
+  @@index([companyId, conceptoId, deletedAt])
+  @@index([companyId, segmentoId, deletedAt])
+  @@map("tramos_costo")
+}
+
+/** Foto inmutable del resultado y de las versiones de tramo utilizadas. */
+model EquilibrioTramosCalculo {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @db.Uuid
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId       String   @db.Uuid
+  tramoCostoIds String[] @default([]) @db.Uuid
+  resultado    Json
+  creadoPorUserId String @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz
+
+  @@index([companyId, createdAt])
+  @@map("equilibrio_tramos_calculos")
 }
 
 /**

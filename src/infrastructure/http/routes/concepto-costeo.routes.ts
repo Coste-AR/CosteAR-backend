@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { ConceptoCosteoService } from '../../../application/parametros/concepto-costeo-service.js';
 import { TramoSemifijoService } from '../../../application/parametros/tramo-semifijo-service.js';
 import { authenticate } from '../plugins/authenticate.js';
@@ -8,6 +9,9 @@ import {
   actualizarConceptoCosteoSchema,
 } from '../../../shared/schemas/concepto-costeo.schema.js';
 import { separarTramoSemifijoSchema } from '../../../shared/schemas/tramo-semifijo.schema.js';
+import { TramoCostoService } from '../../../application/parametros/tramo-costo-service.js';
+import { equilibrioTramosEnvelopeSchema, guardarTramoCostoSchema, tramoCostoEnvelopeSchema, tramosCostoEnvelopeSchema } from '../../../shared/schemas/tramo-costo.schema.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 
 /**
  * CONCEPTOS DE COSTEO (M1-01, plan de análisis marginal v2).
@@ -41,8 +45,52 @@ function actorFrom(request: FastifyRequest) {
 }
 
 export async function registerConceptoCosteoRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
   const service = new ConceptoCosteoService();
   const tramoService = new TramoSemifijoService();
+  const tramoCostoService = new TramoCostoService();
+  const contract = app.withTypeProvider<ZodTypeProvider>();
+
+  contract.get(
+    '/companies/:companyId/tramos-costo',
+    { preHandler: authenticate, schema: { response: { 200: tramosCostoEnvelopeSchema, ...apiErrorResponses } } },
+    async (request) => {
+      const { companyId } = companyParams.parse(request.params);
+      return { data: await tramoCostoService.listar(request.authUser!.id, companyId) };
+    },
+  );
+
+  contract.post(
+    '/companies/:companyId/tramos-costo/equilibrio',
+    { preHandler: authenticate, schema: { response: { 201: equilibrioTramosEnvelopeSchema, ...apiErrorResponses } } },
+    async (request, reply) => {
+      const { companyId } = companyParams.parse(request.params);
+      const data = await tramoCostoService.calcularYGuardar(request.authUser!.id, companyId, actorFrom(request));
+      reply.code(201);
+      return { data };
+    },
+  );
+
+  contract.post(
+    '/companies/:companyId/tramos-costo',
+    { preHandler: authenticate, schema: { response: { 201: tramoCostoEnvelopeSchema, ...apiErrorResponses } } },
+    async (request, reply) => {
+      const { companyId } = companyParams.parse(request.params);
+      const body = guardarTramoCostoSchema.parse(request.body);
+      const data = await tramoCostoService.guardar(request.authUser!.id, companyId, body, actorFrom(request));
+      reply.code(201);
+      return { data };
+    },
+  );
+
+  contract.get(
+    '/companies/:companyId/tramos-costo/equilibrio',
+    { preHandler: authenticate, schema: { response: { 200: equilibrioTramosEnvelopeSchema, ...apiErrorResponses } } },
+    async (request) => {
+      const { companyId } = companyParams.parse(request.params);
+      return { data: await tramoCostoService.calcular(request.authUser!.id, companyId) };
+    },
+  );
 
   app.get(
     '/companies/:companyId/conceptos-costeo',
