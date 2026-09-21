@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { PAQUETE_AVICOLA_POSTURA } from '@/application/operacion/paquete-avicola.js';
 
 const USER = 'user-1';
@@ -29,6 +30,8 @@ async function buildApp() {
   const { registerModulosRubroRoutes } = await import('@/infrastructure/http/routes/modulos-rubro.routes.js');
   const { errorHandler } = await import('@/infrastructure/http/error-handler.js');
   const app = Fastify({ logger: false });
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
   app.setErrorHandler(errorHandler);
   await app.register(registerModulosRubroRoutes);
   await app.ready();
@@ -49,10 +52,45 @@ describe('módulos del rubro — contrato HTTP de #332', () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: `/companies/${COMPANY_ID}/modulos-rubro` });
     expect(res.statusCode).toBe(200);
-    const { data } = JSON.parse(res.body) as { data: Array<{ clave: string; estado: string; alertas: string[] }> };
+    const { data } = JSON.parse(res.body) as {
+      data: Array<{
+        clave: string;
+        estado: string;
+        superficies: string[];
+        parametros: Array<{
+          clave: string;
+          descripcion: string;
+          opciones?: Array<{ valor: string; etiqueta: string }>;
+        }>;
+        alertas: string[];
+      }>;
+    };
     expect(data).toHaveLength(8);
     expect(data.find((modulo) => modulo.clave === 'produccion')).toMatchObject({ estado: 'prendido' });
     expect(data.find((modulo) => modulo.clave === 'depositos')).toMatchObject({ estado: 'apagado', alertas: ['nivel_deposito_bajo', 'humedad_ingreso', 'antiguedad_stock'] });
+    expect(data.find((modulo) => modulo.clave === 'produccion')).toMatchObject({
+      superficies: ['carga.produccion-diaria'],
+      parametros: expect.arrayContaining([
+        { clave: 'huevos_por_cajon', descripcion: 'Huevos que entran en un cajón.' },
+        {
+          clave: 'unidad_carga',
+          descripcion: 'Cuando anotan la producción del día, ¿en qué la anotan?',
+          opciones: expect.arrayContaining([{ valor: 'cajon', etiqueta: 'Cajón' }]),
+        },
+      ]),
+    });
+    expect(data.find((modulo) => modulo.clave === 'alimento')).toMatchObject({
+      estado: 'apagado',
+      superficies: ['carga.alimento-propio'],
+      parametros: expect.arrayContaining([
+        { clave: 'gramaje_estandar_gr', descripcion: 'Gramos de alimento por ave por día.' },
+        {
+          clave: 'alimento_origen',
+          descripcion: '¿El alimento lo comprás hecho o lo preparás vos?',
+          opciones: expect.arrayContaining([{ valor: 'preparo', etiqueta: 'Lo preparo' }]),
+        },
+      ]),
+    });
   });
 
   it('422 — no apaga un módulo si otro módulo prendido depende de él', async () => {
@@ -70,6 +108,22 @@ describe('módulos del rubro — contrato HTTP de #332', () => {
     const res = await app.inject({ method: 'GET', url: `/companies/${COMPANY_ID}/modulos-rubro` });
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual([]);
+  });
+
+  it('200 — completa superficies de una fila de paquete sembrada antes de #384', async () => {
+    const modulosAnteriores = PAQUETE_AVICOLA_POSTURA.modulos.map((modulo) => {
+      const { superficies: _superficies, ...anterior } = modulo;
+      return anterior;
+    });
+    mockPrisma.paqueteRubro.findMany.mockResolvedValue([{
+      category: 'AVICOLA_POSTURA', userId: null, companyId: null, structureId: null, periodId: null,
+      ...PAQUETE_AVICOLA_POSTURA, modulos: modulosAnteriores, scale: null,
+    }]);
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: `/companies/${COMPANY_ID}/modulos-rubro` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.find((modulo: { clave: string }) => modulo.clave === 'produccion'))
+      .toMatchObject({ superficies: ['carga.produccion-diaria'] });
   });
 
   it('200 — apagar un módulo sólo guarda su estado: no borra los datos del negocio', async () => {

@@ -10,7 +10,7 @@ describe('paquete avícola de postura', () => {
     expect(PAQUETE_AVICOLA_POSTURA.alertRules).toHaveLength(5);
     expect(PAQUETE_AVICOLA_POSTURA.modulos).toHaveLength(8);
     expect(PAQUETE_AVICOLA_POSTURA.modulos.find((modulo) => modulo.clave === 'peso'))
-      .toMatchObject({ activoPorDefecto: false, dependeDe: ['plantel'] });
+      .toMatchObject({ activoPorDefecto: false, dependeDe: ['plantel'], superficies: ['carga.muestreo-peso'] });
     expect(PAQUETE_AVICOLA_POSTURA.modulos.filter((modulo) => modulo.activoPorDefecto).map((modulo) => modulo.clave))
       .toEqual(['produccion', 'plantel']);
     expect(PAQUETE_AVICOLA_POSTURA.seedParameters.find((parametro) => parametro.clave === 'unidad_carga'))

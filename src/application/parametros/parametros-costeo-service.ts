@@ -87,7 +87,9 @@ export class ParametrosCosteoService {
       this.catalogoDe(userId, companyId, company.industry),
       new ModulosRubroService(this.db).listar(userId, companyId),
     ]);
-    const claves = new Set(modulos.filter((modulo) => modulo.estado === 'prendido').flatMap((modulo) => modulo.parametros));
+    const claves = new Set(modulos
+      .filter((modulo) => modulo.estado === 'prendido')
+      .flatMap((modulo) => modulo.parametros.map((parametro) => parametro.clave)));
     return catalogo.filter((parametro) => claves.has(parametro.clave));
   }
 
