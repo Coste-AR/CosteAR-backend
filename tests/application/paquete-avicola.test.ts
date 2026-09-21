@@ -15,6 +15,15 @@ describe('paquete avícola de postura', () => {
       .toEqual(['produccion', 'plantel']);
     expect(PAQUETE_AVICOLA_POSTURA.seedParameters.find((parametro) => parametro.clave === 'unidad_carga'))
       .toMatchObject({ tipo: 'texto', opciones: expect.arrayContaining([{ valor: 'cajon', etiqueta: 'Cajón' }]) });
+    expect(PAQUETE_AVICOLA_POSTURA.screens.indicadoresMacro.map((indicador) => indicador.clave)).toEqual([
+      'USD_BLUE',
+      'CAPIA_HUEVO_BLANCO_CAJON',
+      'CAPIA_HUEVO_COLOR_CAJON',
+      'CAPIA_ALIMENTO_PONEDORA_KG',
+      'CAPIA_MAIZ_TON',
+      'CAPIA_SOJA_TON',
+      'CAPIA_MAPLE_UNIDAD',
+    ]);
   });
 
   it('no pisa un parámetro confirmado al reejecutar el seed', async () => {
