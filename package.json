@@ -71,7 +71,10 @@
     "zod": "^3.24.1"
   },
   "overrides": {
-    "@types/node": "$@types/node"
+    "@types/node": "$@types/node",
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0"
+    }
   },
   "lint-staged": {
     "*.{ts,js}": "eslint --fix"
