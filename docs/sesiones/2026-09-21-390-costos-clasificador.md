@@ -1,7 +1,7 @@
 ---
 issue: 390
 repo: CosteAR-backend
-pr: pendiente
+pr: 407
 rama: feat/390-costos-clasificador
 agente: codex
 modelo: gpt-5
