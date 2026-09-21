@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConceptoCosteoService } from '@/application/parametros/concepto-costeo-service.js';
 import { TramoSemifijoService } from '@/application/parametros/tramo-semifijo-service.js';
+import { TramoCostoService } from '@/application/parametros/tramo-costo-service.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { withTenant } from '@/infrastructure/database/prisma.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
@@ -150,5 +151,34 @@ describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
     await expect(withTenantContext(B.userId, () =>
       tramos.obtener(B.userId, A.companyId, concepto.id),
     )).rejects.toThrow(/empresa no encontrada/i);
+  });
+
+  it('TramoCosto: corrige con versión nueva y el cálculo conserva los ids usados', async () => {
+    const conceptos = new ConceptoCosteoService(db);
+    const tramos = new TramoCostoService(db);
+    const concepto = await withTenantContext(A.userId, () => conceptos.crear(
+      A.userId, A.companyId,
+      { clave: 'estructura_galpon', elemento: 'CIP', comportamientoVolumen: 'FIJO', confirmado: true },
+      actor(A.userId),
+    ));
+    const primero = await withTenantContext(A.userId, () => tramos.guardar(A.userId, A.companyId, {
+      conceptoId: concepto.id, desde: 0, hasta: 500, tipo: 'REEMPLAZA', importeFijo: 1780000,
+      cmUnitaria: 2974, techoFisico: 475.7, techoFuente: 'Informe técnico de capacidad',
+    }, actor(A.userId)));
+    const segundo = await withTenantContext(A.userId, () => tramos.guardar(A.userId, A.companyId, {
+      reemplazaId: primero.id, conceptoId: concepto.id, desde: 0, hasta: 500, tipo: 'REEMPLAZA', importeFijo: 1780000,
+      cmUnitaria: 2974, techoFisico: 480, techoFuente: 'Informe técnico corregido',
+    }, actor(A.userId)));
+    const calculo = await withTenantContext(A.userId, () => tramos.calcularYGuardar(A.userId, A.companyId, actor(A.userId)));
+    expect(calculo.tramos[0]).toMatchObject({ tramoId: segundo.id, q: null });
+
+    const versiones = await withTenant(A.userId, (tx) => tx.tramoCosto.findMany({ where: { conceptoId: concepto.id } }));
+    expect(versiones).toHaveLength(2);
+    expect(versiones.find((fila) => fila.id === primero.id)?.deletedAt).not.toBeNull();
+    const foto = await withTenant(A.userId, (tx) => tx.equilibrioTramosCalculo.findUniqueOrThrow({ where: { id: calculo.calculoId } }));
+    expect(foto.tramoCostoIds).toEqual([segundo.id]);
+
+    await expect(withTenantContext(B.userId, () => tramos.listar(B.userId, A.companyId)))
+      .rejects.toThrow(/empresa no encontrada/i);
   });
 });

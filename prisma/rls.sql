@@ -423,6 +423,21 @@ CREATE POLICY tenant_isolation ON tramos_semifijos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- tramos_costo (M10-01): versiones de estructura/capacidad por concepto o segmento.
+ALTER TABLE tramos_costo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tramos_costo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON tramos_costo;
+CREATE POLICY tenant_isolation ON tramos_costo
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE equilibrio_tramos_calculos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE equilibrio_tramos_calculos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON equilibrio_tramos_calculos;
+CREATE POLICY tenant_isolation ON equilibrio_tramos_calculos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- M11-01: serie de índices y snapshots append-only por empresa.
 ALTER TABLE price_index_series ENABLE ROW LEVEL SECURITY;
 ALTER TABLE price_index_series FORCE ROW LEVEL SECURITY;

@@ -21,6 +21,13 @@ const { mockPrisma } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    tramoCosto: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    equilibrioTramosCalculo: { create: vi.fn() },
   },
 }));
 
@@ -61,6 +68,29 @@ beforeEach(() => {
   mockPrisma.company.findFirst.mockResolvedValue(COMPANY);
   mockPrisma.conceptoCosteo.findMany.mockResolvedValue([]);
   mockPrisma.conceptoCosteo.findFirst.mockResolvedValue(null);
+  mockPrisma.tramoCosto.findMany.mockResolvedValue([]);
+});
+
+describe('POST /companies/:companyId/tramos-costo', () => {
+  it('400 — techoFisico sin techoFuente nombra el campo faltante', async () => {
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/companies/${COMPANY_ID}/tramos-costo`,
+      payload: {
+        conceptoId: CONCEPTO_ID,
+        desde: 0,
+        hasta: 475.7,
+        tipo: 'REEMPLAZA',
+        importeFijo: 1780000,
+        cmUnitaria: 2974,
+        techoFisico: 475.7,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.details).toContainEqual(expect.objectContaining({ field: 'techoFuente' }));
+    expect(mockPrisma.tramoCosto.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /companies/:companyId/conceptos-costeo', () => {
