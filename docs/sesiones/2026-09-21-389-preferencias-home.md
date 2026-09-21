@@ -7,8 +7,8 @@ agente: codex
 modelo: gpt-5
 tanda: B3
 inicio: 2026-09-21T15:03:40-03:00
-fin: 2026-09-21T17:12:11-03:00
-minutos: 129
+fin: 2026-09-21T17:16:00-03:00
+minutos: 133
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 2
@@ -66,7 +66,7 @@ rebotes_de_guarda: 0
 npm run lint
 npm run typecheck
 npm test -- --maxWorkers=1
-# 216 archivos verdes, 1 skipped; 1.869 tests verdes, 4 skipped existentes
+# 216 archivos verdes, 1 skipped; 1.872 tests verdes, 4 skipped existentes
 npm run test:http -- --maxWorkers=1
 # 27 archivos; 150 tests verdes
 npm run test:integration -- --maxWorkers=1
@@ -75,11 +75,16 @@ npm run test:db -- --maxWorkers=1
 # 5 archivos; 66 tests verdes con sonda RLS y claves RSA efímeras
 npm run check:tests-base
 npm run check:openapi
+npm run typecheck:openapi-consumer
+npx prisma validate
+# guardas, consumidor tipado y schema verdes; 31 operaciones OpenAPI
 ```
 
 Rojo deliberado: los cinco casos nuevos fallaron antes de implementar porque la
 ruta no existía. El primer arranque se frenó antes por dependencias ausentes en
 el worktree; después de `npm ci` se obtuvo el rojo funcional. El primer
 `db:setup` no tenía `DATABASE_URL`; la primera integración intentó aplicar RLS
-con el rol restringido, y la primera suite DB usó el placeholder RS256. Cada una
-se repitió con el rol dueño o las claves efímeras que exige la suite.
+con el rol restringido y luego encontró que la base desechable todavía no tenía
+los grants de `costear_app`; la primera suite DB usó el placeholder RS256. Cada
+una se repitió con el rol dueño, los grants del init o las claves efímeras que
+exige la suite.
