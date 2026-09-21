@@ -1,4 +1,4 @@
-import { GroqClient, tryParseJson, buildRetryHint, TEXT_MODEL, DETERMINISTIC_SAMPLING } from './groq-client.js';
+import { tryParseJson, buildRetryHint, DETERMINISTIC_SAMPLING } from './groq-client.js';
 import {
   classifyResponseSchema,
   salvageClassifyResponse,
@@ -6,8 +6,14 @@ import {
 } from './groq-schemas.js';
 import type { ClassifyResponse } from './groq-types.js';
 
+export interface ClassifierCompletionClient {
+  readonly isConfigured: boolean;
+  readonly model: string;
+  postGroqRaw(body: Record<string, unknown>): Promise<string | null>;
+}
+
 export class GroqClassifier {
-  constructor(private client: GroqClient = new GroqClient()) {}
+  constructor(private client: ClassifierCompletionClient) {}
 
   async classifyDocument(input: {
     text: string;
@@ -120,7 +126,7 @@ Respondé SOLO con JSON:
     const systemMsg = { role: 'system', content: 'Sos un clasificador de documentos contables argentinos. Respondé solo con JSON válido.' };
     const baseMessages = [systemMsg, { role: 'user', content: prompt }];
     const baseBody = {
-      model: TEXT_MODEL,
+      model: this.client.model,
       max_tokens: 200,
       // ⚠️ NO SUBAS ESTA TEMPERATURA NI SAQUES EL SEED.
       // Con `temperature: 0.05` y sin seed, dos corridas del mismo corpus sin un

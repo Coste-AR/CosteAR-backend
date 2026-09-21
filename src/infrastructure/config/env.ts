@@ -32,6 +32,16 @@ const envSchema = z.object({
 
   GROQ_API_KEY: z.string().min(1).default('groq_placeholder'),
 
+  // IA — fallback del clasificador (Layer 5). La credencial específica es
+  // opcional: Groq conserva compatibilidad con GROQ_API_KEY; otros proveedores
+  // quedan deshabilitados hasta que se configure una key real.
+  CLASSIFIER_AI_PROVIDER: z.enum(['groq', 'deepseek']).default('groq'),
+  CLASSIFIER_AI_MODEL: z.string().min(1).optional(),
+  CLASSIFIER_AI_API_KEY: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().min(1).optional(),
+  ),
+
   // IA — Anthropic (Claude). Generación del Q&A de la bóveda y del consejero.
   // Sin configurar, `getLLMService` cae a Groq y lo registra (degradación segura).
   ANTHROPIC_API_KEY: z.string().min(1).optional(),

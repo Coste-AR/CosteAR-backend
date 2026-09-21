@@ -18,7 +18,7 @@ const valid = {
 
 describe('parseEnv', () => {
   it('parsea un entorno válido y coacciona tipos', () => {
-    const env = parseEnv(valid);
+    const env = parseEnv({ ...valid, CLASSIFIER_AI_API_KEY: '' });
     expect(env.PORT).toBe(3000);
     expect(env.NODE_ENV).toBe('test');
     expect(env.JWT_REFRESH_EXPIRY_DAYS).toBe(7);
@@ -52,5 +52,18 @@ describe('parseEnv', () => {
     expect(env.WHATSAPP_API_TOKEN).toBeUndefined();
     expect(env.WHATSAPP_PHONE_NUMBER_ID).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it('falla al arrancar cuando CLASSIFIER_AI_PROVIDER no está soportado', () => {
+    expect(() => parseEnv({ ...valid, CLASSIFIER_AI_PROVIDER: 'inventado' }))
+      .toThrow(/CLASSIFIER_AI_PROVIDER/);
+  });
+
+  it('documenta Groq como default sin inventar una credencial del clasificador', () => {
+    const env = parseEnv(valid);
+
+    expect(env.CLASSIFIER_AI_PROVIDER).toBe('groq');
+    expect(env.CLASSIFIER_AI_MODEL).toBeUndefined();
+    expect(env.CLASSIFIER_AI_API_KEY).toBeUndefined();
   });
 });
