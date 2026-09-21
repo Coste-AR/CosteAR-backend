@@ -61,7 +61,19 @@ export const PAQUETE_AVICOLA_POSTURA = {
     { indicador: 'antiguedad_stock', condicion: 'MAYOR', umbral: 'configurable' },
     { indicador: 'desvio_consumo', condicion: 'MAYOR', umbral: 'configurable' },
   ],
-  screens: {},
+  screens: {
+    /** Indicadores externos propios del rubro que acompañan al dólar oficial
+     * y al IPC del núcleo. La lista es contenido del paquete, no del tenant. */
+    indicadoresMacro: [
+      { clave: 'USD_BLUE', etiqueta: 'Dólar blue', unidad: 'ARS/USD', fuente: 'DOLARAPI' },
+      { clave: 'CAPIA_HUEVO_BLANCO_CAJON', etiqueta: 'Huevo blanco', unidad: 'cajon', fuente: 'CAPIA' },
+      { clave: 'CAPIA_HUEVO_COLOR_CAJON', etiqueta: 'Huevo color', unidad: 'cajon', fuente: 'CAPIA' },
+      { clave: 'CAPIA_ALIMENTO_PONEDORA_KG', etiqueta: 'Alimento ponedora', unidad: 'kg', fuente: 'CAPIA' },
+      { clave: 'CAPIA_MAIZ_TON', etiqueta: 'Maíz', unidad: 'ton', fuente: 'CAPIA' },
+      { clave: 'CAPIA_SOJA_TON', etiqueta: 'Soja', unidad: 'ton', fuente: 'CAPIA' },
+      { clave: 'CAPIA_MAPLE_UNIDAD', etiqueta: 'Maple', unidad: 'unidad', fuente: 'CAPIA' },
+    ],
+  },
   modulos: [
     {
       clave: 'produccion',
