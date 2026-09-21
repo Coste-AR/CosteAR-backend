@@ -65,6 +65,7 @@ export function buildRetryHint(raw: string | null, parsed: unknown, error: z.Zod
 
 export class GroqClient {
   private readonly apiKey: string;
+  readonly model = TEXT_MODEL;
 
   constructor() {
     this.apiKey = getEnv().GROQ_API_KEY;
