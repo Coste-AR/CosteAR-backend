@@ -1,14 +1,14 @@
 ---
 issue: 389
 repo: CosteAR-backend
-pr: PENDIENTE
+pr: 406
 rama: feat/389-preferencias-home
 agente: codex
 modelo: gpt-5
 tanda: B3
 inicio: 2026-09-21T15:03:40-03:00
-fin: PENDIENTE
-minutos: PENDIENTE
+fin: 2026-09-21T17:12:11-03:00
+minutos: 129
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 2
