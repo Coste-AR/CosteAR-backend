@@ -30,6 +30,7 @@ import { registerPriceIndexRoutes } from '../src/infrastructure/http/routes/pric
 import { registerModulosRubroRoutes } from '../src/infrastructure/http/routes/modulos-rubro.routes.js';
 import { registerMacroRoutes } from '../src/infrastructure/http/routes/macro.routes.js';
 import { registerConceptoCosteoRoutes } from '../src/infrastructure/http/routes/concepto-costeo.routes.js';
+import { registerUserPreferencesRoutes } from '../src/infrastructure/http/routes/user-preferences.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -46,6 +47,7 @@ const CONVERTED_ROUTES = [
   registerModulosRubroRoutes,
   registerMacroRoutes,
   registerConceptoCosteoRoutes,
+  registerUserPreferencesRoutes,
 ];
 
 async function buildSchemaOnlyApp() {
