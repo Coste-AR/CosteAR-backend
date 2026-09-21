@@ -30,6 +30,7 @@ const BASE_INPUT = { costistId: 'c-001', companyId: 'co-001', dataEntryId: 'de-0
 
 describe('classifyDocument — cascade orchestrator', () => {
   it('classifies a factura with CAE at ≥95 confidence without AI', async () => {
+    groqFetchMock.mockClear();
     const text = `
       FACTURA A
       CAE Nº: 75123456789012
@@ -45,6 +46,8 @@ describe('classifyDocument — cascade orchestrator', () => {
     expect(result.confidence).toBeGreaterThanOrEqual(95);
     expect(result.requiresReview).toBe(false);
     expect(result.aiUsed).toBe(false);
+    expect(result.aiCalls).toBeUndefined();
+    expect(groqFetchMock).not.toHaveBeenCalled();
   });
 
   it('classifies a liquidación WITH a production role at ≥95 confidence without AI', async () => {
