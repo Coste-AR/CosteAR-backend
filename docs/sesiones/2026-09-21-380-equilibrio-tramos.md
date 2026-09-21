@@ -11,9 +11,9 @@ fin: 2026-09-21T14:30:00-03:00
 minutos: 27
 tokens: no-informado
 clears: 0
-intentos_hasta_verde: 2
+intentos_hasta_verde: 3
 rojos_deliberados: 2
-rebotes_de_guarda: 0
+rebotes_de_guarda: 1
 ---
 
 # Sesión #380 — equilibrio por tramos
@@ -24,6 +24,7 @@ rebotes_de_guarda: 0
 - Verificación final: 1.864 unitarios, 145 HTTP, 82 integración/RLS y 66 DB verdes; 28 operaciones OpenAPI.
 - El primer rojo fue el módulo de dominio inexistente. El segundo fue el contrato HTTP que rechaza `techoFisico` sin `techoFuente`.
 - La primera instalación de dependencias quedó incompleta; se conservó como `node_modules.incomplete-20260921` y se repitió `npm ci` limpio.
+- El primer CI de integración detectó que una migración nueva no puede crear políticas antes de que `db:setup` instale `current_app_user_id()`. La política quedó únicamente en `rls.sql`, siguiendo el orden real del repo.
 
 ## Decisiones tomadas
 

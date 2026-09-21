@@ -34,12 +34,6 @@ CREATE TABLE "tramos_costo" (
 CREATE INDEX "tramos_costo_companyId_conceptoId_deletedAt_idx" ON "tramos_costo"("companyId", "conceptoId", "deletedAt");
 CREATE INDEX "tramos_costo_companyId_segmentoId_deletedAt_idx" ON "tramos_costo"("companyId", "segmentoId", "deletedAt");
 
-ALTER TABLE "tramos_costo" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "tramos_costo" FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON "tramos_costo"
-  USING ("userId" = current_app_user_id())
-  WITH CHECK ("userId" = current_app_user_id());
-
 CREATE TABLE "equilibrio_tramos_calculos" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "companyId" UUID NOT NULL,
@@ -52,7 +46,3 @@ CREATE TABLE "equilibrio_tramos_calculos" (
   CONSTRAINT "equilibrio_tramos_calculos_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE
 );
 CREATE INDEX "equilibrio_tramos_calculos_companyId_createdAt_idx" ON "equilibrio_tramos_calculos"("companyId", "createdAt");
-ALTER TABLE "equilibrio_tramos_calculos" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "equilibrio_tramos_calculos" FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON "equilibrio_tramos_calculos"
-  USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
