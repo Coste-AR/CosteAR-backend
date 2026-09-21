@@ -104,6 +104,7 @@ export const RLS_MODELS = new Set([
   'PriceIndexValue',
   // Telemetría anónima de uso del panel de campo (#354).
   'PanelTelemetryEvent',
+  'ClassifierAiCall',
 ]);
 
 /**

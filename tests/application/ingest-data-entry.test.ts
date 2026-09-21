@@ -21,6 +21,7 @@ const { mockTx, mockDb, mockClassify, mockPackageResolve } = vi.hoisted(() => {
   const tx = {
     dataEntry: { create: vi.fn() },
     classificationAudit: { create: vi.fn() },
+    classifierAiCall: { createMany: vi.fn() },
     processedCAE: { create: vi.fn() },
   };
   return {
@@ -114,6 +115,25 @@ describe('ingestDataEntry', () => {
     expect(audit.documentType).toBe('FACTURA_COMPRA');
     expect(audit.costSection).toBe('MATERIA_PRIMA');
     expect(audit.requiresReview).toBe(false);
+  });
+
+  it('persiste cada llamada de Layer 5 en la misma transacción que la carga', async () => {
+    const { ingestDataEntry } = await import('@/application/ingest/ingest-data-entry.js');
+    mockClassify.mockResolvedValue(classificationResult({
+      aiUsed: true,
+      aiCalls: [{
+        provider: 'groq', model: 'modelo-medido', inputTokens: 120, outputTokens: 30,
+        latencyMs: 18, estimatedCost: 0.00015, costCurrency: 'USD',
+      }],
+    }));
+
+    await ingestDataEntry(baseInput, { db: mockDb as never, groq: fakeGroq as never });
+
+    expect(mockTx.classifierAiCall.createMany).toHaveBeenCalledWith({ data: [{
+      dataEntryId: 'entry-1', companyId: 'company-1', costistId: 'user-1',
+      provider: 'groq', model: 'modelo-medido', inputTokens: 120, outputTokens: 30,
+      latencyMs: 18, estimatedCost: 0.00015, costCurrency: 'USD',
+    }] });
   });
 
   it('clasifica un mensaje de WhatsApp como texto (el clasificador no conoce ese sourceType)', async () => {
