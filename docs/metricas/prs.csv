@@ -153,3 +153,5 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 395,378,AlanArevalo1,dev,2026-09-20T19:15:01Z,2026-09-20T19:19:25Z,0.1,4,440,0,9,0,,,docs/sesiones/2026-09-20-378-punto-cierre-horizonte.md
 396,379,AlanArevalo1,dev,2026-09-20T23:14:16Z,2026-09-20T23:17:46Z,0.1,3,452,0,9,0,,,docs/sesiones/2026-09-20-379-resultados-cascada.md
 397,384,AlanArevalo1,dev,2026-09-21T03:14:38Z,2026-09-21T03:18:40Z,0.1,11,1078,23,9,0,,,docs/sesiones/2026-09-21-384-superficies-modulos.md
+398,385,AlanArevalo1,dev,2026-09-21T07:19:13Z,2026-09-21T07:22:58Z,0.1,3,234,117,9,0,,,docs/sesiones/2026-09-21-385-alertas-dependabot.md
+399,386,AlanArevalo1,dev,2026-09-21T11:17:59Z,2026-09-21T11:22:18Z,0.1,13,415,20,11,0,,,docs/sesiones/2026-09-21-386-clasificador-ci.md
