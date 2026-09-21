@@ -71,7 +71,16 @@
     "zod": "^3.24.1"
   },
   "overrides": {
-    "@types/node": "$@types/node"
+    "@types/node": "$@types/node",
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0"
+    },
+    "exceljs": {
+      "uuid": "11.1.1"
+    },
+    "tsx": {
+      "esbuild": "0.28.1"
+    }
   },
   "lint-staged": {
     "*.{ts,js}": "eslint --fix"
@@ -102,7 +111,7 @@
     "@prisma/client@6.19.3": true,
     "@prisma/engines@6.19.3": true,
     "argon2@0.41.1": true,
-    "esbuild@0.28.0": true,
+    "esbuild@0.28.1": true,
     "esbuild@0.21.5": true,
     "msgpackr-extract@3.0.4": true,
     "prisma@6.19.3": true
