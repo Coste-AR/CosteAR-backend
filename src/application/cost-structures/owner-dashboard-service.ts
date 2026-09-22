@@ -39,6 +39,15 @@ type NumeroTableroConExplicacion = NumeroTablero & { explicacion: string | null 
  */
 type NumeroTableroFijo = NumeroTablero & { esUnitarioDeFijo: true };
 
+type KpiHomeConfigurado = {
+  clave: string;
+  etiqueta: string;
+  unidad: string;
+  campo: string;
+};
+
+type KpiHomeResuelto = Omit<KpiHomeConfigurado, 'campo'> & Pick<NumeroTablero, 'valor' | 'completo'>;
+
 type AreaPendienteCierre = 'calculo' | 'imputacion' | 'configuracion' | 'produccion' | 'ventas' | 'costeo';
 
 type PendienteCierre = {
@@ -124,6 +133,42 @@ const marcarComoUnitarioDeFijo = (numero: NumeroTablero): NumeroTableroFijo => (
   motivos: numero.completo ? [ADVERTENCIA_FIJO_UNITARIO, ...numero.motivos] : numero.motivos,
 });
 
+const configuracionKpisHome = (paquete: Record<string, unknown> | null): KpiHomeConfigurado[] => {
+  const screens = paquete?.screens;
+  if (typeof screens !== 'object' || screens === null) return [];
+  const home = (screens as { home?: unknown }).home;
+  if (typeof home !== 'object' || home === null) return [];
+  const kpis = (home as { kpis?: unknown }).kpis;
+  if (!Array.isArray(kpis)) return [];
+  return kpis.filter((kpi): kpi is KpiHomeConfigurado => {
+    if (typeof kpi !== 'object' || kpi === null) return false;
+    const entry = kpi as Record<string, unknown>;
+    return ['clave', 'etiqueta', 'unidad', 'campo'].every((key) => typeof entry[key] === 'string');
+  });
+};
+
+const resolverKpisHome = (
+  configuracion: KpiHomeConfigurado[],
+  tablero: Record<string, unknown>,
+  warn: (message: string) => void,
+): KpiHomeResuelto[] => configuracion.map(({ campo, ...kpi }) => {
+  const valorConfigurado = campo.split('.').reduce<unknown>((actual, segmento) => {
+    if (typeof actual !== 'object' || actual === null) return undefined;
+    return (actual as Record<string, unknown>)[segmento];
+  }, tablero);
+  if (typeof valorConfigurado !== 'object' || valorConfigurado === null
+    || !('valor' in valorConfigurado) || !('completo' in valorConfigurado)) {
+    warn(`[tablero-dueno] El KPI ${kpi.clave} apunta a un campo inexistente: ${campo}`);
+    return { ...kpi, valor: null, completo: false };
+  }
+  const indicador = valorConfigurado as { valor?: unknown; completo?: unknown };
+  if ((typeof indicador.valor !== 'number' && indicador.valor !== null) || typeof indicador.completo !== 'boolean') {
+    warn(`[tablero-dueno] El KPI ${kpi.clave} apunta a un campo inválido: ${campo}`);
+    return { ...kpi, valor: null, completo: false };
+  }
+  return { ...kpi, valor: indicador.valor, completo: indicador.completo };
+});
+
 /**
  * Compone los seis indicadores del tablero sin recalcularlos. Lee una foto de
  * CalculationRun del período y transforma solamente las unidades internas a la
@@ -163,14 +208,21 @@ export class OwnerDashboardService {
     const paqueteRubro = categoriaRubro
       ? await new PaqueteRubroService(this.db).resolve(userId, categoriaRubro, { companyId: period.companyId })
       : null;
-    const rubro = paqueteRubro
+    const rubroBase = paqueteRubro
       ? {
           clave: paqueteRubro.category,
           nombreProducto: typeof paqueteRubro.nombreProducto === 'string' ? paqueteRubro.nombreProducto : null,
           icons: paqueteRubro.icons as Record<string, string>,
         }
       : null;
-    const pendienteRubro: FuentePendiente[] = rubro === null
+    const kpisHomeConfigurados = configuracionKpisHome(paqueteRubro);
+    const conKpisHome = <T extends Record<string, unknown>>(tablero: T) => ({
+      ...tablero,
+      rubro: rubroBase === null
+        ? null
+        : { ...rubroBase, kpisHome: resolverKpisHome(kpisHomeConfigurados, tablero, (message) => console.warn(message)) },
+    });
+    const pendienteRubro: FuentePendiente[] = rubroBase === null
       ? [{ area: 'configuracion', dato: 'La empresa no tiene un paquete de rubro declarado' }]
       : [];
     const conversor = crearConversorUnidadGestion(unidadGestion);
@@ -179,8 +231,8 @@ export class OwnerDashboardService {
     if (!run) {
       const falta = incompleto(sinCorrida);
       const periodo = { id: period.id, codigo: period.code };
-      return {
-        periodo, corrida: null, unidadGestion, rubro,
+      return conKpisHome({
+        periodo, corrida: null, unidadGestion,
         pendientes: pendientesUnicos(periodo, [
           { area: 'calculo', dato: 'corrida de cálculo' },
           ...pendienteRubro,
@@ -193,7 +245,7 @@ export class OwnerDashboardService {
         producidoCajones: falta, resultadoPeriodo: falta,
         resultadoPeriodoCosteoVariable: falta,
         diferenciaPorVariacionDeInventarios: { ...falta, explicacion: null },
-      };
+      });
     }
 
     const resultado = run.results as ResultadoCorrida;
@@ -394,11 +446,10 @@ export class OwnerDashboardService {
             explicacion: null,
           };
 
-    return {
+    return conKpisHome({
       periodo,
       corrida: { id: run.id, validada: run.validated, ejecutadaEn: run.executedAt.toISOString() },
       unidadGestion,
-      rubro,
       pendientes,
       costoPorCajon: costos,
       costosFijosDelPeriodo: totalFijoBase === null
@@ -441,6 +492,6 @@ export class OwnerDashboardService {
       resultadoPeriodo: resultadoPeriodoField,
       resultadoPeriodoCosteoVariable,
       diferenciaPorVariacionDeInventarios,
-    };
+    });
   }
 }

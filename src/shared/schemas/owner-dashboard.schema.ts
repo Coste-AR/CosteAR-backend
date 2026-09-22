@@ -46,6 +46,13 @@ const rubroSchema = z.object({
   clave: z.string(),
   nombreProducto: z.string().nullable(),
   icons: z.record(z.string()),
+  kpisHome: z.array(z.object({
+    clave: z.string(),
+    etiqueta: z.string(),
+    unidad: z.string(),
+    valor: z.number().nullable(),
+    completo: z.boolean(),
+  })),
 });
 
 export const ownerDashboardResponseSchema = z.object({
