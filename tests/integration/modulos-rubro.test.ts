@@ -7,7 +7,7 @@ import { createTenant, disconnect, type Tenant } from './helpers/tenants.js';
 
 let A: Tenant;
 let B: Tenant;
-const actor = { role: 'COSTISTA', area: 'costista', method: 'manual' };
+const actor = { role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' };
 
 beforeAll(async () => {
   A = await createTenant('modulos-a');

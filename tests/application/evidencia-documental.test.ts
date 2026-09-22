@@ -12,7 +12,7 @@ import { createDataPointSchema, evidenceSchema } from '@/shared/schemas/trazabil
  * escribían nunca.
  */
 
-const ACTOR = { id: 'user-1', role: 'COSTISTA', area: 'costista' } as never;
+const ACTOR = { id: 'user-1', role: 'EMPRESA_ADMIN', area: 'costista' } as never;
 const FACTURA = { kind: 'factura', reference: 'A-0001-00012345', counterparty: 'Metalúrgica SA' };
 
 function makeTx(evidenceId = 'ev-1') {

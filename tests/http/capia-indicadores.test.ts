@@ -11,7 +11,7 @@ vi.mock('@/infrastructure/workers/queues.js', () => ({ macroSyncQueue: { add: vi
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
     (request as FastifyRequest & { authUser: object }).authUser = {
-      id: 'user-1', tenantId: 'tenant-1', role: 'COSTISTA', jobTitle: null,
+      id: 'user-1', tenantId: 'tenant-1', role: 'EMPRESA_ADMIN', jobTitle: null,
     };
   },
 }));

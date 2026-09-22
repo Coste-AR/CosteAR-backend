@@ -74,7 +74,7 @@ export class CostStructureService {
     return {
       actor: {
         id: userId,
-        role: 'COSTISTA',
+        role: 'EMPRESA_ADMIN',
         area: 'costista',
         ...(ctx.userAgent ? { device: ctx.userAgent } : {}),
       },
@@ -338,7 +338,7 @@ export class CostStructureService {
     if (!structure.rawMaterialConfig || !structure.directLaborConfig || !structure.indirectCostConfig) return;
     await new CalculationRunService(this.db).calculate(userId, structureId, {
       id: ctx.userId ?? userId,
-      role: 'COSTISTA',
+      role: 'EMPRESA_ADMIN',
       area: 'costista',
     });
   }

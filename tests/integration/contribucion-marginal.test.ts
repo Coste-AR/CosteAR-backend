@@ -84,7 +84,7 @@ describe('A-05 — contribución marginal persistida por período', () => {
   it('cargar trabajos de terceros mueve el costo real y el margen del tablero', async () => {
     const structures = new CostStructureService(db);
     const runs = new CalculationRunService(db);
-    const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
+    const actor = { id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista' } as const;
 
     const sinTerceros = await withTenantContext(tenant.userId, () =>
       runs.calculate(tenant.userId, tenant.structureId, actor, 'MANUAL', tenant.periodId),
@@ -130,7 +130,7 @@ describe('A-05 — contribución marginal persistida por período', () => {
 
   it('persiste la vista y cambia sólo al cambiar una clasificación', async () => {
     const service = new CalculationRunService(db);
-    const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
+    const actor = { id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista' } as const;
 
     const primera = await withTenantContext(tenant.userId, () =>
       service.calculate(tenant.userId, tenant.structureId, actor),
@@ -171,7 +171,7 @@ describe('A-05 — contribución marginal persistida por período', () => {
   it('el simulador comparte la vista persistida, refleja shocks y marca faltantes', async () => {
     const simulator = new CostStructureService(db);
     const runs = new CalculationRunService(db);
-    const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
+    const actor = { id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista' } as const;
 
     const simulated = await withTenantContext(tenant.userId, () =>
       simulator.simulate(tenant.userId, tenant.structureId, {}),

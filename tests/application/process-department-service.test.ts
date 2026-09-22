@@ -38,7 +38,7 @@ const { UnprocessableEntityError, NotFoundError } = await import(
 
 const USER = 'user-1';
 const STRUCTURE = 'struct-1';
-const actor = { id: USER, role: 'COSTISTA', area: 'estructura', device: 'test · 127.0.0.1' };
+const actor = { id: USER, role: 'EMPRESA_ADMIN', area: 'estructura', device: 'test · 127.0.0.1' };
 
 const CADENA = [
   { id: 'd1', name: 'Destilado', sequence: 1, defaultConversionAvanceEqualsMO: true },

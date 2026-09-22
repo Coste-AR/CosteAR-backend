@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 
 const { db, authRole } = vi.hoisted(() => ({
-  authRole: { value: 'ADMIN' },
+  authRole: { value: 'SUPER_ADMIN' },
   db: {
     user: { findMany: vi.fn() },
     classifierAiCall: { findMany: vi.fn() },
@@ -41,7 +41,7 @@ async function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  authRole.value = 'ADMIN';
+  authRole.value = 'SUPER_ADMIN';
   db.user.findMany.mockResolvedValue([{ id: 'tenant-1' }]);
   db.classifierAiCall.findMany.mockResolvedValue([
     { provider: 'groq', inputTokens: 100, outputTokens: 20, estimatedCost: 0.001, costCurrency: 'USD' },
@@ -61,8 +61,8 @@ describe('GET /admin/classifier/costos', () => {
     }]);
   });
 
-  it('403 — rechaza a un usuario que no es ADMIN', async () => {
-    authRole.value = 'COSTISTA';
+  it('403 — rechaza a un usuario que no es SUPER_ADMIN', async () => {
+    authRole.value = 'EMPRESA_ADMIN';
     const response = await (await buildApp()).inject({
       method: 'GET', url: '/admin/classifier/costos?desde=2026-09-01&hasta=2026-09-30',
     });

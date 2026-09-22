@@ -135,7 +135,7 @@ export class GroqCostitaChat {
       : 'no disponible';
 
     const contextBlock = `
-CARTERA DEL COSTISTA (${portfolio.companies.length} empresas):
+CARTERA DEL EMPRESA_ADMIN (${portfolio.companies.length} empresas):
 ${portfolioSummary || '(sin empresas cargadas)'}
 
 Validaciones pendientes: ${portfolio.pendingCount}

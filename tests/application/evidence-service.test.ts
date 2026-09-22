@@ -36,7 +36,7 @@ vi.mock('@/infrastructure/cloudinary/cloudinary-upload.js', () => ({
   uploadToCloudinary: (...args: unknown[]) => uploadToCloudinary(...args),
 }));
 
-const actor = { id: 'user-1', role: 'COSTISTA', area: 'costista', device: 'test-agent · 127.0.0.1' };
+const actor = { id: 'user-1', role: 'EMPRESA_ADMIN', area: 'costista', device: 'test-agent · 127.0.0.1' };
 
 const EV = {
   id: 'ev-1',

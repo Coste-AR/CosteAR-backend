@@ -8,7 +8,7 @@ let B: Tenant;
 const sendIndicatorAlert = vi.fn(async () => undefined);
 const actor = (userId: string) => ({
   id: userId,
-  role: 'COSTISTA',
+  role: 'EMPRESA_ADMIN',
   area: 'costista',
   method: 'manual',
 });

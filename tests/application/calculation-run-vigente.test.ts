@@ -13,7 +13,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 
 const USER = 'user-1';
 const STRUCT = 'struct-1';
-const actor = { id: USER, role: 'COSTISTA', area: 'costista' };
+const actor = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista' };
 
 function run(over: Record<string, unknown> = {}) {
   return {

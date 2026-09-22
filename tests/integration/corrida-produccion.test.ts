@@ -4,7 +4,7 @@ import { withTenant } from '@/infrastructure/database/prisma.js';
 import { createTenant, disconnect, type Tenant } from './helpers/tenants.js';
 
 let A: Tenant; let B: Tenant; let corridaId: string;
-const actor = (t: Tenant) => ({ id: t.userId, role: 'COSTISTA', area: 'costista', method: 'manual' });
+const actor = (t: Tenant) => ({ id: t.userId, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' });
 beforeAll(async () => {
   A = await createTenant('corrida-a'); B = await createTenant('corrida-b');
   corridaId = (await new CorridaProduccionService().create(A.userId, A.companyId, { referencia: 'corrida_a', formula: 'formula_base', kilosReales: 10, destino: 'propia' }, actor(A))).id;

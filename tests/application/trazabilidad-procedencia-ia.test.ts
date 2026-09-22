@@ -237,7 +237,7 @@ suite('T-06 — procedencia de la clasificación IA en la ficha del dato', () =>
         valueNum: 7200,
         reason: 'lista de precios de agosto',
       } as never,
-      { id: USER, role: 'COSTISTA', area: 'costista' },
+      { id: USER, role: 'EMPRESA_ADMIN', area: 'costista' },
     );
 
     const trace = (await svc.getTrace(USER, dp.id)) as unknown as Record<string, unknown>;

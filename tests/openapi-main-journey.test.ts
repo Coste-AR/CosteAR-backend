@@ -31,6 +31,7 @@ const requiredOperations = [
   ['get', '/validaciones/pending'],
   ['post', '/validaciones/{entryId}/review'],
   ['get', '/me/preferencias'],
+  ['get', '/me'],
   ['get', '/me/preferencias/catalogo'],
   ['put', '/me/preferencias'],
 ] as const;

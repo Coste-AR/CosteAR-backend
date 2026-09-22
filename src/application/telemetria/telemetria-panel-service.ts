@@ -12,7 +12,7 @@ export class TelemetriaPanelService {
   constructor(private readonly db: PrismaClient = prisma) {}
 
   private async resolverTenant(companyId: string, actor: ActorTelemetria): Promise<string> {
-    if (actor.role === 'COSTISTA') {
+    if (actor.role === 'EMPRESA_ADMIN' || actor.role === 'EMPRESARIO') {
       const company = await this.db.company.findFirst({
         where: { id: companyId, userId: actor.id, deletedAt: null },
         select: { userId: true },

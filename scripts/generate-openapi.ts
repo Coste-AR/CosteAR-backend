@@ -31,6 +31,7 @@ import { registerModulosRubroRoutes } from '../src/infrastructure/http/routes/mo
 import { registerMacroRoutes } from '../src/infrastructure/http/routes/macro.routes.js';
 import { registerConceptoCosteoRoutes } from '../src/infrastructure/http/routes/concepto-costeo.routes.js';
 import { registerUserPreferencesRoutes } from '../src/infrastructure/http/routes/user-preferences.routes.js';
+import { registerUserRoutes } from '../src/infrastructure/http/routes/user.routes.js';
 import { registerClassifierAiCostRoutes } from '../src/infrastructure/http/routes/classifier-ai-cost.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -49,6 +50,7 @@ const CONVERTED_ROUTES = [
   registerMacroRoutes,
   registerConceptoCosteoRoutes,
   registerUserPreferencesRoutes,
+  registerUserRoutes,
   registerClassifierAiCostRoutes,
 ];
 

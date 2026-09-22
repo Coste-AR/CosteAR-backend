@@ -152,7 +152,7 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/system-alerts',
     {
-      preHandler: [authenticate, requireRole('ADMIN')],
+      preHandler: [authenticate, requireRole('SUPER_ADMIN')],
     },
     async (request, reply) => {
       const query = request.query as { unresolvedOnly?: string };
@@ -166,7 +166,7 @@ export async function registerSystemAlertRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/system-alerts/:id/resolve',
     {
-      preHandler: [authenticate, requireRole('ADMIN')],
+      preHandler: [authenticate, requireRole('SUPER_ADMIN')],
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };

@@ -16,8 +16,9 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 enum UserRole {
-  COSTISTA
-  ADMIN
+  SUPER_ADMIN
+  EMPRESARIO
+  EMPRESA_ADMIN
   EMPRESA_OPERATOR // personal de la empresa cliente, solo puede subir documentos
 }
 
@@ -34,7 +35,7 @@ model User {
   email        String   @unique
   passwordHash String
   name         String
-  role         UserRole @default(COSTISTA)
+  role         UserRole @default(EMPRESA_ADMIN)
 
   // Datos profesionales (capturados en el onboarding)
   // cuit es el identificador de login (único, nullable solo para retrocompatibilidad)
@@ -1111,7 +1112,7 @@ model DataEntry {
   costStructureId String?        @db.Uuid
   costStructure   CostStructure? @relation(fields: [costStructureId], references: [id], onDelete: SetNull)
 
-  // Costeo por Procesos: departamento al que el COSTISTA asignó a mano el monto
+  // Costeo por Procesos: departamento al que el EMPRESA_ADMIN asignó a mano el monto
   // de este documento aprobado (nunca lo infiere la IA — ver cost-structure-populator.ts).
   // Null = todavía sin asignar: el documento aparece en la cola de pendientes de
   // Costeo por Procesos hasta que alguien elija el departamento. Solo se usa
