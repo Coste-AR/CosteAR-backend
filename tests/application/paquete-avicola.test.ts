@@ -25,6 +25,11 @@ describe('paquete avícola de postura', () => {
       'CAPIA_SOJA_TON',
       'CAPIA_MAPLE_UNIDAD',
     ]);
+    expect(PAQUETE_AVICOLA_POSTURA.screens.home.kpis).toEqual([
+      { clave: 'costo_cajon', etiqueta: 'Costo por cajón', unidad: 'ARS/cajon', campo: 'costoPorCajon.total' },
+      { clave: 'contribucion_marginal_cajon', etiqueta: 'Contribución marginal por cajón', unidad: 'ARS/cajon', campo: 'contribucionMarginalPorCajon' },
+      { clave: 'punto_equilibrio', etiqueta: 'Punto de equilibrio', unidad: 'cajones', campo: 'puntoEquilibrioCajones' },
+    ]);
   });
 
   it('no pisa un parámetro confirmado al reejecutar el seed', async () => {

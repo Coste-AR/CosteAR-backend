@@ -63,6 +63,13 @@ export const PAQUETE_AVICOLA_POSTURA = {
     { indicador: 'desvio_consumo', condicion: 'MAYOR', umbral: 'configurable' },
   ],
   screens: {
+    home: {
+      kpis: [
+        { clave: 'costo_cajon', etiqueta: 'Costo por cajón', unidad: 'ARS/cajon', campo: 'costoPorCajon.total' },
+        { clave: 'contribucion_marginal_cajon', etiqueta: 'Contribución marginal por cajón', unidad: 'ARS/cajon', campo: 'contribucionMarginalPorCajon' },
+        { clave: 'punto_equilibrio', etiqueta: 'Punto de equilibrio', unidad: 'cajones', campo: 'puntoEquilibrioCajones' },
+      ],
+    },
     /** Indicadores externos propios del rubro que acompañan al dólar oficial
      * y al IPC del núcleo. La lista es contenido del paquete, no del tenant. */
     indicadoresMacro: [

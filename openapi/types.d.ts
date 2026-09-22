@@ -3188,6 +3188,13 @@ export interface paths {
                                     icons: {
                                         [key: string]: string;
                                     };
+                                    kpisHome: {
+                                        clave: string;
+                                        etiqueta: string;
+                                        unidad: string;
+                                        valor: number | null;
+                                        completo: boolean;
+                                    }[];
                                 } | null;
                                 pendientes: {
                                     /** @enum {string} */

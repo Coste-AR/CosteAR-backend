@@ -105,6 +105,11 @@ describe('GET /periods/:id/tablero-dueno', () => {
       clave: CATEGORIA_AVICOLA_POSTURA,
       nombreProducto: 'AVI',
       icons: PAQUETE_AVICOLA_POSTURA.icons,
+      kpisHome: [
+        { clave: 'costo_cajon', etiqueta: 'Costo por cajón', unidad: 'ARS/cajon', valor: 60, completo: true },
+        { clave: 'contribucion_marginal_cajon', etiqueta: 'Contribución marginal por cajón', unidad: 'ARS/cajon', valor: 24, completo: true },
+        { clave: 'punto_equilibrio', etiqueta: 'Punto de equilibrio', unidad: 'cajones', valor: 2, completo: true },
+      ],
     });
     expect(db.paqueteRubro.findMany).toHaveBeenCalledWith({
       where: {
@@ -130,8 +135,33 @@ describe('GET /periods/:id/tablero-dueno', () => {
 
     expect(response.statusCode).toBe(200);
     expect((JSON.parse(response.body) as { data: { rubro: unknown } }).data.rubro).toEqual({
-      clave: 'RUBRO_SIN_NOMBRE', nombreProducto: null, icons: {},
+      clave: 'RUBRO_SIN_NOMBRE', nombreProducto: null, icons: {}, kpisHome: [],
     });
+  });
+
+  it('mantiene el tablero en 200 y advierte cuando un KPI apunta a un campo inexistente', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    db.paqueteRubro.findMany.mockResolvedValue([{
+      category: 'RUBRO_CAMPO_INVALIDO',
+      companyId: 'company-1', structureId: null, periodId: null, userId: USER,
+      lexicon: {}, icons: {}, variants: [], seedParameters: [], alertRules: [],
+      screens: { home: { kpis: [{ clave: 'inexistente', etiqueta: 'Inexistente', unidad: 'unidad', campo: 'no.existe' }] } },
+      modulos: [], scale: null,
+    }]);
+    db.company.findFirst.mockResolvedValue({
+      unidadGestion: { codigo: 'unidad', nombre: 'Unidad', factor: 1 },
+      paquetesRubro: [{ category: 'RUBRO_CAMPO_INVALIDO' }],
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.rubro.kpisHome).toEqual([
+      { clave: 'inexistente', etiqueta: 'Inexistente', unidad: 'unidad', valor: null, completo: false },
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no.existe'));
+    warn.mockRestore();
   });
 
   it('devuelve en una llamada el contrato de los seis indicadores', async () => {

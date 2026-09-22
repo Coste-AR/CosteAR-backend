@@ -8172,12 +8172,45 @@
                               "additionalProperties": {
                                 "type": "string"
                               }
+                            },
+                            "kpisHome": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "clave": {
+                                    "type": "string"
+                                  },
+                                  "etiqueta": {
+                                    "type": "string"
+                                  },
+                                  "unidad": {
+                                    "type": "string"
+                                  },
+                                  "valor": {
+                                    "type": "number",
+                                    "nullable": true
+                                  },
+                                  "completo": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "clave",
+                                  "etiqueta",
+                                  "unidad",
+                                  "valor",
+                                  "completo"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
                             "clave",
                             "nombreProducto",
-                            "icons"
+                            "icons",
+                            "kpisHome"
                           ],
                           "additionalProperties": false,
                           "nullable": true
