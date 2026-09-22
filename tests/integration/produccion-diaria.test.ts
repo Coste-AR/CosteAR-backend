@@ -10,7 +10,7 @@ let loteA2: string;
 let loteSinAves: string;
 const FECHA = '2026-09-02';
 
-const actor = (tenant: Tenant) => ({ id: tenant.userId, role: 'COSTISTA', area: 'costista', method: 'manual' });
+const actor = (tenant: Tenant) => ({ id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' });
 
 async function lote(tenant: Tenant, referencia: string) {
   return withTenant(tenant.userId, (tx) =>

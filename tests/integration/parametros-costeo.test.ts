@@ -3,7 +3,7 @@ import { ParametrosCosteoService } from '@/application/parametros/parametros-cos
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
 
-const actor = (userId: string) => ({ id: userId, role: 'COSTISTA', area: 'costista', method: 'manual' }) as const;
+const actor = (userId: string) => ({ id: userId, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' }) as const;
 
 let A: Tenant;
 let B: Tenant;

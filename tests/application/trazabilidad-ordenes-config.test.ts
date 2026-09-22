@@ -40,7 +40,7 @@ const HUERFANA = 'ee000000-0000-4000-8000-000000000004';
 const PERIOD = '2026-08';
 
 const ctx = { ipAddress: '127.0.0.1', userAgent: 'vitest' };
-const actor = { id: USER, role: 'COSTISTA', area: 'costista', device: 'vitest' };
+const actor = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista', device: 'vitest' };
 
 /** Materia prima con existencia inicial, Wilson y dos movimientos del período. */
 const configMP = {
@@ -328,7 +328,7 @@ suite('T-01 — un caso completo cargado por los endpoints de config deja trazab
       include: { versions: { orderBy: { versionN: 'desc' } } },
     });
     expect(existencia.versions.length).toBe(2);
-    expect(existencia.versions[0]!.actorRole).toBe('COSTISTA');
+    expect(existencia.versions[0]!.actorRole).toBe('EMPRESA_ADMIN');
     expect(existencia.versions[0]!.reason).toBe('Carga de la sección Materia Prima');
   });
 

@@ -61,7 +61,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
   withTenant: (_userId: string, fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
 }));
 
-const actor = { id: 'user-1', role: 'COSTISTA', area: 'costista' };
+const actor = { id: 'user-1', role: 'EMPRESA_ADMIN', area: 'costista' };
 
 describe('CalculationRunService — dato sin imputar marca el resultado incompleto (no lo bloquea)', () => {
   beforeEach(() => vi.clearAllMocks());

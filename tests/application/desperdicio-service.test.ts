@@ -58,7 +58,7 @@ function service(db: Record<string, unknown>) {
   return new DesperdicioService(db as unknown as PrismaClient);
 }
 
-const ACTOR = { id: USER, role: 'COSTISTA', area: 'costista', method: 'manual' };
+const ACTOR = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' };
 
 describe('#92 — carga de desperdicios del período', () => {
   beforeEach(() => {

@@ -12,9 +12,9 @@ async function main() {
     const passwordHash = await hashPassword(adminPassword);
     await prisma.user.update({
       where: { id: existingUser.id },
-      data: { role: 'ADMIN', passwordHash }
+      data: { role: 'SUPER_ADMIN', passwordHash }
     });
-    console.log(`Usuario actualizado a rol ADMIN con nueva contraseña.`);
+    console.log(`Usuario actualizado a rol SUPER_ADMIN con nueva contraseña.`);
 
   } else {
     console.log(`Creando usuario Súper Administrador por defecto...`);
@@ -29,7 +29,7 @@ async function main() {
         email: adminEmail,
         passwordHash,
         name: 'Giuliana Di Rocco',
-        role: 'ADMIN'
+        role: 'SUPER_ADMIN'
       }
     });
     console.log(`Súper Administrador creado exitosamente: ${adminEmail} / ${adminPassword}`);

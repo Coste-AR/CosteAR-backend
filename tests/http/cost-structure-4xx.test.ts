@@ -19,7 +19,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: { authUser?: unknown }) => {
-    request.authUser = { id: USER_ID, role: 'COSTISTA' };
+    request.authUser = { id: USER_ID, role: 'EMPRESA_ADMIN' };
   },
   auditContext: () => ({ ipAddress: '127.0.0.1', userAgent: 'test' }),
 }));

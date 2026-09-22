@@ -53,17 +53,17 @@ describe('tokens (JWT RS256 + refresh opaco)', () => {
     const { signAccessToken, verifyAccessToken } = await import(
       '@/infrastructure/crypto/tokens.js'
     );
-    const token = signAccessToken({ sub: 'u1', tenantId: 'u1', role: 'COSTISTA' });
+    const token = signAccessToken({ sub: 'u1', tenantId: 'u1', role: 'EMPRESA_ADMIN' });
     const payload = verifyAccessToken(token);
     expect(payload.sub).toBe('u1');
-    expect(payload.role).toBe('COSTISTA');
+    expect(payload.role).toBe('EMPRESA_ADMIN');
   });
 
   it('rechaza un token manipulado', async () => {
     const { signAccessToken, verifyAccessToken } = await import(
       '@/infrastructure/crypto/tokens.js'
     );
-    const token = signAccessToken({ sub: 'u1', tenantId: 'u1', role: 'COSTISTA' });
+    const token = signAccessToken({ sub: 'u1', tenantId: 'u1', role: 'EMPRESA_ADMIN' });
     const tampered = token.slice(0, -3) + 'aaa';
     expect(() => verifyAccessToken(tampered)).toThrow();
   });

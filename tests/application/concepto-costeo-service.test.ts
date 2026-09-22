@@ -29,7 +29,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 
 const USER = 'user-1';
 const COMPANY = { id: 'comp-1', userId: USER };
-const ACTOR = { id: USER, role: 'COSTISTA', area: 'costista', method: 'manual' };
+const ACTOR = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' };
 
 let dbActual: Record<string, unknown>;
 

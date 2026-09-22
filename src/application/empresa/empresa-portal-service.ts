@@ -25,7 +25,7 @@ import { SystemAlertService } from '../system/system-alert-service.js';
  *   3. Se envía email con SOLO el código de invitación (sin contraseña).
  *   4. El operador acepta el código desde su dashboard.
  *
- *  CASO C — email pertenece a un COSTISTA:
+ *  CASO C — email pertenece a un EMPRESA_ADMIN:
  *   Se rechaza con error explicativo.
  */
 export class EmpresaPortalService {

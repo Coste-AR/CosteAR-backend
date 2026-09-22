@@ -58,11 +58,11 @@ export async function authenticate(
   // seteado, así las políticas RLS también se aplican a las lecturas. Antes eso
   // solo pasaba dentro de `withTenant`, o sea únicamente en las escrituras.
   //
-  // El ADMIN es la excepción y va sin acotar: es personal interno, no tiene
+  // El SUPER_ADMIN es la excepción y va sin acotar: es personal interno, no tiene
   // datos propios, y el panel mira todas las empresas a propósito. Acotarlo a su
   // propio id le devolvería cero filas en todas las pantallas. Lo que lo protege
-  // es `requireRole('ADMIN')`, no el inquilino.
-  if (request.authUser.role === 'ADMIN') {
+  // es `requireRole('SUPER_ADMIN')`, no el inquilino.
+  if (request.authUser.role === 'SUPER_ADMIN') {
     enterSystemScope('panel de administración: mira todas las empresas');
   } else {
     enterTenantScope(request.authUser.id);

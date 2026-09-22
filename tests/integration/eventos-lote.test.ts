@@ -28,7 +28,7 @@ afterAll(disconnect);
 describe('A-10 — eventos de lote aislados y población derivada', () => {
   it('deriva animales vivos de altas y bajas clasificadas, sin un campo editable', async () => {
     const service = new EventosLoteService();
-    const actor = { id: A.userId, role: 'COSTISTA', area: 'costista', method: 'manual' };
+    const actor = { id: A.userId, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' };
     await service.create(A.userId, loteA, { tipo: 'alta', cantidad: 40, fecha: '2026-09-01' }, actor);
     await service.create(A.userId, loteA, { tipo: 'baja', cantidad: 5, fecha: '2026-09-02', motivo: 'mortalidad' }, actor);
 

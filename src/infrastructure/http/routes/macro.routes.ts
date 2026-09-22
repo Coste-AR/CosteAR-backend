@@ -99,7 +99,7 @@ export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
    * costista puede escribir estado compartido" ES el diseño, no un descuido.
    * Quedó marcado en la auditoría de aislamiento como caso ambiguo; se
    * revisó el uso real en el frontend y se confirma que es intencional — no
-   * se restringe a ADMIN.
+   * se restringe a SUPER_ADMIN.
    */
   app.post('/macro/manual-entry', { preHandler: authenticate }, async (request, reply) => {
     const input = manualEntrySchema.parse(request.body);

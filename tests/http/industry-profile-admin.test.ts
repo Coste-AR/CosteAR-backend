@@ -37,7 +37,7 @@ vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
     (request as FastifyRequest & { authUser: object }).authUser = {
       id: 'admin-id',
       tenantId: 'system',
-      role: 'ADMIN',
+      role: 'SUPER_ADMIN',
     };
   },
   requireRole: (_role: string) => async () => {},

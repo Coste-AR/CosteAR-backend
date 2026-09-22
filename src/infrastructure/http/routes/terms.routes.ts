@@ -34,12 +34,12 @@ export async function registerTermsRoutes(app: FastifyInstance): Promise<void> {
 
   // --- Admin: editar (= publicar nueva versión) ---------------------------
 
-  app.get('/admin/terms', { preHandler: [authenticate, requireRole('ADMIN')] }, async (_request, reply) => {
+  app.get('/admin/terms', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (_request, reply) => {
     const versions = await terms.listVersions();
     return reply.send({ data: versions.map(serializeVersion) });
   });
 
-  app.post('/admin/terms', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/admin/terms', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const { content } = publishTermsSchema.parse(request.body);
     const published = await terms.publish(content, request.authUser!.id);
     return reply.status(201).send({ data: serializeVersion(published) });

@@ -16,7 +16,7 @@ import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js'
  * para la parte estática).
  */
 
-const actor = (userId: string) => ({ id: userId, role: 'COSTISTA', area: 'costista', method: 'manual' }) as const;
+const actor = (userId: string) => ({ id: userId, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' }) as const;
 
 let A: Tenant;
 let B: Tenant;

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '../../database/prisma.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
@@ -8,8 +9,18 @@ import { recordAudit } from '../../../application/audit/audit-logger.js';
 import { NotFoundError, UnauthorizedError, ValidationError } from '../../../domain/errors/domain-error.js';
 import { uploadToCloudinary } from '../../cloudinary/cloudinary-upload.js';
 import { TermsService } from '../../../application/legal/terms-service.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 
 const updateProfileSchema = z.object({ name: z.string().min(2).max(120).trim() });
+const userRoleSchema = z.enum(['SUPER_ADMIN', 'EMPRESARIO', 'EMPRESA_ADMIN', 'EMPRESA_OPERATOR']);
+const meEnvelopeSchema = z.object({
+  data: z.object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    rol: userRoleSchema,
+    empresaId: z.string().uuid().nullable(),
+  }),
+});
 
 // La imagen llega ya RECORTADA desde el front (base64, sin el prefijo data:).
 const avatarSchema = z.object({
@@ -18,7 +29,39 @@ const avatarSchema = z.object({
 });
 
 export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
+  const contract = app.withTypeProvider<ZodTypeProvider>();
   const terms = new TermsService();
+
+  contract.get('/me', {
+    preHandler: authenticate,
+    schema: { response: { 200: meEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const user = await prisma.user.findUnique({
+      where: { id: request.authUser!.id },
+      select: { id: true, email: true, role: true },
+    });
+    if (!user) throw new NotFoundError('Usuario no encontrado');
+
+    let empresaId: string | null = null;
+    if (user.role === 'EMPRESA_OPERATOR') {
+      const membership = await prisma.operatorMembership.findFirst({
+        where: { operatorId: user.id, isActive: true },
+        orderBy: { joinedAt: 'asc' },
+        select: { connection: { select: { companyId: true } } },
+      });
+      empresaId = membership?.connection.companyId ?? null;
+    } else if (user.role !== 'SUPER_ADMIN') {
+      const company = await prisma.company.findFirst({
+        where: { userId: user.id, isActive: true },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      empresaId = company?.id ?? null;
+    }
+
+    return { data: { id: user.id, email: user.email, rol: user.role, empresaId } };
+  });
 
   app.get('/user/profile', { preHandler: authenticate }, async (request) => {
     const user = await prisma.user.findUnique({ where: { id: request.authUser!.id } });

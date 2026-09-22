@@ -14,7 +14,7 @@ const querySchema = z.object({
 export async function registerClassifierAiCostRoutes(app: FastifyInstance): Promise<void> {
   const service = new ClassifierAiCostService();
   app.withTypeProvider<ZodTypeProvider>().get('/admin/classifier/costos', {
-    preHandler: [authenticate, requireRole('ADMIN')],
+    preHandler: [authenticate, requireRole('SUPER_ADMIN')],
     schema: {
       querystring: querySchema,
       response: { 200: classifierCostSummaryEnvelopeSchema, ...apiErrorResponses },

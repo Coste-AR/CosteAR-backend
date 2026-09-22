@@ -107,7 +107,7 @@ describe('AuthService.login — anti-bruteforce', () => {
           email: 'a@b.com',
           passwordHash: realHash,
           name: 'Test',
-          role: 'COSTISTA',
+          role: 'EMPRESA_ADMIN',
           twoFactorEnabled: false,
           isLocked: false,
           lockedUntil: null,

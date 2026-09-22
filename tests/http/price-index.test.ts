@@ -20,7 +20,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 vi.mock('@/application/audit/trace-audit.js', () => ({ recordTraceAudit: vi.fn(async () => undefined) }));
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
-    (request as FastifyRequest & { authUser: object }).authUser = { id: USER_ID, role: 'COSTISTA', jobTitle: null };
+    (request as FastifyRequest & { authUser: object }).authUser = { id: USER_ID, role: 'EMPRESA_ADMIN', jobTitle: null };
   },
 }));
 

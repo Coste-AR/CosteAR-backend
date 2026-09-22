@@ -19,7 +19,7 @@ vi.mock('@/application/cost-structures/cost-period-service.js', () => ({
 
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: { authUser?: unknown }) => {
-    request.authUser = { id: 'user-1', role: 'COSTISTA' };
+    request.authUser = { id: 'user-1', role: 'EMPRESA_ADMIN' };
   },
   auditContext: () => ({}),
 }));

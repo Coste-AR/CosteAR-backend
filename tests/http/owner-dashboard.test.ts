@@ -25,7 +25,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
-    (request as FastifyRequest & { authUser: object }).authUser = { id: USER, role: 'COSTISTA', jobTitle: null };
+    (request as FastifyRequest & { authUser: object }).authUser = { id: USER, role: 'EMPRESA_ADMIN', jobTitle: null };
   },
 }));
 

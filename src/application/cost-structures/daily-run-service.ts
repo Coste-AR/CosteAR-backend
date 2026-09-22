@@ -27,7 +27,7 @@ import { ProcessCalculationService } from './process-costing/process-calculation
  *     el historial bajo corridas iguales.
  *  2. AISLAMIENTO. Una estructura que falla no puede voltear el lote. El job
  *     recorre todos los períodos y reporta al final qué pasó con cada uno.
- *  3. NUNCA UN 500 A LA CARA DEL COSTISTA. Si faltan insumos, se registra el
+ *  3. NUNCA UN 500 A LA CARA DEL EMPRESA_ADMIN. Si faltan insumos, se registra el
  *     motivo en castellano y se sigue. Que falte un dato es un estado normal de
  *     un período en curso, no un error del sistema.
  */
@@ -51,7 +51,7 @@ function systemActor(ownerId: string): TraceActor {
     // estructura. El `area: 'sistema'` y el `trigger: AUTO_DAILY` son los que
     // dejan claro que no la apretó él.
     id: ownerId,
-    role: 'COSTISTA',
+    role: 'EMPRESA_ADMIN',
     area: 'sistema',
     method: 'manual',
     device: 'cálculo automático diario',

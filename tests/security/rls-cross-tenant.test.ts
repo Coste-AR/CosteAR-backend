@@ -184,7 +184,7 @@ async function sembrar(db: PrismaClient, t: ReturnType<typeof ids>, tag: string)
     INSERT INTO evidence (id, kind, reference, counterparty, "uploadedBy")
       VALUES ('${t.evidence}', 'factura', 'Factura A 0001-0000000${tag === 'a' ? 1 : 2}', 'Proveedor ${tag}', '${t.user}');
     INSERT INTO data_point_versions (id, "dataPointId", "versionN", method, "createdBy", "actorRole", "actorArea", "evidenceId")
-      VALUES ('${t.data_point_versions}', '${t.data_points}', 1, 'manual', '${t.user}', 'COSTISTA', 'costista', '${t.evidence}');
+      VALUES ('${t.data_point_versions}', '${t.data_points}', 1, 'manual', '${t.user}', 'EMPRESA_ADMIN', 'costista', '${t.evidence}');
     INSERT INTO calculation_runs (id, "structureId", "runN", "engineVersion", "executedBy", "inputsSnapshot", results)
       VALUES ('${t.calculation_runs}', '${t.cost_structures}', 1, 'test', '${t.user}', '{}'::jsonb, '{}'::jsonb);
     INSERT INTO calculation_nodes (id, "runId", ord, label)

@@ -17,7 +17,7 @@ describe('telemetría del panel — persistencia y RLS real', () => {
     const service = new TelemetriaPanelService(db);
     const saved = await withTenantContext(tenantA.userId, () => service.registrar(
       tenantA.companyId,
-      { id: tenantA.userId, role: 'COSTISTA' },
+      { id: tenantA.userId, role: 'EMPRESA_ADMIN' },
       { tipo: 'CARGA_INICIADA', accion: 'carga.produccion-diaria' },
     ));
 
@@ -29,7 +29,7 @@ describe('telemetría del panel — persistencia y RLS real', () => {
     expect(visibleA).toMatchObject({
       companyId: tenantA.companyId,
       userId: tenantA.userId,
-      technicalRole: 'COSTISTA',
+      technicalRole: 'EMPRESA_ADMIN',
     });
     expect(visibleA).not.toHaveProperty('actorId');
     expect(visibleB).toBeNull();

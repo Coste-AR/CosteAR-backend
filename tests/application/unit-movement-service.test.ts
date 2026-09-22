@@ -25,7 +25,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
   withTenant: (_userId: string, fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
 }));
 
-const actor = { id: 'user-1', role: 'COSTISTA', area: 'planta', device: 'test-agent · 127.0.0.1' };
+const actor = { id: 'user-1', role: 'EMPRESA_ADMIN', area: 'planta', device: 'test-agent · 127.0.0.1' };
 
 /** Estructura de Procesos válida, depto. Destilado (seq 1), período Abril 2026. */
 function mockProcessesContext(overrides: { sequence?: number; unified?: boolean } = {}) {

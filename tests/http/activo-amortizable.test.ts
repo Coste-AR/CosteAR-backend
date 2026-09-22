@@ -32,7 +32,7 @@ vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
     (request as FastifyRequest & { authUser: object }).authUser = {
       id: USER,
-      role: 'COSTISTA',
+      role: 'EMPRESA_ADMIN',
       jobTitle: null,
     };
   },

@@ -5,7 +5,8 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 
-const { mockPrisma } = vi.hoisted(() => ({
+const { mockPrisma, authRole } = vi.hoisted(() => ({
+  authRole: { value: 'EMPRESA_ADMIN' },
   mockPrisma: {
     company: { findFirst: vi.fn() },
     operatorMembership: { findFirst: vi.fn() },
@@ -19,7 +20,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
 }));
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
-    request.authUser = { id: USER_ID, tenantId: USER_ID, role: 'COSTISTA' };
+    request.authUser = { id: USER_ID, tenantId: USER_ID, role: authRole.value };
   },
 }));
 
@@ -38,6 +39,7 @@ async function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authRole.value = 'EMPRESA_ADMIN';
   mockPrisma.company.findFirst.mockResolvedValue({ id: COMPANY_ID, userId: USER_ID });
   mockPrisma.panelTelemetryEvent.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
     id: 'event-1',
@@ -64,7 +66,7 @@ describe('telemetría anónima del panel de campo — #354', () => {
       tipo: 'CARGA_COMPLETADA',
       accion: 'carga.produccion-diaria.guardar',
       duracionMs: 42_000,
-      rolTecnico: 'COSTISTA',
+      rolTecnico: 'EMPRESA_ADMIN',
       registradoEn: '2026-09-20T11:00:00.000Z',
     });
     expect(mockPrisma.panelTelemetryEvent.create).toHaveBeenCalledWith({ data: {
@@ -73,8 +75,21 @@ describe('telemetría anónima del panel de campo — #354', () => {
       type: 'CARGA_COMPLETADA',
       action: 'carga.produccion-diaria.guardar',
       durationMs: 42_000,
-      technicalRole: 'COSTISTA',
+      technicalRole: 'EMPRESA_ADMIN',
     } });
+  });
+
+  it('201 — EMPRESARIO conserva el acceso de administración empresarial', async () => {
+    authRole.value = 'EMPRESARIO';
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/companies/${COMPANY_ID}/telemetria-panel`,
+      payload: { tipo: 'ACCION_TOCADA', accion: 'home.abrir' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data.rolTecnico).toBe('EMPRESARIO');
   });
 
   it.each([
