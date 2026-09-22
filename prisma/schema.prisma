@@ -213,51 +213,52 @@ enum CondicionIva {
 }
 
 model Company {
-  classifierAiCalls     ClassifierAiCall[]
-  panelTelemetryEvents PanelTelemetryEvent[]
-  priceIndexSeries      PriceIndexSeries?
-  priceIndexVersions    PriceIndexSeriesVersion[]
-  priceIndexValues      PriceIndexValue[]
-  paquetesRubro        PaqueteRubro[]
-  modulosRubro         ConfiguracionModuloRubro[]
-  reglasAlerta         ReglaAlerta[]
-  movimientosDeposito  MovimientoDeposito[]
-  eventosLote          EventoLote[]
-  produccionesDiarias  ProduccionDiaria[]
-  egresosProducto      EgresoProducto[]
-  ventasProducto       VentaProducto[]
-  corridasProduccion   CorridaProduccion[]
-  consumosCorrida      ConsumoCorrida[]
-  activosAmortizables  ActivoAmortizable[]
-  desperdicioRegistros DesperdicioRegistro[]
-  depositos            Deposito[]
-  unidadesMedida       UnidadMedida[]
+  classifierAiCalls        ClassifierAiCall[]
+  panelTelemetryEvents     PanelTelemetryEvent[]
+  priceIndexSeries         PriceIndexSeries?
+  priceIndexVersions       PriceIndexSeriesVersion[]
+  priceIndexValues         PriceIndexValue[]
+  paquetesRubro            PaqueteRubro[]
+  modulosRubro             ConfiguracionModuloRubro[]
+  reglasAlerta             ReglaAlerta[]
+  movimientosDeposito      MovimientoDeposito[]
+  eventosLote              EventoLote[]
+  produccionesDiarias      ProduccionDiaria[]
+  egresosProducto          EgresoProducto[]
+  ventasProducto           VentaProducto[]
+  corridasProduccion       CorridaProduccion[]
+  consumosCorrida          ConsumoCorrida[]
+  activosAmortizables      ActivoAmortizable[]
+  desperdicioRegistros     DesperdicioRegistro[]
+  depositos                Deposito[]
+  unidadesMedida           UnidadMedida[]
   // La unidad en la que esta empresa gestiona y comunica sus cantidades. Es
   // explícita: no se infiere del rubro ni de ningún perfil global.
-  unidadGestionId      String?               @db.Uuid
-  unidadGestion        UnidadMedida?         @relation("UnidadGestion", fields: [unidadGestionId], references: [id], onDelete: Restrict)
+  unidadGestionId          String?                    @db.Uuid
+  unidadGestion            UnidadMedida?              @relation("UnidadGestion", fields: [unidadGestionId], references: [id], onDelete: Restrict)
   // Escala declarada como cantidad física anual. La unidad viaja junto al valor:
   // nunca se infiere del rubro ni se reemplaza por una estimación monetaria.
-  operationScaleValue  Decimal?              @db.Decimal(18, 4)
-  operationScaleUnit   String?
-  parametrosCosteo     ParametroCosteo[]
-  conceptosCosteo      ConceptoCosteo[]
-  tramosSemifijos      TramoSemifijo[]
-  tramosCosto          TramoCosto[]
+  operationScaleValue      Decimal?                   @db.Decimal(18, 4)
+  operationScaleUnit       String?
+  parametrosCosteo         ParametroCosteo[]
+  conceptosCosteo          ConceptoCosteo[]
+  importesConceptoCosteo   ConceptoCosteoImporte[]
+  tramosSemifijos          TramoSemifijo[]
+  tramosCosto              TramoCosto[]
   calculosEquilibrioTramos EquilibrioTramosCalculo[]
-  unidadesProductivas  UnidadProductiva[]
-  lotesProductivos     LoteProductivo[]
-  id                   String                @id @default(uuid()) @db.Uuid
-  userId               String                @db.Uuid
-  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name                 String
-  industry             String?
-  cuit                 String?
-  description          String?
-  isActive             Boolean               @default(true)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  deletedAt            DateTime? // Soft delete
+  unidadesProductivas      UnidadProductiva[]
+  lotesProductivos         LoteProductivo[]
+  id                       String                     @id @default(uuid()) @db.Uuid
+  userId                   String                     @db.Uuid
+  user                     User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                     String
+  industry                 String?
+  cuit                     String?
+  description              String?
+  isActive                 Boolean                    @default(true)
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  deletedAt                DateTime? // Soft delete
 
   // Modelo de períodos (problema C): el RITMO de costeo de la empresa. Se elige
   // una vez y el sistema arma los períodos solo. Por defecto, mensual.
@@ -321,36 +322,42 @@ enum DestinoCorrida {
 }
 
 model CorridaProduccion {
-  id String @id @default(uuid()) @db.Uuid
-  companyId String @db.Uuid
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "corridas_produccion_company_fkey")
-  userId String @db.Uuid
-  referencia String
-  formula String
-  kilosReales Decimal @db.Decimal(18, 4)
-  destino DestinoCorrida
-  consumos ConsumoCorrida[]
-  createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt @db.Timestamptz
+  id          String           @id @default(uuid()) @db.Uuid
+  companyId   String           @db.Uuid
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "corridas_produccion_company_fkey")
+  userId      String           @db.Uuid
+  referencia  String
+  formula     String
+  kilosReales Decimal          @db.Decimal(18, 4)
+  destino     DestinoCorrida
+  consumos    ConsumoCorrida[]
+  createdAt   DateTime         @default(now()) @db.Timestamptz
+  updatedAt   DateTime         @updatedAt @db.Timestamptz
+
   @@unique([companyId, referencia])
   @@index([companyId])
   @@map("corridas_produccion")
 }
 
-/** costoUnitarioPpp is the inventory valuation snapshot; total is derived. */
+/**
+ * costoUnitarioPpp is the inventory valuation snapshot; total is derived.
+ */
 model ConsumoCorrida {
-  id String @id @default(uuid()) @db.Uuid
-  companyId String @db.Uuid
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "consumos_corrida_company_fkey")
-  userId String @db.Uuid
-  corridaId String @db.Uuid
-  corrida CorridaProduccion @relation(fields: [corridaId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "consumos_corrida_corrida_fkey")
-  material String
-  cantidad Decimal @db.Decimal(18, 4)
-  costoUnitarioPpp Decimal @db.Decimal(18, 6)
-  /** Reserved for the A-12 linkage; no duplicated stock calculation here. */
-  depositoId String? @db.Uuid
-  createdAt DateTime @default(now()) @db.Timestamptz
+  id               String            @id @default(uuid()) @db.Uuid
+  companyId        String            @db.Uuid
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "consumos_corrida_company_fkey")
+  userId           String            @db.Uuid
+  corridaId        String            @db.Uuid
+  corrida          CorridaProduccion @relation(fields: [corridaId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "consumos_corrida_corrida_fkey")
+  material         String
+  cantidad         Decimal           @db.Decimal(18, 4)
+  costoUnitarioPpp Decimal           @db.Decimal(18, 6)
+  /**
+   * Reserved for the A-12 linkage; no duplicated stock calculation here.
+   */
+  depositoId       String?           @db.Uuid
+  createdAt        DateTime          @default(now()) @db.Timestamptz
+
   @@index([companyId, corridaId])
   @@map("consumos_corrida")
 }
@@ -550,7 +557,6 @@ model CostPeriod {
    * TRABAJOS DE TERCEROS del período: procesos mandados a hacer afuera (un
    * tratamiento térmico, un bordado, un flete de proceso) que son parte del
    * costo de producción.
-   *
    * ⚠️ NO son un CIP y NO se prorratean. La cátedra (clase 20) los registra por
    * separado de los costos indirectos justamente porque no se reparten entre
    * centros ni generan cuotas: van derecho al estado de costos, entre el costo
@@ -564,13 +570,11 @@ model CostPeriod {
    * `CostElement.VENTA` existe hace tiempo en el enum de abajo pero nunca tuvo
    * dónde cargarse como gasto propio del período — hasta ahora el punto de
    * equilibrio del tablero era un equilibrio DE PRODUCCIÓN, no de la empresa.
-   *
    * Los dos son de naturaleza fija/variable por DEFINICIÓN, no por elección del
    * costista (a diferencia de MP/MOD/CIP, que sí requieren clasificación
    * humana): un gasto de comercialización "por unidad vendida" es variable por
    * cómo se mide, y un gasto de administración de un período es fijo del
    * período. Por eso viven acá directo, sin pasar por `ParametroCosteo`.
-   *
    * Solo en `CostPeriod`, sin mirror en `CostStructure` (a diferencia de
    * `thirdPartyWork`): son gastos SG&A que naturalmente se re-cargan cada
    * período (alquiler, sueldos administrativos, comisiones), no una
@@ -662,6 +666,7 @@ model CostStructure {
    * /**
    * /**
    * /**
+   * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
    */
   periodicity      Periodicity?
@@ -690,6 +695,7 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -735,7 +741,6 @@ model CostStructure {
    * TRABAJOS DE TERCEROS del período: procesos mandados a hacer afuera (un
    * tratamiento térmico, un bordado, un flete de proceso) que son parte del
    * costo de producción.
-   *
    * ⚠️ NO son un CIP y NO se prorratean. La cátedra (clase 20) los registra por
    * separado de los costos indirectos justamente porque no se reparten entre
    * centros ni generan cuotas: van derecho al estado de costos, entre el costo
@@ -773,11 +778,11 @@ model CostStructure {
 // Resultado de un cálculo. Inmutable: cada recálculo crea un registro nuevo,
 // preservando la trazabilidad histórica (qué datos macro se usaron, cuándo).
 model CostCalculation {
-  id              String        @id @default(uuid()) @db.Uuid
-  costStructureId String        @db.Uuid
-  costStructure   CostStructure @relation(fields: [costStructureId], references: [id], onDelete: Cascade)
-  userId          String        @db.Uuid
-  macroSnapshotId String?       @db.Uuid
+  id                        String                   @id @default(uuid()) @db.Uuid
+  costStructureId           String                   @db.Uuid
+  costStructure             CostStructure            @relation(fields: [costStructureId], references: [id], onDelete: Cascade)
+  userId                    String                   @db.Uuid
+  macroSnapshotId           String?                  @db.Uuid
   priceIndexSeriesVersionId String?                  @db.Uuid
   priceIndexSeriesVersion   PriceIndexSeriesVersion? @relation(fields: [priceIndexSeriesVersionId], references: [id], onDelete: SetNull)
 
@@ -831,12 +836,14 @@ model MacroSnapshot {
   @@map("macro_snapshots")
 }
 
-/** Una única serie de precios por empresa. Fuente y momento cero son fijos. */
+/**
+ * Una única serie de precios por empresa. Fuente y momento cero son fijos.
+ */
 model PriceIndexSeries {
-  id             String  @id @default(uuid()) @db.Uuid
-  companyId      String  @unique @db.Uuid
-  company        Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId         String  @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @unique @db.Uuid
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId         String   @db.Uuid
   source         String
   basePeriodCode String
   createdAt      DateTime @default(now()) @db.Timestamptz
@@ -847,17 +854,19 @@ model PriceIndexSeries {
   @@map("price_index_series")
 }
 
-/** Snapshot append-only completo de la serie usado por cálculos auditables. */
+/**
+ * Snapshot append-only completo de la serie usado por cálculos auditables.
+ */
 model PriceIndexSeriesVersion {
-  id          String           @id @default(uuid()) @db.Uuid
-  seriesId    String           @db.Uuid
-  series      PriceIndexSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  companyId   String           @db.Uuid
-  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId      String           @db.Uuid
-  version     Int
-  createdBy   String           @db.Uuid
-  createdAt   DateTime         @default(now()) @db.Timestamptz
+  id        String           @id @default(uuid()) @db.Uuid
+  seriesId  String           @db.Uuid
+  series    PriceIndexSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  companyId String           @db.Uuid
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String           @db.Uuid
+  version   Int
+  createdBy String           @db.Uuid
+  createdAt DateTime         @default(now()) @db.Timestamptz
 
   values       PriceIndexValue[]
   calculations CostCalculation[]
@@ -868,17 +877,19 @@ model PriceIndexSeriesVersion {
   @@map("price_index_series_versions")
 }
 
-/** Un coeficiente mensual dentro de un snapshot; nunca se actualiza. */
+/**
+ * Un coeficiente mensual dentro de un snapshot; nunca se actualiza.
+ */
 model PriceIndexValue {
-  id        String                  @id @default(uuid()) @db.Uuid
-  versionId String                  @db.Uuid
-  version   PriceIndexSeriesVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  companyId String                  @db.Uuid
-  company   Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId    String                  @db.Uuid
+  id         String                  @id @default(uuid()) @db.Uuid
+  versionId  String                  @db.Uuid
+  version    PriceIndexSeriesVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  companyId  String                  @db.Uuid
+  company    Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId     String                  @db.Uuid
   periodCode String
-  indexValue Decimal                @db.Decimal(18, 6)
-  createdAt DateTime                @default(now()) @db.Timestamptz
+  indexValue Decimal                 @db.Decimal(18, 6)
+  createdAt  DateTime                @default(now()) @db.Timestamptz
 
   @@unique([versionId, periodCode])
   @@index([companyId, periodCode])
@@ -1125,7 +1136,7 @@ model DataEntry {
 
   history              ValidationHistory[]
   classificationAudits ClassificationAudit[]
-  classifierAiCalls     ClassifierAiCall[]
+  classifierAiCalls    ClassifierAiCall[]
   // Datos trazables que nacieron de este documento (T-06). Es el puente que
   // permite ir del número de la ficha a la clasificación que lo produjo.
   dataPointVersions    DataPointVersion[]
@@ -1375,7 +1386,6 @@ enum CostElement {
 
 /**
  * Cómo varía un concepto frente al volumen de actividad.
- *
  * `FIJO` no significa que el importe sea inmutable: puede cambiar por precio,
  * contrato o período. Significa solamente que no varía con el volumen.
  */
@@ -1532,16 +1542,16 @@ enum RunTrigger {
 }
 
 model CalculationRun {
-  id             String        @id @default(uuid()) @db.Uuid
-  structureId    String        @db.Uuid
-  structure      CostStructure @relation(fields: [structureId], references: [id])
-  runN           Int
-  engineVersion  String
-  executedBy     String        @db.Uuid
-  executedByUser User          @relation(fields: [executedBy], references: [id])
-  executedAt     DateTime      @default(now()) @db.Timestamptz
-  inputsSnapshot Json
-  results        Json
+  id                        String                   @id @default(uuid()) @db.Uuid
+  structureId               String                   @db.Uuid
+  structure                 CostStructure            @relation(fields: [structureId], references: [id])
+  runN                      Int
+  engineVersion             String
+  executedBy                String                   @db.Uuid
+  executedByUser            User                     @relation(fields: [executedBy], references: [id])
+  executedAt                DateTime                 @default(now()) @db.Timestamptz
+  inputsSnapshot            Json
+  results                   Json
   priceIndexSeriesVersionId String?                  @db.Uuid
   priceIndexSeriesVersion   PriceIndexSeriesVersion? @relation(fields: [priceIndexSeriesVersionId], references: [id], onDelete: SetNull)
 
@@ -1558,6 +1568,7 @@ model CalculationRun {
   // no el período entero.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -1710,18 +1721,18 @@ enum VaultSourceType {
 }
 
 model VaultChunk {
-  id          String                       @id @default(uuid()) @db.Uuid
-  sourceFile  String // path relativo dentro del vault, ej: "Costeo/Metodo-FIFO.md"
-  sourceTitle String // título de la nota (H1 o nombre de archivo)
-  headingPath String? // ej: "Costeo por Procesos > Método FIFO"
-  content     String
-  contentHash String // sha256 de headingPath+content — evita re-embedear sin cambios
-  chunkIndex  Int
-  vaultCommit String // sha del commit del vault de origen (trazabilidad)
+  id               String                       @id @default(uuid()) @db.Uuid
+  sourceFile       String // path relativo dentro del vault, ej: "Costeo/Metodo-FIFO.md"
+  sourceTitle      String // título de la nota (H1 o nombre de archivo)
+  headingPath      String? // ej: "Costeo por Procesos > Método FIFO"
+  content          String
+  contentHash      String // sha256 de headingPath+content — evita re-embedear sin cambios
+  chunkIndex       Int
+  vaultCommit      String // sha del commit del vault de origen (trazabilidad)
   // Namespace por origen. Nullable: los chunks previos a F1-06 se backfillean
   // por carpeta en la migración; los que no matcheen una carpeta conocida
   // quedan en null hasta el próximo reindex.
-  sourceType  VaultSourceType?
+  sourceType       VaultSourceType?
   // Contexto de 1-2 frases que F1-05 antepone al `content` antes de embeber
   // (Contextual Retrieval). Nullable hasta que ese issue entre y se reindexe.
   contextualPrefix String?
@@ -1736,14 +1747,14 @@ model VaultChunk {
   // ofrecer generar una migración que lo borre: SIEMPRE rechazar ese prompt.
   // Para verificar el estado de las migraciones usar `prisma migrate status`,
   // no `migrate dev`.
-  embedding   Unsupported("vector(1024)")?
+  embedding        Unsupported("vector(1024)")?
   // Columna GENERADA (STORED) a partir de `content`, para full-text search en
   // español. Mismo caso que `embedding`: Prisma no puede representar columnas
   // generadas ni su índice GIN, sufre el mismo problema de drift-detection
   // descrito arriba. Nunca se escribe manualmente, Postgres la recalcula sola.
-  contentTsv  Unsupported("tsvector")?
-  createdAt   DateTime                     @default(now())
-  updatedAt   DateTime                     @updatedAt
+  contentTsv       Unsupported("tsvector")?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
 
   @@unique([sourceFile, chunkIndex])
   @@map("vault_chunks")
@@ -1855,20 +1866,20 @@ model VaultChatMessage {
 // proxy" del panel admin por métricas reales. Sin RLS: es operativo, no dato de
 // un tenant (mismo criterio que vault_chunks).
 model VaultQueryLog {
-  id                 String   @id @default(uuid()) @db.Uuid
-  question           String
-  retrieverVersion   String // qué versión del retriever respondió (ej. "v1-cosine")
-  embeddingModel     String
-  llmModel           String
+  id                  String   @id @default(uuid()) @db.Uuid
+  question            String
+  retrieverVersion    String // qué versión del retriever respondió (ej. "v1-cosine")
+  embeddingModel      String
+  llmModel            String
   // [{ sourceFile, headingPath, distance, rrfScore?, rerankScore? }] de cada chunk usado
-  chunksReturned     Json
-  confidence         String // HIGH | LOW | NONE
+  chunksReturned      Json
+  confidence          String // HIGH | LOW | NONE
   answeredFromContext Boolean
-  latencyMs          Int
-  userId             String?  @db.Uuid
+  latencyMs           Int
+  userId              String?  @db.Uuid
   // 👍/👎 del consumidor. null = sin feedback todavía.
-  feedbackUseful     Boolean?
-  createdAt          DateTime @default(now())
+  feedbackUseful      Boolean?
+  createdAt           DateTime @default(now())
 
   @@index([createdAt])
   @@map("vault_query_log")
@@ -1965,6 +1976,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -1991,6 +2003,7 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2035,6 +2048,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
   periodCostMp           Decimal? @db.Decimal(18, 4)
@@ -2070,6 +2084,7 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2271,30 +2286,31 @@ model IndustryProfile {
 }
 
 model PaqueteRubro {
-  id String @id @default(uuid()) @db.Uuid
-  category String
-  companyId String? @db.Uuid
-  structureId String? @db.Uuid
-  periodId String? @db.Uuid
-  userId String? @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
+  category       String
+  companyId      String?  @db.Uuid
+  structureId    String?  @db.Uuid
+  periodId       String?  @db.Uuid
+  userId         String?  @db.Uuid
   /// Nombre corto visible del producto que declara el paquete (por ejemplo,
   /// "AVI"). Nullable para paquetes históricos o que no necesiten marca.
   nombreProducto String?
-  lexicon Json
-  icons Json
-  variants Json
+  lexicon        Json
+  icons          Json
+  variants       Json
   seedParameters Json
-  alertRules Json
-  screens Json
+  alertRules     Json
+  screens        Json
   /// Módulos declarativos del rubro. Cada uno informa qué habilita, qué
   /// preguntas vuelven relevantes y su estado inicial para un tenant nuevo.
-  modulos Json @default("[]")
+  modulos        Json     @default("[]")
   // Escala de calibración del perfil: { value, unit }. Nullable hasta que el
   // rubro la declare; la cascada no inventa una si no hay dato.
-  scale Json?
-  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paquetes_rubro_company_fkey")
-  createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt @db.Timestamptz
+  scale          Json?
+  company        Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paquetes_rubro_company_fkey")
+  createdAt      DateTime @default(now()) @db.Timestamptz
+  updatedAt      DateTime @updatedAt @db.Timestamptz
+
   @@index([category, companyId, structureId, periodId], map: "paquetes_rubro_scope_idx")
   @@map("paquetes_rubro")
 }
@@ -2337,16 +2353,16 @@ model ConfiguracionModuloRubro {
  * solo puede imprimirlo.
  */
 model UnidadMedida {
-  reglasAlerta         ReglaAlerta[]
-  activosAmortizables  ActivoAmortizable[]
-  desperdicioRegistros DesperdicioRegistro[]
-  depositos            Deposito[]
-  ventasProducto       VentaProducto[]
-  id                   String                @id @default(uuid()) @db.Uuid
-  companyId            String                @db.Uuid
-  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  empresasQueLaGestionan Company[]           @relation("UnidadGestion")
-  userId               String                @db.Uuid // denormalizado para RLS
+  reglasAlerta           ReglaAlerta[]
+  activosAmortizables    ActivoAmortizable[]
+  desperdicioRegistros   DesperdicioRegistro[]
+  depositos              Deposito[]
+  ventasProducto         VentaProducto[]
+  id                     String                @id @default(uuid()) @db.Uuid
+  companyId              String                @db.Uuid
+  company                Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  empresasQueLaGestionan Company[]             @relation("UnidadGestion")
+  userId                 String                @db.Uuid // denormalizado para RLS
 
   /**
    * Estable y en minúsculas: "cajon", "maple", "huevo", "kg".
@@ -2466,7 +2482,6 @@ model ParametroCosteo {
  * amortización del plantel "parecía" variable porque crecía con la
  * producción, pero la CAUSA (el tiempo) la hace fija (R6) — `AM17` la llama
  * "el error más caro del proyecto".
- *
  * `otra` existe para no forzar una causa falsa cuando ninguna de las
  * conocidas aplica; el costista todavía puede declarar el comportamiento sin
  * necesidad de inventar una causa que no es.
@@ -2480,7 +2495,9 @@ enum CausaVariabilidad {
   otra
 }
 
-/** Método usado para separar un costo semifijo entre su porción fija y variable. */
+/**
+ * Método usado para separar un costo semifijo entre su porción fija y variable.
+ */
 enum MetodoTramoSemifijo {
   PUNTOS_EXTREMOS
   CORRELACION
@@ -2496,33 +2513,29 @@ enum TipoTramoCosto {
 /**
  * M1-01 (plan de análisis marginal v2). Clasificación de costos POR CONCEPTO,
  * por debajo de los tres baldes de `ParametroCosteo`.
- *
  * Por qué existe: `ParametroCosteo.comportamientoVolumen` clasifica el CIP
  * ENTERO con una sola etiqueta. Un CIP real mezcla energía (variable) con
  * depreciación (fija) — con un solo balde hay que elegir una de las dos para
  * las dos. `ConceptoCosteo` permite bajar la clasificación a cada concepto.
- *
  * 🔴 Compatibilidad (regla dura de la tarea): una empresa sin ningún
  * `ConceptoCosteo` cargado resuelve EXACTAMENTE como hoy, contra los tres
  * baldes. Esta tabla nace vacía — el onboarding la puebla cuando el cliente
  * desagrega, la migración no crea ningún concepto.
- *
  * Cascada idéntica a `ParametroCosteo`: `período → estructura → empresa`,
  * NULL en los dos primeros vale "para todo lo de arriba".
- *
  * Los cuatro campos nuevos que la v1 del plan no tenía, cada uno con su regla
  * dura:
- *   - `causaVariabilidad` → R4 (la clasificación es por causalidad, no por
- *     variabilidad observada) y R6 (amortización: tiempo = fija, intensidad
- *     de uso = variable).
- *   - `horizonteErogableMeses` → R7 ("erogable" sin horizonte no significa
- *     nada: depende del plazo del análisis).
- *   - `evitable` → R19 (los fijos indirectos evitables van en fila propia,
- *     antes de los inevitables) y R25 (fabricar-vs-comprar: el numerador es
- *     el fijo EVITABLE). NO es sinónimo de `erogable`: un alquiler con
- *     contrato es erogable e inevitable a la vez.
- *   - `rangoActividadDesde/Hasta` → R5 (todo costo declarado fijo tiene que
- *     declarar el rango de actividad en el que esa afirmación vale).
+ * - `causaVariabilidad` → R4 (la clasificación es por causalidad, no por
+ * variabilidad observada) y R6 (amortización: tiempo = fija, intensidad
+ * de uso = variable).
+ * - `horizonteErogableMeses` → R7 ("erogable" sin horizonte no significa
+ * nada: depende del plazo del análisis).
+ * - `evitable` → R19 (los fijos indirectos evitables van en fila propia,
+ * antes de los inevitables) y R25 (fabricar-vs-comprar: el numerador es
+ * el fijo EVITABLE). NO es sinónimo de `erogable`: un alquiler con
+ * contrato es erogable e inevitable a la vez.
+ * - `rangoActividadDesde/Hasta` → R5 (todo costo declarado fijo tiene que
+ * declarar el rango de actividad en el que esa afirmación vale).
  */
 model ConceptoCosteo {
   id        String  @id @default(uuid()) @db.Uuid
@@ -2530,19 +2543,27 @@ model ConceptoCosteo {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   userId    String  @db.Uuid // denormalizado para RLS
 
-  /** NULL = vale para toda la empresa. */
+  /**
+   * NULL = vale para toda la empresa.
+   */
   structureId String?        @db.Uuid
   structure   CostStructure? @relation(fields: [structureId], references: [id], onDelete: Cascade)
 
-  /** NULL = default de la estructura; con valor, aplica solo a ese período. */
+  /**
+   * NULL = default de la estructura; con valor, aplica solo a ese período.
+   */
   periodId String?     @db.Uuid
   period   CostPeriod? @relation(fields: [periodId], references: [id], onDelete: Cascade)
 
-  /** Estable, en snake_case: "amortizacion_plantel", "energia_planta". */
+  /**
+   * Estable, en snake_case: "amortizacion_plantel", "energia_planta".
+   */
   clave       String
   descripcion String?
 
-  /** A qué renglón del motor ancla este concepto. */
+  /**
+   * A qué renglón del motor ancla este concepto.
+   */
   elemento CostElement
 
   comportamientoVolumen ComportamientoCosto?
@@ -2553,11 +2574,15 @@ model ConceptoCosteo {
 
   evitable Boolean?
 
-  /** Para segmentación futura (M4-01): a qué nivel aplica este concepto. */
+  /**
+   * Para segmentación futura (M4-01): a qué nivel aplica este concepto.
+   */
   nivelSegmentacion String?
   segmentoId        String? @db.Uuid
 
-  /** R5: rango de actividad dentro del cual la clasificación FIJO vale. */
+  /**
+   * R5: rango de actividad dentro del cual la clasificación FIJO vale.
+   */
   rangoActividadDesde Decimal? @db.Decimal(18, 6)
   rangoActividadHasta Decimal? @db.Decimal(18, 6)
 
@@ -2575,9 +2600,12 @@ model ConceptoCosteo {
   updatedAt DateTime  @updatedAt @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
 
-  /** Versiones de la separación semifija. La vigente es la que no tiene deletedAt. */
+  /**
+   * Versiones de la separación semifija. La vigente es la que no tiene deletedAt.
+   */
   tramosSemifijos TramoSemifijo[]
   tramosCosto     TramoCosto[]
+  importes        ConceptoCosteoImporte[]
 
   @@unique([companyId, structureId, periodId, clave])
   @@index([companyId, clave])
@@ -2586,7 +2614,33 @@ model ConceptoCosteo {
   @@map("conceptos_costeo")
 }
 
-/** M10-01: versión append-only de una estructura de costos/capacidad. */
+/**
+ * M3-03b. Valor nominal versionado de un concepto. Ninguna corrección pisa
+ * importes: cada declaración es una fila y `vigenteDesde` elige la aplicable.
+ */
+model ConceptoCosteoImporte {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId  String         @db.Uuid
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "conceptos_costeo_importes_companyId_fkey")
+  userId     String         @db.Uuid
+  conceptoId String         @db.Uuid
+  concepto   ConceptoCosteo @relation(fields: [conceptoId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "conceptos_costeo_importes_conceptoId_fkey")
+
+  importeFijo             Decimal? @db.Decimal(18, 6)
+  importeVariableUnitario Decimal? @db.Decimal(18, 6)
+  moneda                  String   @db.VarChar(3)
+  unidad                  String   @db.VarChar(80)
+  vigenteDesde            DateTime @db.Timestamptz
+  creadoPorUserId         String   @db.Uuid
+  createdAt               DateTime @default(now()) @db.Timestamptz
+
+  @@index([companyId, conceptoId, vigenteDesde, createdAt])
+  @@map("conceptos_costeo_importes")
+}
+
+/**
+ * M10-01: versión append-only de una estructura de costos/capacidad.
+ */
 model TramoCosto {
   id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId String  @db.Uuid
@@ -2616,16 +2670,18 @@ model TramoCosto {
   @@map("tramos_costo")
 }
 
-/** Foto inmutable del resultado y de las versiones de tramo utilizadas. */
+/**
+ * Foto inmutable del resultado y de las versiones de tramo utilizadas.
+ */
 model EquilibrioTramosCalculo {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  companyId    String   @db.Uuid
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "equilibrio_tramos_calculos_companyId_fkey")
-  userId       String   @db.Uuid
-  tramoCostoIds String[] @default([]) @db.Uuid
-  resultado    Json
-  creadoPorUserId String @db.Uuid
-  createdAt    DateTime @default(now()) @db.Timestamptz
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId       String   @db.Uuid
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "equilibrio_tramos_calculos_companyId_fkey")
+  userId          String   @db.Uuid
+  tramoCostoIds   String[] @default([]) @db.Uuid
+  resultado       Json
+  creadoPorUserId String   @db.Uuid
+  createdAt       DateTime @default(now()) @db.Timestamptz
 
   @@index([companyId, createdAt])
   @@map("equilibrio_tramos_calculos")
@@ -2633,7 +2689,6 @@ model EquilibrioTramosCalculo {
 
 /**
  * M1-02. Separación auditable de un `ConceptoCosteo` SEMIFIJO.
- *
  * Las observaciones conservan los pares (volumen, importe) que justificaron
  * el método. Las correcciones son append-only: guardar otra separación marca
  * la anterior como reemplazada, pero nunca pisa sus importes ni su evidencia.
@@ -2647,18 +2702,22 @@ model TramoSemifijo {
   conceptoId String         @db.Uuid
   concepto   ConceptoCosteo @relation(fields: [conceptoId], references: [id], onDelete: Cascade)
 
-  porcionFija     Decimal @db.Decimal(18, 6)
-  porcionVariable Decimal @db.Decimal(18, 6)
-  metodo          MetodoTramoSemifijo
+  porcionFija       Decimal             @db.Decimal(18, 6)
+  porcionVariable   Decimal             @db.Decimal(18, 6)
+  metodo            MetodoTramoSemifijo
   observacionesBase Json
 
-  /** Derivados del método, persistidos para que el cálculo sea auditable. */
+  /**
+   * Derivados del método, persistidos para que el cálculo sea auditable.
+   */
   costoVariableUnitario  Decimal? @db.Decimal(18, 6)
   coeficienteCorrelacion Decimal? @db.Decimal(18, 6)
 
-  creadoPorUserId String   @db.Uuid
-  createdAt       DateTime @default(now()) @db.Timestamptz
-  /** NULL = versión vigente; con fecha = reemplazada lógicamente. */
+  creadoPorUserId String    @db.Uuid
+  createdAt       DateTime  @default(now()) @db.Timestamptz
+  /**
+   * NULL = versión vigente; con fecha = reemplazada lógicamente.
+   */
   deletedAt       DateTime? @db.Timestamptz
 
   @@index([companyId, conceptoId])
@@ -2703,7 +2762,9 @@ enum TipoMovimientoDeposito {
   EGRESO
 }
 
-/** Almacén físico genérico; su nombre visible corresponde al paquete de rubro. */
+/**
+ * Almacén físico genérico; su nombre visible corresponde al paquete de rubro.
+ */
 model Deposito {
   id        String  @id @default(uuid()) @db.Uuid
   companyId String  @db.Uuid
@@ -2711,34 +2772,36 @@ model Deposito {
   userId    String  @db.Uuid
 
   referencia String
-  capacidad  Decimal @db.Decimal(18, 4)
-  unidadId   String  @db.Uuid
+  capacidad  Decimal      @db.Decimal(18, 4)
+  unidadId   String       @db.Uuid
   unidad     UnidadMedida @relation(fields: [unidadId], references: [id], onDelete: Restrict)
   // Regla por depósito, expresada en la misma unidad física que sus movimientos.
-  umbralBajo Decimal @db.Decimal(18, 4)
+  umbralBajo Decimal      @db.Decimal(18, 4)
 
   movimientos MovimientoDeposito[]
-  createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt @db.Timestamptz
-  deletedAt DateTime? @db.Timestamptz
+  createdAt   DateTime             @default(now()) @db.Timestamptz
+  updatedAt   DateTime             @updatedAt @db.Timestamptz
+  deletedAt   DateTime?            @db.Timestamptz
 
   @@unique([companyId, referencia])
   @@index([companyId])
   @@map("depositos")
 }
 
-/** Hechos de entrada y salida; el nivel nunca se materializa. */
+/**
+ * Hechos de entrada y salida; el nivel nunca se materializa.
+ */
 model MovimientoDeposito {
-  id        String  @id @default(uuid()) @db.Uuid
-  companyId String  @db.Uuid
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId    String  @db.Uuid
-  depositoId String @db.Uuid
-  deposito Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
-  tipo TipoMovimientoDeposito
-  cantidad Decimal @db.Decimal(18, 4)
-  fecha DateTime @db.Date
-  createdAt DateTime @default(now()) @db.Timestamptz
+  id         String                 @id @default(uuid()) @db.Uuid
+  companyId  String                 @db.Uuid
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId     String                 @db.Uuid
+  depositoId String                 @db.Uuid
+  deposito   Deposito               @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+  tipo       TipoMovimientoDeposito
+  cantidad   Decimal                @db.Decimal(18, 4)
+  fecha      DateTime               @db.Date
+  createdAt  DateTime               @default(now()) @db.Timestamptz
 
   @@index([companyId, depositoId, fecha])
   @@map("movimientos_deposito")
@@ -2761,7 +2824,7 @@ model LoteProductivo {
   referencia String
   activo     Boolean @default(true)
 
-  eventos EventoLote[]
+  eventos             EventoLote[]
   produccionesDiarias ProduccionDiaria[]
 
   createdAt DateTime  @default(now()) @db.Timestamptz
@@ -2775,7 +2838,9 @@ model LoteProductivo {
   @@map("lotes_productivos")
 }
 
-/** Un movimiento físico del lote; nunca guarda la población resultante. */
+/**
+ * Un movimiento físico del lote; nunca guarda la población resultante.
+ */
 enum TipoEventoLote {
   ALTA
   BAJA
@@ -2795,7 +2860,6 @@ enum MotivoBajaLote {
 /**
  * Hechos que modifican la población de un lote. `cantidadViva` no existe como
  * columna: se deriva de las altas y de las bajas que ya tienen motivo.
- *
  * Una baja histórica/importada sin motivo se conserva para que pueda revisarse,
  * pero no entra al saldo ni a ningún cálculo hasta que alguien la clasifique.
  */
@@ -2808,11 +2872,11 @@ model EventoLote {
   loteId String         @db.Uuid
   lote   LoteProductivo @relation(fields: [companyId, loteId], references: [companyId, id], onDelete: Restrict)
 
-  tipo     TipoEventoLote
-  cantidad Decimal          @db.Decimal(18, 4)
-  motivo   MotivoBajaLote?
-  fecha    DateTime         @db.Date
-  requiereRevision Boolean  @default(false)
+  tipo             TipoEventoLote
+  cantidad         Decimal         @db.Decimal(18, 4)
+  motivo           MotivoBajaLote?
+  fecha            DateTime        @db.Date
+  requiereRevision Boolean         @default(false)
   motivoRevision   String?
 
   createdAt DateTime  @default(now()) @db.Timestamptz
@@ -2836,18 +2900,18 @@ model ProduccionDiaria {
   loteId String         @db.Uuid
   lote   LoteProductivo @relation(fields: [companyId, loteId], references: [companyId, id], onDelete: Restrict)
 
-  fecha               DateTime @db.Date
-  variante            String
-  unidadesProducidas  Decimal  @db.Decimal(18, 4)
-  roturas             Decimal  @default(0) @db.Decimal(18, 4)
-  descartes           Decimal  @default(0) @db.Decimal(18, 4)
-  requiereRevision    Boolean  @default(false)
-  motivoRevision      String?
+  fecha              DateTime @db.Date
+  variante           String
+  unidadesProducidas Decimal  @db.Decimal(18, 4)
+  roturas            Decimal  @default(0) @db.Decimal(18, 4)
+  descartes          Decimal  @default(0) @db.Decimal(18, 4)
+  requiereRevision   Boolean  @default(false)
+  motivoRevision     String?
 
   egresosProducto EgresoProducto[]
 
-  createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt @db.Timestamptz
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
   deletedAt DateTime? @db.Timestamptz
 
   @@unique([companyId, loteId, fecha, variante])
@@ -2862,15 +2926,15 @@ model ProduccionDiaria {
  * del stock. El saldo siempre se deriva de producción menos estos egresos.
  */
 model EgresoProducto {
-  id            String            @id @default(uuid()) @db.Uuid
-  companyId     String            @db.Uuid
-  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userId        String            @db.Uuid // denormalizado para RLS
-  produccionId  String            @db.Uuid
-  produccion    ProduccionDiaria  @relation(fields: [produccionId], references: [id], onDelete: Restrict)
-  cantidad      Decimal           @db.Decimal(18, 4)
-  fecha         DateTime          @db.Date
-  createdAt     DateTime          @default(now()) @db.Timestamptz
+  id           String           @id @default(uuid()) @db.Uuid
+  companyId    String           @db.Uuid
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId       String           @db.Uuid // denormalizado para RLS
+  produccionId String           @db.Uuid
+  produccion   ProduccionDiaria @relation(fields: [produccionId], references: [id], onDelete: Restrict)
+  cantidad     Decimal          @db.Decimal(18, 4)
+  fecha        DateTime         @db.Date
+  createdAt    DateTime         @default(now()) @db.Timestamptz
 
   @@index([companyId, produccionId, fecha])
   @@map("egresos_producto")
@@ -2893,10 +2957,10 @@ model VentaProducto {
   canal    String
   variante String
 
-  cantidad       Decimal       @db.Decimal(18, 4)
-  precioUnitario Decimal       @db.Decimal(18, 4)
-  unidadId       String        @db.Uuid
-  unidad         UnidadMedida  @relation(fields: [unidadId], references: [id], onDelete: Restrict)
+  cantidad       Decimal      @db.Decimal(18, 4)
+  precioUnitario Decimal      @db.Decimal(18, 4)
+  unidadId       String       @db.Uuid
+  unidad         UnidadMedida @relation(fields: [unidadId], references: [id], onDelete: Restrict)
 
   createdAt DateTime  @default(now()) @db.Timestamptz
   updatedAt DateTime  @updatedAt @db.Timestamptz

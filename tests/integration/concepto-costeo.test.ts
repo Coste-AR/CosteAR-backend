@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConceptoCosteoService } from '@/application/parametros/concepto-costeo-service.js';
 import { TramoSemifijoService } from '@/application/parametros/tramo-semifijo-service.js';
 import { TramoCostoService } from '@/application/parametros/tramo-costo-service.js';
+import { PuntoCierreService } from '@/application/parametros/punto-cierre-service.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { withTenant } from '@/infrastructure/database/prisma.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
@@ -180,5 +181,27 @@ describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
 
     await expect(withTenantContext(B.userId, () => tramos.listar(B.userId, A.companyId)))
       .rejects.toThrow(/empresa no encontrada/i);
+  });
+
+  it('ImporteConcepto: corrige con fila nueva, conserva versiones y RLS aísla empresas', async () => {
+    const conceptos = new ConceptoCosteoService(db);
+    const puntoCierre = new PuntoCierreService(db);
+    const concepto = await withTenantContext(A.userId, () => conceptos.crear(
+      A.userId, A.companyId,
+      { clave: 'costo_variable_versionado', elemento: 'MP', comportamientoVolumen: 'VARIABLE', causaVariabilidad: 'volumen', erogable: true, horizonteErogableMeses: 1, confirmado: true },
+      actor(A.userId),
+    ));
+    const primero = await withTenantContext(A.userId, () => puntoCierre.guardarImporte(A.userId, 'EMPRESA_ADMIN', A.companyId, concepto.id, {
+      importeVariableUnitario: 200, moneda: 'ARS', unidad: 'unidad', vigenteDesde: '2026-01-01T00:00:00.000Z',
+    }, actor(A.userId)));
+    const segundo = await withTenantContext(A.userId, () => puntoCierre.guardarImporte(A.userId, 'EMPRESA_ADMIN', A.companyId, concepto.id, {
+      importeVariableUnitario: 244, moneda: 'ARS', unidad: 'unidad', vigenteDesde: '2026-02-01T00:00:00.000Z',
+    }, actor(A.userId)));
+    expect(segundo.id).not.toBe(primero.id);
+    const versiones = await withTenant(A.userId, (tx) => tx.conceptoCosteoImporte.findMany({ where: { conceptoId: concepto.id }, orderBy: { vigenteDesde: 'asc' } }));
+    expect(versiones.map((v) => Number(v.importeVariableUnitario))).toEqual([200, 244]);
+    await expect(withTenant(A.userId, (tx) => tx.conceptoCosteoImporte.update({ where: { id: primero.id }, data: { importeVariableUnitario: 1 } }))).rejects.toThrow();
+    const vistoPorB = await withTenant(B.userId, (tx) => tx.conceptoCosteoImporte.findMany({ where: { conceptoId: concepto.id } }));
+    expect(vistoPorB).toEqual([]);
   });
 });

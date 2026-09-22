@@ -189,6 +189,8 @@ export type PuntoCierrePorHorizonte = ResultadoFormulaPuntoCierre & {
   costoVariableUnitarioErogable: number | null;
   contribucionMarginalFinanciera: number | null;
   situacion: typeof TEXTO_SOSTIENE_CAJA | null;
+  conceptosIncluidos: ContextoFormulaEquilibrio['basadoEn'];
+  conceptosExcluidos: ContextoFormulaEquilibrio['basadoEn'];
 };
 
 /** Devuelve todos los horizontes pedidos; nunca colapsa 1 y 12 meses en un único número. */
@@ -223,6 +225,8 @@ export function calcularPuntosCierre(input: {
       costosFijosErogables: perfil.incompleto ? null : perfil.costosFijosErogables,
       costoVariableUnitarioErogable: perfil.incompleto ? null : perfil.costoVariableUnitarioErogable,
       contribucionMarginalFinanciera: perfil.incompleto ? null : perfil.contribucionMarginalFinanciera,
+      conceptosIncluidos: perfil.incompleto ? [] : perfil.conceptosIncluidos,
+      conceptosExcluidos: perfil.incompleto ? [] : perfil.conceptosExcluidos,
       situacion,
     };
   });

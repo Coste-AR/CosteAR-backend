@@ -12,6 +12,8 @@ import { separarTramoSemifijoSchema } from '../../../shared/schemas/tramo-semifi
 import { TramoCostoService } from '../../../application/parametros/tramo-costo-service.js';
 import { equilibrioTramosEnvelopeSchema, guardarTramoCostoSchema, tramoCostoEnvelopeSchema, tramosCostoEnvelopeSchema } from '../../../shared/schemas/tramo-costo.schema.js';
 import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
+import { PuntoCierreService } from '../../../application/parametros/punto-cierre-service.js';
+import { guardarImporteConceptoSchema, importeConceptoEnvelopeSchema, puntoCierreEnvelopeSchema, puntoCierreQuerySchema } from '../../../shared/schemas/punto-cierre.schema.js';
 
 /**
  * CONCEPTOS DE COSTEO (M1-01, plan de análisis marginal v2).
@@ -49,7 +51,30 @@ export async function registerConceptoCosteoRoutes(app: FastifyInstance): Promis
   const service = new ConceptoCosteoService();
   const tramoService = new TramoSemifijoService();
   const tramoCostoService = new TramoCostoService();
+  const puntoCierreService = new PuntoCierreService();
   const contract = app.withTypeProvider<ZodTypeProvider>();
+
+  contract.post(
+    '/companies/:companyId/conceptos-costeo/:id/importes',
+    { preHandler: authenticate, schema: { response: { 201: importeConceptoEnvelopeSchema, ...apiErrorResponses } } },
+    async (request, reply) => {
+      const { companyId, id } = conceptoParams.parse(request.params);
+      const body = guardarImporteConceptoSchema.parse(request.body);
+      const data = await puntoCierreService.guardarImporte(request.authUser!.id, request.authUser!.role, companyId, id, body, actorFrom(request));
+      reply.code(201);
+      return { data };
+    },
+  );
+
+  contract.get(
+    '/companies/:companyId/analisis/punto-cierre',
+    { preHandler: authenticate, schema: { response: { 200: puntoCierreEnvelopeSchema, ...apiErrorResponses } } },
+    async (request) => {
+      const { companyId } = companyParams.parse(request.params);
+      const query = puntoCierreQuerySchema.parse(request.query);
+      return { data: await puntoCierreService.calcular(request.authUser!.id, companyId, query) };
+    },
+  );
 
   contract.get(
     '/companies/:companyId/tramos-costo',
