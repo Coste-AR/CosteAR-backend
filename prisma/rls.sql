@@ -415,6 +415,14 @@ CREATE POLICY tenant_isolation ON conceptos_costeo
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- M3-03b: importes nominales versionados de cada concepto.
+ALTER TABLE conceptos_costeo_importes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conceptos_costeo_importes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON conceptos_costeo_importes;
+CREATE POLICY tenant_isolation ON conceptos_costeo_importes
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- tramos_semifijos (M1-02): versiones de la separación por concepto.
 ALTER TABLE tramos_semifijos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tramos_semifijos FORCE ROW LEVEL SECURITY;
