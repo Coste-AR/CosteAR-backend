@@ -69,6 +69,11 @@ describe('A-07 — tablero del dueño por período', () => {
       clave: CATEGORIA_AVICOLA_POSTURA,
       nombreProducto: 'AVI',
       icons: PAQUETE_AVICOLA_POSTURA.icons,
+      kpisHome: [
+        { clave: 'costo_cajon', etiqueta: 'Costo por cajón', unidad: 'ARS/cajon', valor: 60, completo: true },
+        { clave: 'contribucion_marginal_cajon', etiqueta: 'Contribución marginal por cajón', unidad: 'ARS/cajon', valor: 24, completo: true },
+        { clave: 'punto_equilibrio', etiqueta: 'Punto de equilibrio', unidad: 'cajones', valor: 2, completo: true },
+      ],
     });
   });
 
