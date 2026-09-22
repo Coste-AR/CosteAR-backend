@@ -15,6 +15,7 @@ export async function seedPaqueteAvicola(db: PrismaClient = prisma) {
       // por empresa viven en `ConfiguracionModuloRubro` y no se pisan aquí.
       data: {
         lexicon: PAQUETE_AVICOLA_POSTURA.lexicon,
+        nombreProducto: PAQUETE_AVICOLA_POSTURA.nombreProducto,
         icons: PAQUETE_AVICOLA_POSTURA.icons,
         variants: PAQUETE_AVICOLA_POSTURA.variants,
         seedParameters: PAQUETE_AVICOLA_POSTURA.seedParameters,

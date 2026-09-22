@@ -44,6 +44,7 @@ const unidadGestionSchema = z.object({
 
 const rubroSchema = z.object({
   clave: z.string(),
+  nombreProducto: z.string().nullable(),
   icons: z.record(z.string()),
 });
 
@@ -55,8 +56,8 @@ export const ownerDashboardResponseSchema = z.object({
   // La unidad de gestión que declaró la empresa (#274/#252). `null` explícito
   // cuando no hay una declarada — nunca un default inventado.
   unidadGestion: unidadGestionSchema.nullable(),
-  // El paquete asociado a la empresa declara tanto la clave estable como sus
-  // íconos. `null` evita inferir el rubro desde `Company.industry`.
+  // El paquete asociado a la empresa declara la clave estable, el nombre corto
+  // visible y sus íconos. `null` evita inferirlos desde `Company.industry`.
   rubro: rubroSchema.nullable(),
   pendientes: z.array(pendienteCierreSchema),
   costoPorCajon: z.object({

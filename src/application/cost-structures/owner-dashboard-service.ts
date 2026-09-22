@@ -164,7 +164,11 @@ export class OwnerDashboardService {
       ? await new PaqueteRubroService(this.db).resolve(userId, categoriaRubro, { companyId: period.companyId })
       : null;
     const rubro = paqueteRubro
-      ? { clave: paqueteRubro.category, icons: paqueteRubro.icons as Record<string, string> }
+      ? {
+          clave: paqueteRubro.category,
+          nombreProducto: typeof paqueteRubro.nombreProducto === 'string' ? paqueteRubro.nombreProducto : null,
+          icons: paqueteRubro.icons as Record<string, string>,
+        }
       : null;
     const pendienteRubro: FuentePendiente[] = rubro === null
       ? [{ area: 'configuracion', dato: 'La empresa no tiene un paquete de rubro declarado' }]

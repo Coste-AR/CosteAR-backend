@@ -8163,6 +8163,10 @@
                             "clave": {
                               "type": "string"
                             },
+                            "nombreProducto": {
+                              "type": "string",
+                              "nullable": true
+                            },
                             "icons": {
                               "type": "object",
                               "additionalProperties": {
@@ -8172,6 +8176,7 @@
                           },
                           "required": [
                             "clave",
+                            "nombreProducto",
                             "icons"
                           ],
                           "additionalProperties": false,
