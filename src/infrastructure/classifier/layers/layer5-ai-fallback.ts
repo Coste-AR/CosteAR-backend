@@ -2,6 +2,7 @@
 import { GroqClassifier } from '../../ai/groq-classifier.js';
 import { createClassifierAiClient } from '../classifier-ai-client.js';
 import type { DocumentType, CostSection } from '../types.js';
+import type { ClassifierAiCallMetric } from '../../ai/groq-classifier.js';
 
 let classifierAi: GroqClassifier | null = null;
 let classifierAiInitFailed = false;
@@ -24,6 +25,7 @@ export interface Layer5Result {
   costSection: CostSection;
   confidence: number;
   reasoning: string;
+  aiCalls: ClassifierAiCallMetric[];
 }
 
 const VALID_DOC_TYPES = new Set<string>([
@@ -54,10 +56,14 @@ export async function runLayer5(input: {
   ambiguityHint?: string;
   /** Ejemplos few-shot de correcciones previas del costista (memoria). */
   correctionExamples?: string;
-}): Promise<Layer5Result | null> {
+}, onCall?: (call: ClassifierAiCallMetric) => void): Promise<Layer5Result | null> {
   const service = getClassifierAi();
   if (!service) return null;
-  const raw = await service.classifyDocument(input);
+  const aiCalls: ClassifierAiCallMetric[] = [];
+  const raw = await service.classifyDocument(input, (call) => {
+    aiCalls.push(call);
+    onCall?.(call);
+  });
   if (!raw) return null;
 
   // Si el proveedor devuelve un tipo o sección fuera del set válido, lo tratamos como
@@ -73,5 +79,5 @@ export async function runLayer5(input: {
 
   const confidence = Math.min(100, Math.max(0, Math.round(raw.confidence)));
 
-  return { documentType, costSection, confidence, reasoning: raw.reasoning };
+  return { documentType, costSection, confidence, reasoning: raw.reasoning, aiCalls };
 }

@@ -41,6 +41,9 @@ const envSchema = z.object({
     (value) => value === '' ? undefined : value,
     z.string().min(1).optional(),
   ),
+  // Precio por millón de tokens, por proveedor/modelo. Ejemplo:
+  // {"groq":{"openai/gpt-oss-120b":{"input":0.15,"output":0.75,"currency":"USD"}}}
+  CLASSIFIER_AI_PRICING_JSON: z.string().default('{}'),
 
   // IA — Anthropic (Claude). Generación del Q&A de la bóveda y del consejero.
   // Sin configurar, `getLLMService` cae a Groq y lo registra (degradación segura).

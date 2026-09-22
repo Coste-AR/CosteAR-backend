@@ -106,6 +106,7 @@ export const RLS_MODELS = new Set([
   'PanelTelemetryEvent',
   // Preferencias de interfaz por persona (#389).
   'UserPreference',
+  'ClassifierAiCall',
 ]);
 
 /**

@@ -580,3 +580,11 @@ DROP POLICY IF EXISTS tenant_isolation ON user_preferences;
 CREATE POLICY tenant_isolation ON user_preferences
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+-- classifier_ai_calls (#390): costo de cada llamada aislado por el dueño.
+ALTER TABLE classifier_ai_calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE classifier_ai_calls FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON classifier_ai_calls;
+CREATE POLICY tenant_isolation ON classifier_ai_calls
+  USING ("costistId" = current_app_user_id())
+  WITH CHECK ("costistId" = current_app_user_id());

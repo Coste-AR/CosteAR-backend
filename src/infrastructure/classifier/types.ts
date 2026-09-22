@@ -199,4 +199,6 @@ export interface ClassificationResult {
   acquisitionLink?: AcquisitionCostLink | null;
   /** Solo aparece si la escala declarada no es compatible con el perfil. */
   scaleCalibrationWarning?: ScaleCalibrationWarning;
+  /** Métricas de cada request real a Layer 5; nunca contiene el documento. */
+  aiCalls?: import('../ai/groq-classifier.js').ClassifierAiCallMetric[];
 }

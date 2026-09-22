@@ -88,3 +88,17 @@ con el rol restringido y luego encontró que la base desechable todavía no ten�
 los grants de `costear_app`; la primera suite DB usó el placeholder RS256. Cada
 una se repitió con el rol dueño, los grants del init o las claves efímeras que
 exige la suite.
+
+## Reconciliación posterior con `dev`
+
+El 21-09 a las 22:05 (-03:00), el PR quedó en conflicto después de entrar #390.
+Se conservaron ambas altas en RLS, el registro de modelos y el generador; los
+artefactos OpenAPI se regeneraron desde las 32 operaciones tipadas. La
+reconciliación tomó 13 minutos, sin clears ni rebotes de guarda.
+
+Verificación del estado integrado: lint, typecheck, OpenAPI y consumidor
+tipado verdes; 1.878 unitarios, 152 HTTP, 85 integración/RLS y 66 DB (32
+ejecutados, 34 skips previstos) verdes. La primera preparación de integración
+no tenía `DATABASE_URL`; la primera DB usó el rol restringido y la segunda el
+placeholder RS256. Se repitieron con base local desechable, rol dueño para DB y
+claves RSA efímeras.

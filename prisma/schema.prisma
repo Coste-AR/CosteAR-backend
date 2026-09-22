@@ -212,6 +212,7 @@ enum CondicionIva {
 }
 
 model Company {
+  classifierAiCalls     ClassifierAiCall[]
   panelTelemetryEvents PanelTelemetryEvent[]
   priceIndexSeries      PriceIndexSeries?
   priceIndexVersions    PriceIndexSeriesVersion[]
@@ -1123,6 +1124,7 @@ model DataEntry {
 
   history              ValidationHistory[]
   classificationAudits ClassificationAudit[]
+  classifierAiCalls     ClassifierAiCall[]
   // Datos trazables que nacieron de este documento (T-06). Es el puente que
   // permite ir del número de la ficha a la clasificación que lo produjo.
   dataPointVersions    DataPointVersion[]
@@ -1137,6 +1139,29 @@ model DataEntry {
   // en cada migración nueva. Declararlo no crea nada: lo deja dicho.
   @@index([uploadedBy])
   @@map("data_entries")
+}
+
+/// Métricas de una request real a la capa 5. No guarda prompts ni contenido.
+model ClassifierAiCall {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dataEntryId   String    @db.Uuid
+  dataEntry     DataEntry @relation(fields: [dataEntryId], references: [id], onDelete: Cascade)
+  companyId     String    @db.Uuid
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  costistId     String    @db.Uuid
+  provider      String
+  model         String
+  inputTokens   Int?
+  outputTokens  Int?
+  latencyMs     Int
+  estimatedCost Decimal?  @db.Decimal(18, 10)
+  costCurrency  String?
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+
+  @@index([companyId, createdAt])
+  @@index([costistId, createdAt])
+  @@index([dataEntryId])
+  @@map("classifier_ai_calls")
 }
 
 // ---------------------------------------------------------------------------
@@ -2559,13 +2584,13 @@ model ConceptoCosteo {
 
 /** M10-01: versión append-only de una estructura de costos/capacidad. */
 model TramoCosto {
-  id        String  @id @default(uuid()) @db.Uuid
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId String  @db.Uuid
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "tramos_costo_companyId_fkey")
   userId    String  @db.Uuid
 
   conceptoId String?         @db.Uuid
-  concepto   ConceptoCosteo? @relation(fields: [conceptoId], references: [id], onDelete: Restrict)
+  concepto   ConceptoCosteo? @relation(fields: [conceptoId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "tramos_costo_conceptoId_fkey")
   segmentoId String?         @db.Uuid
 
   desde       Decimal        @db.Decimal(18, 6)
@@ -2589,9 +2614,9 @@ model TramoCosto {
 
 /** Foto inmutable del resultado y de las versiones de tramo utilizadas. */
 model EquilibrioTramosCalculo {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId    String   @db.Uuid
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "equilibrio_tramos_calculos_companyId_fkey")
   userId       String   @db.Uuid
   tramoCostoIds String[] @default([]) @db.Uuid
   resultado    Json

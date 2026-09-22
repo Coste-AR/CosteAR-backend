@@ -9,7 +9,17 @@ import type { ClassifyResponse } from './groq-types.js';
 export interface ClassifierCompletionClient {
   readonly isConfigured: boolean;
   readonly model: string;
-  postGroqRaw(body: Record<string, unknown>): Promise<string | null>;
+  postGroqRaw(body: Record<string, unknown>, onCall?: (call: ClassifierAiCallMetric) => void): Promise<string | null>;
+}
+
+export interface ClassifierAiCallMetric {
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  latencyMs: number;
+  estimatedCost: number | null;
+  costCurrency: string | null;
 }
 
 export class GroqClassifier {
@@ -25,7 +35,7 @@ export class GroqClassifier {
     intent?: string;
     ambiguityHint?: string;
     correctionExamples?: string;
-  }): Promise<ClassifyResponse | null> {
+  }, onCall?: (call: ClassifierAiCallMetric) => void): Promise<ClassifyResponse | null> {
     if (!this.client.isConfigured) return null;
 
     const signalsSummary = input.foundSignalLabels.length > 0
@@ -142,7 +152,7 @@ Respondé SOLO con JSON:
     try {
       let everGotContent = false;
 
-      const raw1 = await this.client.postGroqRaw({ ...baseBody, messages: baseMessages });
+      const raw1 = await this.client.postGroqRaw({ ...baseBody, messages: baseMessages }, onCall);
       if (raw1 !== null) everGotContent = true;
       const parsed1 = tryParseJson(raw1);
       const val1 = parsed1 !== undefined ? classifyResponseSchema.safeParse(parsed1) : null;
@@ -160,7 +170,7 @@ Respondé SOLO con JSON:
         },
       ];
 
-      const raw2 = await this.client.postGroqRaw({ ...baseBody, messages: retryMessages });
+      const raw2 = await this.client.postGroqRaw({ ...baseBody, messages: retryMessages }, onCall);
       if (raw2 !== null) everGotContent = true;
       const parsed2 = tryParseJson(raw2);
       const val2 = parsed2 !== undefined ? classifyResponseSchema.safeParse(parsed2) : null;
