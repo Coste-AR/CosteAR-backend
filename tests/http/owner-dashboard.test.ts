@@ -103,6 +103,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
     const body = JSON.parse(response.body) as { data: { rubro: unknown } };
     expect(body.data.rubro).toEqual({
       clave: CATEGORIA_AVICOLA_POSTURA,
+      nombreProducto: 'AVI',
       icons: PAQUETE_AVICOLA_POSTURA.icons,
     });
     expect(db.paqueteRubro.findMany).toHaveBeenCalledWith({
@@ -110,6 +111,26 @@ describe('GET /periods/:id/tablero-dueno', () => {
         category: CATEGORIA_AVICOLA_POSTURA,
         OR: [{ userId: null }, { userId: USER }],
       },
+    });
+  });
+
+  it('publica nombreProducto null sin fallar cuando el paquete no lo declara', async () => {
+    db.paqueteRubro.findMany.mockResolvedValue([{
+      category: 'RUBRO_SIN_NOMBRE',
+      companyId: 'company-1', structureId: null, periodId: null, userId: USER,
+      lexicon: {}, icons: {}, variants: [], seedParameters: [], alertRules: [], screens: {}, modulos: [], scale: null,
+    }]);
+    db.company.findFirst.mockResolvedValue({
+      unidadGestion: { codigo: 'unidad', nombre: 'Unidad', factor: 1 },
+      paquetesRubro: [{ category: 'RUBRO_SIN_NOMBRE' }],
+    });
+
+    const server = await app();
+    const response = await server.inject({ method: 'GET', url: `/periods/${PERIOD_ID}/tablero-dueno` });
+
+    expect(response.statusCode).toBe(200);
+    expect((JSON.parse(response.body) as { data: { rubro: unknown } }).data.rubro).toEqual({
+      clave: 'RUBRO_SIN_NOMBRE', nombreProducto: null, icons: {},
     });
   });
 

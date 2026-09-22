@@ -7,6 +7,7 @@ export const CATEGORY_BY_INDUSTRY = {
 
 /** Contenido declarativo del paquete; no contiene reglas de dominio. */
 export const PAQUETE_AVICOLA_POSTURA = {
+  nombreProducto: 'AVI',
   lexicon: {
     UnidadProductiva: 'Galpón',
     LoteProductivo: 'Lote de aves',

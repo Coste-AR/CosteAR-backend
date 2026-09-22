@@ -3184,6 +3184,7 @@ export interface paths {
                                 } | null;
                                 rubro: {
                                     clave: string;
+                                    nombreProducto: string | null;
                                     icons: {
                                         [key: string]: string;
                                     };

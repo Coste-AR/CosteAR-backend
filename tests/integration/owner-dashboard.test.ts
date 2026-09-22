@@ -67,6 +67,7 @@ describe('A-07 — tablero del dueño por período', () => {
     expect(tablero.unidadGestion).toEqual({ codigo: 'cajon', nombre: 'Cajón de prueba', factor: 12 });
     expect(tablero.rubro).toEqual({
       clave: CATEGORIA_AVICOLA_POSTURA,
+      nombreProducto: 'AVI',
       icons: PAQUETE_AVICOLA_POSTURA.icons,
     });
   });
