@@ -30,6 +30,9 @@ const requiredOperations = [
   ['post', '/datos/submit'],
   ['get', '/validaciones/pending'],
   ['post', '/validaciones/{entryId}/review'],
+  ['get', '/me/preferencias'],
+  ['get', '/me/preferencias/catalogo'],
+  ['put', '/me/preferencias'],
 ] as const;
 
 describe('contrato OpenAPI del recorrido principal', () => {

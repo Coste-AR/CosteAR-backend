@@ -572,6 +572,15 @@ CREATE POLICY tenant_isolation ON panel_telemetry_events
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- user_preferences (#389): la preferencia pertenece a una persona y nunca se
+-- comparte entre usuarios, aun cuando trabajen sobre la misma empresa.
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON user_preferences;
+CREATE POLICY tenant_isolation ON user_preferences
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- classifier_ai_calls (#390): costo de cada llamada aislado por el dueño.
 ALTER TABLE classifier_ai_calls ENABLE ROW LEVEL SECURITY;
 ALTER TABLE classifier_ai_calls FORCE ROW LEVEL SECURITY;
