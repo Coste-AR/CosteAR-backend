@@ -11,10 +11,34 @@ import type {
   ReglaAlertaUpdateInput,
 } from '../../shared/schemas/regla-alerta.schema.js';
 import { EmailService } from '../../infrastructure/email/email-service.js';
+import {
+  CATEGORY_BY_INDUSTRY,
+  CATEGORIA_AVICOLA_POSTURA,
+  PAQUETE_AVICOLA_POSTURA,
+} from '../operacion/paquete-avicola.js';
+import { PaqueteRubroService } from '../operacion/paquete-rubro-service.js';
+
+interface IndicadorAlertaConfigurado {
+  indicador: string;
+  etiqueta: string;
+  unidad: string;
+}
+
+function catalogoDesdePaquete(value: unknown): IndicadorAlertaConfigurado[] | null {
+  if (!Array.isArray(value)) return null;
+  const catalogo = value.filter((item): item is IndicadorAlertaConfigurado => {
+    if (!item || typeof item !== 'object') return false;
+    const candidato = item as Partial<IndicadorAlertaConfigurado>;
+    return typeof candidato.indicador === 'string'
+      && typeof candidato.etiqueta === 'string'
+      && typeof candidato.unidad === 'string';
+  });
+  return catalogo.length > 0 ? catalogo : null;
+}
 
 export class ReglaAlertaService {
   constructor(
-    private readonly email: Pick<EmailService, 'sendIndicatorAlert'> = new EmailService(),
+    private readonly email?: Pick<EmailService, 'sendIndicatorAlert'>,
   ) {}
 
   private async companyDe(userId: string, companyId: string) {
@@ -26,6 +50,25 @@ export class ReglaAlertaService {
     );
     if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
+  }
+
+  async catalogo(userId: string, companyId: string) {
+    const company = await this.companyDe(userId, companyId);
+    const category = company.industry
+      ? CATEGORY_BY_INDUSTRY[company.industry as keyof typeof CATEGORY_BY_INDUSTRY]
+      : undefined;
+    if (!category) return [];
+
+    const paquete = await new PaqueteRubroService().resolve(userId, category, { companyId });
+    const configurados = catalogoDesdePaquete(paquete.alertRules)
+      ?? (category === CATEGORIA_AVICOLA_POSTURA
+        ? catalogoDesdePaquete(PAQUETE_AVICOLA_POSTURA.alertRules) ?? []
+        : []);
+    return configurados.map(({ indicador, etiqueta, unidad }) => ({
+      clave: indicador,
+      etiqueta,
+      unidad,
+    }));
   }
 
   private async validarAlcance(
@@ -183,6 +226,40 @@ export class ReglaAlertaService {
         regla,
         input.lecturas.map((lectura) => ({ ...lectura, fecha: new Date(lectura.fecha) })),
       );
+      const metadatos = {
+        indicador: fila.indicador,
+        indicadorEtiqueta: fila.descripcion,
+        severidad: fila.severidad,
+        unidadValor: fila.unidad?.codigo ?? null,
+        unidadUmbral: fila.unidad?.codigo ?? null,
+      };
+      if (resultado.estado === 'NO_EVALUABLE') {
+        const alerta = await tx.alert.create({
+          data: {
+            userId,
+            companyId,
+            costStructureId: fila.structureId,
+            type: 'INDICADOR_FISICO',
+            message: resultado.motivo,
+            threshold: Number(fila.umbral),
+            actualValue: null,
+            motivoNoEvaluada: resultado.motivo,
+            ...metadatos,
+          },
+        });
+        await recordTraceAudit(
+          {
+            entityType: 'Alert',
+            entityId: alerta.id,
+            action: 'create',
+            actor,
+            after: alerta,
+            comment: `La regla ${fila.indicador} no pudo evaluarse y dejó el motivo disponible.`,
+          },
+          tx,
+        );
+        return { ...resultado, alerta };
+      }
       if (resultado.estado !== 'ALERTA') return { ...resultado, alerta: null };
 
       const alerta = await tx.alert.create({
@@ -194,6 +271,8 @@ export class ReglaAlertaService {
           message: resultado.hallazgo.mensaje,
           threshold: resultado.hallazgo.umbral,
           actualValue: resultado.hallazgo.valor,
+          motivoNoEvaluada: null,
+          ...metadatos,
         },
       });
       await recordTraceAudit(
@@ -223,10 +302,11 @@ export class ReglaAlertaService {
     const destinatarios = regla.destinatarios.length > 0
       ? regla.destinatarios
       : [company.user.email];
+    const email = this.email ?? new EmailService();
     try {
       await Promise.all(
         destinatarios.map((to) =>
-          this.email.sendIndicatorAlert(to, company.name, evaluacion.hallazgo.mensaje),
+          email.sendIndicatorAlert(to, company.name, evaluacion.hallazgo.mensaje),
         ),
       );
     } catch {

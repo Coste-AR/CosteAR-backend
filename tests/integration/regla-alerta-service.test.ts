@@ -58,7 +58,7 @@ describe('S-05b — reglas configurables con RLS real', () => {
     expect(auditoria).not.toBeNull();
   });
 
-  it('declara dato faltante y sólo crea alerta cuando la lectura supera el umbral', async () => {
+  it('deja consultable el dato faltante y crea alerta cuando la lectura supera el umbral', async () => {
     const service = new ReglaAlertaService({ sendIndicatorAlert });
     const [regla] = await service.listar(A.userId, A.companyId, A.structureId);
     expect(regla).toBeDefined();
@@ -70,7 +70,14 @@ describe('S-05b — reglas configurables con RLS real', () => {
       { lecturas: [] },
       actor(A.userId),
     );
-    expect(sinDato).toMatchObject({ estado: 'NO_EVALUABLE', alerta: null });
+    expect(sinDato).toMatchObject({
+      estado: 'NO_EVALUABLE',
+      alerta: {
+        companyId: A.companyId,
+        indicador: 'humedad_grano_ingreso',
+        motivoNoEvaluada: expect.stringMatching(/falta una lectura/i),
+      },
+    });
 
     const alerta = await service.evaluar(
       A.userId,

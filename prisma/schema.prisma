@@ -921,6 +921,14 @@ model Alert {
   message     String
   threshold   Decimal?  @db.Decimal(18, 4)
   actualValue Decimal?  @db.Decimal(18, 4)
+  /// Snapshot de la regla para que la bandeja no dependa de una configuración posterior.
+  severidad          SeveridadAlerta?
+  indicador          String?
+  indicadorEtiqueta  String?
+  unidadValor        String?
+  unidadUmbral       String?
+  /// Ausente en alertas evaluadas; presente cuando faltaron datos para evaluar la regla.
+  motivoNoEvaluada   String?
 
   isRead      Boolean   @default(false)
   emailSentAt DateTime?

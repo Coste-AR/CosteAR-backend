@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import Fastify from 'fastify';
+import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { registerReglaAlertaRoutes } from '@/infrastructure/http/routes/regla-alerta.routes.js';
 import { errorHandler } from '@/infrastructure/http/error-handler.js';
 
@@ -12,6 +13,7 @@ const { mockPrisma, sendIndicatorAlert } = vi.hoisted(() => ({
   sendIndicatorAlert: vi.fn(async () => undefined),
   mockPrisma: {
     company: { findFirst: vi.fn() },
+    paqueteRubro: { findMany: vi.fn() },
     costStructure: { findFirst: vi.fn() },
     unidadMedida: { findFirst: vi.fn() },
     reglaAlerta: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
@@ -47,6 +49,8 @@ vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
 
 async function buildTestApp() {
   const app = Fastify({ logger: false });
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
   app.setErrorHandler(errorHandler);
   await app.register(registerReglaAlertaRoutes);
   await app.ready();
@@ -77,6 +81,20 @@ function filaRegla(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function alertaPersistida(id: string) {
+  return {
+    id,
+    type: 'INDICADOR_FISICO',
+    message: 'Humedad del grano al ingreso: 19, por encima del límite de 16.',
+    severidad: 'CRITICA',
+    indicador: 'humedad_grano_ingreso',
+    indicadorEtiqueta: 'Humedad del grano al ingreso',
+    unidadValor: null,
+    unidadUmbral: null,
+    motivoNoEvaluada: null,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockPrisma.company.findFirst.mockResolvedValue({
@@ -87,6 +105,7 @@ beforeEach(() => {
   });
   mockPrisma.reglaAlerta.findMany.mockResolvedValue([]);
   mockPrisma.reglaAlerta.findFirst.mockResolvedValue(null);
+  mockPrisma.paqueteRubro.findMany.mockResolvedValue([]);
 });
 
 describe('reglas de alerta por indicador físico', () => {
@@ -120,6 +139,7 @@ describe('reglas de alerta por indicador físico', () => {
 
   it('explica por qué no puede evaluar cuando faltan lecturas', async () => {
     mockPrisma.reglaAlerta.findFirst.mockResolvedValue(filaRegla());
+    mockPrisma.alert.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'alert-no-evaluable', ...data }));
     const app = await buildTestApp();
     const res = await app.inject({
       method: 'POST',
@@ -131,14 +151,26 @@ describe('reglas de alerta por indicador físico', () => {
     expect(res.json().data).toMatchObject({
       estado: 'NO_EVALUABLE',
       motivo: expect.stringMatching(/falta una lectura/i),
-      alerta: null,
+      alerta: {
+        motivoNoEvaluada: expect.stringMatching(/falta una lectura/i),
+        indicador: 'humedad_grano_ingreso',
+        indicadorEtiqueta: 'Humedad del grano al ingreso',
+        severidad: 'CRITICA',
+      },
     });
-    expect(mockPrisma.alert.create).not.toHaveBeenCalled();
+    expect(mockPrisma.alert.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actualValue: null,
+        motivoNoEvaluada: expect.stringMatching(/falta una lectura/i),
+        unidadUmbral: null,
+        unidadValor: null,
+      }),
+    });
   });
 
   it('crea una alerta visible en la app cuando la lectura supera el umbral', async () => {
     mockPrisma.reglaAlerta.findFirst.mockResolvedValue(filaRegla());
-    mockPrisma.alert.create.mockResolvedValue({ id: 'alert-1', type: 'INDICADOR_FISICO' });
+    mockPrisma.alert.create.mockResolvedValue(alertaPersistida('alert-1'));
     const app = await buildTestApp();
     const res = await app.inject({
       method: 'POST',
@@ -155,15 +187,46 @@ describe('reglas de alerta por indicador físico', () => {
         type: 'INDICADOR_FISICO',
         threshold: 16,
         actualValue: 19,
+        indicador: 'humedad_grano_ingreso',
+        indicadorEtiqueta: 'Humedad del grano al ingreso',
+        severidad: 'CRITICA',
+        unidadUmbral: null,
+        unidadValor: null,
       }),
     });
+  });
+
+  it('publica un catalogo del rubro con claves, etiquetas visibles y unidades', async () => {
+    mockPrisma.company.findFirst.mockResolvedValue({
+      id: COMPANY_ID,
+      userId: USER,
+      name: 'Empresa ficticia',
+      industry: 'AVICULTURA',
+      user: { email: 'costista@example.com' },
+    });
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/companies/${COMPANY_ID}/alert-rules/catalog`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.length).toBeGreaterThan(0);
+    for (const indicador of res.json().data) {
+      expect(indicador.etiqueta).not.toBe(indicador.clave);
+      expect(indicador).toEqual(expect.objectContaining({
+        clave: expect.any(String),
+        etiqueta: expect.any(String),
+        unidad: expect.any(String),
+      }));
+    }
   });
 
   it('envía email al destinatario configurado y registra la entrega', async () => {
     mockPrisma.reglaAlerta.findFirst
       .mockResolvedValueOnce(filaRegla({ canal: 'EMAIL', destinatarios: ['dueno@example.com'] }))
       .mockResolvedValueOnce({ canal: 'EMAIL', destinatarios: ['dueno@example.com'] });
-    mockPrisma.alert.create.mockResolvedValue({ id: 'alert-2', type: 'INDICADOR_FISICO' });
+    mockPrisma.alert.create.mockResolvedValue(alertaPersistida('alert-2'));
     mockPrisma.alert.update.mockResolvedValue({
       id: 'alert-2',
       type: 'INDICADOR_FISICO',
@@ -193,7 +256,7 @@ describe('reglas de alerta por indicador físico', () => {
     mockPrisma.reglaAlerta.findFirst
       .mockResolvedValueOnce(filaRegla({ canal: 'EMAIL', destinatarios: [] }))
       .mockResolvedValueOnce({ canal: 'EMAIL', destinatarios: [] });
-    mockPrisma.alert.create.mockResolvedValue({ id: 'alert-3', type: 'INDICADOR_FISICO' });
+    mockPrisma.alert.create.mockResolvedValue(alertaPersistida('alert-3'));
     sendIndicatorAlert.mockRejectedValueOnce(new Error('proveedor no disponible'));
     const app = await buildTestApp();
     const res = await app.inject({
