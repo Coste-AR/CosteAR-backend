@@ -16,6 +16,16 @@ const fakeLlm = { isConfigured: true, modelId: 'claude-sonnet-4-5', completeJSON
 beforeEach(() => completeJSON.mockReset());
 
 describe('AdvisorService', () => {
+  it('instruye al asesor sin vocabulario prohibido en ningún tipo de respuesta', async () => {
+    completeJSON.mockResolvedValue({ headline: 'Revisá el margen', points: ['Compará los costos.'] });
+
+    for (const kind of ['cost_result', 'reconciliation', 'macro', 'alerts'] as const) {
+      await new AdvisorService(fakeLlm).advise(kind, { ejemplo: true });
+      const [systemPrompt, userPrompt] = completeJSON.mock.calls.at(-1)!;
+      expect(`${systemPrompt}\n${userPrompt}`).not.toMatch(/\b(?:costista|pymes?|empresa)\b/i);
+    }
+  });
+
   it('devuelve AdvisorResult cuando el LLM responde con JSON válido', async () => {
     completeJSON.mockResolvedValue({
       headline: 'El margen es bajo, subí el precio.',

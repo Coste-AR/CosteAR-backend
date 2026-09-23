@@ -27,7 +27,7 @@ export class AllocationBaseService {
 
   private async requireCompany(userId: string, companyId: string) {
     const c = await this.db.company.findFirst({ where: { id: companyId, userId } });
-    if (!c) throw new NotFoundError('Empresa no encontrada');
+    if (!c) throw new NotFoundError('Negocio no encontrado');
     return c;
   }
 

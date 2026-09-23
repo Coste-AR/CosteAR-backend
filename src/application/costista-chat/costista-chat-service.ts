@@ -212,7 +212,7 @@ export class CostitaChatService {
           where: { id: entry.companyId, userId },
           select: { id: true },
         });
-        if (!company) throw new Error('Empresa no encontrada en tu cartera');
+        if (!company) throw new Error('Negocio no encontrado en tu cartera');
       }
 
       // Buscar la conexión existente entre el costista y la empresa.
@@ -262,7 +262,7 @@ export class CostitaChatService {
           where: { id: alert.companyId, userId },
           select: { id: true },
         });
-        if (!company) throw new Error('Empresa no encontrada en tu cartera');
+        if (!company) throw new Error('Negocio no encontrado en tu cartera');
       }
 
       // Mapear severity de la IA → AlertType del schema

@@ -28,7 +28,7 @@ export class CompanyService {
 
   async getById(userId: string, id: string) {
     const company = await this.db.company.findFirst({ where: { id, userId, deletedAt: null } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 
@@ -86,7 +86,7 @@ export class CompanyService {
       const unidad = await this.db.unidadMedida.findFirst({
         where: { id: input.unidadGestionId, companyId: id, deletedAt: null },
       });
-      if (!unidad) throw new NotFoundError('Unidad de gestión no encontrada para esta empresa');
+      if (!unidad) throw new NotFoundError('Unidad de gestión no encontrada para este negocio');
     }
 
     // El ritmo de costeo no se cambia con la empresa en marcha. Los períodos ya abiertos

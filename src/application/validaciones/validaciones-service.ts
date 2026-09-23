@@ -267,7 +267,7 @@ export class ValidacionesService {
               data: {
                 type: 'USER_CORRECTION',
                 source: 'VALIDACIONES_CORRECCION',
-                content: 'El costista corrigió la clasificación del documento.',
+                content: 'La persona corrigió la clasificación del documento.',
                 context: {
                   entryId,
                   original: { type: audit.documentType, section: audit.costSection },

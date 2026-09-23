@@ -14,12 +14,12 @@ export class EmpresaConnectionService {
     const company = await this.db.company.findFirst({
       where: { id: companyId, userId: costistId },
     });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
 
     const existing = await this.db.empresaConnection.findUnique({
       where: { companyId_costistId: { companyId, costistId } },
     });
-    if (existing) throw new ConflictError('Ya existe una conexión para esta empresa');
+    if (existing) throw new ConflictError('Ya existe una conexión para este negocio');
 
     return this.db.empresaConnection.create({
       data: { companyId, costistId },

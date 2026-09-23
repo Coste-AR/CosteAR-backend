@@ -8,7 +8,7 @@ export class CorridaProduccionService {
   constructor(private readonly db: PrismaClient = prisma) {}
   async create(userId: string, companyId: string, input: CorridaCreateInput, actor: TraceActor) {
     const company = await withTenant(userId, (tx) => tx.company.findFirst({ where: { id: companyId, userId } }));
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return withTenant(userId, async (tx) => {
       const corrida = await tx.corridaProduccion.create({ data: { companyId, userId, ...input, destino: destino[input.destino] } });
       await recordTraceAudit({ entityType: 'CorridaProduccion', entityId: corrida.id, action: 'create', actor, after: corrida, comment: 'Corrida de producción registrada' }, tx);

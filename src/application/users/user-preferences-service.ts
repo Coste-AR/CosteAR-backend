@@ -37,7 +37,7 @@ export class UserPreferencesService {
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
-    if (!company) throw new NotFoundError('No hay una empresa activa para resolver los accesos rápidos');
+    if (!company) throw new NotFoundError('No hay un negocio activo para resolver los accesos rápidos');
     return new ModulosRubroService(this.db).listar(userId, company.id);
   }
 

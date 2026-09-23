@@ -26,6 +26,13 @@ function fila(
 }
 
 describe('A-04 — propuesta de clasificación por rubro', () => {
+  it('expone descripciones y fundamentos sin vocabulario prohibido', () => {
+    const textoVisible = CLASIFICACIONES_AVICOLA
+      .flatMap((def) => [def.descripcion, def.fundamento])
+      .join('\n');
+    expect(textoVisible).not.toMatch(/\b(?:costista|pymes?|empresa)\b/i);
+  });
+
   it('propone sólo materia prima y deja los rubros grises sin inventar', () => {
     const mp = resolverComportamiento('comportamiento_materia_prima', [], {});
     expect(mp).toMatchObject({ comportamientoVolumen: 'VARIABLE', origen: 'default', confirmado: false });
