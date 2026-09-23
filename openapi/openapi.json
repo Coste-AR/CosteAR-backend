@@ -18693,13 +18693,18 @@
                           },
                           "porDefecto": {
                             "type": "boolean"
+                          },
+                          "destino": {
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
                           "clave",
                           "etiqueta",
                           "modulo",
-                          "porDefecto"
+                          "porDefecto",
+                          "destino"
                         ],
                         "additionalProperties": false
                       }
