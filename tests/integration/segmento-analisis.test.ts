@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SegmentoAnalisisService } from '@/application/parametros/segmento-analisis-service.js';
+import { RelacionReemplazoService } from '@/application/parametros/relacion-reemplazo-service.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
 
@@ -21,14 +22,28 @@ describe('SegmentoAnalisis con RLS real', () => {
       { nombre: 'B', participacion: 0.3, precioUnitario: 60, costoVariableUnitario: 40, costoFijoDirecto: 6_000, prorrateoIndirectos: 3_600 },
       { nombre: 'C', participacion: 0.5, precioUnitario: 40, costoVariableUnitario: 28, costoFijoDirecto: 2_000, prorrateoIndirectos: 6_000 },
     ];
+    const ids: string[] = [];
     for (const fila of datos) {
-      await withTenantContext(A.userId, () => service.crear(A.userId, A.companyId, {
+      const creado = await withTenantContext(A.userId, () => service.crear(A.userId, A.companyId, {
         ...fila, nivel: 'linea', parentId: null, produccionConjunta: false, coproductos: [],
       }, actor(A.userId)));
+      ids.push(creado.id);
     }
     const resultado = await withTenantContext(A.userId, () => service.calcular(A.userId, A.companyId));
     expect(resultado.equilibrioGeneral).toBe(2_000);
     expect(resultado.controlIndirectos.diferencia).toBe(0);
+    const reemplazo = await withTenantContext(A.userId, () => new RelacionReemplazoService().calcular(A.userId, A.companyId, {
+      segmentoOrigenId: ids[0]!, segmentoDestinoId: ids[1]!, cantidadOrigen: 50,
+      resultadoObjetivo: 0, unidadCantidad: 'unidades',
+    }));
+    expect(reemplazo).toMatchObject({
+      relacionReemplazo: 2, cantidadDestino: 100,
+      resultadoCortoPlazo: 1_900, resultadoLargoPlazo: 900,
+    });
+    await expect(withTenantContext(B.userId, () => new RelacionReemplazoService().calcular(B.userId, B.companyId, {
+      segmentoOrigenId: ids[0]!, segmentoDestinoId: ids[1]!, cantidadOrigen: 50,
+      resultadoObjetivo: 0, unidadCantidad: 'unidades',
+    }))).rejects.toThrow(/segmento.*no encontrado/i);
     const vistoPorB = await withTenantContext(B.userId, () => service.listar(B.userId, B.companyId));
     expect(vistoPorB).toEqual([]);
     await expect(withTenantContext(B.userId, () => service.listar(B.userId, A.companyId)))

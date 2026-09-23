@@ -40,6 +40,7 @@ import { registerSegmentoAnalisisRoutes } from '../src/infrastructure/http/route
 import { registerCapacidadOciosaRoutes } from '../src/infrastructure/http/routes/capacidad-ociosa.routes.js';
 import { registerPlaneamientoResultadosRoutes } from '../src/infrastructure/http/routes/planeamiento-resultados.routes.js';
 import { registerPuntoIndiferenciaRoutes } from '../src/infrastructure/http/routes/punto-indiferencia.routes.js';
+import { registerRelacionReemplazoRoutes } from '../src/infrastructure/http/routes/relacion-reemplazo.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -65,6 +66,7 @@ const CONVERTED_ROUTES = [
   registerCapacidadOciosaRoutes,
   registerPlaneamientoResultadosRoutes,
   registerPuntoIndiferenciaRoutes,
+  registerRelacionReemplazoRoutes,
   (app) => registerEmpresaPortalRoutes(app, { portal: {} as never, scopes: {} as never }),
 ];
 

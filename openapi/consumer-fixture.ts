@@ -27,6 +27,9 @@ type CalculationResponse =
 type PuntoIndiferenciaResponse =
   paths['/companies/{companyId}/analisis/punto-indiferencia']['post']['responses'][200]['content']['application/json'];
 
+type RelacionReemplazoResponse =
+  paths['/companies/{companyId}/analisis/relacion-reemplazo']['post']['responses'][200]['content']['application/json'];
+
 export function sesionIniciada(response: LoginResponse): string {
   return `${response.data.user.name} · ${response.data.user.role}`;
 }
@@ -49,4 +52,11 @@ export function resumenPuntoIndiferencia(response: PuntoIndiferenciaResponse): s
   return cantidadIndiferencia === null
     ? motivoSinPunto ?? 'No existe un punto de indiferencia.'
     : `${cantidadIndiferencia} ${unidades.cantidad}`;
+}
+
+export function resumenRelacionReemplazo(response: RelacionReemplazoResponse): string {
+  const { resultadoCortoPlazo, resultadoLargoPlazo, unidades } = response.data;
+  return resultadoCortoPlazo === null || resultadoLargoPlazo === null
+    ? response.data.motivo ?? 'No existe una relación de reemplazo.'
+    : `Corto: ${resultadoCortoPlazo} ${unidades.resultadoCortoPlazo}; largo: ${resultadoLargoPlazo} ${unidades.resultadoLargoPlazo}.`;
 }
