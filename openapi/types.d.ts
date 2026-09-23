@@ -9637,6 +9637,273 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/companies/{companyId}/analisis/planeamiento-resultados": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    companyId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        modalidad: "fisica";
+                        costosFijos: number;
+                        moneda: string;
+                        objetivo: {
+                            /** @enum {string} */
+                            tipo: "resultado_absoluto";
+                            importe: number;
+                        } | {
+                            /** @enum {string} */
+                            tipo: "porcentaje_sobre_capital";
+                            tasa: number;
+                            capitalFijo: number;
+                            capitalPorPesoCostoVariable: number;
+                        } | {
+                            /** @enum {string} */
+                            tipo: "porcentaje_sobre_ventas";
+                            tasa: number;
+                        } | {
+                            /** @enum {string} */
+                            tipo: "porcentaje_sobre_costos";
+                            tasa: number;
+                        };
+                        costoVariableUnitario: number;
+                        precioUnitario: number;
+                        unidadCantidad: string;
+                    } | {
+                        /** @enum {string} */
+                        modalidad: "monetaria";
+                        costosFijos: number;
+                        moneda: string;
+                        objetivo: {
+                            /** @enum {string} */
+                            tipo: "resultado_absoluto";
+                            importe: number;
+                        } | {
+                            /** @enum {string} */
+                            tipo: "porcentaje_sobre_capital";
+                            tasa: number;
+                            capitalFijo: number;
+                            capitalPorPesoCostoVariable: number;
+                        } | {
+                            /** @enum {string} */
+                            tipo: "porcentaje_sobre_ventas";
+                            tasa: number;
+                        } | {
+                            /** @enum {string} */
+                            tipo: "porcentaje_sobre_costos";
+                            tasa: number;
+                        };
+                        margenMarcacion: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                cantidadNecesaria: number | null;
+                                ventasNecesarias: number | null;
+                                resultadoLogrado: number | null;
+                                /** @enum {string} */
+                                basadoEn: "resultado_absoluto" | "porcentaje_sobre_capital";
+                                unidades: {
+                                    cantidadNecesaria: string | null;
+                                    ventasNecesarias: string;
+                                    resultadoLogrado: string;
+                                };
+                                motivo?: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/empresa-portal/{companyId}/operators": {
         parameters: {
             query?: never;
