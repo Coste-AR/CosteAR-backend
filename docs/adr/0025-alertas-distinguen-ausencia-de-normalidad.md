@@ -1,7 +1,7 @@
 # 0025 — Las alertas distinguen ausencia de normalidad
 
 - **Fecha:** 2026-09-19
-- **Estado:** Propuesta
+- **Estado:** Superada parcialmente por [ADR-0026](./0026-evaluaciones-no-evaluables-en-bandeja.md)
 - **Decide:** Codex, para revisión de Santiago
 - **Contexto de origen:** issue #74, S-05b
 

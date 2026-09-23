@@ -33,6 +33,8 @@ import { registerConceptoCosteoRoutes } from '../src/infrastructure/http/routes/
 import { registerUserPreferencesRoutes } from '../src/infrastructure/http/routes/user-preferences.routes.js';
 import { registerUserRoutes } from '../src/infrastructure/http/routes/user.routes.js';
 import { registerClassifierAiCostRoutes } from '../src/infrastructure/http/routes/classifier-ai-cost.routes.js';
+import { registerAlertRoutes } from '../src/infrastructure/http/routes/alert.routes.js';
+import { registerReglaAlertaRoutes } from '../src/infrastructure/http/routes/regla-alerta.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -52,6 +54,8 @@ const CONVERTED_ROUTES = [
   registerUserPreferencesRoutes,
   registerUserRoutes,
   registerClassifierAiCostRoutes,
+  registerAlertRoutes,
+  registerReglaAlertaRoutes,
 ];
 
 async function buildSchemaOnlyApp() {

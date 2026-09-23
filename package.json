@@ -24,6 +24,7 @@
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "check:openapi": "node scripts/check-openapi.mjs",
     "typecheck:openapi-consumer": "tsc --noEmit -p openapi/tsconfig.json",
+    "verificar": "npm run lint && npm run typecheck && npm run test && npm run test:http && npm run check:openapi && npm run typecheck:openapi-consumer && npm run check:tests-base",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",

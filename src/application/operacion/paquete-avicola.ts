@@ -56,11 +56,11 @@ export const PAQUETE_AVICOLA_POSTURA = {
     },
   ],
   alertRules: [
-    { indicador: 'nivel_deposito_bajo', condicion: 'MENOR', umbral: 'configurable' },
-    { indicador: 'humedad_ingreso', condicion: 'MAYOR', umbral: 'configurable' },
-    { indicador: 'postura_media_movil', condicion: 'MENOR', umbral: 'configurable' },
-    { indicador: 'antiguedad_stock', condicion: 'MAYOR', umbral: 'configurable' },
-    { indicador: 'desvio_consumo', condicion: 'MAYOR', umbral: 'configurable' },
+    { indicador: 'nivel_deposito_bajo', etiqueta: 'Nivel del depósito', unidad: '%', condicion: 'MENOR', umbral: 'configurable' },
+    { indicador: 'humedad_ingreso', etiqueta: 'Humedad al ingreso', unidad: '%', condicion: 'MAYOR', umbral: 'configurable' },
+    { indicador: 'postura_media_movil', etiqueta: 'Postura media', unidad: '%', condicion: 'MENOR', umbral: 'configurable' },
+    { indicador: 'antiguedad_stock', etiqueta: 'Antigüedad del stock', unidad: 'días', condicion: 'MAYOR', umbral: 'configurable' },
+    { indicador: 'desvio_consumo', etiqueta: 'Desvío de consumo', unidad: '%', condicion: 'MAYOR', umbral: 'configurable' },
   ],
   screens: {
     home: {

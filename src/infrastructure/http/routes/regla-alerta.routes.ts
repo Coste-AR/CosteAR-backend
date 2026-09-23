@@ -7,6 +7,11 @@ import {
   reglaAlertaCreateSchema,
   reglaAlertaUpdateSchema,
 } from '../../../shared/schemas/regla-alerta.schema.js';
+import {
+  evaluacionReglaAlertaEnvelopeSchema,
+  indicadoresAlertaCatalogoEnvelopeSchema,
+} from '../../../shared/schemas/alerta.schema.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const ruleParams = z.object({ companyId: z.string().uuid(), id: z.string().uuid() });
@@ -32,6 +37,14 @@ export async function registerReglaAlertaRoutes(app: FastifyInstance): Promise<v
     return { data: await service.listar(request.authUser!.id, companyId, structureId) };
   });
 
+  app.get('/companies/:companyId/alert-rules/catalog', {
+    preHandler: authenticate,
+    schema: { response: { 200: indicadoresAlertaCatalogoEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { companyId } = companyParams.parse(request.params);
+    return { data: await service.catalogo(request.authUser!.id, companyId) };
+  });
+
   app.post('/companies/:companyId/alert-rules', { preHandler: authenticate }, async (request, reply) => {
     const { companyId } = companyParams.parse(request.params);
     const input = reglaAlertaCreateSchema.parse(request.body);
@@ -46,7 +59,10 @@ export async function registerReglaAlertaRoutes(app: FastifyInstance): Promise<v
     return { data };
   });
 
-  app.post('/companies/:companyId/alert-rules/:id/evaluate', { preHandler: authenticate }, async (request) => {
+  app.post('/companies/:companyId/alert-rules/:id/evaluate', {
+    preHandler: authenticate,
+    schema: { response: { 200: evaluacionReglaAlertaEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { companyId, id } = ruleParams.parse(request.params);
     const input = evaluarReglaAlertaSchema.parse(request.body);
     const data = await service.evaluar(request.authUser!.id, companyId, id, input, actorFrom(request));
