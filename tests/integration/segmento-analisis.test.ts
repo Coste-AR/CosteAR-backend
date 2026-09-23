@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SegmentoAnalisisService } from '@/application/parametros/segmento-analisis-service.js';
 import { RelacionReemplazoService } from '@/application/parametros/relacion-reemplazo-service.js';
 import { MezclaOptimaService } from '@/application/parametros/mezcla-optima-service.js';
+import { PrecioTransferenciaService } from '@/application/parametros/precio-transferencia-service.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { withTenant } from '@/infrastructure/database/prisma.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
@@ -62,6 +63,21 @@ describe('SegmentoAnalisis con RLS real', () => {
     expect(mezcla.ranking[0]).toMatchObject({ producto: 'B', cme: 20 });
     const mezclaB = await withTenantContext(B.userId, () => new MezclaOptimaService().calcular(B.userId, B.companyId));
     expect(mezclaB).toMatchObject({ recurso: null, ranking: [], contribucionMarginalTotal: null });
+    await withTenant(A.userId, async (tx) => {
+      const concepto = await tx.conceptoCosteo.create({ data: {
+        companyId: A.companyId, userId: A.userId, structureId: A.structureId, periodId: A.periodId,
+        clave: 'insumo_interno', elemento: 'MP', confirmado: true,
+      } });
+      await tx.segmentoAnalisis.update({ where: { id: ids[1]! }, data: { precioUnitario: 48_000, costoVariableUnitario: 15_000, costoFijoDirecto: 15_000_000 } });
+      await tx.precioTransferencia.createMany({ data: [
+        { companyId: A.companyId, userId: A.userId, periodId: A.periodId, conceptoId: concepto.id, segmentoOrigenId: ids[0]!, segmentoDestinoId: ids[1]!, criterio: 'COSTO_VARIABLE', valor: 2_600, unidad: 'cajones' },
+        { companyId: A.companyId, userId: A.userId, periodId: A.periodId, conceptoId: concepto.id, segmentoOrigenId: ids[0]!, segmentoDestinoId: ids[1]!, criterio: 'MERCADO', valor: 3_600, unidad: 'cajones' },
+      ] });
+    });
+    const transferencia = await withTenantContext(A.userId, () => new PrecioTransferenciaService().calcular(A.userId, A.companyId, {}));
+    expect(transferencia).toMatchObject({ equilibrioACostoVariable: 493.42105263157896, diferencia: 16.783029 });
+    await expect(withTenantContext(B.userId, () => new PrecioTransferenciaService().calcular(B.userId, A.companyId, {})))
+      .rejects.toThrow(/empresa no encontrada/i);
     await expect(withTenantContext(B.userId, () => new RelacionReemplazoService().calcular(B.userId, B.companyId, {
       segmentoOrigenId: ids[0]!, segmentoDestinoId: ids[1]!, cantidadOrigen: 50,
       resultadoObjetivo: 0, unidadCantidad: 'unidades',
