@@ -30,6 +30,9 @@ type PuntoIndiferenciaResponse =
 type RelacionReemplazoResponse =
   paths['/companies/{companyId}/analisis/relacion-reemplazo']['post']['responses'][200]['content']['application/json'];
 
+type MezclaOptimaResponse =
+  paths['/companies/{companyId}/analisis/mezcla-optima']['get']['responses'][200]['content']['application/json'];
+
 export function sesionIniciada(response: LoginResponse): string {
   return `${response.data.user.name} · ${response.data.user.role}`;
 }
@@ -59,4 +62,11 @@ export function resumenRelacionReemplazo(response: RelacionReemplazoResponse): s
   return resultadoCortoPlazo === null || resultadoLargoPlazo === null
     ? response.data.motivo ?? 'No existe una relación de reemplazo.'
     : `Corto: ${resultadoCortoPlazo} ${unidades.resultadoCortoPlazo}; largo: ${resultadoLargoPlazo} ${unidades.resultadoLargoPlazo}.`;
+}
+
+export function resumenMezclaOptima(response: MezclaOptimaResponse): string {
+  const { recurso, ranking, motivoSinRanking } = response.data;
+  return recurso === null
+    ? motivoSinRanking ?? 'No hay un recurso escaso activo.'
+    : `${recurso.clave}: ${ranking.length} productos ordenados por contribución por ${recurso.unidad}.`;
 }
