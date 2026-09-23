@@ -634,3 +634,10 @@ DROP POLICY IF EXISTS tenant_isolation ON classifier_ai_calls;
 CREATE POLICY tenant_isolation ON classifier_ai_calls
   USING ("costistId" = current_app_user_id())
   WITH CHECK ("costistId" = current_app_user_id());
+-- segmentos_analisis (M4-01): jerarquía y parámetros marginales por tenant.
+ALTER TABLE segmentos_analisis ENABLE ROW LEVEL SECURITY;
+ALTER TABLE segmentos_analisis FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON segmentos_analisis;
+CREATE POLICY tenant_isolation ON segmentos_analisis
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());

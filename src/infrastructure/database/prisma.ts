@@ -102,6 +102,7 @@ export const RLS_MODELS = new Set([
   'TramoSemifijo',
   'TramoCosto',
   'EquilibrioTramosCalculo',
+  'SegmentoAnalisis',
   'PriceIndexSeries',
   'PriceIndexSeriesVersion',
   'PriceIndexValue',
