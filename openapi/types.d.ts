@@ -9904,6 +9904,259 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/companies/{companyId}/analisis/punto-indiferencia": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    companyId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        tipoDecision: "comparar_estructuras";
+                        estructuraA: {
+                            nombre: string;
+                            costosFijos: number;
+                            costoVariableUnitario: number;
+                        };
+                        estructuraB: {
+                            nombre: string;
+                            costosFijos: number;
+                            costoVariableUnitario: number;
+                        };
+                        unidadCantidad: string;
+                        moneda: string;
+                    } | {
+                        /** @enum {string} */
+                        tipoDecision: "dejar_de_fabricar";
+                        estructuraA: {
+                            nombre: string;
+                            costosFijos: number;
+                            costoVariableUnitario: number;
+                            costosFijosEvitables: number;
+                            costoVariableUnitarioLiquidacion: number;
+                        };
+                        estructuraB: {
+                            nombre: string;
+                            costosFijos: number;
+                            costoVariableUnitario: number;
+                        };
+                        unidadCantidad: string;
+                        moneda: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                cantidadIndiferencia: number | null;
+                                costoEnElPunto: number | null;
+                                convieneA: {
+                                    desde: number;
+                                    hasta: number | null;
+                                } | null;
+                                convieneB: {
+                                    desde: number;
+                                    hasta: number | null;
+                                } | null;
+                                motivoSinPunto: string | null;
+                                /** @enum {string} */
+                                criterio: "costos_totales" | "r25_fijo_evitable_y_liquidacion";
+                                unidades: {
+                                    cantidad: string;
+                                    costo: string;
+                                };
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code?: string;
+                                message: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                } | {
+                                    field: string;
+                                    message: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/empresa-portal/{companyId}/operators": {
         parameters: {
             query?: never;
