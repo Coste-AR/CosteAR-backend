@@ -254,7 +254,11 @@ export class EmpresaPortalService {
 
     const memberships = await this.db.operatorMembership.findMany({
       where: { connectionId: connection.id },
-      include: { operator: { select: { id: true, name: true, email: true, createdAt: true } } },
+      include: {
+        operator: { select: { id: true, name: true, email: true, createdAt: true } },
+        unidadesAutorizadas: { select: { unidadProductiva: { select: { id: true, referencia: true } } } },
+        depositosAutorizados: { select: { deposito: { select: { id: true, referencia: true } } } },
+      },
       orderBy: { joinedAt: 'desc' },
     });
 
@@ -264,6 +268,10 @@ export class EmpresaPortalService {
       email: m.operator.email,
       isActive: m.isActive,
       createdAt: m.operator.createdAt,
+      alcance: {
+        unidadesProductivas: m.unidadesAutorizadas.map((x) => x.unidadProductiva),
+        depositos: m.depositosAutorizados.map((x) => x.deposito),
+      },
     }));
   }
 

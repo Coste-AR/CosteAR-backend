@@ -35,6 +35,7 @@ import { registerUserRoutes } from '../src/infrastructure/http/routes/user.route
 import { registerClassifierAiCostRoutes } from '../src/infrastructure/http/routes/classifier-ai-cost.routes.js';
 import { registerAlertRoutes } from '../src/infrastructure/http/routes/alert.routes.js';
 import { registerReglaAlertaRoutes } from '../src/infrastructure/http/routes/regla-alerta.routes.js';
+import { registerEmpresaPortalRoutes } from '../src/infrastructure/http/routes/empresa-portal.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -56,6 +57,7 @@ const CONVERTED_ROUTES = [
   registerClassifierAiCostRoutes,
   registerAlertRoutes,
   registerReglaAlertaRoutes,
+  (app) => registerEmpresaPortalRoutes(app, { portal: {} as never, scopes: {} as never }),
 ];
 
 async function buildSchemaOnlyApp() {

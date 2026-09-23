@@ -19,6 +19,10 @@ const meEnvelopeSchema = z.object({
     email: z.string().email(),
     rol: userRoleSchema,
     empresaId: z.string().uuid().nullable(),
+    entidadesAutorizadas: z.object({
+      unidadesProductivas: z.array(z.object({ id: z.string().uuid(), referencia: z.string(), etiqueta: z.string() })),
+      depositos: z.array(z.object({ id: z.string().uuid(), referencia: z.string(), etiqueta: z.string() })),
+    }),
   }),
 });
 
@@ -44,13 +48,36 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     if (!user) throw new NotFoundError('Usuario no encontrado');
 
     let empresaId: string | null = null;
+    let entidadesAutorizadas: {
+      unidadesProductivas: Array<{ id: string; referencia: string; etiqueta: string }>;
+      depositos: Array<{ id: string; referencia: string; etiqueta: string }>;
+    } = { unidadesProductivas: [], depositos: [] };
     if (user.role === 'EMPRESA_OPERATOR') {
       const membership = await prisma.operatorMembership.findFirst({
         where: { operatorId: user.id, isActive: true },
         orderBy: { joinedAt: 'asc' },
-        select: { connection: { select: { companyId: true } } },
+        select: {
+          connection: { select: { companyId: true, company: { select: { industry: true } } } },
+          unidadesAutorizadas: { select: { unidadProductiva: { select: { id: true, referencia: true } } } },
+          depositosAutorizados: { select: { deposito: { select: { id: true, referencia: true } } } },
+        },
       });
       empresaId = membership?.connection.companyId ?? null;
+      if (membership) {
+        const paquete = membership.connection.company.industry
+          ? await prisma.paqueteRubro.findFirst({
+              where: { category: membership.connection.company.industry, OR: [{ companyId: null }, { companyId: membership.connection.companyId }] },
+              orderBy: { companyId: 'desc' }, select: { lexicon: true },
+            })
+          : null;
+        const lexicon = (paquete?.lexicon ?? {}) as Record<string, unknown>;
+        const unidadLabel = typeof lexicon.UnidadProductiva === 'string' ? lexicon.UnidadProductiva : 'Unidad productiva';
+        const depositoLabel = typeof lexicon.Deposito === 'string' ? lexicon.Deposito : 'Depósito';
+        entidadesAutorizadas = {
+          unidadesProductivas: membership.unidadesAutorizadas.map(({ unidadProductiva: x }) => ({ ...x, etiqueta: unidadLabel })),
+          depositos: membership.depositosAutorizados.map(({ deposito: x }) => ({ ...x, etiqueta: depositoLabel })),
+        };
+      }
     } else if (user.role !== 'SUPER_ADMIN') {
       const company = await prisma.company.findFirst({
         where: { userId: user.id, isActive: true },
@@ -60,7 +87,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
       empresaId = company?.id ?? null;
     }
 
-    return { data: { id: user.id, email: user.email, rol: user.role, empresaId } };
+    return { data: { id: user.id, email: user.email, rol: user.role, empresaId, entidadesAutorizadas } };
   });
 
   app.get('/user/profile', { preHandler: authenticate }, async (request) => {

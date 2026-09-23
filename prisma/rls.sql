@@ -519,6 +519,44 @@ CREATE POLICY tenant_isolation ON depositos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- Alcance del cargador: el dueño de la empresa administra las filas y el
+-- propio operador puede leerlas para que la autorización no dependa sólo de TS.
+ALTER TABLE operator_unidades_productivas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operator_unidades_productivas FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON operator_unidades_productivas;
+CREATE POLICY tenant_isolation ON operator_unidades_productivas
+  USING (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId"
+      AND (om."operatorId" = current_app_user_id() OR c."userId" = current_app_user_id())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
+  ));
+
+ALTER TABLE operator_depositos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operator_depositos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON operator_depositos;
+CREATE POLICY tenant_isolation ON operator_depositos
+  USING (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId"
+      AND (om."operatorId" = current_app_user_id() OR c."userId" = current_app_user_id())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
+  ));
+
 ALTER TABLE movimientos_deposito ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_deposito FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON movimientos_deposito;

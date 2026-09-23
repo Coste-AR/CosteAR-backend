@@ -19214,13 +19214,72 @@
                           "type": "string",
                           "format": "uuid",
                           "nullable": true
+                        },
+                        "entidadesAutorizadas": {
+                          "type": "object",
+                          "properties": {
+                            "unidadesProductivas": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "referencia": {
+                                    "type": "string"
+                                  },
+                                  "etiqueta": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "referencia",
+                                  "etiqueta"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "depositos": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "referencia": {
+                                    "type": "string"
+                                  },
+                                  "etiqueta": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "referencia",
+                                  "etiqueta"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "unidadesProductivas",
+                            "depositos"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "id",
                         "email",
                         "rol",
-                        "empresaId"
+                        "empresaId",
+                        "entidadesAutorizadas"
                       ],
                       "additionalProperties": false
                     }
@@ -21643,6 +21702,2198 @@
                           "additionalProperties": true
                         }
                       ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/empresa-portal/{companyId}/operators": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operatorName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "operatorEmail": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "jobTitle": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "operatorName",
+                  "operatorEmail"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "companyId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string",
+                          "format": "email"
+                        },
+                        "tempPassword": {
+                          "type": "string"
+                        },
+                        "inviteCode": {
+                          "type": "string"
+                        },
+                        "isNewUser": {
+                          "type": "boolean"
+                        },
+                        "emailSent": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "email",
+                        "inviteCode",
+                        "isNewUser",
+                        "emailSent"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "companyId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string",
+                            "format": "email"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "alcance": {
+                            "type": "object",
+                            "properties": {
+                              "unidadesProductivas": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "referencia": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "referencia"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "depositos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "referencia": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "referencia"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "unidadesProductivas",
+                              "depositos"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "email",
+                          "isActive",
+                          "createdAt",
+                          "alcance"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/empresa-portal/operators/{operatorId}": {
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "operatorId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "success"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "message"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/empresa-portal/{companyId}/operators/{operatorId}/scope": {
+      "put": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "unidadProductivaIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "default": []
+                  },
+                  "depositoIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "companyId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "operatorId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "success"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
