@@ -164,7 +164,7 @@ a mano al final es una promesa que se incumple sola.
   hayas acertado**. No es una queja: es con lo que mejoramos cómo pedimos el trabajo.
 - **Qué quedó afuera.**
 
-Formato completo: `CosteAR-os/code/templates/bitacora-sesion-agente.md`.
+Formato completo: `CosteAR-os/software/templates/bitacora-sesion-agente.md`.
 
 ## Antes de decir que algo ya está resuelto
 
