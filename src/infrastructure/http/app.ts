@@ -65,6 +65,7 @@ import { registerPlaneamientoResultadosRoutes } from './routes/planeamiento-resu
 import { registerPuntoIndiferenciaRoutes } from './routes/punto-indiferencia.routes.js';
 import { registerRelacionReemplazoRoutes } from './routes/relacion-reemplazo.routes.js';
 import { registerMezclaOptimaRoutes } from './routes/mezcla-optima.routes.js';
+import { registerPrecioTransferenciaRoutes } from './routes/precio-transferencia.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -251,6 +252,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerPuntoIndiferenciaRoutes(api);
       await registerRelacionReemplazoRoutes(api);
       await registerMezclaOptimaRoutes(api);
+      await registerPrecioTransferenciaRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerLotesProductivosRoutes(api);

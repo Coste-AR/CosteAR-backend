@@ -656,3 +656,8 @@ DROP POLICY IF EXISTS tenant_isolation ON consumos_recurso_por_unidad;
 CREATE POLICY tenant_isolation ON consumos_recurso_por_unidad
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE precios_transferencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE precios_transferencia FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON precios_transferencia;
+CREATE POLICY tenant_isolation ON precios_transferencia USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
