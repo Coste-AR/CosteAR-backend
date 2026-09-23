@@ -1023,10 +1023,37 @@ model OperatorMembership {
    */
   telegramChatId String? @unique
 
+  unidadesAutorizadas OperatorUnidadProductiva[]
+  depositosAutorizados OperatorDeposito[]
+
   @@unique([operatorId, connectionId])
   @@index([operatorId])
   @@index([connectionId])
   @@map("operator_memberships")
+}
+
+model OperatorUnidadProductiva {
+  membershipId      String             @db.Uuid
+  membership        OperatorMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  unidadProductivaId String             @db.Uuid
+  unidadProductiva   UnidadProductiva   @relation(fields: [unidadProductivaId], references: [id], onDelete: Cascade)
+  grantedAt          DateTime           @default(now()) @db.Timestamptz
+
+  @@id([membershipId, unidadProductivaId])
+  @@index([unidadProductivaId])
+  @@map("operator_unidades_productivas")
+}
+
+model OperatorDeposito {
+  membershipId String             @db.Uuid
+  membership   OperatorMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  depositoId   String             @db.Uuid
+  deposito     Deposito           @relation(fields: [depositoId], references: [id], onDelete: Cascade)
+  grantedAt    DateTime           @default(now()) @db.Timestamptz
+
+  @@id([membershipId, depositoId])
+  @@index([depositoId])
+  @@map("operator_depositos")
 }
 
 // Código de invitación para que un operador se una a una empresa
@@ -2752,6 +2779,7 @@ model UnidadProductiva {
   activa     Boolean @default(true)
 
   lotes LoteProductivo[]
+  operadoresAutorizados OperatorUnidadProductiva[]
 
   createdAt DateTime  @default(now()) @db.Timestamptz
   updatedAt DateTime  @updatedAt @db.Timestamptz
@@ -2787,6 +2815,7 @@ model Deposito {
   umbralBajo Decimal      @db.Decimal(18, 4)
 
   movimientos MovimientoDeposito[]
+  operadoresAutorizados OperatorDeposito[]
   createdAt   DateTime             @default(now()) @db.Timestamptz
   updatedAt   DateTime             @updatedAt @db.Timestamptz
   deletedAt   DateTime?            @db.Timestamptz

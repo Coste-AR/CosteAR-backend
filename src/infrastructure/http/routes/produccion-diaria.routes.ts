@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ProduccionDiariaService } from '../../../application/operacion/produccion-diaria-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import { produccionDiariaCreateSchema } from '../../../shared/schemas/produccion-diaria.schema.js';
+import { OperatorScopeService } from '../../../application/empresa/operator-scope-service.js';
 
 const loteParams = z.object({ loteId: z.string().uuid() });
 const fechaQuery = z.object({ fecha: z.string().date().optional() });
@@ -20,6 +21,7 @@ function actorFrom(request: FastifyRequest) {
 
 export async function registerProduccionDiariaRoutes(app: FastifyInstance): Promise<void> {
   const service = new ProduccionDiariaService();
+  const scopes = new OperatorScopeService();
 
   app.get('/lotes/:loteId/producciones', { preHandler: authenticate }, async (request) => {
     const { loteId } = loteParams.parse(request.params);
@@ -29,6 +31,7 @@ export async function registerProduccionDiariaRoutes(app: FastifyInstance): Prom
   app.post('/lotes/:loteId/producciones', { preHandler: authenticate }, async (request, reply) => {
     const { loteId } = loteParams.parse(request.params);
     const input = produccionDiariaCreateSchema.parse(request.body);
+    if (request.authUser!.role === 'EMPRESA_OPERATOR') await scopes.assertLote(request.authUser!.id, loteId, actorFrom(request));
     return reply.code(201).send({ data: await service.create(request.authUser!.id, loteId, input, actorFrom(request)) });
   });
   app.get('/lotes/:loteId/producciones/indicadores', { preHandler: authenticate }, async (request) => {
