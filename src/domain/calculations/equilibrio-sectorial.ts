@@ -20,6 +20,16 @@ export interface SegmentoSectorialInput {
 
 const n = (valor: Decimal): number => valor.toNumber();
 
+export function contribucionMarginalSegmento(segmento: SegmentoSectorialInput): number {
+  if (segmento.produccionConjunta) {
+    return n((segmento.coproductos ?? []).reduce(
+      (total, coproducto) => total.plus(new Decimal(coproducto.precio).times(coproducto.rendimiento)),
+      new Decimal(0),
+    ));
+  }
+  return n(new Decimal(segmento.precioUnitario ?? 0).minus(segmento.costoVariableUnitario ?? 0));
+}
+
 /**
  * R15/R16: la producción conjunta obtiene su ingreso unitario de los
  * coproductos ponderados por rendimiento; nunca de un costo variable propio.
@@ -32,15 +42,7 @@ export function calcularEquilibrioSectorial(segmentos: readonly SegmentoSectoria
   const participacionTotal = segmentos.reduce((a, s) => a.plus(s.participacion), new Decimal(0));
   if (!participacionTotal.eq(1)) throw new Error('Las participaciones de los segmentos deben sumar uno.');
 
-  const cm = (s: SegmentoSectorialInput): Decimal => {
-    if (s.produccionConjunta) {
-      return (s.coproductos ?? []).reduce(
-        (total, coproducto) => total.plus(new Decimal(coproducto.precio).times(coproducto.rendimiento)),
-        new Decimal(0),
-      );
-    }
-    return new Decimal(s.precioUnitario ?? 0).minus(s.costoVariableUnitario ?? 0);
-  };
+  const cm = (s: SegmentoSectorialInput): Decimal => new Decimal(contribucionMarginalSegmento(s));
   const cmPonderada = segmentos.reduce(
     (total, s) => total.plus(cm(s).times(s.participacion)), new Decimal(0),
   );
