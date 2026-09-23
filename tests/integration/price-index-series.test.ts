@@ -48,6 +48,6 @@ describe('M11-01 — serie de índices versionada y aislada', () => {
   it('RLS y la propiedad de empresa impiden leer la serie de otro tenant', async () => {
     const service = new PriceIndexSeriesService(db);
     await expect(withTenantContext(B.userId, () => service.get(B.userId, A.companyId)))
-      .rejects.toThrow(/empresa no encontrada/i);
+      .rejects.toThrow(/negocio no encontrado/i);
   });
 });

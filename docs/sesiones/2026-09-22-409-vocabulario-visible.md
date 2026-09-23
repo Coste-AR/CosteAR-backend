@@ -7,13 +7,13 @@ agente: codex
 modelo: gpt-5
 tanda: B3
 inicio: 2026-09-22T22:23-03:00
-fin: 2026-09-22T22:38-03:00
-minutos: 15
+fin: 2026-09-22T22:42-03:00
+minutos: 19
 tokens: no-informado
 clears: 0
-intentos_hasta_verde: 4
+intentos_hasta_verde: 5
 rojos_deliberados: 1
-rebotes_de_guarda: 0
+rebotes_de_guarda: 1
 ---
 
 # 2026-09-22 — CosteAR habla de negocios y personas
@@ -54,6 +54,7 @@ npm run lint       # verde
 npm run typecheck  # verde
 npm run test       # 221 archivos pasados, 1 omitido; 1896 tests pasados, 4 omitidos
 npm run test:http  # 30 archivos y 164 tests pasados
+npm run test:integration  # 28 archivos y 86 tests pasados
 ```
 
-El rojo deliberado ejecutó los cuatro tests nuevos antes del cambio: fallaron en correo, catálogo de parámetros, catálogo de comportamientos y prompt del asesor. Una ejecución paralela posterior produjo timeouts por competencia entre dos suites Vitest; la repetición secuencial completa pasó sin saltear pruebas.
+El rojo deliberado ejecutó los cuatro tests nuevos antes del cambio: fallaron en correo, catálogo de parámetros, catálogo de comportamientos y prompt del asesor. Una ejecución paralela posterior produjo timeouts por competencia entre dos suites Vitest; la repetición secuencial completa pasó sin saltear pruebas. El primer CI de integración encontró nueve aserciones que todavía exigían el texto anterior; se actualizaron sin renombrar tests y la suite de integración local completa quedó verde.
