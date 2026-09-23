@@ -1,14 +1,14 @@
 ---
 issue: 409
 repo: CosteAR-backend
-pr: pendiente
+pr: 415
 rama: fix/vocabulario-visible-409
 agente: codex
 modelo: gpt-5
 tanda: B3
 inicio: 2026-09-22T22:23-03:00
-fin: 2026-09-22T22:36-03:00
-minutos: 13
+fin: 2026-09-22T22:38-03:00
+minutos: 15
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 4
