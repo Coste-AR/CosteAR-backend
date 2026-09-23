@@ -85,7 +85,7 @@ describe('A-07 — tablero del dueño por período', () => {
     expect(tablero.rubro).toBeNull();
     expect(tablero.pendientes).toContainEqual({
       area: 'configuracion',
-      dato: 'La empresa no tiene un paquete de rubro declarado',
+      dato: 'El negocio no tiene un paquete de rubro declarado',
       periodo: { id: B.periodId, codigo: expect.any(String) },
     });
   });

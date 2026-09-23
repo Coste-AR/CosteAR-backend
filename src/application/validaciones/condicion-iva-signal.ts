@@ -138,9 +138,9 @@ export function notaDeRevision(senal: CondicionIvaSignal, params: { documento: s
   const donde = senal.origen === 'qualityNote' ? 'la nota de calidad de la IA' : 'el texto del comprobante';
   return (
     `Indicio de "${senal.indicio}" detectado en ${donde} del documento "${params.documento}". ` +
-    `La empresa está declarada como Responsable Inscripto, así que el sistema costea sobre el NETO. ` +
+    `El negocio está declarado como Responsable Inscripto, así que el sistema costea sobre el NETO. ` +
     `Si en realidad es ${senal.sugerida === 'MONOTRIBUTO' ? 'monotributista' : 'exenta'}, el IVA SÍ es parte ` +
     `del costo (Clase 4 de la cátedra, línea 27) y los costos se están subvaluando. ` +
-    `Confirmá la condición frente al IVA en la ficha de la empresa.`
+    `Confirmá la condición frente al IVA en la ficha del negocio.`
   );
 }

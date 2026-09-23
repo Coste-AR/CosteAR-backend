@@ -40,9 +40,9 @@ describe('contrato de parámetros: catálogo, cascada y aislamiento', () => {
 
     await expect(
       withTenantContext(A.userId, () => service.delete(A.userId, B.companyId, clave, {}, actor(A.userId))),
-    ).rejects.toThrow(/empresa no encontrada/i);
+    ).rejects.toThrow(/negocio no encontrado/i);
     await expect(
       withTenantContext(A.userId, () => service.resolver(A.userId, B.companyId, clave)),
-    ).rejects.toThrow(/empresa no encontrada/i);
+    ).rejects.toThrow(/negocio no encontrado/i);
   });
 });

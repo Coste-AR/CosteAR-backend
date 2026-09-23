@@ -90,7 +90,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data.rubro).toBeNull();
     expect(body.data.pendientes).toContainEqual({
       area: 'configuracion',
-      dato: 'La empresa no tiene un paquete de rubro declarado',
+      dato: 'El negocio no tiene un paquete de rubro declarado',
       periodo: { id: PERIOD_ID, codigo: '2026-09' },
     });
   });
@@ -558,7 +558,7 @@ describe('GET /periods/:id/tablero-dueno', () => {
     expect(body.data.unidadGestion).toBeNull();
     expect(body.data.pendientes).toEqual(expect.arrayContaining([
       { area: 'imputacion', dato: 'Compra de prueba', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
-      { area: 'configuracion', dato: 'unidad de gestión de la empresa', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
+      { area: 'configuracion', dato: 'unidad de gestión del negocio', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'produccion', dato: 'cantidad producida mayor a cero', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'ventas', dato: 'ventas del período', periodo: { id: PERIOD_ID, codigo: '2026-09' } },
       { area: 'costeo', dato: 'clasificación frente al volumen del rubro Materia prima', periodo: { id: PERIOD_ID, codigo: '2026-09' } },

@@ -298,7 +298,7 @@ export function comparePeriods(
     warnings.push(
       missingPeriodCodes.length > 0
         ? `Comparación en pesos nominales: faltan índices para ${missingPeriodCodes.join(', ')}.`
-        : 'Comparación en pesos nominales: la empresa todavía no cargó una serie de índices.',
+        : 'Comparación en pesos nominales: el negocio todavía no tiene cargada una serie de índices.',
     );
   }
 

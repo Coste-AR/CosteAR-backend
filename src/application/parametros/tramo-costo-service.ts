@@ -10,7 +10,7 @@ export class TramoCostoService {
 
   private async companyDe(userId: string, companyId: string) {
     const company = await this.db.company.findFirst({ where: { id: companyId, userId, deletedAt: null } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 

@@ -17,7 +17,7 @@ export class TelemetriaPanelService {
         where: { id: companyId, userId: actor.id, deletedAt: null },
         select: { userId: true },
       });
-      if (!company) throw new NotFoundError('Empresa no encontrada');
+      if (!company) throw new NotFoundError('Negocio no encontrado');
       return company.userId;
     }
 
@@ -30,7 +30,7 @@ export class TelemetriaPanelService {
         },
         select: { connection: { select: { costistId: true } } },
       });
-      if (!membership) throw new ForbiddenError('No tenés acceso a esa empresa');
+      if (!membership) throw new ForbiddenError('No tenés acceso a ese negocio');
       return membership.connection.costistId;
     }
 

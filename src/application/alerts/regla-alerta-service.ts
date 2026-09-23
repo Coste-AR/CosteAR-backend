@@ -24,7 +24,7 @@ export class ReglaAlertaService {
         include: { user: { select: { email: true } } },
       }),
     );
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 

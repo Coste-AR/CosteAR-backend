@@ -11,11 +11,11 @@ export class PuntoCierreService {
 
   private async empresa(userId: string, companyId: string) {
     const company = await this.db.company.findFirst({ where: { id: companyId, userId } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
   }
 
   async guardarImporte(userId: string, role: string, companyId: string, conceptoId: string, input: GuardarImporteConceptoInput, actor: TraceActor) {
-    if (role !== 'EMPRESA_ADMIN') throw new ForbiddenError('Solo la cuenta administradora de la empresa puede declarar importes.');
+    if (role !== 'EMPRESA_ADMIN') throw new ForbiddenError('Solo la cuenta administradora del negocio puede declarar importes.');
     await this.empresa(userId, companyId);
     const concepto = await this.db.conceptoCosteo.findFirst({ where: { id: conceptoId, companyId, deletedAt: null } });
     if (!concepto) throw new NotFoundError('Concepto de costeo no encontrado');

@@ -43,8 +43,8 @@ export class GroqClassifier {
       : '- Ninguna señal encontrada';
 
     const industryCtx = input.industryLabel
-      ? `Rubro de la empresa: ${input.industryLabel} (categoría interna: ${input.industryCategory ?? 'DEFAULT'}).`
-      : 'Rubro de la empresa: no especificado.';
+      ? `Rubro del negocio: ${input.industryLabel} (categoría interna: ${input.industryCategory ?? 'DEFAULT'}).`
+      : 'Rubro del negocio: no especificado.';
 
     const intentCtx = input.intent && input.intent !== 'DOCUMENTO_FORMAL'
       ? `Nota: el mensaje fue detectado como "${input.intent}", tener en cuenta al clasificar.`
@@ -55,7 +55,7 @@ export class GroqClassifier {
       : '';
 
     const examplesCtx = input.correctionExamples
-      ? `\nEjemplos de clasificaciones que este costista validó/corrigió en casos similares (seguí su criterio):\n${input.correctionExamples}`
+      ? `\nEjemplos de clasificaciones que la persona validó o corrigió en casos similares (seguí su criterio):\n${input.correctionExamples}`
       : '';
 
     // ⚠️ NO ESCRIBAS ACÁ UNA REGLA SOBRE EL FLETE.
@@ -102,7 +102,7 @@ export class GroqClassifier {
       'MATERIA_PRIMA, no a COSTOS_INDIRECTOS. Solo el flete SIN compra asociada (movimiento ' +
       'interno de planta, logística entre depósitos, reparto propio) es COSTOS_INDIRECTOS.';
 
-    const prompt = `Contexto: documento contable argentino enviado por un operador de PyME.
+    const prompt = `Contexto: documento contable argentino enviado por un operador del negocio.
 ${industryCtx}
 ${industryHint}
 ${intentCtx}${ambiguityCtx}${examplesCtx}

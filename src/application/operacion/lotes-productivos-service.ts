@@ -7,7 +7,7 @@ export class LotesProductivosService {
 
   private async empresaDe(userId: string, companyId: string) {
     const company = await withTenant(userId, (tx) => tx.company.findFirst({ where: { id: companyId, userId, isActive: true } }));
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
   }
 
   async listUnidades(userId: string, companyId: string) {

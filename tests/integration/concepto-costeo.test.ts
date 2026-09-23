@@ -97,7 +97,7 @@ describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
     // Ni siquiera adivinando el companyId de A: la empresa no es "de" B.
     await expect(
       withTenantContext(B.userId, () => service.listar(B.userId, A.companyId)),
-    ).rejects.toThrow(/empresa no encontrada/i);
+    ).rejects.toThrow(/negocio no encontrado/i);
   });
 
   it('empresa sin ningún ConceptoCosteo: listar devuelve vacío, no rompe nada (compatibilidad hacia atrás)', async () => {
@@ -151,7 +151,7 @@ describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
 
     await expect(withTenantContext(B.userId, () =>
       tramos.obtener(B.userId, A.companyId, concepto.id),
-    )).rejects.toThrow(/empresa no encontrada/i);
+    )).rejects.toThrow(/negocio no encontrado/i);
   });
 
   it('TramoCosto: corrige con versión nueva y el cálculo conserva los ids usados', async () => {
@@ -180,7 +180,7 @@ describe('ConceptoCosteo: CRUD, cascada y aislamiento', () => {
     expect(foto.tramoCostoIds).toEqual([segundo.id]);
 
     await expect(withTenantContext(B.userId, () => tramos.listar(B.userId, A.companyId)))
-      .rejects.toThrow(/empresa no encontrada/i);
+      .rejects.toThrow(/negocio no encontrado/i);
   });
 
   it('ImporteConcepto: corrige con fila nueva, conserva versiones y RLS aísla empresas', async () => {

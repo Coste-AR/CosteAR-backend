@@ -223,7 +223,7 @@ export class OwnerDashboardService {
         : { ...rubroBase, kpisHome: resolverKpisHome(kpisHomeConfigurados, tablero, (message) => console.warn(message)) },
     });
     const pendienteRubro: FuentePendiente[] = rubroBase === null
-      ? [{ area: 'configuracion', dato: 'La empresa no tiene un paquete de rubro declarado' }]
+      ? [{ area: 'configuracion', dato: 'El negocio no tiene un paquete de rubro declarado' }]
       : [];
     const conversor = crearConversorUnidadGestion(unidadGestion);
 
@@ -306,7 +306,7 @@ export class OwnerDashboardService {
     }) ?? [];
     const pendientes = pendientesUnicos(periodo, [
       ...pendientesBase,
-      ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de gestión de la empresa' }] : []),
+      ...(factor === null ? [{ area: 'configuracion' as const, dato: 'unidad de gestión del negocio' }] : []),
       ...pendienteRubro,
       ...(baseUnidades <= 0 ? [{ area: 'produccion' as const, dato: 'cantidad producida mayor a cero' }] : []),
       ...(sinVentas.length > 0 ? [{ area: 'ventas' as const, dato: 'ventas del período' }] : []),

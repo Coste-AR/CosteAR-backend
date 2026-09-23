@@ -43,7 +43,7 @@ describe('S-05b — reglas configurables con RLS real', () => {
 
     expect(creada.indicador).toBe('humedad_grano_ingreso');
     expect(await service.listar(A.userId, A.companyId, A.structureId)).toHaveLength(1);
-    await expect(service.listar(B.userId, A.companyId)).rejects.toThrow(/empresa no encontrada/i);
+    await expect(service.listar(B.userId, A.companyId)).rejects.toThrow(/negocio no encontrado/i);
     expect(
       await withTenant(B.userId, (tx) =>
         tx.reglaAlerta.findMany({ where: { companyId: A.companyId } }),

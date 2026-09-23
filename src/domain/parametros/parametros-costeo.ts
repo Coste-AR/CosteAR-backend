@@ -119,7 +119,7 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
     seguro: false,
     nota:
       'Valor de referencia no confirmado. Se resuelve como parámetro porque puede cambiar por estación ' +
-      'y la antigüedad del stock debe evaluarse contra el valor vigente de cada empresa.',
+      'y la antigüedad del stock debe evaluarse contra el valor vigente de cada negocio.',
   },
   {
     clave: 'tamanos_huevo',
@@ -142,7 +142,7 @@ export const PARAMETROS_AVICOLA: DefinicionParametro[] = [
     seguro: false,
     nota:
       'Sin umbral declarado no se puede decidir sola: el sistema manda la merma a revisión ' +
-      'humana en vez de elegir por el costista.',
+      'humana en vez de decidir por vos.',
   },
 ];
 
@@ -168,7 +168,7 @@ export const CLASIFICACIONES_AVICOLA: DefinicionComportamiento[] = [
     clave: 'comportamiento_mano_obra_directa',
     descripcion: 'Comportamiento frente al volumen de la mano de obra directa.',
     propuesta: null,
-    fundamento: 'Depende de cómo se organice y remunere el trabajo de cada empresa.',
+    fundamento: 'Depende de cómo se organice y remunere el trabajo de cada negocio.',
   },
   {
     clave: 'comportamiento_costos_indirectos',

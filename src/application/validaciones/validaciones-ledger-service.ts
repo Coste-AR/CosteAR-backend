@@ -108,7 +108,7 @@ export class ValidacionesLedgerService {
       where: { id: input.companyId, userId: costistId },
       select: { id: true },
     });
-    if (!company) throw new ForbiddenError('Empresa no encontrada o sin acceso');
+    if (!company) throw new ForbiddenError('Negocio no encontrado o sin acceso');
 
     await this.requirePeriodExists(input.companyId, input.period);
 
@@ -189,7 +189,7 @@ export class ValidacionesLedgerService {
     });
     if (!structure) {
       throw new ValidationError(
-        `El período ${period} no existe para esta empresa: creá primero la estructura de costos de ese mes`,
+        `El período ${period} no existe para este negocio: creá primero la estructura de costos de ese mes`,
       );
     }
   }

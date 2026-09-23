@@ -69,7 +69,7 @@ export class ParametrosCosteoService {
   /** Verifica que la empresa exista y sea de quien la pide. */
   private async companyDe(userId: string, companyId: string) {
     const company = await this.db.company.findFirst({ where: { id: companyId, userId } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 
@@ -266,7 +266,7 @@ export class ParametrosCosteoService {
             where: { companyId, codigo: input.valorTexto, deletedAt: null },
           });
           if (!unidad) {
-            throw new UnprocessableEntityError(`La empresa no tiene una unidad "${input.valorTexto}" disponible para gestión.`, { field: 'valorTexto' });
+            throw new UnprocessableEntityError(`El negocio no tiene una unidad "${input.valorTexto}" disponible para gestión.`, { field: 'valorTexto' });
           }
           const actualizada = await tx.company.update({ where: { id: companyId }, data: { unidadGestionId: unidad.id } });
           await recordTraceAudit({

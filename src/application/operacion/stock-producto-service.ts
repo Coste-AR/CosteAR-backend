@@ -22,7 +22,7 @@ export class StockProductoService {
 
   private async companyDe(userId: string, companyId: string) {
     const company = await withTenant(userId, (tx) => tx.company.findFirst({ where: { id: companyId, userId, deletedAt: null } }));
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 

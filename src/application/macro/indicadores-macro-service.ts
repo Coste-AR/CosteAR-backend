@@ -61,7 +61,7 @@ export class IndicadoresMacroService {
       where: { id: companyId, userId },
       select: { industry: true },
     });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
 
     const category = company.industry
       ? CATEGORY_BY_INDUSTRY[company.industry as keyof typeof CATEGORY_BY_INDUSTRY]
