@@ -24,6 +24,9 @@ type LoginResponse =
 type CalculationResponse =
   paths['/cost-structures/{id}/calculate']['post']['responses'][200]['content']['application/json'];
 
+type PuntoIndiferenciaResponse =
+  paths['/companies/{companyId}/analisis/punto-indiferencia']['post']['responses'][200]['content']['application/json'];
+
 export function sesionIniciada(response: LoginResponse): string {
   return `${response.data.user.name} · ${response.data.user.role}`;
 }
@@ -39,4 +42,11 @@ export function resumenTablero(tablero: TableroResponse): string {
   return costo === null
     ? `Período ${data.periodo.codigo}: costo por unidad incompleto.`
     : `Período ${data.periodo.codigo}: costo por unidad $${costo.toFixed(2)}.`;
+}
+
+export function resumenPuntoIndiferencia(response: PuntoIndiferenciaResponse): string {
+  const { cantidadIndiferencia, motivoSinPunto, unidades } = response.data;
+  return cantidadIndiferencia === null
+    ? motivoSinPunto ?? 'No existe un punto de indiferencia.'
+    : `${cantidadIndiferencia} ${unidades.cantidad}`;
 }

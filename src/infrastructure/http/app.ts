@@ -62,6 +62,7 @@ import { registerClassifierAiCostRoutes } from './routes/classifier-ai-cost.rout
 import { registerSegmentoAnalisisRoutes } from './routes/segmento-analisis.routes.js';
 import { registerCapacidadOciosaRoutes } from './routes/capacidad-ociosa.routes.js';
 import { registerPlaneamientoResultadosRoutes } from './routes/planeamiento-resultados.routes.js';
+import { registerPuntoIndiferenciaRoutes } from './routes/punto-indiferencia.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -245,6 +246,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerSegmentoAnalisisRoutes(api);
       await registerCapacidadOciosaRoutes(api);
       await registerPlaneamientoResultadosRoutes(api);
+      await registerPuntoIndiferenciaRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerLotesProductivosRoutes(api);
