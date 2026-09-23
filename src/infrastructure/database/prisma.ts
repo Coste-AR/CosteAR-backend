@@ -103,6 +103,8 @@ export const RLS_MODELS = new Set([
   'TramoCosto',
   'EquilibrioTramosCalculo',
   'SegmentoAnalisis',
+  'RecursoEscaso',
+  'ConsumoRecursoPorUnidad',
   'PriceIndexSeries',
   'PriceIndexSeriesVersion',
   'PriceIndexValue',
