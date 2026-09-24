@@ -97,6 +97,27 @@ export function mismoCommit(a, b) {
   return largo.startsWith(corto);
 }
 
+/** Evalúa un preflight CORS sin red para que el criterio tenga cobertura unitaria. */
+export function evaluarCors({ origin, respuesta }) {
+  if (respuesta.error) {
+    return { ok: false, motivo: `CORS para ${origin} no respondió (${respuesta.error})` };
+  }
+
+  if (respuesta.status < 200 || respuesta.status >= 300) {
+    return { ok: false, motivo: `CORS para ${origin} respondió HTTP ${respuesta.status}` };
+  }
+
+  if (respuesta.allowOrigin !== origin) {
+    const recibido = respuesta.allowOrigin ?? 'sin Access-Control-Allow-Origin';
+    return {
+      ok: false,
+      motivo: `CORS para ${origin} devolvió ${recibido}; se esperaba exactamente ${origin}`,
+    };
+  }
+
+  return { ok: true, motivo: `CORS permite ${origin}` };
+}
+
 /** Consulta `/health` y normaliza cualquier falla a la forma que espera `evaluarSalud`. */
 async function consultarSalud(url, timeoutMs = 10_000) {
   const corte = AbortSignal.timeout(timeoutMs);
@@ -119,6 +140,27 @@ async function consultarSalud(url, timeoutMs = 10_000) {
   }
 }
 
+async function consultarCors(base, origin, timeoutMs = 10_000) {
+  const url = `${base.replace(/\/+$/, '')}/api/v1/auth/refresh`;
+  try {
+    const response = await fetch(url, {
+      method: 'OPTIONS',
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'manual',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+      },
+    });
+    return {
+      status: response.status,
+      allowOrigin: response.headers.get('access-control-allow-origin') ?? undefined,
+    };
+  } catch (error) {
+    return { status: 0, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function leerArgs(argv) {
@@ -136,6 +178,7 @@ async function main() {
   const sha = args.sha ?? process.env.GITHUB_SHA;
   const intentos = Number(args.intentos ?? 12);
   const espera = Number(args.espera ?? 15) * 1000;
+  const originsRaw = args.origins ?? process.env.FRONTEND_ORIGINS;
 
   if (!base) {
     console.error(
@@ -144,43 +187,70 @@ async function main() {
         '  Cargarlas en: Settings → Secrets and variables → Actions → Variables.\n' +
         '  (Es el "hueco de infra" que el runbook viene arrastrando sin dueño.)',
     );
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
   if (!sha) {
     console.error('✖ Falta el SHA esperado (--sha o GITHUB_SHA).');
-    process.exit(2);
+    process.exitCode = 2;
+    return;
+  }
+  const origins = originsRaw?.split(',').map((origin) => origin.trim()).filter(Boolean) ?? [];
+  if (origins.length === 0) {
+    console.error(
+      '✖ Falta FRONTEND_ORIGINS. Cargar una lista separada por comas en las variables del repositorio; sin orígenes no se puede medir CORS.',
+    );
+    process.exitCode = 2;
+    return;
   }
 
   const url = `${base.replace(/\/+$/, '')}/health`;
   console.log(`Verificando que ${url} esté corriendo ${sha}`);
   console.log(`Hasta ${intentos} intentos, cada ${espera / 1000}s.\n`);
 
+  let deployConfirmado = false;
   for (let intento = 1; intento <= intentos; intento += 1) {
     const respuesta = await consultarSalud(url);
     const { estado, motivo } = evaluarSalud({ shaEsperado: sha, respuesta });
 
     if (estado === 'ok') {
       console.log(`✔ Intento ${intento}/${intentos}: ${motivo}`);
-      console.log('\nEl deploy llegó y está sirviendo el commit correcto.');
-      return;
+      deployConfirmado = true;
+      break;
     }
 
     if (estado === 'abortar') {
       console.error(`\n✖ ${motivo}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     console.log(`… intento ${intento}/${intentos}: ${motivo}`);
     if (intento < intentos) await dormir(espera);
   }
 
-  console.error(
-    `\n✖ El deploy NO llegó: después de ${intentos} intentos ` +
-      `(${(intentos * espera) / 1000}s) el ambiente sigue sin servir ${sha}.\n` +
-      '  O el build de Railway falló, o tarda más que la ventana, o el deploy quedó ' +
-      'trabado (P3009 de una migración a medio aplicar bloquea cualquier deploy).',
-  );
-  process.exit(1);
+  if (!deployConfirmado) {
+    console.error(
+      `\n✖ El deploy NO llegó: después de ${intentos} intentos ` +
+        `(${(intentos * espera) / 1000}s) el ambiente sigue sin servir ${sha}.\n` +
+        '  O el build de Railway falló, o tarda más que la ventana, o el deploy quedó ' +
+        'trabado (P3009 de una migración a medio aplicar bloquea cualquier deploy).',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log('\nEl deploy llegó. Verificando preflights CORS:');
+  for (const origin of origins) {
+    const resultado = evaluarCors({ origin, respuesta: await consultarCors(base, origin) });
+    if (!resultado.ok) {
+      console.error(`✖ ${resultado.motivo}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`✔ ${resultado.motivo}`);
+  }
+  console.log('\nEl deploy sirve el commit correcto y permite todos los orígenes configurados.');
 }
 
 // Solo corre cuando se lo invoca como script; importarlo desde un test no dispara nada.

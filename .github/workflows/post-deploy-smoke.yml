@@ -22,6 +22,8 @@ name: Smoke post-deploy
 on:
   push:
     branches: [ "staging", "main" ]
+  schedule:
+    - cron: "17 9 * * *"
   # Para re-verificar un ambiente sin pushear nada. El SHA que se compara es el
   # HEAD de la rama que elijas en "Use workflow from": elegí `staging` o `main`,
   # no `dev` — `dev` no deploya a ningún lado y daría un rojo sin sentido.
@@ -34,6 +36,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'staging' || github.ref }}
+
+      - name: Identificar el commit verificado
+        id: revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v7
         with:
@@ -42,7 +51,7 @@ jobs:
       - name: Qué ambiente le corresponde a esta rama
         id: ambiente
         env:
-          RAMA: ${{ github.ref_name }}
+          RAMA: ${{ github.event_name == 'schedule' && 'staging' || github.ref_name }}
           STAGING_URL: ${{ vars.STAGING_HEALTH_URL }}
           PRODUCTION_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
         run: |
@@ -71,12 +80,14 @@ jobs:
         run: sleep 45
 
       - name: El ambiente ${{ steps.ambiente.outputs.nombre }} tiene que estar sirviendo este commit
-        run: node scripts/smoke-deploy.mjs --url "${{ steps.ambiente.outputs.url }}" --sha "${{ github.sha }}" --intentos 12 --espera 15
+        env:
+          FRONTEND_ORIGINS: ${{ vars.FRONTEND_ORIGINS }}
+        run: node scripts/smoke-deploy.mjs --url "${{ steps.ambiente.outputs.url }}" --sha "${{ steps.revision.outputs.sha }}" --intentos 12 --espera 15
 
       - name: Qué mirar si esto falló
         if: failure()
         run: |
-          echo "::notice::El ambiente '${{ steps.ambiente.outputs.nombre }}' no está sirviendo ${{ github.sha }}."
+          echo "::notice::El ambiente '${{ steps.ambiente.outputs.nombre }}' no superó el smoke para ${{ steps.revision.outputs.sha }}."
           echo "1. Logs de deploy en Railway, ambiente '${{ steps.ambiente.outputs.nombre }}':"
           echo "   ¿falló el build o el preDeployCommand?"
           echo "2. Una migración a medio aplicar bloquea CUALQUIER deploy (P3009):"
