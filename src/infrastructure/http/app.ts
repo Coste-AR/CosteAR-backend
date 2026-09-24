@@ -66,6 +66,7 @@ import { registerPuntoIndiferenciaRoutes } from './routes/punto-indiferencia.rou
 import { registerRelacionReemplazoRoutes } from './routes/relacion-reemplazo.routes.js';
 import { registerMezclaOptimaRoutes } from './routes/mezcla-optima.routes.js';
 import { registerPrecioTransferenciaRoutes } from './routes/precio-transferencia.routes.js';
+import { createCorsOriginHandler } from './cors-policy.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -120,29 +121,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // --- CORS: lista blanca explícita, nunca '*' con credenciales ---
   // CORS_ORIGIN puede ser una lista separada por comas: "https://foo.vercel.app,http://localhost:5173"
   const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
-  // Dominios de Vercel del frontend (producción + previews) y localhost: se permiten
-  // SIEMPRE, para no depender de que CORS_ORIGIN esté bien seteado en el deploy.
-  // Cubre los dos nombres del proyecto ("costear-frontend" y "coste-ar-frontend")
-  // y sus URLs de preview. Ej: coste-ar-frontend.vercel.app, coste-ar-frontend-xxx.vercel.app
-  // Nota: no hace falta una entrada para sentry.io acá — el webhook de Sentry
-  // es server-to-server (sin header Origin), CORS no aplica a esa llamada.
-  // Había una entrada así antes (/^https:\/\/.*sentry\.io$/) que además era
-  // bypasseable con dominios tipo "evilsentry.io" — se saca directamente.
-  const alwaysAllowed = [
-    /^https:\/\/costear-frontend[a-z0-9-]*\.vercel\.app$/,
-    /^https:\/\/coste-ar-frontend[a-z0-9-]*\.vercel\.app$/,
-    /^http:\/\/localhost:\d+$/,
-  ];
-  const isAllowed = (origin: string) =>
-    allowedOrigins.includes(origin) || alwaysAllowed.some((re) => re.test(origin));
+  // La política centralizada permite los dominios propios exactos, previews de
+  // Vercel y localhost aun si CORS_ORIGIN quedó mal configurada en el deploy.
   await app.register(cors, {
-    origin: (origin, cb) => {
-      // Requests sin origin (curl, Postman, server-to-server) siempre pasan.
-      if (!origin) return cb(null, true);
-      if (isAllowed(origin)) return cb(null, true);
-      app.log.warn({ origin, allowedOrigins }, 'CORS: origen rechazado');
-      cb(new Error(`Origin ${origin} no permitido por CORS`), false);
-    },
+    origin: createCorsOriginHandler(allowedOrigins, app.log),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });

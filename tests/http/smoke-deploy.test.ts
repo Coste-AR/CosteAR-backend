@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error — el script es .mjs sin tipos; se importa por lo que hace, no por su tipo.
-import { evaluarSalud, mismoCommit } from '../../scripts/smoke-deploy.mjs';
+import { evaluarCors, evaluarSalud, mismoCommit } from '../../scripts/smoke-deploy.mjs';
 
 /**
  * LA DECISIÓN DEL SMOKE POST-DEPLOY, PROBADA SIN DEPLOYAR.
@@ -118,5 +118,40 @@ describe('comparación de commits', () => {
 
   it('rechaza commits distintos', () => {
     expect(mismoCommit(SHA, 'b88ef12b3c4d5e6f')).toBe(false);
+  });
+});
+
+describe('smoke post-deploy — CORS', () => {
+  it('acepta un preflight 2xx que refleja exactamente el origen', () => {
+    expect(
+      evaluarCors({
+        origin: 'https://coste-ar.com',
+        respuesta: { status: 204, allowOrigin: 'https://coste-ar.com' },
+      }),
+    ).toEqual({ ok: true, motivo: 'CORS permite https://coste-ar.com' });
+  });
+
+  it('falla nombrando el origen cuando falta el permiso', () => {
+    const resultado = evaluarCors({
+      origin: 'https://no-permitido.example',
+      respuesta: { status: 204 },
+    });
+    expect(resultado.ok).toBe(false);
+    expect(resultado.motivo).toContain('https://no-permitido.example');
+  });
+
+  it('falla si la cabecera permite un origen distinto o la respuesta no es 2xx', () => {
+    expect(
+      evaluarCors({
+        origin: 'https://coste-ar.com',
+        respuesta: { status: 204, allowOrigin: 'https://otro.example' },
+      }).ok,
+    ).toBe(false);
+    expect(
+      evaluarCors({
+        origin: 'https://coste-ar.com',
+        respuesta: { status: 500, allowOrigin: 'https://coste-ar.com' },
+      }).ok,
+    ).toBe(false);
   });
 });
