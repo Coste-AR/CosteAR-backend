@@ -59,6 +59,13 @@ import { registerModulosRubroRoutes } from './routes/modulos-rubro.routes.js';
 import { registerTelemetriaPanelRoutes } from './routes/telemetria-panel.routes.js';
 import { registerPriceIndexRoutes } from './routes/price-index.routes.js';
 import { registerClassifierAiCostRoutes } from './routes/classifier-ai-cost.routes.js';
+import { registerSegmentoAnalisisRoutes } from './routes/segmento-analisis.routes.js';
+import { registerCapacidadOciosaRoutes } from './routes/capacidad-ociosa.routes.js';
+import { registerPlaneamientoResultadosRoutes } from './routes/planeamiento-resultados.routes.js';
+import { registerPuntoIndiferenciaRoutes } from './routes/punto-indiferencia.routes.js';
+import { registerRelacionReemplazoRoutes } from './routes/relacion-reemplazo.routes.js';
+import { registerMezclaOptimaRoutes } from './routes/mezcla-optima.routes.js';
+import { registerPrecioTransferenciaRoutes } from './routes/precio-transferencia.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -239,6 +246,13 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerTelemetriaPanelRoutes(api);
       await registerPriceIndexRoutes(api);
       await registerClassifierAiCostRoutes(api);
+      await registerSegmentoAnalisisRoutes(api);
+      await registerCapacidadOciosaRoutes(api);
+      await registerPlaneamientoResultadosRoutes(api);
+      await registerPuntoIndiferenciaRoutes(api);
+      await registerRelacionReemplazoRoutes(api);
+      await registerMezclaOptimaRoutes(api);
+      await registerPrecioTransferenciaRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerLotesProductivosRoutes(api);

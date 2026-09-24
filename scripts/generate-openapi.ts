@@ -35,6 +35,14 @@ import { registerUserRoutes } from '../src/infrastructure/http/routes/user.route
 import { registerClassifierAiCostRoutes } from '../src/infrastructure/http/routes/classifier-ai-cost.routes.js';
 import { registerAlertRoutes } from '../src/infrastructure/http/routes/alert.routes.js';
 import { registerReglaAlertaRoutes } from '../src/infrastructure/http/routes/regla-alerta.routes.js';
+import { registerEmpresaPortalRoutes } from '../src/infrastructure/http/routes/empresa-portal.routes.js';
+import { registerSegmentoAnalisisRoutes } from '../src/infrastructure/http/routes/segmento-analisis.routes.js';
+import { registerCapacidadOciosaRoutes } from '../src/infrastructure/http/routes/capacidad-ociosa.routes.js';
+import { registerPlaneamientoResultadosRoutes } from '../src/infrastructure/http/routes/planeamiento-resultados.routes.js';
+import { registerPuntoIndiferenciaRoutes } from '../src/infrastructure/http/routes/punto-indiferencia.routes.js';
+import { registerRelacionReemplazoRoutes } from '../src/infrastructure/http/routes/relacion-reemplazo.routes.js';
+import { registerMezclaOptimaRoutes } from '../src/infrastructure/http/routes/mezcla-optima.routes.js';
+import { registerPrecioTransferenciaRoutes } from '../src/infrastructure/http/routes/precio-transferencia.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -56,6 +64,14 @@ const CONVERTED_ROUTES = [
   registerClassifierAiCostRoutes,
   registerAlertRoutes,
   registerReglaAlertaRoutes,
+  registerSegmentoAnalisisRoutes,
+  registerCapacidadOciosaRoutes,
+  registerPlaneamientoResultadosRoutes,
+  registerPuntoIndiferenciaRoutes,
+  registerRelacionReemplazoRoutes,
+  registerMezclaOptimaRoutes,
+  registerPrecioTransferenciaRoutes,
+  (app) => registerEmpresaPortalRoutes(app, { portal: {} as never, scopes: {} as never }),
 ];
 
 async function buildSchemaOnlyApp() {

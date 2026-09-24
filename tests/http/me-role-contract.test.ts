@@ -7,6 +7,7 @@ const COMPANY_ID = '22222222-2222-4222-8222-222222222222';
 const userFindUnique = vi.hoisted(() => vi.fn());
 const companyFindFirst = vi.hoisted(() => vi.fn());
 const membershipFindFirst = vi.hoisted(() => vi.fn());
+const packageFindFirst = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest) => {
@@ -28,6 +29,7 @@ vi.mock('../../src/infrastructure/database/prisma.js', () => ({
     user: { findUnique: userFindUnique },
     company: { findFirst: companyFindFirst, findMany: vi.fn() },
     operatorMembership: { findFirst: membershipFindFirst },
+    paqueteRubro: { findFirst: packageFindFirst },
   },
 }));
 
@@ -49,6 +51,8 @@ describe('GET /me — identidad y rol vigente', () => {
       id: USER_ID, email: 'persona@example.test', role: 'EMPRESA_ADMIN',
     });
     companyFindFirst.mockReset().mockResolvedValue({ id: COMPANY_ID });
+    membershipFindFirst.mockReset();
+    packageFindFirst.mockReset();
   });
 
   async function app() {
@@ -63,7 +67,10 @@ describe('GET /me — identidad y rol vigente', () => {
     const response = await instance.inject({ method: 'GET', url: '/me' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      data: { id: USER_ID, email: 'persona@example.test', rol: 'EMPRESA_ADMIN', empresaId: COMPANY_ID },
+      data: {
+        id: USER_ID, email: 'persona@example.test', rol: 'EMPRESA_ADMIN', empresaId: COMPANY_ID,
+        entidadesAutorizadas: { unidadesProductivas: [], depositos: [] },
+      },
     });
   });
 
@@ -72,5 +79,22 @@ describe('GET /me — identidad y rol vigente', () => {
     const instance = await app();
     const response = await instance.inject({ method: 'GET', url: '/me' });
     expect(response.statusCode).toBe(401);
+  });
+
+  it('devuelve sólo las entidades autorizadas con las etiquetas del paquete', async () => {
+    authState.role = 'EMPRESA_OPERATOR';
+    userFindUnique.mockResolvedValue({ id: USER_ID, email: 'cargador@example.test', role: 'EMPRESA_OPERATOR' });
+    membershipFindFirst.mockResolvedValue({
+      connection: { companyId: COMPANY_ID, company: { industry: 'avicola' } },
+      unidadesAutorizadas: [{ unidadProductiva: { id: '33333333-3333-4333-8333-333333333333', referencia: 'G-1' } }],
+      depositosAutorizados: [{ deposito: { id: '44444444-4444-4444-8444-444444444444', referencia: 'S-1' } }],
+    });
+    packageFindFirst.mockResolvedValue({ lexicon: { UnidadProductiva: 'Galpón', Deposito: 'Silo' } });
+    const response = await (await app()).inject({ method: 'GET', url: '/me' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.entidadesAutorizadas).toEqual({
+      unidadesProductivas: [{ id: '33333333-3333-4333-8333-333333333333', referencia: 'G-1', etiqueta: 'Galpón' }],
+      depositos: [{ id: '44444444-4444-4444-8444-444444444444', referencia: 'S-1', etiqueta: 'Silo' }],
+    });
   });
 });
