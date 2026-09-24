@@ -75,14 +75,37 @@ describe('preferencias de accesos rápidos — contrato HTTP de #389', () => {
     });
   });
 
-  it('GET catálogo devuelve clave, etiqueta y módulo y oculta módulos apagados', async () => {
+  it('GET catálogo devuelve destinos no vacíos y oculta módulos apagados', async () => {
     const app = await buildApp();
     const response = await app.inject({ method: 'GET', url: '/me/preferencias/catalogo' });
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toContainEqual({
-      clave: 'carga.produccion-diaria', etiqueta: 'Producción diaria', modulo: 'produccion', porDefecto: true,
+      clave: 'carga.produccion-diaria', etiqueta: 'Producción diaria', modulo: 'produccion',
+      porDefecto: true, destino: '/panel-campo',
     });
+    expect(response.json().data.every((item: { destino: string }) => item.destino.length > 0)).toBe(true);
     expect(response.json().data.some((item: { clave: string }) => item.clave === 'carga.depositos')).toBe(false);
+  });
+
+  it('GET catálogo omite una superficie sin destino y conserva el resto', async () => {
+    const modulos = PAQUETE_AVICOLA_POSTURA.modulos.map((modulo) => modulo.clave === 'produccion'
+      ? {
+          ...modulo,
+          superficies: ['carga.produccion-diaria', 'carga.sin-pantalla'],
+          destinos: { 'carga.produccion-diaria': '/panel-campo' },
+        }
+      : modulo);
+    mockPrisma.paqueteRubro.findMany.mockResolvedValueOnce([{
+      category: 'AVICOLA_POSTURA', userId: null, companyId: null, structureId: null, periodId: null,
+      ...PAQUETE_AVICOLA_POSTURA, modulos, scale: null,
+    }]);
+    const app = await buildApp();
+
+    const response = await app.inject({ method: 'GET', url: '/me/preferencias/catalogo' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.some((item: { clave: string }) => item.clave === 'carga.produccion-diaria')).toBe(true);
+    expect(response.json().data.some((item: { clave: string }) => item.clave === 'carga.sin-pantalla')).toBe(false);
   });
 
   it('PUT rechaza con 422 y nombra una clave fuera del catálogo', async () => {
@@ -97,13 +120,16 @@ describe('preferencias de accesos rápidos — contrato HTTP de #389', () => {
   });
 
   it('PUT rechaza con 422 un widget cuyo módulo está apagado', async () => {
+    mockPrisma.configuracionModuloRubro.findMany.mockResolvedValueOnce([
+      { moduleId: 'produccion', activo: false },
+    ]);
     const app = await buildApp();
     const response = await app.inject({
       method: 'PUT', url: '/me/preferencias',
-      payload: { home: { accesosRapidos: ['carga.depositos'] } },
+      payload: { home: { accesosRapidos: ['carga.produccion-diaria'] } },
     });
     expect(response.statusCode).toBe(422);
-    expect(response.json().error.message).toContain('carga.depositos');
+    expect(response.json().error.message).toContain('carga.produccion-diaria');
     expect(response.json().error.message).toContain('apagado');
   });
 

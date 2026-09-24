@@ -6971,6 +6971,7 @@ export interface paths {
                                 etiqueta: string;
                                 modulo: string;
                                 porDefecto: boolean;
+                                destino: string;
                             }[];
                         };
                     };
