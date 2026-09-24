@@ -10,17 +10,24 @@ export interface WidgetCatalogItem {
   etiqueta: string;
   modulo: string;
   porDefecto: boolean;
+  destino: string;
 }
 
 function widgetsDe(modulos: ModuloRubroListado[], soloActivos: boolean): WidgetCatalogItem[] {
   return modulos.flatMap((modulo) => {
     if (soloActivos && modulo.estado !== 'prendido') return [];
-    return modulo.superficies.map((superficie) => ({
-      clave: superficie,
-      etiqueta: modulo.nombre,
-      modulo: modulo.clave,
-      porDefecto: modulo.porDefecto,
-    }));
+    return modulo.superficies.flatMap((superficie) => {
+      const destino = modulo.destinos[superficie];
+      return typeof destino === 'string' && destino.trim().length > 0
+        ? [{
+            clave: superficie,
+            etiqueta: modulo.nombre,
+            modulo: modulo.clave,
+            porDefecto: modulo.porDefecto,
+            destino,
+          }]
+        : [];
+    });
   });
 }
 

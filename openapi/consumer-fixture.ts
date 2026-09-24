@@ -24,6 +24,15 @@ type LoginResponse =
 type CalculationResponse =
   paths['/cost-structures/{id}/calculate']['post']['responses'][200]['content']['application/json'];
 
+type PuntoIndiferenciaResponse =
+  paths['/companies/{companyId}/analisis/punto-indiferencia']['post']['responses'][200]['content']['application/json'];
+
+type RelacionReemplazoResponse =
+  paths['/companies/{companyId}/analisis/relacion-reemplazo']['post']['responses'][200]['content']['application/json'];
+
+type MezclaOptimaResponse =
+  paths['/companies/{companyId}/analisis/mezcla-optima']['get']['responses'][200]['content']['application/json'];
+
 export function sesionIniciada(response: LoginResponse): string {
   return `${response.data.user.name} · ${response.data.user.role}`;
 }
@@ -39,4 +48,25 @@ export function resumenTablero(tablero: TableroResponse): string {
   return costo === null
     ? `Período ${data.periodo.codigo}: costo por unidad incompleto.`
     : `Período ${data.periodo.codigo}: costo por unidad $${costo.toFixed(2)}.`;
+}
+
+export function resumenPuntoIndiferencia(response: PuntoIndiferenciaResponse): string {
+  const { cantidadIndiferencia, motivoSinPunto, unidades } = response.data;
+  return cantidadIndiferencia === null
+    ? motivoSinPunto ?? 'No existe un punto de indiferencia.'
+    : `${cantidadIndiferencia} ${unidades.cantidad}`;
+}
+
+export function resumenRelacionReemplazo(response: RelacionReemplazoResponse): string {
+  const { resultadoCortoPlazo, resultadoLargoPlazo, unidades } = response.data;
+  return resultadoCortoPlazo === null || resultadoLargoPlazo === null
+    ? response.data.motivo ?? 'No existe una relación de reemplazo.'
+    : `Corto: ${resultadoCortoPlazo} ${unidades.resultadoCortoPlazo}; largo: ${resultadoLargoPlazo} ${unidades.resultadoLargoPlazo}.`;
+}
+
+export function resumenMezclaOptima(response: MezclaOptimaResponse): string {
+  const { recurso, ranking, motivoSinRanking } = response.data;
+  return recurso === null
+    ? motivoSinRanking ?? 'No hay un recurso escaso activo.'
+    : `${recurso.clave}: ${ranking.length} productos ordenados por contribución por ${recurso.unidad}.`;
 }

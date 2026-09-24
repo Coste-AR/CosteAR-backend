@@ -16,6 +16,7 @@ export const widgetCatalogItemSchema = z.object({
   etiqueta: z.string(),
   modulo: z.string(),
   porDefecto: z.boolean(),
+  destino: z.string().min(1),
 });
 
 export const widgetCatalogEnvelopeSchema = z.object({ data: z.array(widgetCatalogItemSchema) });

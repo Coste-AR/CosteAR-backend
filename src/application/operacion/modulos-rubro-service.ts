@@ -14,6 +14,7 @@ export interface ModuloRubro {
   nombre: string;
   descripcion: string;
   superficies?: string[];
+  destinos?: Record<string, string>;
   parametros: string[];
   alertas: string[];
   dependeDe: string[];
@@ -40,6 +41,7 @@ interface ParametroPaquete {
 
 export interface ModuloRubroListado extends Omit<ModuloRubroResuelto, 'parametros'> {
   superficies: string[];
+  destinos: Record<string, string>;
   parametros: Array<ParametroPaquete>;
 }
 
@@ -49,7 +51,8 @@ function esModuloRubro(value: unknown): value is ModuloRubro {
   return typeof modulo.clave === 'string' && typeof modulo.nombre === 'string' &&
     typeof modulo.descripcion === 'string' && typeof modulo.activoPorDefecto === 'boolean' &&
     ['parametros', 'alertas', 'dependeDe']
-      .every((campo) => Array.isArray(modulo[campo as keyof ModuloRubro]));
+      .every((campo) => Array.isArray(modulo[campo as keyof ModuloRubro])) &&
+    (modulo.destinos === undefined || (typeof modulo.destinos === 'object' && modulo.destinos !== null));
 }
 
 function esParametroPaquete(value: unknown): value is ParametroPaquete {
@@ -77,6 +80,10 @@ export class ModulosRubroService {
     const superficiesBase = category === CATEGORIA_AVICOLA_POSTURA
       ? new Map(PAQUETE_AVICOLA_POSTURA.modulos.map((modulo) => [modulo.clave, [...modulo.superficies]]))
       : new Map<string, string[]>();
+    const destinosBase: Map<string, Record<string, string>> = category === CATEGORIA_AVICOLA_POSTURA
+      ? new Map(PAQUETE_AVICOLA_POSTURA.modulos.map((modulo) =>
+          [modulo.clave, 'destinos' in modulo ? { ...modulo.destinos } : {}] as const))
+      : new Map<string, Record<string, string>>();
     const modulos = Array.isArray(paquete.modulos) ? paquete.modulos.filter(esModuloRubro) : [];
     return {
       // Compatibilidad con filas sembradas antes de #384: el paquete canónico
@@ -85,6 +92,7 @@ export class ModulosRubroService {
       modulos: modulos.map((modulo) => ({
         ...modulo,
         superficies: modulo.superficies ?? superficiesBase.get(modulo.clave) ?? [],
+        destinos: modulo.destinos ?? destinosBase.get(modulo.clave) ?? {},
       })),
       parametros: Array.isArray(paquete.seedParameters) ? paquete.seedParameters.filter(esParametroPaquete) : [],
     };
@@ -109,6 +117,7 @@ export class ModulosRubroService {
         porDefecto: modulo.activoPorDefecto,
         dependeDe: modulo.dependeDe,
         superficies: modulo.superficies ?? [],
+        destinos: modulo.destinos ?? {},
         parametros: modulo.parametros.flatMap((clave) => {
           const parametro = catalogo.get(clave);
           return parametro ? [parametro] : [];

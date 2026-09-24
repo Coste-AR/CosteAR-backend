@@ -247,6 +247,9 @@ model Company {
   tramosCosto              TramoCosto[]
   calculosEquilibrioTramos EquilibrioTramosCalculo[]
   segmentosAnalisis        SegmentoAnalisis[]
+  preciosTransferencia     PrecioTransferencia[]
+  recursosEscasos          RecursoEscaso[]
+  consumosRecurso          ConsumoRecursoPorUnidad[]
   unidadesProductivas      UnidadProductiva[]
   lotesProductivos         LoteProductivo[]
   id                       String                     @id @default(uuid()) @db.Uuid
@@ -297,9 +300,12 @@ model SegmentoAnalisis {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "segmentos_analisis_companyId_fkey")
   userId    String  @db.Uuid
 
-  parentId String?            @db.Uuid
-  parent   SegmentoAnalisis?  @relation("JerarquiaSegmentos", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  children SegmentoAnalisis[] @relation("JerarquiaSegmentos")
+  parentId              String?                   @db.Uuid
+  parent                SegmentoAnalisis?         @relation("JerarquiaSegmentos", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  children              SegmentoAnalisis[]        @relation("JerarquiaSegmentos")
+  consumosRecurso       ConsumoRecursoPorUnidad[]
+  transferenciasOrigen  PrecioTransferencia[]     @relation("TransferenciaOrigen")
+  transferenciasDestino PrecioTransferencia[]     @relation("TransferenciaDestino")
 
   nombre                String   @db.VarChar(120)
   nivel                 String   @db.VarChar(20)
@@ -317,6 +323,79 @@ model SegmentoAnalisis {
 
   @@index([companyId, parentId, deletedAt])
   @@map("segmentos_analisis")
+}
+
+enum CriterioPrecioTransferencia {
+  MERCADO
+  COSTO_VARIABLE
+  PRECIO_EN_BLOQUE
+}
+
+model PrecioTransferencia {
+  id                String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId         String                      @db.Uuid
+  company           Company                     @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId            String                      @db.Uuid
+  segmentoOrigenId  String                      @db.Uuid
+  segmentoOrigen    SegmentoAnalisis            @relation("TransferenciaOrigen", fields: [segmentoOrigenId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  segmentoDestinoId String                      @db.Uuid
+  segmentoDestino   SegmentoAnalisis            @relation("TransferenciaDestino", fields: [segmentoDestinoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  conceptoId        String                      @db.Uuid
+  concepto          ConceptoCosteo              @relation(fields: [conceptoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  periodId          String                      @db.Uuid
+  period            CostPeriod                  @relation(fields: [periodId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  criterio          CriterioPrecioTransferencia
+  valor             Decimal                     @db.Decimal(18, 6)
+  unidad            String                      @db.VarChar(80)
+  createdAt         DateTime                    @default(now()) @db.Timestamptz
+  updatedAt         DateTime                    @updatedAt @db.Timestamptz
+
+  @@unique([periodId, segmentoOrigenId, segmentoDestinoId, conceptoId, criterio])
+  @@index([companyId, periodId, segmentoDestinoId])
+  @@map("precios_transferencia")
+}
+
+model RecursoEscaso {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId    String  @db.Uuid
+
+  clave                   String                    @db.VarChar(80)
+  unidadId                String                    @db.Uuid
+  unidad                  UnidadMedida              @relation(fields: [unidadId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  disponibleEnPeriodo     Decimal                   @db.Decimal(18, 6)
+  esCuelloDeBotellaActivo Boolean                   @default(false)
+  consumos                ConsumoRecursoPorUnidad[]
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  updatedAt DateTime  @updatedAt @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
+
+  @@unique([companyId, clave])
+  @@index([companyId, esCuelloDeBotellaActivo, deletedAt])
+  @@map("recursos_escasos")
+}
+
+model ConsumoRecursoPorUnidad {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId  String           @db.Uuid
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId     String           @db.Uuid
+  recursoId  String           @db.Uuid
+  recurso    RecursoEscaso    @relation(fields: [recursoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  segmentoId String           @db.Uuid
+  segmento   SegmentoAnalisis @relation(fields: [segmentoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  consumoPorUnidad Decimal   @db.Decimal(18, 6)
+  demandaMaxima    Decimal   @db.Decimal(18, 6)
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @db.Timestamptz
+  deletedAt        DateTime? @db.Timestamptz
+
+  @@unique([recursoId, segmentoId])
+  @@index([companyId, recursoId, deletedAt])
+  @@map("consumos_recurso_por_unidad")
 }
 
 enum PanelTelemetryEventType {
@@ -538,6 +617,7 @@ model CostPeriod {
   desperdicioRegistros DesperdicioRegistro[]
   parametrosCosteo     ParametroCosteo[]
   conceptosCosteo      ConceptoCosteo[]
+  preciosTransferencia PrecioTransferencia[]
   // DEFAULT gen_random_uuid() a nivel SQL (migración 20260712000000) — ver AllocationBase.id.
   id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   structureId          String                @db.Uuid
@@ -696,6 +776,7 @@ model CostStructure {
    * /**
    * /**
    * /**
+   * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
    */
   periodicity      Periodicity?
@@ -724,6 +805,7 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -946,18 +1028,18 @@ model Alert {
   costStructureId String?        @db.Uuid
   costStructure   CostStructure? @relation(fields: [costStructureId], references: [id], onDelete: SetNull)
 
-  type        AlertType
-  message     String
-  threshold   Decimal?  @db.Decimal(18, 4)
-  actualValue Decimal?  @db.Decimal(18, 4)
+  type              AlertType
+  message           String
+  threshold         Decimal?         @db.Decimal(18, 4)
+  actualValue       Decimal?         @db.Decimal(18, 4)
   /// Snapshot de la regla para que la bandeja no dependa de una configuración posterior.
-  severidad          SeveridadAlerta?
-  indicador          String?
-  indicadorEtiqueta  String?
-  unidadValor        String?
-  unidadUmbral       String?
+  severidad         SeveridadAlerta?
+  indicador         String?
+  indicadorEtiqueta String?
+  unidadValor       String?
+  unidadUmbral      String?
   /// Ausente en alertas evaluadas; presente cuando faltaron datos para evaluar la regla.
-  motivoNoEvaluada   String?
+  motivoNoEvaluada  String?
 
   isRead      Boolean   @default(false)
   emailSentAt DateTime?
@@ -1052,7 +1134,7 @@ model OperatorMembership {
    */
   telegramChatId String? @unique
 
-  unidadesAutorizadas OperatorUnidadProductiva[]
+  unidadesAutorizadas  OperatorUnidadProductiva[]
   depositosAutorizados OperatorDeposito[]
 
   @@unique([operatorId, connectionId])
@@ -1062,8 +1144,8 @@ model OperatorMembership {
 }
 
 model OperatorUnidadProductiva {
-  membershipId      String             @db.Uuid
-  membership        OperatorMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  membershipId       String             @db.Uuid
+  membership         OperatorMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   unidadProductivaId String             @db.Uuid
   unidadProductiva   UnidadProductiva   @relation(fields: [unidadProductivaId], references: [id], onDelete: Cascade)
   grantedAt          DateTime           @default(now()) @db.Timestamptz
@@ -1636,6 +1718,7 @@ model CalculationRun {
    * /**
    * /**
    * /**
+   * /**
    * Período al que pertenece. Nullable: las corridas anteriores al modelo de
    * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
    * dejarlas sin él.
@@ -2041,6 +2124,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -2067,6 +2151,7 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2113,6 +2198,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
   periodCostMp           Decimal? @db.Decimal(18, 4)
@@ -2148,6 +2234,7 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2422,6 +2509,7 @@ model UnidadMedida {
   desperdicioRegistros   DesperdicioRegistro[]
   depositos              Deposito[]
   ventasProducto         VentaProducto[]
+  recursosEscasos        RecursoEscaso[]
   id                     String                @id @default(uuid()) @db.Uuid
   companyId              String                @db.Uuid
   company                Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2667,9 +2755,10 @@ model ConceptoCosteo {
   /**
    * Versiones de la separación semifija. La vigente es la que no tiene deletedAt.
    */
-  tramosSemifijos TramoSemifijo[]
-  tramosCosto     TramoCosto[]
-  importes        ConceptoCosteoImporte[]
+  tramosSemifijos      TramoSemifijo[]
+  tramosCosto          TramoCosto[]
+  importes             ConceptoCosteoImporte[]
+  preciosTransferencia PrecioTransferencia[]
 
   @@unique([companyId, structureId, periodId, clave])
   @@index([companyId, clave])
@@ -2807,7 +2896,7 @@ model UnidadProductiva {
   referencia String
   activa     Boolean @default(true)
 
-  lotes LoteProductivo[]
+  lotes                 LoteProductivo[]
   operadoresAutorizados OperatorUnidadProductiva[]
 
   createdAt DateTime  @default(now()) @db.Timestamptz
@@ -2843,11 +2932,11 @@ model Deposito {
   // Regla por depósito, expresada en la misma unidad física que sus movimientos.
   umbralBajo Decimal      @db.Decimal(18, 4)
 
-  movimientos MovimientoDeposito[]
+  movimientos           MovimientoDeposito[]
   operadoresAutorizados OperatorDeposito[]
-  createdAt   DateTime             @default(now()) @db.Timestamptz
-  updatedAt   DateTime             @updatedAt @db.Timestamptz
-  deletedAt   DateTime?            @db.Timestamptz
+  createdAt             DateTime             @default(now()) @db.Timestamptz
+  updatedAt             DateTime             @updatedAt @db.Timestamptz
+  deletedAt             DateTime?            @db.Timestamptz
 
   @@unique([companyId, referencia])
   @@index([companyId])

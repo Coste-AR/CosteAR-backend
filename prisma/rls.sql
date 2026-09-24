@@ -641,3 +641,23 @@ DROP POLICY IF EXISTS tenant_isolation ON segmentos_analisis;
 CREATE POLICY tenant_isolation ON segmentos_analisis
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+-- recursos escasos (M8-01): restricciones y consumos por tenant.
+ALTER TABLE recursos_escasos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recursos_escasos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON recursos_escasos;
+CREATE POLICY tenant_isolation ON recursos_escasos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE consumos_recurso_por_unidad ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consumos_recurso_por_unidad FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consumos_recurso_por_unidad;
+CREATE POLICY tenant_isolation ON consumos_recurso_por_unidad
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE precios_transferencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE precios_transferencia FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON precios_transferencia;
+CREATE POLICY tenant_isolation ON precios_transferencia USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());

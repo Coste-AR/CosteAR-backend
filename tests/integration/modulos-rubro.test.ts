@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ModulosRubroService } from '@/application/operacion/modulos-rubro-service.js';
+import { UserPreferencesService } from '@/application/users/user-preferences-service.js';
 import { CATEGORIA_AVICOLA_POSTURA, PAQUETE_AVICOLA_POSTURA } from '@/application/operacion/paquete-avicola.js';
 import { withTenant } from '@/infrastructure/database/prisma.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
@@ -18,7 +19,12 @@ beforeAll(async () => {
   const paquete = await withTenant(A.userId, (tx) => tx.paqueteRubro.findFirst({
     where: { category: CATEGORIA_AVICOLA_POSTURA, userId: null, companyId: null, structureId: null, periodId: null },
   }));
-  if (!paquete) {
+  if (paquete) {
+    await withTenant(A.userId, (tx) => tx.paqueteRubro.update({
+      where: { id: paquete.id },
+      data: { modulos: PAQUETE_AVICOLA_POSTURA.modulos },
+    }));
+  } else {
     await withTenant(A.userId, (tx) => tx.paqueteRubro.create({
       data: { category: CATEGORIA_AVICOLA_POSTURA, userId: null, companyId: null, structureId: null, periodId: null, ...PAQUETE_AVICOLA_POSTURA },
     }));
@@ -28,6 +34,14 @@ beforeAll(async () => {
 afterAll(disconnect);
 
 describe('A-17 — configuración de módulos aislada por empresa', () => {
+  it('el catálogo del tenant publica destino no vacío para cada acceso', async () => {
+    const catalogo = await withTenantContext(A.userId, () =>
+      new UserPreferencesService().catalogo(A.userId));
+
+    expect(catalogo.length).toBeGreaterThan(0);
+    expect(catalogo.every((item) => item.destino.length > 0)).toBe(true);
+  });
+
   it('un estado de A no se filtra a B mediante RLS', async () => {
     const service = new ModulosRubroService();
     await withTenantContext(A.userId, () => service.set(A.userId, A.companyId, 'variantes', true, { id: A.userId, ...actor }));
