@@ -13,7 +13,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({ prisma: db }));
 
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest) => {
-    (request as FastifyRequest & { authUser: object }).authUser = { id: 'admin-1', role: 'ADMIN' };
+    (request as FastifyRequest & { authUser: object }).authUser = { id: 'admin-1', role: 'SUPER_ADMIN' };
   },
   requireRole: () => async () => {},
 }));

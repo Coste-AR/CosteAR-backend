@@ -55,7 +55,7 @@ export async function createTenant(label: string): Promise<Tenant> {
       name: `Costista ${label}`,
       // Hash cualquiera con forma válida: estos tests no pasan por login.
       passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$0000000000000000$0000000000000000000000000000000',
-      role: 'COSTISTA',
+      role: 'EMPRESA_ADMIN',
     },
   });
 
@@ -108,7 +108,7 @@ export async function createTenant(label: string): Promise<Tenant> {
         valueNum: label === 'A' ? 111_111 : 222_222,
         method: 'manual',
         createdBy: user.id,
-        actorRole: 'COSTISTA',
+        actorRole: 'EMPRESA_ADMIN',
         actorArea: 'contaduria',
       },
     });

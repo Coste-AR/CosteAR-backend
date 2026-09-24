@@ -467,6 +467,7 @@ export async function classifyDocument(input: ClassifierInput & {
     industryCategory,
     foundLabels,
   });
+  const aiCalls: NonNullable<ClassificationResult['aiCalls']> = [];
   const aiResult = await runLayer5({
     text,
     accumulatedPts: confidence,
@@ -477,7 +478,7 @@ export async function classifyDocument(input: ClassifierInput & {
     intent,
     ambiguityHint: conflictHint ?? payrollHint ?? wasteHint,
     correctionExamples,
-  });
+  }, (call) => aiCalls.push(call));
 
   if (aiResult) {
     const l4afterAI = runLayer4(
@@ -521,6 +522,7 @@ export async function classifyDocument(input: ClassifierInput & {
       industryCategory,
       ...scaleWarningResult,
       acquisitionLink,
+      aiCalls,
       // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
       ...buildSectionAndExplanation({
         intent, documentType: aiResult.documentType as DocumentType,
@@ -548,6 +550,7 @@ export async function classifyDocument(input: ClassifierInput & {
     intent,
     industryCategory,
     ...scaleWarningResult,
+    ...(aiCalls.length > 0 && { aiCalls }),
     // `costSection` y `explanation` salen juntas de acá: no se pueden separar.
     ...buildSectionAndExplanation({
       intent, documentType: chosenType,

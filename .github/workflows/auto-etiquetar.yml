@@ -160,6 +160,7 @@ on:
 permissions:
   pull-requests: write
   contents: read
+  statuses: read
 
 jobs:
   etiquetar:
@@ -175,6 +176,7 @@ jobs:
       - name: Etiquetar si el CI verde alcanza como revision
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CIRCUITO_PAT: ${{ secrets.CIRCUITO_PAT }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           MODO: ${{ vars.AUTO_ETIQUETAR_CODIGO }}
@@ -273,6 +275,61 @@ jobs:
             echo "$casos $afirmaciones"
           }
 
+          # G7 vive en admin porque la lista de identificadores protegidos es
+          # privada. Este repo solo pide y espera el veredicto para el SHA
+          # exacto que podria recibir auto-merge. Cualquier falla deja la
+          # puerta cerrada.
+          esperar_g7() {
+            local pr="$1" sha="$2" intento estado
+
+            if [ -z "${CIRCUITO_PAT:-}" ]; then
+              echo "No se pudo pedir el veredicto G7: CIRCUITO_PAT esta ausente."
+              echo "NO APTO: G7 no dio veredicto"
+              return 1
+            fi
+
+            if ! GH_TOKEN="$CIRCUITO_PAT" gh api --method POST \
+              repos/Coste-AR/CosteAR-admin/dispatches \
+              -f event_type=g7-revisar \
+              -f "client_payload[repo]=$REPO" \
+              -F "client_payload[pr]=$pr" \
+              -f "client_payload[sha]=$sha" >/dev/null 2>&1; then
+              echo "No se pudo pedir el veredicto G7 mediante repository_dispatch."
+              echo "NO APTO: G7 no dio veredicto"
+              return 1
+            fi
+
+            echo "G7/datos-de-cliente: solicitud enviada; esperando el status del SHA exacto."
+            for intento in $(seq 1 60); do
+              estado=$(gh api "repos/$REPO/commits/$sha/status" \
+                --jq '[.statuses[] | select(.context == "G7/datos-de-cliente")][0].state // ""' \
+                2>/dev/null || true)
+              case "$estado" in
+                success)
+                  echo "G7/datos-de-cliente: success"
+                  return 0
+                  ;;
+                failure|error)
+                  echo "G7/datos-de-cliente: $estado"
+                  echo "NO APTO: G7 encontró datos de cliente"
+                  return 1
+                  ;;
+                pending|"")
+                  ;;
+                *)
+                  echo "G7/datos-de-cliente: estado no habilitante ($estado)"
+                  ;;
+              esac
+
+              if [ "$intento" -lt 60 ]; then
+                sleep 5
+              fi
+            done
+
+            echo "NO APTO: G7 no dio veredicto"
+            return 1
+          }
+
           # En workflow_dispatch no hay PR puntual: se revisan los abiertos.
           if [ -n "${PR:-}" ]; then
             lista="$PR"
@@ -305,6 +362,13 @@ jobs:
             if [ "$base" = "main" ]; then
               echo "NO APTO: la base es main. Produccion la mergea una persona."
               echo "::endgroup::"; continue
+            fi
+
+            # G7 mide los cambios cuando entran a dev. El contrato del emisor
+            # rechaza otras bases; una promocion a staging ya contiene commits
+            # que atravesaron esta puerta en su ingreso a dev.
+            if [ "$base" = "dev" ] && ! esperar_g7 "$n" "$head_sha"; then
+              echo "Queda para revision humana."; echo "::endgroup::"; continue
             fi
 
             # ── Traer las dos puntas que hay que medir ────────────────────────

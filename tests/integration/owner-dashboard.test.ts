@@ -67,7 +67,13 @@ describe('A-07 — tablero del dueño por período', () => {
     expect(tablero.unidadGestion).toEqual({ codigo: 'cajon', nombre: 'Cajón de prueba', factor: 12 });
     expect(tablero.rubro).toEqual({
       clave: CATEGORIA_AVICOLA_POSTURA,
+      nombreProducto: 'AVI',
       icons: PAQUETE_AVICOLA_POSTURA.icons,
+      kpisHome: [
+        { clave: 'costo_cajon', etiqueta: 'Costo por cajón', unidad: 'ARS/cajon', valor: 60, completo: true },
+        { clave: 'contribucion_marginal_cajon', etiqueta: 'Contribución marginal por cajón', unidad: 'ARS/cajon', valor: 24, completo: true },
+        { clave: 'punto_equilibrio', etiqueta: 'Punto de equilibrio', unidad: 'cajones', valor: 2, completo: true },
+      ],
     });
   });
 
@@ -79,7 +85,7 @@ describe('A-07 — tablero del dueño por período', () => {
     expect(tablero.rubro).toBeNull();
     expect(tablero.pendientes).toContainEqual({
       area: 'configuracion',
-      dato: 'La empresa no tiene un paquete de rubro declarado',
+      dato: 'El negocio no tiene un paquete de rubro declarado',
       periodo: { id: B.periodId, codigo: expect.any(String) },
     });
   });

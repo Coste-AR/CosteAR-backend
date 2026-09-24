@@ -12,6 +12,7 @@ import {
   type OrigenParametro,
 } from '../../domain/parametros/parametros-costeo.js';
 import type { SetParametroCosteoInput } from '../../shared/schemas/parametros-costeo.schema.js';
+import { CLAVES_COMPORTAMIENTO_CONTRIBUCION } from '../../domain/calculations/contribucion-marginal.js';
 import { CATEGORY_BY_INDUSTRY } from '../operacion/paquete-avicola.js';
 import { PaqueteRubroService } from '../operacion/paquete-rubro-service.js';
 import { ModulosRubroService } from '../operacion/modulos-rubro-service.js';
@@ -68,7 +69,7 @@ export class ParametrosCosteoService {
   /** Verifica que la empresa exista y sea de quien la pide. */
   private async companyDe(userId: string, companyId: string) {
     const company = await this.db.company.findFirst({ where: { id: companyId, userId } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 
@@ -86,7 +87,9 @@ export class ParametrosCosteoService {
       this.catalogoDe(userId, companyId, company.industry),
       new ModulosRubroService(this.db).listar(userId, companyId),
     ]);
-    const claves = new Set(modulos.filter((modulo) => modulo.estado === 'prendido').flatMap((modulo) => modulo.parametros));
+    const claves = new Set(modulos
+      .filter((modulo) => modulo.estado === 'prendido')
+      .flatMap((modulo) => modulo.parametros.map((parametro) => parametro.clave)));
     return catalogo.filter((parametro) => claves.has(parametro.clave));
   }
 
@@ -263,7 +266,7 @@ export class ParametrosCosteoService {
             where: { companyId, codigo: input.valorTexto, deletedAt: null },
           });
           if (!unidad) {
-            throw new UnprocessableEntityError(`La empresa no tiene una unidad "${input.valorTexto}" disponible para gestión.`, { field: 'valorTexto' });
+            throw new UnprocessableEntityError(`El negocio no tiene una unidad "${input.valorTexto}" disponible para gestión.`, { field: 'valorTexto' });
           }
           const actualizada = await tx.company.update({ where: { id: companyId }, data: { unidadGestionId: unidad.id } });
           await recordTraceAudit({
@@ -282,6 +285,19 @@ export class ParametrosCosteoService {
     if (definicionComportamiento && input.comportamientoVolumen === undefined) {
       throw new UnprocessableEntityError(
         `La clasificación "${clave}" requiere un comportamiento frente al volumen.`,
+        { field: 'comportamientoVolumen' },
+      );
+    }
+    // 🔴 R6/R8 (M0-01, plan de análisis marginal v2). La amortización de un
+    // bien de uso es FIJA cuando la causa es el tiempo, nunca la intensidad
+    // de uso — y ningún costo fijo puede entrar al costo variable por vía de
+    // una cuota de aplicación. No es un default que se propone y se puede
+    // pisar: es una regla que se RECHAZA si alguien la viola. `AM17` la llama
+    // "el error más caro del proyecto" — tratarla como variable cambió la
+    // contribución marginal un 24,9 %.
+    if (clave === CLAVES_COMPORTAMIENTO_CONTRIBUCION.amortizacionActivos && input.comportamientoVolumen === 'VARIABLE') {
+      throw new UnprocessableEntityError(
+        'La amortización de un bien de uso es fija cuando la causa es el tiempo (R6): no puede clasificarse como variable (R8).',
         { field: 'comportamientoVolumen' },
       );
     }

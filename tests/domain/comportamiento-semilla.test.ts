@@ -26,13 +26,40 @@ function fila(
 }
 
 describe('A-04 — propuesta de clasificación por rubro', () => {
+  it('expone descripciones y fundamentos sin vocabulario prohibido', () => {
+    const textoVisible = CLASIFICACIONES_AVICOLA
+      .flatMap((def) => [def.descripcion, def.fundamento])
+      .join('\n');
+    expect(textoVisible).not.toMatch(/\b(?:costista|pymes?|empresa)\b/i);
+  });
+
   it('propone sólo materia prima y deja los rubros grises sin inventar', () => {
     const mp = resolverComportamiento('comportamiento_materia_prima', [], {});
     expect(mp).toMatchObject({ comportamientoVolumen: 'VARIABLE', origen: 'default', confirmado: false });
     for (const clave of ['comportamiento_mano_obra_directa', 'comportamiento_costos_indirectos']) {
       expect(resolverComportamiento(clave, [], {}).comportamientoVolumen).toBeNull();
     }
-    expect(CLASIFICACIONES_AVICOLA).toHaveLength(3);
+  });
+
+  /**
+   * M0-01 (plan de análisis marginal v2). Los cuatro renglones del costo REAL
+   * que se suman al costeo variable —variación presupuesto, trabajos de
+   * terceros, amortización de activos, desperdicio neto— nacen SIN clasificar,
+   * igual que MOD y CIP: ninguno tiene una relación tan directa con el volumen
+   * como la materia prima como para proponerla sola. La amortización tiene una
+   * regla dura propia (R6/R8, nunca VARIABLE), pero esa regla se hace cumplir
+   * con un rechazo en `parametros-costeo-service.ts`, no con un default acá.
+   */
+  it('las cuatro claves de M0-01 también nacen sin proponer, como MOD y CIP', () => {
+    for (const clave of [
+      'comportamiento_variacion_presupuesto',
+      'comportamiento_trabajos_de_terceros',
+      'comportamiento_amortizacion_activos',
+      'comportamiento_desperdicio_al_costo',
+    ]) {
+      expect(resolverComportamiento(clave, [], {}).comportamientoVolumen).toBeNull();
+    }
+    expect(CLASIFICACIONES_AVICOLA).toHaveLength(7);
   });
 
   it('la elección de empresa gana sobre la propuesta y el período gana sobre empresa', () => {

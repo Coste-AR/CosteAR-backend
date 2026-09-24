@@ -9,12 +9,12 @@ const createAdminSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   name: z.string().min(2),
-  role: z.literal('ADMIN').default('ADMIN')
+  role: z.literal('SUPER_ADMIN').default('SUPER_ADMIN')
 });
 
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   // GET /admin/stats
-  app.get('/admin/stats', { preHandler: [authenticate, requireRole('ADMIN')] }, async (_request, reply) => {
+  app.get('/admin/stats', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (_request, reply) => {
     
     // SaaS Metrics
     const totalUsers = await prisma.user.count();
@@ -134,7 +134,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /admin/users
-  app.get('/admin/users', { preHandler: [authenticate, requireRole('ADMIN')] }, async (_request, reply) => {
+  app.get('/admin/users', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (_request, reply) => {
     const users = await prisma.user.findMany({
       select: {
         id: true,
@@ -149,7 +149,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // POST /admin/users
-  app.post('/admin/users', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/admin/users', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const { email, password, name, role } = createAdminSchema.parse(request.body);
     
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -177,7 +177,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // POST /admin/nightly/run
-  app.post('/admin/nightly/run', { preHandler: [authenticate, requireRole('ADMIN')] }, async (_request, reply) => {
+  app.post('/admin/nightly/run', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (_request, reply) => {
     // Añadimos el job con una prioridad o identificador para ejecución inmediata
     await nightlyLearningQueue.add('manual-nightly-pipeline', {}, {
       jobId: `manual-${Date.now()}`

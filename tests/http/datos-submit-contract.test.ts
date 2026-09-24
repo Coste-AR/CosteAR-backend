@@ -98,7 +98,12 @@ describe('contrato de POST /datos/submit', () => {
   it('la forma del payload es la misma en los dos casos (id/status/isDuplicate siempre)', async () => {
     const app = await buildTestApp();
 
-    submitDataViaApiKey.mockResolvedValue({ isDuplicate: false, id: 'a', status: 'PENDING', classification: {} });
+    submitDataViaApiKey.mockResolvedValue({
+      isDuplicate: false,
+      id: 'a',
+      status: 'PENDING',
+      classification: { documentType: 'FACTURA_COMPRA', costSection: 'MATERIA_PRIMA', confidence: 88 },
+    });
     const nuevo = (await app.inject({ method: 'POST', url: '/datos/submit', headers: { 'x-api-key': 'k' }, payload: body })).json();
 
     submitDataViaApiKey.mockResolvedValue({ isDuplicate: true, duplicateEntryId: 'b', duplicateStatus: 'PENDING', message: 'ya estaba' });
@@ -121,7 +126,12 @@ describe('contrato de POST /datos/submit', () => {
   });
 
   it('sourceType default TEXT cuando no se manda', async () => {
-    submitDataViaApiKey.mockResolvedValue({ isDuplicate: false, id: 'a', status: 'PENDING', classification: {} });
+    submitDataViaApiKey.mockResolvedValue({
+      isDuplicate: false,
+      id: 'a',
+      status: 'PENDING',
+      classification: { documentType: 'FACTURA_COMPRA', costSection: 'MATERIA_PRIMA', confidence: 88 },
+    });
 
     const app = await buildTestApp();
     await app.inject({

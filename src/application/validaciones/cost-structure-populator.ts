@@ -624,7 +624,7 @@ async function reconcileIntakeDataPoints(
   ];
   if (sections.length === 0) return;
 
-  const actor = { id: costistId, role: 'COSTISTA', area: 'costista' };
+  const actor = { id: costistId, role: 'EMPRESA_ADMIN', area: 'costista' };
 
   await db.$transaction(async (tx) => {
     for (const section of sections) {

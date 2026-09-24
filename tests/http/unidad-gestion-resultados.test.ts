@@ -19,7 +19,7 @@ vi.mock('@/application/cost-structures/cost-period-service.js', () => ({
 
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: { authUser?: unknown }) => {
-    request.authUser = { id: 'user-1', role: 'COSTISTA' };
+    request.authUser = { id: 'user-1', role: 'EMPRESA_ADMIN' };
   },
   auditContext: () => ({}),
 }));
@@ -98,12 +98,17 @@ describe('contrato HTTP de unidad de gestión en resultados', () => {
     compare.mockResolvedValueOnce({
       unidadGestion,
       units: { from: 2, to: 3, comparable: true },
+      currency: { kind: 'NOMINAL', periodCode: null, index: null, seriesVersionId: null, missingPeriodCodes: [] },
       unit: { productionCost: { a: 30, b: 36, delta: 6, deltaPct: 20 } },
     });
     const app = await comparisonApp();
     const withUnit = await app.inject({ method: 'GET', url: `/structures/${STRUCTURE_ID}/periods/compare` });
 
-    compare.mockResolvedValueOnce({ unidadGestion: null, units: { from: 24, to: 36, comparable: true } });
+    compare.mockResolvedValueOnce({
+      unidadGestion: null,
+      units: { from: 24, to: 36, comparable: true },
+      currency: { kind: 'NOMINAL', periodCode: null, index: null, seriesVersionId: null, missingPeriodCodes: [] },
+    });
     const withoutUnit = await app.inject({ method: 'GET', url: `/structures/${STRUCTURE_ID}/periods/compare` });
     await app.close();
 

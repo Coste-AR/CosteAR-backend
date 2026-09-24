@@ -3,6 +3,16 @@ import nodemailer from 'nodemailer';
 import { getEnv } from '../config/env.js';
 import { emailLayout, emailButton, emailCodeBox } from './email-templates.js';
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[char]!);
+}
+
 /**
  * Envío de emails transaccionales vía Resend o SMTP. En test y development (sin API
  * key o SMTP real) cae a un modo "log only" que no hace llamadas de red.
@@ -180,14 +190,14 @@ export class EmailService {
         preheader: `Credenciales de acceso al portal de ${companyName}.`,
         bodyHtml:
           `<p style="margin:0 0 12px">Hola <strong>${operatorName}</strong>,</p>` +
-          `<p style="margin:0 0 4px">Tu costista te habilitó el acceso al portal de carga de datos de <strong>${companyName}</strong>. Estas son tus credenciales:</p>` +
+          `<p style="margin:0 0 4px">Te habilitaron el acceso al portal de carga de datos de <strong>${companyName}</strong>. Estas son tus credenciales:</p>` +
           `<div style="background:#f6f5f3;border:1px solid #e6e4e3;border-radius:10px;padding:18px;margin:16px 0">` +
             `<p style="margin:0 0 8px;font-size:11px;color:#5B6066;text-transform:uppercase;letter-spacing:2px">Tus credenciales</p>` +
             `<p style="margin:4px 0"><strong>Email:</strong> ${to}</p>` +
             `<p style="margin:4px 0"><strong>Contraseña temporal:</strong> <code style="background:#e8e6e3;padding:2px 6px;border-radius:4px;font-family:'Courier New',monospace">${tempPassword}</code></p>` +
           `</div>` +
           `<p style="margin:0">Al ingresar por primera vez, vas a poder cambiar tu contraseña.</p>` +
-          (inviteCode ? emailCodeBox('Código de empresa', inviteCode) : '') +
+          (inviteCode ? emailCodeBox('Código de invitación', inviteCode) : '') +
           emailButton('Ingresar al portal', loginUrl),
         footerNote: 'Si no esperabas este acceso, ignorá este mensaje.',
       }),
@@ -210,6 +220,23 @@ export class EmailService {
         bodyHtml:
           `<p style="margin:0 0 10px">El margen de <strong>${productName}</strong> en <strong>${companyName}</strong> cayó a <strong style="color:#B91C1C">${marginPct.toFixed(1)}%</strong>, por debajo de tu umbral de ${thresholdPct.toFixed(1)}%.</p>` +
           `<p style="margin:0">Revisá la estructura de costos antes de que el cliente venda sin margen.</p>`,
+      }),
+    );
+  }
+
+  async sendIndicatorAlert(to: string, companyName: string, message: string): Promise<void> {
+    const empresa = escapeHtml(companyName);
+    const detalle = escapeHtml(message);
+    await this.send(
+      to,
+      `CosteAR — Alerta de indicador: ${companyName}`,
+      emailLayout({
+        heading: 'Alerta de indicador físico',
+        preheader: `Hay un indicador para revisar en ${companyName}.`,
+        bodyHtml:
+          `<p style="margin:0 0 10px">En <strong>${empresa}</strong> se detectó una condición que requiere revisión:</p>` +
+          `<p style="margin:0 0 10px;color:#B91C1C"><strong>${detalle}</strong></p>` +
+          '<p style="margin:0">La alerta no modifica ningún costo. Revisá el dato antes de tomar una decisión.</p>',
       }),
     );
   }

@@ -84,6 +84,8 @@ export const RLS_MODELS = new Set([
   'VentaProducto',
   'Deposito',
   'MovimientoDeposito',
+  'OperatorUnidadProductiva',
+  'OperatorDeposito',
   'CorridaProduccion',
   'ConsumoCorrida',
   'PaqueteRubro',
@@ -93,6 +95,25 @@ export const RLS_MODELS = new Set([
   'DesperdicioRegistro',
   // S-05b.
   'ReglaAlerta',
+  // M1-01: clasificación de costos por concepto.
+  'ConceptoCosteo',
+  'ConceptoCosteoImporte',
+  // M1-02: separación versionada de conceptos semifijos.
+  'TramoSemifijo',
+  'TramoCosto',
+  'EquilibrioTramosCalculo',
+  'SegmentoAnalisis',
+  'RecursoEscaso',
+  'ConsumoRecursoPorUnidad',
+  'PrecioTransferencia',
+  'PriceIndexSeries',
+  'PriceIndexSeriesVersion',
+  'PriceIndexValue',
+  // Telemetría anónima de uso del panel de campo (#354).
+  'PanelTelemetryEvent',
+  // Preferencias de interfaz por persona (#389).
+  'UserPreference',
+  'ClassifierAiCall',
 ]);
 
 /**

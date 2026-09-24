@@ -1,7 +1,7 @@
 # 0012 — Contrato tipado y versionado de respuestas API
 
 - **Fecha:** 2026-09-10
-- **Estado:** Aceptada (fase 1 — prueba de concepto)
+- **Estado:** Aceptada e implementada en el recorrido principal
 - **Decide:** Alan (sesión de Claude), a partir del issue
 - **Contexto de origen:** issue #282
 
@@ -57,6 +57,14 @@ Componentes:
 | Convertir las cinco pantallas en este mismo PR | PR-03: un PR de ese tamaño no se revisa. Además, retrofitear `schema.response` a rutas que hoy no lo tienen puede cambiar el shape serializado si el handler devolvía campos extra — mejor validarlo ruta por ruta. |
 
 ## Consecuencias
+
+### Actualización 2026-09-20 — cierre de #282
+
+La prueba de concepto se extendió a 19 operaciones del recorrido autenticado principal. Se
+mantiene la decisión original de migrar ruta por ruta: el generador filtra las operaciones sin
+`schema.response`, de modo que importar un archivo de rutas no publica accidentalmente endpoints
+todavía no contrastados. El documento declara versión `1.0.0`; el consumidor puede fijar además
+el SHA inmutable que contiene `openapi/openapi.json` y `openapi/types.d.ts`.
 
 **A favor**
 

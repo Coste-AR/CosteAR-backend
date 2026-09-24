@@ -406,6 +406,68 @@ CREATE POLICY tenant_isolation ON parametros_costeo
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+-- conceptos_costeo (M1-01): mismo patrón que parametros_costeo — `userId`
+-- denormalizado, aislamiento de Postgres, no de TypeScript (DOM-07).
+ALTER TABLE conceptos_costeo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conceptos_costeo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON conceptos_costeo;
+CREATE POLICY tenant_isolation ON conceptos_costeo
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- M3-03b: importes nominales versionados de cada concepto.
+ALTER TABLE conceptos_costeo_importes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conceptos_costeo_importes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON conceptos_costeo_importes;
+CREATE POLICY tenant_isolation ON conceptos_costeo_importes
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- tramos_semifijos (M1-02): versiones de la separación por concepto.
+ALTER TABLE tramos_semifijos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tramos_semifijos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON tramos_semifijos;
+CREATE POLICY tenant_isolation ON tramos_semifijos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- tramos_costo (M10-01): versiones de estructura/capacidad por concepto o segmento.
+ALTER TABLE tramos_costo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tramos_costo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON tramos_costo;
+CREATE POLICY tenant_isolation ON tramos_costo
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE equilibrio_tramos_calculos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE equilibrio_tramos_calculos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON equilibrio_tramos_calculos;
+CREATE POLICY tenant_isolation ON equilibrio_tramos_calculos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- M11-01: serie de índices y snapshots append-only por empresa.
+ALTER TABLE price_index_series ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_index_series FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON price_index_series;
+CREATE POLICY tenant_isolation ON price_index_series
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE price_index_series_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_index_series_versions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON price_index_series_versions;
+CREATE POLICY tenant_isolation ON price_index_series_versions
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE price_index_values ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_index_values FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON price_index_values;
+CREATE POLICY tenant_isolation ON price_index_values
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- Operación física genérica: ambas tablas tienen `userId` denormalizado para
 -- que el aislamiento se aplique sin joins adicionales.
 ALTER TABLE unidades_productivas ENABLE ROW LEVEL SECURITY;
@@ -456,6 +518,44 @@ DROP POLICY IF EXISTS tenant_isolation ON depositos;
 CREATE POLICY tenant_isolation ON depositos
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+-- Alcance del cargador: el dueño de la empresa administra las filas y el
+-- propio operador puede leerlas para que la autorización no dependa sólo de TS.
+ALTER TABLE operator_unidades_productivas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operator_unidades_productivas FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON operator_unidades_productivas;
+CREATE POLICY tenant_isolation ON operator_unidades_productivas
+  USING (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId"
+      AND (om."operatorId" = current_app_user_id() OR c."userId" = current_app_user_id())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
+  ));
+
+ALTER TABLE operator_depositos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operator_depositos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON operator_depositos;
+CREATE POLICY tenant_isolation ON operator_depositos
+  USING (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId"
+      AND (om."operatorId" = current_app_user_id() OR c."userId" = current_app_user_id())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
+  ));
 
 ALTER TABLE movimientos_deposito ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_deposito FORCE ROW LEVEL SECURITY;
@@ -508,3 +608,56 @@ DROP POLICY IF EXISTS tenant_isolation ON reglas_alerta;
 CREATE POLICY tenant_isolation ON reglas_alerta
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
+
+-- panel_telemetry_events (#354): eventos anónimos por persona, aislados por
+-- tenant. La columna userId identifica al dueño de la empresa, no al actor.
+ALTER TABLE panel_telemetry_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE panel_telemetry_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON panel_telemetry_events;
+CREATE POLICY tenant_isolation ON panel_telemetry_events
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- user_preferences (#389): la preferencia pertenece a una persona y nunca se
+-- comparte entre usuarios, aun cuando trabajen sobre la misma empresa.
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON user_preferences;
+CREATE POLICY tenant_isolation ON user_preferences
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- classifier_ai_calls (#390): costo de cada llamada aislado por el dueño.
+ALTER TABLE classifier_ai_calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE classifier_ai_calls FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON classifier_ai_calls;
+CREATE POLICY tenant_isolation ON classifier_ai_calls
+  USING ("costistId" = current_app_user_id())
+  WITH CHECK ("costistId" = current_app_user_id());
+-- segmentos_analisis (M4-01): jerarquía y parámetros marginales por tenant.
+ALTER TABLE segmentos_analisis ENABLE ROW LEVEL SECURITY;
+ALTER TABLE segmentos_analisis FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON segmentos_analisis;
+CREATE POLICY tenant_isolation ON segmentos_analisis
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+-- recursos escasos (M8-01): restricciones y consumos por tenant.
+ALTER TABLE recursos_escasos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recursos_escasos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON recursos_escasos;
+CREATE POLICY tenant_isolation ON recursos_escasos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE consumos_recurso_por_unidad ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consumos_recurso_por_unidad FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consumos_recurso_por_unidad;
+CREATE POLICY tenant_isolation ON consumos_recurso_por_unidad
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE precios_transferencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE precios_transferencia FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON precios_transferencia;
+CREATE POLICY tenant_isolation ON precios_transferencia USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());

@@ -53,7 +53,7 @@ export function enterTenantScope(userId: string): void {
  *
  * Es la versión de `asSystem` para un pre-handler. El único uso hoy es el panel
  * de administración: mira todas las empresas a propósito, y el admin es personal
- * interno que no tiene datos propios. Sigue protegido por `requireRole('ADMIN')`.
+ * interno que no tiene datos propios. Sigue protegido por `requireRole('SUPER_ADMIN')`.
  */
 export function enterSystemScope(motivo: string): void {
   void motivo;

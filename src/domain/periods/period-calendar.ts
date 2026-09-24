@@ -78,7 +78,7 @@ const MS_PER_DAY = 86_400_000;
 export class InvalidPeriodCodeError extends Error {
   constructor(code: string, rhythm: Rhythm) {
     const name = typeof rhythm === 'string' ? rhythm : `ciclos de ${rhythm.lengthDays} días`;
-    super(`El código de período "${code}" no corresponde al ritmo ${name} de la empresa.`);
+    super(`El código de período "${code}" no corresponde al ritmo ${name} del negocio.`);
     this.name = 'InvalidPeriodCodeError';
   }
 }

@@ -274,6 +274,23 @@ export async function ingestDataEntry(
       },
     });
 
+    if (classification.aiCalls?.length) {
+      await tx.classifierAiCall.createMany({
+        data: classification.aiCalls.map((call) => ({
+          dataEntryId: created.id,
+          companyId: input.companyId,
+          costistId: input.costistId,
+          provider: call.provider,
+          model: call.model,
+          inputTokens: call.inputTokens,
+          outputTokens: call.outputTokens,
+          latencyMs: call.latencyMs,
+          estimatedCost: call.estimatedCost,
+          costCurrency: call.costCurrency,
+        })),
+      });
+    }
+
     if (cae) {
       await tx.processedCAE.create({
         data: { cae, dataEntryId: created.id, companyId: input.companyId },

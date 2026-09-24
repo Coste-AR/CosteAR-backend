@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 
 const { mockDb } = vi.hoisted(() => ({
   mockDb: { macroSnapshot: { findFirst: vi.fn(), findMany: vi.fn() } },
@@ -10,7 +11,7 @@ vi.mock('@/infrastructure/workers/queues.js', () => ({ macroSyncQueue: { add: vi
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
     (request as FastifyRequest & { authUser: object }).authUser = {
-      id: 'user-1', tenantId: 'tenant-1', role: 'COSTISTA', jobTitle: null,
+      id: 'user-1', tenantId: 'tenant-1', role: 'EMPRESA_ADMIN', jobTitle: null,
     };
   },
 }));
@@ -18,7 +19,11 @@ vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
 async function buildTestApp() {
   const Fastify = (await import('fastify')).default;
   const { registerMacroRoutes } = await import('@/infrastructure/http/routes/macro.routes.js');
+  const { errorHandler } = await import('@/infrastructure/http/error-handler.js');
   const app = Fastify({ logger: false });
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+  app.setErrorHandler(errorHandler);
   await app.register(registerMacroRoutes);
   await app.ready();
   return app;

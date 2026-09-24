@@ -20,6 +20,7 @@ import { selectCostingEngine } from './costing-engine.js';
 import { persistCalculationRun, type RunTrigger } from './calculation-run-persistence.js';
 import { validateCalculationInputs, toMissingInputError } from './validate-inputs.js';
 import { enrichCalculationResult } from './calculation-result-enrichment.js';
+import { prepararMateriaPrimaHomogenea } from '../../domain/calculations/moneda-homogenea.js';
 
 /**
  * Marca de incompletitud de una corrida (F04). Contrato ADITIVO que consume el
@@ -179,6 +180,13 @@ export class CalculationRunService {
     structureId: string,
     actor: TraceActor,
     trigger: RunTrigger = 'MANUAL',
+    /**
+     * El período que se está calculando, cuando el llamador lo conoce. La corrida
+     * diaria recorre períodos, así que sabe cuál es y lo pasa; el botón manual
+     * calcula «la estructura» y lo deja en `undefined` para que resuelva contra
+     * el período abierto, que es el que el costista tiene delante (MX-04).
+     */
+    periodId?: string,
   ) {
     const s = await this.requireStructure(userId, structureId);
 
@@ -205,6 +213,40 @@ export class CalculationRunService {
       throw new MissingInputError('indirectCosts', 'Falta cargar la sección de Costos Indirectos antes de calcular.');
     }
 
+    // #367 — trabajos de terceros pertenecen al período. La estructura conserva
+    // un espejo para retrocompatibilidad y para calcular antes de que exista un
+    // período, pero una corrida con período conocido tiene que usar la foto de
+    // ese período (y el cálculo manual, el período abierto más reciente).
+    const periodoDelCalculo = periodId
+      ? await this.db.costPeriod.findFirst({
+          where: { id: periodId, structureId, deletedAt: null },
+          select: { thirdPartyWork: true, code: true },
+        })
+      : await this.db.costPeriod.findFirst({
+          where: { structureId, status: 'OPEN', deletedAt: null },
+          select: { thirdPartyWork: true, code: true },
+          orderBy: { code: 'desc' },
+        });
+
+    const priceIndexDelegate = (this.db as unknown as {
+      priceIndexSeriesVersion?: { findFirst(args: unknown): Promise<{ id: string; values: { periodCode: string; indexValue: unknown }[] } | null> };
+    }).priceIndexSeriesVersion;
+    const priceIndexVersion = s.companyId && priceIndexDelegate
+      ? await priceIndexDelegate.findFirst({
+          where: { companyId: s.companyId }, orderBy: { version: 'desc' }, include: { values: true },
+        })
+      : null;
+    const rawMaterial = prepararMateriaPrimaHomogenea(
+      rawMaterialSectionSchema.parse(s.rawMaterialConfig),
+      priceIndexVersion
+        ? {
+            destinationPeriodCode: periodoDelCalculo?.code ?? s.period,
+            seriesVersionId: priceIndexVersion.id,
+            indices: Object.fromEntries(priceIndexVersion.values.map((value) => [value.periodCode, Number(value.indexValue)])),
+          }
+        : null,
+    );
+
     // Doble período (spec D.3): un dato sin decisión de imputación no se puede
     // asignar con certeza a este mes. F04 — decisión: el cálculo NO se bloquea
     // (bloquearlo sin una pantalla para imputar dejaría al costista sin acción
@@ -216,9 +258,10 @@ export class CalculationRunService {
     // Nota: `take: 20` acota nombres y payload; con >20 pendientes el conteo del
     // motivo queda en 20 (mismo tope que la detección original).
     const input: CalculationInput = {
-      rawMaterial: rawMaterialSectionSchema.parse(s.rawMaterialConfig),
+      rawMaterial: rawMaterial.rawMaterial,
       directLabor: directLaborConfigSchema.parse(s.directLaborConfig),
       indirectCosts: indirectCostConfigSchema.parse(s.indirectCostConfig),
+      thirdPartyWork: Number(periodoDelCalculo?.thirdPartyWork ?? s.thirdPartyWork ?? 0),
       inventory: inventorySchema.parse({}),
       sales: {
         unitPrice: s.salesUnitPrice ? Number(s.salesUnitPrice) : 0,
@@ -258,24 +301,29 @@ export class CalculationRunService {
     // Si la estructura no trae `companyId` (mocks históricos), la ausencia de
     // clasificación queda marcada como incompleta sin intentar una consulta sin
     // tenant. En producción `companyId` siempre existe por el modelo Prisma.
-    const { results, resultsBase, incompletitud, periodId } = await enrichCalculationResult(this.db, {
+    const enriched = await enrichCalculationResult(this.db, {
       structureId,
       companyId: s.companyId,
+      periodId,
       input,
       output,
     });
+    const results = { ...enriched.results, currency: rawMaterial.currency };
+    const resultsBase = { ...enriched.resultsBase, currency: rawMaterial.currency };
+    const { incompletitud, periodId: periodoDeLaCorrida } = enriched;
 
     return withTenant(userId, async (tx) => {
       // Persistencia COMPARTIDA (misma que usará el motor de Procesos, B17): una
       // corrida + su árbol + la auditoría, en esta transacción. No se duplica.
-      const { run } = await persistCalculationRun(tx, {
+      const { run, priceIndexSeriesVersionId } = await persistCalculationRun(tx, {
         structureId,
         engineVersion: engine.engineVersion,
         executedBy: actor.id,
-        periodId,
+        periodId: periodoDeLaCorrida,
         trigger,
         inputsSnapshot: input,
         results: resultsBase,
+        priceIndexSeriesVersionId: rawMaterial.currency.seriesVersionId,
         tree,
         audit: { actor, after: { grossMargin: output.grossMargin, grossMarginPct: output.grossMarginPct } },
       });
@@ -284,7 +332,7 @@ export class CalculationRunService {
         userId,
         companyId: s.companyId,
         structureId,
-        periodId,
+        periodId: periodoDeLaCorrida,
         runId: run.id,
         puntoEquilibrio: resultsBase.puntoEquilibrio,
         fecha: new Date(),
@@ -313,6 +361,7 @@ export class CalculationRunService {
         data: {
           costStructureId: structureId,
           userId,
+          priceIndexSeriesVersionId,
           rawMaterialConsumed: output.rawMaterialConsumed,
           directLaborTotal: output.directLaborTotal,
           indirectCostsApplied: output.indirectCostsApplied,

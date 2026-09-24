@@ -9,7 +9,7 @@ import { withTenant } from '@/infrastructure/database/prisma.js';
 import { withTenantContext } from '@/infrastructure/database/tenant-context.js';
 import { createTenant, disconnect, db, type Tenant } from './helpers/tenants.js';
 
-const actor = (userId: string) => ({ id: userId, role: 'COSTISTA', area: 'costista' }) as const;
+const actor = (userId: string) => ({ id: userId, role: 'EMPRESA_ADMIN', area: 'costista' }) as const;
 
 async function preparar(label: string): Promise<Tenant> {
   const tenant = await createTenant(label);

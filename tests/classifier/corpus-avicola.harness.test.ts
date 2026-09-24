@@ -383,8 +383,10 @@ const baseUnaVez = () => (corridaBase ??= correrCorpus(PERFIL_BASE));
 // haría que `npm test` fallara por el estado de una cuota externa y no por el
 // código — el peor tipo de test flaky, porque enseña a ignorar el rojo.
 //
-// Es una vara de medición que se usa deliberadamente antes y después de una
-// corrección, no una compuerta de CI:
+// Es una vara de medición EN VIVO que se usa deliberadamente antes y después de
+// una corrección. La compuerta determinista de CI vive en `corpus-ci.test.ts`:
+// recorre cada caso con su sección esperada y simula sólo las respuestas de IA,
+// sin depender de cuota, red ni credenciales externas.
 //
 //   CORPUS=1 npx vitest run tests/classifier/corpus-avicola.harness.test.ts
 //   CORPUS=1 CORPUS_REPETICIONES=5 npx vitest run ...   (antes de declarar algo arreglado)

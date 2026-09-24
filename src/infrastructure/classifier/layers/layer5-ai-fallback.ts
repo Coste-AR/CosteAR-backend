@@ -1,21 +1,23 @@
 // src/infrastructure/classifier/layers/layer5-ai-fallback.ts
-import { GroqService } from '../../ai/groq-service.js';
+import { GroqClassifier } from '../../ai/groq-classifier.js';
+import { createClassifierAiClient } from '../classifier-ai-client.js';
 import type { DocumentType, CostSection } from '../types.js';
+import type { ClassifierAiCallMetric } from '../../ai/groq-classifier.js';
 
-let groq: GroqService | null = null;
-let groqInitFailed = false;
+let classifierAi: GroqClassifier | null = null;
+let classifierAiInitFailed = false;
 
-function getGroq(): GroqService | null {
-  if (groqInitFailed) return null;
-  if (!groq) {
+function getClassifierAi(): GroqClassifier | null {
+  if (classifierAiInitFailed) return null;
+  if (!classifierAi) {
     try {
-      groq = new GroqService();
+      classifierAi = new GroqClassifier(createClassifierAiClient());
     } catch {
-      groqInitFailed = true;
+      classifierAiInitFailed = true;
       return null;
     }
   }
-  return groq;
+  return classifierAi;
 }
 
 export interface Layer5Result {
@@ -23,6 +25,7 @@ export interface Layer5Result {
   costSection: CostSection;
   confidence: number;
   reasoning: string;
+  aiCalls: ClassifierAiCallMetric[];
 }
 
 const VALID_DOC_TYPES = new Set<string>([
@@ -37,7 +40,7 @@ const VALID_SECTIONS = new Set<string>([
 ]);
 
 /**
- * Layer 5: Groq AI Fallback.
+ * Layer 5: fallback de IA configurable (Groq o DeepSeek).
  * Only called when accumulated confidence < 72 after layers 0-4.
  * Returns null if the API is unavailable.
  */
@@ -53,13 +56,17 @@ export async function runLayer5(input: {
   ambiguityHint?: string;
   /** Ejemplos few-shot de correcciones previas del costista (memoria). */
   correctionExamples?: string;
-}): Promise<Layer5Result | null> {
-  const service = getGroq();
+}, onCall?: (call: ClassifierAiCallMetric) => void): Promise<Layer5Result | null> {
+  const service = getClassifierAi();
   if (!service) return null;
-  const raw = await service.classifyDocument(input);
+  const aiCalls: ClassifierAiCallMetric[] = [];
+  const raw = await service.classifyDocument(input, (call) => {
+    aiCalls.push(call);
+    onCall?.(call);
+  });
   if (!raw) return null;
 
-  // Si Groq devuelve un tipo o sección fuera del set válido, lo tratamos como
+  // Si el proveedor devuelve un tipo o sección fuera del set válido, lo tratamos como
   // DESCONOCIDO (más abajo) — nunca inventamos una categoría que no existe.
 
   const documentType = VALID_DOC_TYPES.has(raw.documentType)
@@ -72,5 +79,5 @@ export async function runLayer5(input: {
 
   const confidence = Math.min(100, Math.max(0, Math.round(raw.confidence)));
 
-  return { documentType, costSection, confidence, reasoning: raw.reasoning };
+  return { documentType, costSection, confidence, reasoning: raw.reasoning, aiCalls };
 }

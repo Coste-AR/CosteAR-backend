@@ -81,9 +81,56 @@ beforeAll(async () => {
 afterAll(disconnect);
 
 describe('A-05 — contribución marginal persistida por período', () => {
+  it('cargar trabajos de terceros mueve el costo real y el margen del tablero', async () => {
+    const structures = new CostStructureService(db);
+    const runs = new CalculationRunService(db);
+    const actor = { id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista' } as const;
+
+    const sinTerceros = await withTenantContext(tenant.userId, () =>
+      runs.calculate(tenant.userId, tenant.structureId, actor, 'MANUAL', tenant.periodId),
+    );
+
+    await withTenantContext(tenant.userId, () =>
+      structures.updateThirdPartyWork(tenant.userId, tenant.structureId, 25, {
+        userId: tenant.userId,
+        ipAddress: '127.0.0.1',
+        userAgent: 'vitest',
+      }),
+    );
+
+    // Distingue el origen: una corrida asociada a un período debe leer su foto,
+    // aunque el espejo vigente de la estructura ya tenga otro importe.
+    await withTenant(tenant.userId, (tx) =>
+      tx.costStructure.update({ where: { id: tenant.structureId }, data: { thirdPartyWork: 999 } }),
+    );
+
+    try {
+      const conTerceros = await withTenantContext(tenant.userId, () =>
+        runs.calculate(tenant.userId, tenant.structureId, actor, 'MANUAL', tenant.periodId),
+      );
+
+      expect(conTerceros.results.thirdPartyWork).toBe(25);
+      expect(conTerceros.results.realProductionCost! - sinTerceros.results.realProductionCost!)
+        .toBeCloseTo(25, 6);
+      expect(sinTerceros.results.grossMargin - conTerceros.results.grossMargin)
+        .toBeCloseTo(25, 6);
+    } finally {
+      // Este archivo comparte tenant entre casos. La restauración pasa por la
+      // mutación productiva (con versión y auditoría), no por un UPDATE de test
+      // que podría ocultar un problema en ese camino.
+      await withTenantContext(tenant.userId, () =>
+        structures.updateThirdPartyWork(tenant.userId, tenant.structureId, 0, {
+          userId: tenant.userId,
+          ipAddress: '127.0.0.1',
+          userAgent: 'vitest',
+        }),
+      );
+    }
+  });
+
   it('persiste la vista y cambia sólo al cambiar una clasificación', async () => {
     const service = new CalculationRunService(db);
-    const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
+    const actor = { id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista' } as const;
 
     const primera = await withTenantContext(tenant.userId, () =>
       service.calculate(tenant.userId, tenant.structureId, actor),
@@ -124,7 +171,7 @@ describe('A-05 — contribución marginal persistida por período', () => {
   it('el simulador comparte la vista persistida, refleja shocks y marca faltantes', async () => {
     const simulator = new CostStructureService(db);
     const runs = new CalculationRunService(db);
-    const actor = { id: tenant.userId, role: 'COSTISTA', area: 'costista' } as const;
+    const actor = { id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista' } as const;
 
     const simulated = await withTenantContext(tenant.userId, () =>
       simulator.simulate(tenant.userId, tenant.structureId, {}),
@@ -159,7 +206,39 @@ describe('A-05 — contribución marginal persistida por período', () => {
       simulator.simulate(tenant.userId, tenant.structureId, {}),
     );
     expect(incompleta.result.contribucionMarginal.incompleta).toBe(true);
-    expect(incompleta.result.puntoEquilibrio.incompleta).toBe(true);
+    expect(incompleta.result.puntoEquilibrio).toMatchObject({
+      incompleta: false,
+      tipo: 'zona',
+      unidadesEquilibrio: null,
+    });
+    const zona = incompleta.result.puntoEquilibrio;
+    if (zona.incompleta || zona.tipo !== 'zona') throw new Error('Se esperaba una zona acotada');
+    expect(Number.isFinite(zona.qMin)).toBe(true);
+    expect(zona.qMax).toBeGreaterThan(zona.qMin);
+    expect(zona.conceptosQueLaEnsanchan.map(({ clave }) => clave).sort())
+      .toEqual([
+        CLAVES_COMPORTAMIENTO_CONTRIBUCION.materiaPrima,
+        CLAVES_COMPORTAMIENTO_CONTRIBUCION.manoObraDirecta,
+        CLAVES_COMPORTAMIENTO_CONTRIBUCION.costosIndirectos,
+      ].sort());
+    expect(zona.basadoEn).toEqual(incompleta.result.contribucionMarginal.componentes
+      .map(({ clave, etiqueta }) => ({ clave, etiqueta })));
+    const sinClasificar = await withTenantContext(tenant.userId, () =>
+      runs.calculate(tenant.userId, tenant.structureId, actor),
+    );
+    expect(sinClasificar.results.puntoEquilibrio).toMatchObject({
+      tipo: 'zona',
+      qMin: zona.qMin,
+      qMax: zona.qMax,
+      conceptosQueLaEnsanchan: zona.conceptosQueLaEnsanchan,
+    });
+    const sinPrecio = await withTenantContext(tenant.userId, () =>
+      simulator.simulate(tenant.userId, tenant.structureId, { sales: -1 }),
+    );
+    expect(sinPrecio.result.puntoEquilibrio).toMatchObject({
+      incompleta: true,
+      unidadesEquilibrio: null,
+    });
     expect(incompleta.result.contribucionMarginal.motivos.length).toBeGreaterThan(0);
   });
 });

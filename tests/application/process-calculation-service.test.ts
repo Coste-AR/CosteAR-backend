@@ -28,7 +28,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
   withTenant: (_userId: string, fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
 }));
 
-const actor = { id: 'user-1', role: 'COSTISTA', area: 'costista' };
+const actor = { id: 'user-1', role: 'EMPRESA_ADMIN', area: 'costista' };
 const PERIOD = 'per-1';
 
 /** Cuadro de UN departamento inicial lineal (sin EI ni pérdidas): unit $2,00. */

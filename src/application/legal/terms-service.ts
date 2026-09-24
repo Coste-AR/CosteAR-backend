@@ -60,9 +60,9 @@ export function findInitialTermsMarkers(content: string): string[] {
  * cualquier usuario cuya última aceptación no sea de la versión activa
  * necesita volver a aceptar, sin ningún job ni flag adicional.
  *
- * Solo aplica a costistas (COSTISTA). El registro de operadores de empresa
+ * Solo aplica a costistas (EMPRESA_ADMIN). El registro de operadores de empresa
  * (EMPRESA_OPERATOR) es por invitación, no por /auth/register, y el personal
- * interno (ADMIN) nunca pasa por el frontend de costistas.
+ * interno (SUPER_ADMIN) nunca pasa por el frontend de costistas.
  */
 export class TermsService {
   constructor(
@@ -125,11 +125,11 @@ export class TermsService {
    * Para el gate post-login/registro: ¿este usuario tiene que (re)aceptar?
    * Se le pide a costistas Y a operarios de empresa (EMPRESA_OPERATOR) —
    * cualquiera que use la plataforma como cliente. Al personal interno
-   * (ADMIN) no: nunca pasa por el frontend de costistas (login lo manda
+   * (SUPER_ADMIN) no: nunca pasa por el frontend de costistas (login lo manda
    * directo al panel de admin), y el contrato es con quien usa el producto.
    */
   async needsAcceptance(userId: string, role: string): Promise<{ needs: boolean; current: TermsVersion | null }> {
-    if (role === 'ADMIN') return { needs: false, current: null };
+    if (role === 'SUPER_ADMIN') return { needs: false, current: null };
 
     const current = await this.getCurrentVersion();
     if (!current) return { needs: false, current: null };

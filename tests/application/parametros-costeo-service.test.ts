@@ -61,7 +61,7 @@ function service(db: Record<string, unknown>) {
   return new ParametrosCosteoService(db as unknown as PrismaClient);
 }
 
-const ACTOR = { id: USER, role: 'COSTISTA', area: 'costista', method: 'manual' };
+const ACTOR = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' };
 
 describe('#115 — resolución de parámetros de costeo', () => {
   beforeEach(() => {
@@ -155,6 +155,36 @@ describe('#115 — resolución de parámetros de costeo', () => {
       await expect(
         service(db).set(USER, 'comp-1', 'no_existe', { valor: 1, confirmado: true }, ACTOR),
       ).rejects.toThrow(UnprocessableEntityError);
+    });
+
+    /**
+     * M0-01 (plan de análisis marginal v2). 🔴 R6: la amortización de un bien
+     * de uso es FIJA cuando la causa es el tiempo. 🔴 R8: ningún costo fijo
+     * puede entrar al costo variable por vía de una cuota de aplicación.
+     * `AM17` lo llama "el error más caro del proyecto" — tratar la
+     * amortización del plantel como variable cambió la contribución marginal
+     * un 24,9 %. No queda librado a que nadie se acuerde de clasificarla bien:
+     * el servicio la rechaza.
+     */
+    it('rechaza clasificar la amortización de activos como VARIABLE (R6/R8)', async () => {
+      const db = makeDb();
+      await expect(
+        service(db).set(
+          USER, 'comp-1', 'comportamiento_amortizacion_activos',
+          { comportamientoVolumen: 'VARIABLE', confirmado: true },
+          ACTOR,
+        ),
+      ).rejects.toThrow(/fija|amortiza/i); // no "no existe en el catálogo": la clave SÍ existe
+    });
+
+    it('acepta clasificar la amortización de activos como FIJO', async () => {
+      const db = makeDb();
+      const r = await service(db).set(
+        USER, 'comp-1', 'comportamiento_amortizacion_activos',
+        { comportamientoVolumen: 'FIJO', confirmado: true },
+        ACTOR,
+      );
+      expect(r).toMatchObject({ clave: 'comportamiento_amortizacion_activos', comportamientoVolumen: 'FIJO' });
     });
 
     it('rechaza una estructura que no pertenece a la empresa', async () => {

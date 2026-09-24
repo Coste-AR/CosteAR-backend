@@ -7,6 +7,7 @@ export const CATEGORY_BY_INDUSTRY = {
 
 /** Contenido declarativo del paquete; no contiene reglas de dominio. */
 export const PAQUETE_AVICOLA_POSTURA = {
+  nombreProducto: 'AVI',
   lexicon: {
     UnidadProductiva: 'Galpón',
     LoteProductivo: 'Lote de aves',
@@ -55,18 +56,39 @@ export const PAQUETE_AVICOLA_POSTURA = {
     },
   ],
   alertRules: [
-    { indicador: 'nivel_deposito_bajo', condicion: 'MENOR', umbral: 'configurable' },
-    { indicador: 'humedad_ingreso', condicion: 'MAYOR', umbral: 'configurable' },
-    { indicador: 'postura_media_movil', condicion: 'MENOR', umbral: 'configurable' },
-    { indicador: 'antiguedad_stock', condicion: 'MAYOR', umbral: 'configurable' },
-    { indicador: 'desvio_consumo', condicion: 'MAYOR', umbral: 'configurable' },
+    { indicador: 'nivel_deposito_bajo', etiqueta: 'Nivel del depósito', unidad: '%', condicion: 'MENOR', umbral: 'configurable' },
+    { indicador: 'humedad_ingreso', etiqueta: 'Humedad al ingreso', unidad: '%', condicion: 'MAYOR', umbral: 'configurable' },
+    { indicador: 'postura_media_movil', etiqueta: 'Postura media', unidad: '%', condicion: 'MENOR', umbral: 'configurable' },
+    { indicador: 'antiguedad_stock', etiqueta: 'Antigüedad del stock', unidad: 'días', condicion: 'MAYOR', umbral: 'configurable' },
+    { indicador: 'desvio_consumo', etiqueta: 'Desvío de consumo', unidad: '%', condicion: 'MAYOR', umbral: 'configurable' },
   ],
-  screens: {},
+  screens: {
+    home: {
+      kpis: [
+        { clave: 'costo_cajon', etiqueta: 'Costo por cajón', unidad: 'ARS/cajon', campo: 'costoPorCajon.total' },
+        { clave: 'contribucion_marginal_cajon', etiqueta: 'Contribución marginal por cajón', unidad: 'ARS/cajon', campo: 'contribucionMarginalPorCajon' },
+        { clave: 'punto_equilibrio', etiqueta: 'Punto de equilibrio', unidad: 'cajones', campo: 'puntoEquilibrioCajones' },
+      ],
+    },
+    /** Indicadores externos propios del rubro que acompañan al dólar oficial
+     * y al IPC del núcleo. La lista es contenido del paquete, no del tenant. */
+    indicadoresMacro: [
+      { clave: 'USD_BLUE', etiqueta: 'Dólar blue', unidad: 'ARS/USD', fuente: 'DOLARAPI' },
+      { clave: 'CAPIA_HUEVO_BLANCO_CAJON', etiqueta: 'Huevo blanco', unidad: 'cajon', fuente: 'CAPIA' },
+      { clave: 'CAPIA_HUEVO_COLOR_CAJON', etiqueta: 'Huevo color', unidad: 'cajon', fuente: 'CAPIA' },
+      { clave: 'CAPIA_ALIMENTO_PONEDORA_KG', etiqueta: 'Alimento ponedora', unidad: 'kg', fuente: 'CAPIA' },
+      { clave: 'CAPIA_MAIZ_TON', etiqueta: 'Maíz', unidad: 'ton', fuente: 'CAPIA' },
+      { clave: 'CAPIA_SOJA_TON', etiqueta: 'Soja', unidad: 'ton', fuente: 'CAPIA' },
+      { clave: 'CAPIA_MAPLE_UNIDAD', etiqueta: 'Maple', unidad: 'unidad', fuente: 'CAPIA' },
+    ],
+  },
   modulos: [
     {
       clave: 'produccion',
       nombre: 'Producción diaria',
       descripcion: 'Registrá lo que produjo cada lote durante el día.',
+      superficies: ['carga.produccion-diaria'],
+      destinos: { 'carga.produccion-diaria': '/panel-campo' },
       parametros: ['huevos_por_cajon', 'huevos_por_maple', 'maples_por_cajon', 'costo_maple', 'unidad_carga', 'unidad_gestion'],
       alertas: [],
       dependeDe: [],
@@ -76,6 +98,8 @@ export const PAQUETE_AVICOLA_POSTURA = {
       clave: 'plantel',
       nombre: 'Plantel',
       descripcion: 'Registrá bajas y otros eventos del lote.',
+      superficies: ['carga.bajas-plantel'],
+      destinos: { 'carga.bajas-plantel': '/panel-campo' },
       parametros: ['vida_util_lote_meses'],
       alertas: ['postura_media_movil'],
       dependeDe: [],
@@ -83,27 +107,27 @@ export const PAQUETE_AVICOLA_POSTURA = {
     },
     {
       clave: 'variantes', nombre: 'Tipos de producto', descripcion: 'Separá la producción por tipo y repartí el costo entre ellos.',
-      parametros: [], alertas: [], dependeDe: ['produccion'], activoPorDefecto: false,
+      superficies: ['tablero.variantes'], parametros: [], alertas: [], dependeDe: ['produccion'], activoPorDefecto: false,
     },
     {
       clave: 'depositos', nombre: 'Silos', descripcion: 'Registrá el nivel del depósito y sus alertas de reposición.',
-      parametros: [], alertas: ['nivel_deposito_bajo', 'humedad_ingreso', 'antiguedad_stock'], dependeDe: [], activoPorDefecto: false,
+      superficies: ['carga.depositos'], parametros: [], alertas: ['nivel_deposito_bajo', 'humedad_ingreso', 'antiguedad_stock'], dependeDe: [], activoPorDefecto: false,
     },
     {
       clave: 'alimento', nombre: 'Alimento propio', descripcion: 'Registrá bachadas, fórmulas activas y consumo por lote.',
-      parametros: ['gramaje_estandar_gr', 'alimento_origen'], alertas: ['desvio_consumo'], dependeDe: [], activoPorDefecto: false,
+      superficies: ['carga.alimento-propio'], parametros: ['gramaje_estandar_gr', 'alimento_origen'], alertas: ['desvio_consumo'], dependeDe: [], activoPorDefecto: false,
     },
     {
       clave: 'peso', nombre: 'Muestreo de peso', descripcion: 'Registrá peso por muestreo contra tabla estándar.',
-      parametros: [], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
+      superficies: ['carga.muestreo-peso'], parametros: [], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
     },
     {
       clave: 'amortizacion_plantel', nombre: 'Plantel como activo', descripcion: 'Amortizá el lote en vez de imputarlo al período.',
-      parametros: ['vida_util_lote_meses'], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
+      superficies: ['costeo.amortizacion-plantel'], parametros: ['vida_util_lote_meses'], alertas: [], dependeDe: ['plantel'], activoPorDefecto: false,
     },
     {
       clave: 'desperdicio', nombre: 'Desperdicio', descripcion: 'Registrá mermas con su naturaleza declarada.',
-      parametros: ['umbral_merma_normal_pct'], alertas: [], dependeDe: [], activoPorDefecto: false,
+      superficies: ['carga.desperdicio'], parametros: ['umbral_merma_normal_pct'], alertas: [], dependeDe: [], activoPorDefecto: false,
     },
   ],
 } as const;

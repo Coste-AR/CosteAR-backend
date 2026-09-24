@@ -12,7 +12,7 @@ import { LateDataService } from '@/application/cost-structures/late-data-service
 const USER = 'user-1';
 const STRUCT = 'struct-1';
 const DP = 'dp-1';
-const actor = { id: USER, role: 'COSTISTA', area: 'costista' };
+const actor = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista' };
 
 function makeDb(policy: string, over: Record<string, unknown> = {}) {
   return {

@@ -5,6 +5,7 @@ import {
   crearConversorUnidadGestion,
   type UnidadGestion,
 } from '../../domain/units/unidad-gestion.js';
+import { reexpresar } from '../../domain/calculations/moneda-homogenea.js';
 
 /**
  * COMPARACIÓN ENTRE PERÍODOS (problema C — Fase 4).
@@ -122,6 +123,20 @@ export interface PeriodComparison {
   offsetting: boolean;
   warnings: string[];
   macroContrast: MacroContrast | null;
+  currency: ComparisonCurrencyMetadata;
+}
+
+export interface ComparisonCurrencyMetadata {
+  kind: 'NOMINAL' | 'HOMOGENEA';
+  periodCode: string | null;
+  index: number | null;
+  seriesVersionId: string | null;
+  missingPeriodCodes: string[];
+}
+
+export interface ComparisonPriceIndexContext {
+  seriesVersionId: string;
+  values: Readonly<Record<string, number>>;
 }
 
 export type PeriodComparisonWithUnit = PeriodComparison & {
@@ -250,8 +265,42 @@ function pairByKey<T>(
   });
 }
 
-export function comparePeriods(from: PeriodSide, to: PeriodSide): PeriodComparison {
+export function comparePeriods(
+  fromInput: PeriodSide,
+  to: PeriodSide,
+  indexContext?: ComparisonPriceIndexContext,
+): PeriodComparison {
   const warnings: string[] = [];
+  const sourceIndex = indexContext?.values[fromInput.code];
+  const destinationIndex = indexContext?.values[to.code];
+  const missingPeriodCodes = [fromInput.code, to.code]
+    .filter((code) => indexContext?.values[code] === undefined);
+  const homogeneous = sourceIndex !== undefined && destinationIndex !== undefined && indexContext !== undefined;
+  const from = homogeneous
+    ? reexpressPeriodSide(fromInput, sourceIndex, destinationIndex)
+    : fromInput;
+  const currency: ComparisonCurrencyMetadata = homogeneous
+    ? {
+        kind: 'HOMOGENEA',
+        periodCode: to.code,
+        index: destinationIndex,
+        seriesVersionId: indexContext.seriesVersionId,
+        missingPeriodCodes: [],
+      }
+    : {
+        kind: 'NOMINAL',
+        periodCode: null,
+        index: null,
+        seriesVersionId: null,
+        missingPeriodCodes,
+      };
+  if (!homogeneous) {
+    warnings.push(
+      missingPeriodCodes.length > 0
+        ? `Comparación en pesos nominales: faltan índices para ${missingPeriodCodes.join(', ')}.`
+        : 'Comparación en pesos nominales: el negocio todavía no tiene cargada una serie de índices.',
+    );
+  }
 
   // ── Los tres elementos del costo, sobre el total del mes.
   const mp = delta(new Decimal(from.result.rawMaterialConsumed), new Decimal(to.result.rawMaterialConsumed));
@@ -373,6 +422,49 @@ export function comparePeriods(from: PeriodSide, to: PeriodSide): PeriodComparis
     offsetting,
     warnings,
     macroContrast: null,
+    currency,
+  };
+}
+
+/** Reexpresa solo importes monetarios; cantidades, porcentajes y unidades no cambian. */
+function reexpressPeriodSide(side: PeriodSide, sourceIndex: number, destinationIndex: number): PeriodSide {
+  const money = (value: number) => reexpresar(value, sourceIndex, destinationIndex).toNumber();
+  const result = side.result;
+  return {
+    ...side,
+    result: {
+      ...result,
+      rawMaterialConsumed: money(result.rawMaterialConsumed),
+      directLaborTotal: money(result.directLaborTotal),
+      indirectCostsApplied: money(result.indirectCostsApplied),
+      productionCost: money(result.productionCost),
+      costOfGoodsSold: money(result.costOfGoodsSold),
+      grossMargin: money(result.grossMargin),
+      detail: {
+        ...result.detail,
+        rawMaterial: {
+          ...result.detail.rawMaterial,
+          materials: result.detail.rawMaterial.materials.map((material) => ({
+            ...material,
+            consumed: money(material.consumed),
+          })),
+        },
+        directLabor: {
+          ...result.detail.directLabor,
+          departments: result.detail.directLabor.departments.map((department) => ({
+            ...department,
+            totalMod: money(department.totalMod),
+          })),
+        },
+        indirectCosts: {
+          ...result.detail.indirectCosts,
+          perDepartment: Object.fromEntries(Object.entries(result.detail.indirectCosts.perDepartment).map(([id, center]) => [
+            id,
+            { ...center, appliedCip: money(center.appliedCip) },
+          ])),
+        },
+      },
+    },
   };
 }
 

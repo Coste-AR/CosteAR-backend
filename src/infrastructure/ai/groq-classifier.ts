@@ -1,4 +1,4 @@
-import { GroqClient, tryParseJson, buildRetryHint, TEXT_MODEL, DETERMINISTIC_SAMPLING } from './groq-client.js';
+import { tryParseJson, buildRetryHint, DETERMINISTIC_SAMPLING } from './groq-client.js';
 import {
   classifyResponseSchema,
   salvageClassifyResponse,
@@ -6,8 +6,24 @@ import {
 } from './groq-schemas.js';
 import type { ClassifyResponse } from './groq-types.js';
 
+export interface ClassifierCompletionClient {
+  readonly isConfigured: boolean;
+  readonly model: string;
+  postGroqRaw(body: Record<string, unknown>, onCall?: (call: ClassifierAiCallMetric) => void): Promise<string | null>;
+}
+
+export interface ClassifierAiCallMetric {
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  latencyMs: number;
+  estimatedCost: number | null;
+  costCurrency: string | null;
+}
+
 export class GroqClassifier {
-  constructor(private client: GroqClient = new GroqClient()) {}
+  constructor(private client: ClassifierCompletionClient) {}
 
   async classifyDocument(input: {
     text: string;
@@ -19,7 +35,7 @@ export class GroqClassifier {
     intent?: string;
     ambiguityHint?: string;
     correctionExamples?: string;
-  }): Promise<ClassifyResponse | null> {
+  }, onCall?: (call: ClassifierAiCallMetric) => void): Promise<ClassifyResponse | null> {
     if (!this.client.isConfigured) return null;
 
     const signalsSummary = input.foundSignalLabels.length > 0
@@ -27,8 +43,8 @@ export class GroqClassifier {
       : '- Ninguna señal encontrada';
 
     const industryCtx = input.industryLabel
-      ? `Rubro de la empresa: ${input.industryLabel} (categoría interna: ${input.industryCategory ?? 'DEFAULT'}).`
-      : 'Rubro de la empresa: no especificado.';
+      ? `Rubro del negocio: ${input.industryLabel} (categoría interna: ${input.industryCategory ?? 'DEFAULT'}).`
+      : 'Rubro del negocio: no especificado.';
 
     const intentCtx = input.intent && input.intent !== 'DOCUMENTO_FORMAL'
       ? `Nota: el mensaje fue detectado como "${input.intent}", tener en cuenta al clasificar.`
@@ -39,7 +55,7 @@ export class GroqClassifier {
       : '';
 
     const examplesCtx = input.correctionExamples
-      ? `\nEjemplos de clasificaciones que este costista validó/corrigió en casos similares (seguí su criterio):\n${input.correctionExamples}`
+      ? `\nEjemplos de clasificaciones que la persona validó o corrigió en casos similares (seguí su criterio):\n${input.correctionExamples}`
       : '';
 
     // ⚠️ NO ESCRIBAS ACÁ UNA REGLA SOBRE EL FLETE.
@@ -86,7 +102,7 @@ export class GroqClassifier {
       'MATERIA_PRIMA, no a COSTOS_INDIRECTOS. Solo el flete SIN compra asociada (movimiento ' +
       'interno de planta, logística entre depósitos, reparto propio) es COSTOS_INDIRECTOS.';
 
-    const prompt = `Contexto: documento contable argentino enviado por un operador de PyME.
+    const prompt = `Contexto: documento contable argentino enviado por un operador del negocio.
 ${industryCtx}
 ${industryHint}
 ${intentCtx}${ambiguityCtx}${examplesCtx}
@@ -120,7 +136,7 @@ Respondé SOLO con JSON:
     const systemMsg = { role: 'system', content: 'Sos un clasificador de documentos contables argentinos. Respondé solo con JSON válido.' };
     const baseMessages = [systemMsg, { role: 'user', content: prompt }];
     const baseBody = {
-      model: TEXT_MODEL,
+      model: this.client.model,
       max_tokens: 200,
       // ⚠️ NO SUBAS ESTA TEMPERATURA NI SAQUES EL SEED.
       // Con `temperature: 0.05` y sin seed, dos corridas del mismo corpus sin un
@@ -136,7 +152,7 @@ Respondé SOLO con JSON:
     try {
       let everGotContent = false;
 
-      const raw1 = await this.client.postGroqRaw({ ...baseBody, messages: baseMessages });
+      const raw1 = await this.client.postGroqRaw({ ...baseBody, messages: baseMessages }, onCall);
       if (raw1 !== null) everGotContent = true;
       const parsed1 = tryParseJson(raw1);
       const val1 = parsed1 !== undefined ? classifyResponseSchema.safeParse(parsed1) : null;
@@ -154,7 +170,7 @@ Respondé SOLO con JSON:
         },
       ];
 
-      const raw2 = await this.client.postGroqRaw({ ...baseBody, messages: retryMessages });
+      const raw2 = await this.client.postGroqRaw({ ...baseBody, messages: retryMessages }, onCall);
       if (raw2 !== null) everGotContent = true;
       const parsed2 = tryParseJson(raw2);
       const val2 = parsed2 !== undefined ? classifyResponseSchema.safeParse(parsed2) : null;

@@ -94,7 +94,7 @@ async function limpiar(): Promise<void> {
 async function sembrar(): Promise<void> {
   const stmts = [
     `INSERT INTO users (id, email, "passwordHash", name, role, "updatedAt")
-       VALUES ('${T.user}', 'evidence-probe@costear.test', 'x', 'Costista Probe', 'COSTISTA', now())`,
+       VALUES ('${T.user}', 'evidence-probe@costear.test', 'x', 'Costista Probe', 'EMPRESA_ADMIN', now())`,
     `INSERT INTO companies (id, "userId", name, "updatedAt")
        VALUES ('${T.company}', '${T.user}', 'Empresa Probe', now())`,
     `INSERT INTO cost_structures (id, "companyId", "userId", "productName", period, "updatedAt")
@@ -160,7 +160,7 @@ describe.skipIf(!HAY_BASE)('T-04: adjuntar un comprobante a un dato ya cargado',
     app.setErrorHandler(errorHandler);
     await app.register(async (api) => { await registerTrazabilidadRoutes(api); }, { prefix: '/api/v1' });
     await app.ready();
-    token = signAccessToken({ sub: T.user, tenantId: T.user, role: 'COSTISTA' });
+    token = signAccessToken({ sub: T.user, tenantId: T.user, role: 'EMPRESA_ADMIN' });
   }, 60_000);
 
   afterAll(async () => {

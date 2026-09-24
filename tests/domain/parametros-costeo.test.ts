@@ -92,6 +92,11 @@ describe('S-02(b) — resolución en cascada', () => {
 });
 
 describe('S-02(b) — el catálogo de defaults', () => {
+  it('expone notas sin vocabulario prohibido para quien configura el negocio', () => {
+    const textoVisible = PARAMETROS_AVICOLA.flatMap((def) => [def.descripcion, def.nota ?? '']).join('\n');
+    expect(textoVisible).not.toMatch(/\b(?:costista|pymes?|empresa)\b/i);
+  });
+
   it('ningún default del catálogo se da por confirmado', () => {
     for (const def of PARAMETROS_AVICOLA) {
       const r = resolverParametro(def.clave, [], {});

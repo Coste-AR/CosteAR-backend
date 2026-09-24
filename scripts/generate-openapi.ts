@@ -20,18 +20,66 @@ import swagger from '@fastify/swagger';
 import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
 import openapiTS, { astToString } from 'openapi-typescript';
 import { registerOwnerDashboardRoutes } from '../src/infrastructure/http/routes/owner-dashboard.routes.js';
+import { registerAuthRoutes } from '../src/infrastructure/http/routes/auth.routes.js';
+import { registerCompanyRoutes } from '../src/infrastructure/http/routes/company.routes.js';
+import { registerCostStructureRoutes } from '../src/infrastructure/http/routes/cost-structure.routes.js';
+import { registerCostPeriodRoutes } from '../src/infrastructure/http/routes/cost-period.routes.js';
+import { registerValidacionesRoutes } from '../src/infrastructure/http/routes/validaciones.routes.js';
+import { registerTelemetriaPanelRoutes } from '../src/infrastructure/http/routes/telemetria-panel.routes.js';
+import { registerPriceIndexRoutes } from '../src/infrastructure/http/routes/price-index.routes.js';
+import { registerModulosRubroRoutes } from '../src/infrastructure/http/routes/modulos-rubro.routes.js';
+import { registerMacroRoutes } from '../src/infrastructure/http/routes/macro.routes.js';
+import { registerConceptoCosteoRoutes } from '../src/infrastructure/http/routes/concepto-costeo.routes.js';
+import { registerUserPreferencesRoutes } from '../src/infrastructure/http/routes/user-preferences.routes.js';
+import { registerUserRoutes } from '../src/infrastructure/http/routes/user.routes.js';
+import { registerClassifierAiCostRoutes } from '../src/infrastructure/http/routes/classifier-ai-cost.routes.js';
+import { registerAlertRoutes } from '../src/infrastructure/http/routes/alert.routes.js';
+import { registerReglaAlertaRoutes } from '../src/infrastructure/http/routes/regla-alerta.routes.js';
+import { registerEmpresaPortalRoutes } from '../src/infrastructure/http/routes/empresa-portal.routes.js';
+import { registerSegmentoAnalisisRoutes } from '../src/infrastructure/http/routes/segmento-analisis.routes.js';
+import { registerCapacidadOciosaRoutes } from '../src/infrastructure/http/routes/capacidad-ociosa.routes.js';
+import { registerPlaneamientoResultadosRoutes } from '../src/infrastructure/http/routes/planeamiento-resultados.routes.js';
+import { registerPuntoIndiferenciaRoutes } from '../src/infrastructure/http/routes/punto-indiferencia.routes.js';
+import { registerRelacionReemplazoRoutes } from '../src/infrastructure/http/routes/relacion-reemplazo.routes.js';
+import { registerMezclaOptimaRoutes } from '../src/infrastructure/http/routes/mezcla-optima.routes.js';
+import { registerPrecioTransferenciaRoutes } from '../src/infrastructure/http/routes/precio-transferencia.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /** Rutas ya convertidas al contrato tipado. Crece en las próximas fases de #282. */
-const CONVERTED_ROUTES = [registerOwnerDashboardRoutes];
+const CONVERTED_ROUTES = [
+  registerAuthRoutes,
+  registerCompanyRoutes,
+  registerCostStructureRoutes,
+  registerCostPeriodRoutes,
+  registerOwnerDashboardRoutes,
+  registerValidacionesRoutes,
+  registerTelemetriaPanelRoutes,
+  registerPriceIndexRoutes,
+  registerModulosRubroRoutes,
+  registerMacroRoutes,
+  registerConceptoCosteoRoutes,
+  registerUserPreferencesRoutes,
+  registerUserRoutes,
+  registerClassifierAiCostRoutes,
+  registerAlertRoutes,
+  registerReglaAlertaRoutes,
+  registerSegmentoAnalisisRoutes,
+  registerCapacidadOciosaRoutes,
+  registerPlaneamientoResultadosRoutes,
+  registerPuntoIndiferenciaRoutes,
+  registerRelacionReemplazoRoutes,
+  registerMezclaOptimaRoutes,
+  registerPrecioTransferenciaRoutes,
+  (app) => registerEmpresaPortalRoutes(app, { portal: {} as never, scopes: {} as never }),
+];
 
 async function buildSchemaOnlyApp() {
   const app = Fastify({ logger: false });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   await app.register(swagger, {
-    openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '0.1.0' } },
+    openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '1.0.0' } },
     transform: jsonSchemaTransform,
   });
   for (const register of CONVERTED_ROUTES) {
@@ -43,7 +91,28 @@ async function buildSchemaOnlyApp() {
 
 async function main() {
   const app = await buildSchemaOnlyApp();
-  const document = app.swagger();
+  const fullDocument = app.swagger() as {
+    paths?: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
+    [key: string]: unknown;
+  };
+  // Un archivo de rutas puede contener operaciones todavía no migradas. Solo
+  // publicamos las que declaran al menos una respuesta JSON con schema; así el
+  // artefacto nunca presenta como tipado un endpoint cuyo handler aún no está
+  // contrastado en el borde.
+  const paths = Object.fromEntries(
+    Object.entries(fullDocument.paths ?? {}).flatMap(([path, operations]) => {
+      const typedOperations = Object.fromEntries(
+        Object.entries(operations).filter(([, operation]) =>
+          Object.values(operation.responses ?? {}).some((response) => {
+            const content = (response as { content?: Record<string, { schema?: unknown }> }).content;
+            return content?.['application/json']?.schema !== undefined;
+          }),
+        ),
+      );
+      return Object.keys(typedOperations).length > 0 ? [[path, typedOperations]] : [];
+    }),
+  );
+  const document = { ...fullDocument, paths };
   // El orden de claves de `document` es determinista para el mismo código
   // (no depende de un Map/Set ni de iteración no ordenada): misma entrada,
   // mismo JSON, en cada corrida — que es lo que `check:openapi` necesita para
@@ -64,7 +133,11 @@ async function main() {
   await writeFile(new URL('types.d.ts', openapiDir), types, 'utf-8');
 
   await app.close();
-  console.log(`[openapi] generado desde ${CONVERTED_ROUTES.length} ruta(s) convertida(s) → ${ROOT}openapi/`);
+  const operationCount = Object.values(paths).reduce(
+    (count, operations) => count + Object.keys(operations as object).length,
+    0,
+  );
+  console.log(`[openapi] generado desde ${operationCount} operación(es) tipada(s) → ${ROOT}openapi/`);
 }
 
 main().catch((err) => {

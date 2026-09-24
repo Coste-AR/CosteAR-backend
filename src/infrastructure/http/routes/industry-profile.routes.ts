@@ -24,7 +24,7 @@ export async function registerIndustryProfileRoutes(app: FastifyInstance): Promi
   // GET /admin/industry-profiles — lista todos los perfiles (incluye inactivos)
   app.get(
     '/admin/industry-profiles',
-    { preHandler: [authenticate, requireRole('ADMIN')] },
+    { preHandler: [authenticate, requireRole('SUPER_ADMIN')] },
     async (_request, reply) => {
       const profiles = await prisma.industryProfile.findMany({
         orderBy: { category: 'asc' },
@@ -36,7 +36,7 @@ export async function registerIndustryProfileRoutes(app: FastifyInstance): Promi
   // PUT /admin/industry-profiles/:category — edita keywords/flags e invalida el caché
   app.put(
     '/admin/industry-profiles/:category',
-    { preHandler: [authenticate, requireRole('ADMIN')] },
+    { preHandler: [authenticate, requireRole('SUPER_ADMIN')] },
     async (request, reply) => {
       const { category } = categoryParam.parse(request.params);
       const body = updateBody.parse(request.body);

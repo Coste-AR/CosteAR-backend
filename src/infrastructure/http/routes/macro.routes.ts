@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { MacroService } from '../../../application/macro/macro-service.js';
+import { IndicadoresMacroService } from '../../../application/macro/indicadores-macro-service.js';
 import { authenticate } from '../plugins/authenticate.js';
-import { macroSyncQueue } from '../../workers/queues.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
+import { indicadoresMacroEnvelopeSchema } from '../../../shared/schemas/indicador-macro.schema.js';
 
 const historyQuery = z.object({
   source: z.enum(['BCRA', 'INDEC', 'ARCA', 'PARITARIA', 'DOLARAPI', 'CAPIA']).optional(),
@@ -25,8 +28,25 @@ const propagationPreviewSchema = z.object({
   indicatorLabel: z.string().min(1).max(120),
 });
 
+const companyParams = z.object({ companyId: z.string().uuid() });
+
 export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
   const service = new MacroService();
+  const indicadoresService = new IndicadoresMacroService();
+
+  app.withTypeProvider<ZodTypeProvider>().get(
+    '/companies/:companyId/indicadores-macro',
+    {
+      preHandler: authenticate,
+      schema: {
+        params: companyParams,
+        response: { 200: indicadoresMacroEnvelopeSchema, ...apiErrorResponses },
+      },
+    },
+    async (request) => ({
+      data: await indicadoresService.listar(request.authUser!.id, request.params.companyId),
+    }),
+  );
 
   /**
    * PÚBLICO (sin auth): métricas de la vitrina de la landing.
@@ -79,7 +99,7 @@ export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
    * costista puede escribir estado compartido" ES el diseño, no un descuido.
    * Quedó marcado en la auditoría de aislamiento como caso ambiguo; se
    * revisó el uso real en el frontend y se confirma que es intencional — no
-   * se restringe a ADMIN.
+   * se restringe a SUPER_ADMIN.
    */
   app.post('/macro/manual-entry', { preHandler: authenticate }, async (request, reply) => {
     const input = manualEntrySchema.parse(request.body);
@@ -91,6 +111,7 @@ export async function registerMacroRoutes(app: FastifyInstance): Promise<void> {
    * Forzar sincronización BCRA+INDEC inmediata (útil para actualizar manualmente).
    */
   app.post('/macro/sync-now', { preHandler: authenticate }, async (request, reply) => {
+    const { macroSyncQueue } = await import('../../workers/queues.js');
     await macroSyncQueue.add('manual-sync', {}, { priority: 1 });
     return reply.send({ data: { queued: true, message: 'Sincronización encolada' } });
   });

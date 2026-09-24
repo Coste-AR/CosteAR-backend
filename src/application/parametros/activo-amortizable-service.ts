@@ -26,7 +26,7 @@ export class ActivoAmortizableService {
 
   private async companyDe(userId: string, companyId: string) {
     const company = await this.db.company.findFirst({ where: { id: companyId, userId } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
     return company;
   }
 

@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { ModulosRubroService } from '../../../application/operacion/modulos-rubro-service.js';
 import { authenticate } from '../plugins/authenticate.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
+import { modulosRubroEnvelopeSchema } from '../../../shared/schemas/modulos-rubro.schema.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const moduleParams = companyParams.extend({ moduleId: z.string().min(1).max(120) });
@@ -14,10 +17,17 @@ function actorFrom(request: FastifyRequest) {
 
 export async function registerModulosRubroRoutes(app: FastifyInstance): Promise<void> {
   const service = new ModulosRubroService();
-  app.get('/companies/:companyId/modulos-rubro', { preHandler: authenticate }, async (request) => {
-    const { companyId } = companyParams.parse(request.params);
-    return { data: await service.listar(request.authUser!.id, companyId) };
-  });
+  app.withTypeProvider<ZodTypeProvider>().get(
+    '/companies/:companyId/modulos-rubro',
+    {
+      preHandler: authenticate,
+      schema: {
+        params: companyParams,
+        response: { 200: modulosRubroEnvelopeSchema, ...apiErrorResponses },
+      },
+    },
+    async (request) => ({ data: await service.listar(request.authUser!.id, request.params.companyId) }),
+  );
   app.put('/companies/:companyId/modulos-rubro/:moduleId', { preHandler: authenticate }, async (request) => {
     const { companyId, moduleId } = moduleParams.parse(request.params);
     const { activo } = estadoModuloSchema.parse(request.body);

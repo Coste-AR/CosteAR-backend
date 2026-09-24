@@ -1,7 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { EmpresaPortalService } from '../../../application/empresa/empresa-portal-service.js';
 import { authenticate } from '../plugins/authenticate.js';
+import { requireRole } from '../plugins/authenticate.js';
+import { OperatorScopeService } from '../../../application/empresa/operator-scope-service.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 
 const inviteOperatorSchema = z.object({
   operatorName: z.string().min(2).max(120).trim(),
@@ -13,6 +17,26 @@ const inviteOperatorSchema = z.object({
    */
   jobTitle: z.string().min(2).max(120).trim().optional(),
 });
+
+const scopeSchema = z.object({
+  unidadProductivaIds: z.array(z.string().uuid()).default([]),
+  depositoIds: z.array(z.string().uuid()).default([]),
+});
+const companyOperatorParams = z.object({ companyId: z.string().uuid(), operatorId: z.string().uuid() });
+const companyParams = z.object({ companyId: z.string().uuid() });
+const operatorParams = z.object({ operatorId: z.string().uuid() });
+const successEnvelope = z.object({ data: z.object({ success: z.boolean() }) });
+const inviteEnvelope = z.object({ data: z.object({
+  email: z.string().email(), tempPassword: z.string().optional(), inviteCode: z.string(),
+  isNewUser: z.boolean(), emailSent: z.boolean(),
+}) });
+const operatorListEnvelope = z.object({ data: z.array(z.object({
+  id: z.string().uuid(), name: z.string(), email: z.string().email(), isActive: z.boolean(), createdAt: z.coerce.date(),
+  alcance: z.object({
+    unidadesProductivas: z.array(z.object({ id: z.string().uuid(), referencia: z.string() })),
+    depositos: z.array(z.object({ id: z.string().uuid(), referencia: z.string() })),
+  }),
+})) });
 
 const submitDocSchema = z.object({
   rawContent: z.string().max(10_000).default(''),
@@ -27,16 +51,25 @@ const submitDocSchema = z.object({
   { message: 'Ingresá una descripción o adjuntá un archivo' },
 );
 
-export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise<void> {
-  const svc = new EmpresaPortalService();
+export async function registerEmpresaPortalRoutes(
+  app: FastifyInstance,
+  dependencies: { portal?: EmpresaPortalService; scopes?: OperatorScopeService } = {},
+): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
+  app.setValidatorCompiler(validatorCompiler);
+  const contract = app.withTypeProvider<ZodTypeProvider>();
+  const svc = dependencies.portal ?? new EmpresaPortalService();
+  const scopes = dependencies.scopes ?? new OperatorScopeService();
 
   // ── Costista: invitar operador ──────────────────────────────────────────────
-  app.post(
+  contract.post(
     '/empresa-portal/:companyId/operators',
-    { preHandler: authenticate },
+    { preHandler: [authenticate, requireRole('EMPRESA_ADMIN', 'EMPRESARIO')], schema: {
+      params: companyParams, body: inviteOperatorSchema, response: { 201: inviteEnvelope, ...apiErrorResponses },
+    } },
     async (request, reply) => {
-      const { companyId } = request.params as { companyId: string };
-      const { operatorName, operatorEmail, jobTitle } = inviteOperatorSchema.parse(request.body);
+      const { companyId } = request.params;
+      const { operatorName, operatorEmail, jobTitle } = request.body;
       const result = await svc.inviteOperator(
         companyId,
         request.authUser!.id,
@@ -49,23 +82,42 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
   );
 
   // ── Costista: listar operadores ────────────────────────────────────────────
-  app.get(
+  contract.get(
     '/empresa-portal/:companyId/operators',
-    { preHandler: authenticate },
+    { preHandler: [authenticate, requireRole('EMPRESA_ADMIN', 'EMPRESARIO')], schema: {
+      params: companyParams, response: { 200: operatorListEnvelope, ...apiErrorResponses },
+    } },
     async (request, reply) => {
-      const { companyId } = request.params as { companyId: string };
+      const { companyId } = request.params;
       const operators = await svc.listOperators(companyId, request.authUser!.id);
       return reply.send({ data: operators });
     },
   );
 
   // ── Costista: revocar operador ─────────────────────────────────────────────
-  app.delete(
+  contract.delete(
     '/empresa-portal/operators/:operatorId',
-    { preHandler: authenticate },
+    { preHandler: [authenticate, requireRole('EMPRESA_ADMIN', 'EMPRESARIO')], schema: {
+      params: operatorParams, response: { 200: successEnvelope, ...apiErrorResponses },
+    } },
     async (request, reply) => {
-      const { operatorId } = request.params as { operatorId: string };
+      const { operatorId } = request.params;
       await svc.revokeOperator(operatorId, request.authUser!.id);
+      return reply.send({ data: { success: true } });
+    },
+  );
+
+  contract.put(
+    '/empresa-portal/:companyId/operators/:operatorId/scope',
+    { preHandler: [authenticate, requireRole('EMPRESA_ADMIN', 'EMPRESARIO')], schema: {
+      params: companyOperatorParams, body: scopeSchema, response: { 200: successEnvelope, ...apiErrorResponses },
+    } },
+    async (request, reply) => {
+      const { companyId, operatorId } = request.params;
+      const input = request.body;
+      await scopes.replace(companyId, operatorId, request.authUser!.id, input, {
+        id: request.authUser!.id, role: request.authUser!.role, area: 'costista', method: 'manual',
+      });
       return reply.send({ data: { success: true } });
     },
   );
@@ -73,7 +125,7 @@ export async function registerEmpresaPortalRoutes(app: FastifyInstance): Promise
   // ── Costista: resetear contraseña de un operador ──────────────────────────
   app.post(
     '/empresa-portal/operators/:operatorId/reset-password',
-    { preHandler: authenticate },
+    { preHandler: [authenticate, requireRole('EMPRESA_ADMIN', 'EMPRESARIO')] },
     async (request, reply) => {
       const { operatorId } = request.params as { operatorId: string };
       const result = await svc.resetOperatorPassword(operatorId, request.authUser!.id);

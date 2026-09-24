@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AlertService } from '../../../application/alerts/alert-service.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
+import { alertasEnvelopeSchema } from '../../../shared/schemas/alerta.schema.js';
+import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const listQuery = z.object({ unread: z.coerce.boolean().optional() });
@@ -13,7 +15,10 @@ const settingsSchema = z.object({
 export async function registerAlertRoutes(app: FastifyInstance): Promise<void> {
   const service = new AlertService();
 
-  app.get('/alerts', { preHandler: authenticate }, async (request) => {
+  app.get('/alerts', {
+    preHandler: authenticate,
+    schema: { response: { 200: alertasEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { unread } = listQuery.parse(request.query);
     const data = await service.list(request.authUser!.id, unread ?? false);
     return { data };

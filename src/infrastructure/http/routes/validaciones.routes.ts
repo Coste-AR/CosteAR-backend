@@ -4,6 +4,13 @@ import { ValidacionesService } from '../../../application/validaciones/validacio
 import { ValidacionesLedgerService } from '../../../application/validaciones/validaciones-ledger-service.js';
 import { EmpresaConnectionService } from '../../../application/empresa/empresa-connection-service.js';
 import { authenticate } from '../plugins/authenticate.js';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import {
+  apiErrorResponses,
+  pendingValidationsEnvelopeSchema,
+  submitDataEnvelopeSchema,
+  validationEntryEnvelopeSchema,
+} from '../../../shared/schemas/api-contract.schema.js';
 
 const DOC_TYPES = [
   'FACTURA_COMPRA', 'FACTURA_VENTA', 'REMITO', 'LIQUIDACION_MOD',
@@ -37,9 +44,11 @@ const submitViaKeySchema = z.object({
 });
 
 export async function registerValidacionesRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
   const svc = new ValidacionesService();
   const ledgerSvc = new ValidacionesLedgerService();
   const connSvc = new EmpresaConnectionService();
+  const contract = app.withTypeProvider<ZodTypeProvider>();
 
   // ----- Conexiones empresa -----
 
@@ -79,7 +88,15 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
 
   // ----- Submit público por API key (sin JWT) -----
 
-  app.post('/datos/submit', async (request, reply) => {
+  contract.post('/datos/submit', {
+    schema: {
+      response: {
+        200: submitDataEnvelopeSchema,
+        201: submitDataEnvelopeSchema,
+        ...apiErrorResponses,
+      },
+    },
+  }, async (request, reply) => {
     const apiKey = (request.headers['x-api-key'] as string) ?? '';
     if (!apiKey) {
       return reply.status(401).send({ error: { message: 'API key requerida' } });
@@ -97,19 +114,19 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
     if (result.isDuplicate) {
       return reply.status(200).send({
         data: {
-          id: result.duplicateEntryId,
-          status: result.duplicateStatus,
+          id: result.duplicateEntryId!,
+          status: result.duplicateStatus!,
           isDuplicate: true,
-          message: result.message,
+          message: result.message ?? 'El comprobante ya estaba registrado',
         },
       });
     }
     return reply.status(201).send({
       data: {
-        id: result.id,
-        status: result.status,
+        id: result.id!,
+        status: result.status!,
         isDuplicate: false,
-        classification: result.classification,
+        classification: result.classification!,
       },
     });
   });
@@ -117,7 +134,10 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
   // ----- Validaciones (costista revisa) -----
 
   // Listar pendientes
-  app.get('/validaciones/pending', { preHandler: authenticate }, async (request, reply) => {
+  contract.get('/validaciones/pending', {
+    preHandler: authenticate,
+    schema: { response: { 200: pendingValidationsEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
     const { page, limit } = request.query as { page?: string; limit?: string };
     const result = await svc.listPending(
       request.authUser!.id,
@@ -146,7 +166,10 @@ export async function registerValidacionesRoutes(app: FastifyInstance): Promise<
   });
 
   // Revisar una entrada (aprobar / rechazar / corregir)
-  app.post('/validaciones/:entryId/review', { preHandler: authenticate }, async (request, reply) => {
+  contract.post('/validaciones/:entryId/review', {
+    preHandler: authenticate,
+    schema: { response: { 200: validationEntryEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
     const { entryId } = request.params as { entryId: string };
     const input = reviewSchema.parse(request.body);
     const updated = await svc.review(entryId, request.authUser!.id, input);

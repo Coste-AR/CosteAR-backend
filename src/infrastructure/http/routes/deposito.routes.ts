@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { DepositoService } from '../../../application/operacion/deposito-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import { depositoCreateSchema, movimientoDepositoCreateSchema } from '../../../shared/schemas/deposito.schema.js';
+import { OperatorScopeService } from '../../../application/empresa/operator-scope-service.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const depositoParams = z.object({ depositoId: z.string().uuid() });
@@ -10,6 +11,7 @@ const actor = (request: FastifyRequest) => ({ id: request.authUser!.id, role: re
 
 export async function registerDepositoRoutes(app: FastifyInstance): Promise<void> {
   const service = new DepositoService();
+  const scopes = new OperatorScopeService();
   app.post('/companies/:companyId/depositos', { preHandler: authenticate }, async (request, reply) => {
     const { companyId } = companyParams.parse(request.params);
     return reply.code(201).send({ data: await service.create(request.authUser!.id, companyId, depositoCreateSchema.parse(request.body), actor(request)) });
@@ -20,6 +22,7 @@ export async function registerDepositoRoutes(app: FastifyInstance): Promise<void
   });
   app.post('/depositos/:depositoId/movimientos', { preHandler: authenticate }, async (request, reply) => {
     const { depositoId } = depositoParams.parse(request.params);
+    if (request.authUser!.role === 'EMPRESA_OPERATOR') await scopes.assertDeposito(request.authUser!.id, depositoId, actor(request));
     return reply.code(201).send({ data: await service.movimiento(request.authUser!.id, depositoId, movimientoDepositoCreateSchema.parse(request.body), actor(request)) });
   });
 }

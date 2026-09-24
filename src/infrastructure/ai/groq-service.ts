@@ -21,8 +21,8 @@ export class GroqService {
   private analyzer: GroqDocumentAnalyzer;
   private classifier: GroqClassifier;
 
-  constructor() {
-    this.client = new GroqClient();
+  constructor(client: GroqClient = new GroqClient()) {
+    this.client = client;
     this.analyzer = new GroqDocumentAnalyzer(this.client);
     this.classifier = new GroqClassifier(this.client);
   }

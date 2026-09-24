@@ -391,3 +391,37 @@ describe('COMPARACIÓN — de dónde salieron los números', () => {
     expect(c.centers[0]!.contributionPct).toBe(100); // toda la suba del CIF fue Corte
   });
 });
+
+describe('COMPARACIÓN — moneda homogénea M11-01', () => {
+  it('reexpresa el período viejo al índice del nuevo y declara la versión usada', () => {
+    const c = comparePeriods(
+      side({ code: '2026-01', label: 'Enero', result: result({ mp: 100, mod: 0, cif: 0 }) }),
+      side({ code: '2026-07', label: 'Julio', result: result({ mp: 150, mod: 0, cif: 0 }) }),
+      {
+        seriesVersionId: '11111111-1111-1111-1111-111111111111',
+        values: { '2026-01': 100, '2026-07': 150 },
+      },
+    );
+
+    expect(c.total.rawMaterial).toMatchObject({ a: 150, b: 150, delta: 0 });
+    expect(c.currency).toEqual({
+      kind: 'HOMOGENEA',
+      periodCode: '2026-07',
+      index: 150,
+      seriesVersionId: '11111111-1111-1111-1111-111111111111',
+      missingPeriodCodes: [],
+    });
+  });
+
+  it('sin índice conserva los importes nominales y marca el período faltante', () => {
+    const c = comparePeriods(
+      side({ code: '2026-01', label: 'Enero', result: result({ mp: 100, mod: 0, cif: 0 }) }),
+      side({ code: '2026-07', label: 'Julio', result: result({ mp: 150, mod: 0, cif: 0 }) }),
+      { seriesVersionId: 'v1', values: { '2026-07': 150 } },
+    );
+
+    expect(c.total.rawMaterial).toMatchObject({ a: 100, b: 150, delta: 50 });
+    expect(c.currency).toMatchObject({ kind: 'NOMINAL', missingPeriodCodes: ['2026-01'] });
+    expect(c.warnings.join(' ')).toMatch(/pesos nominales/i);
+  });
+});

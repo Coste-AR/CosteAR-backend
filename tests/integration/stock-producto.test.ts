@@ -8,7 +8,7 @@ let A: Tenant;
 let B: Tenant;
 let loteId: string;
 let partidaRecienteId: string;
-const actor = (tenant: Tenant) => ({ id: tenant.userId, role: 'COSTISTA', area: 'costista', method: 'manual' });
+const actor = (tenant: Tenant) => ({ id: tenant.userId, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' });
 
 beforeAll(async () => {
   A = await createTenant('stock-producto-a');
@@ -62,6 +62,6 @@ describe('A-14 — stock de producto terminado por variante y partida', () => {
 
   it('RLS impide consultar el stock de otra empresa', async () => {
     await expect(new StockProductoService().stock(B.userId, A.companyId, '2026-09-04'))
-      .rejects.toThrow(/Empresa no encontrada/);
+      .rejects.toThrow(/Negocio no encontrado/);
   });
 });

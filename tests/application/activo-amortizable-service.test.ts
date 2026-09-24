@@ -46,7 +46,7 @@ function service(db: Record<string, unknown>) {
   return new ActivoAmortizableService(db as unknown as PrismaClient);
 }
 
-const ACTOR = { id: USER, role: 'COSTISTA', area: 'costista', method: 'manual' };
+const ACTOR = { id: USER, role: 'EMPRESA_ADMIN', area: 'costista', method: 'manual' };
 const INPUT = {
   nombre: 'Lote de ponedoras Hy-Line — alta marzo 2026',
   costoAdquisicion: 67_200_000,

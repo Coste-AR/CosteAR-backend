@@ -17,10 +17,10 @@ if (!EMAIL || !PASSWORD || !API_KEY) {
 async function main() {
   // 1. Find costista
   const costista = await prisma.user.findFirst({
-    where: { role: 'COSTISTA' }
+    where: { role: 'EMPRESA_ADMIN' }
   });
   if (!costista) {
-    console.error('No se encontró un usuario COSTISTA en la DB. Corre primero el seed.');
+    console.error('No se encontró un usuario EMPRESA_ADMIN en la DB. Corre primero el seed.');
     return;
   }
 

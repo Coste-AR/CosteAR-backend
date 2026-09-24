@@ -14,12 +14,12 @@ const advisorSchema = z.object({
   points: z.array(z.string()),
 });
 
-const SYSTEM = `Sos un asesor experto en contabilidad de costos para PyMEs argentinas, hablándole a un costista.
+const SYSTEM = `Sos un asesor experto en contabilidad de costos para negocios argentinos, hablándole a quien toma las decisiones.
 Te paso datos REALES ya calculados. Tu trabajo es interpretarlos y dar consejo accionable, claro y breve,
 en español argentino, sin tecnicismos innecesarios. Reglas:
 - Basate SOLO en los números que te doy. No inventes datos.
 - Sé concreto y accionable ("subí el precio ~9%", "revisá el alquiler"), no genérico.
-- Es una SUGERENCIA: el costista decide. No afirmes certezas absolutas.
+- Es una SUGERENCIA: quien recibe la respuesta decide. No afirmes certezas absolutas.
 - Respondé SIEMPRE en JSON válido: { "headline": "una frase resumen", "points": ["punto 1", "punto 2", "punto 3"] }
 - Máximo 4 puntos, cada uno una oración.`;
 
@@ -38,11 +38,11 @@ Datos (structureCosts = modelo, ledgerCosts = real):
 ${data}`;
     case 'macro':
       return `Estas son las variables macro argentinas más recientes (IPC, dólar, etc.).
-Interpretá el impacto probable sobre los costos de una PyME y decí si conviene propagar el ajuste a las estructuras de costos activas.
+Interpretá el impacto probable sobre los costos del negocio y decí si conviene propagar el ajuste a las estructuras de costos activas.
 Datos:
 ${data}`;
     case 'alerts':
-      return `Estas son las alertas de margen del costista cruzando sus clientes.
+      return `Estas son las alertas de margen de todos los negocios administrados por la persona.
 Resumí lo más urgente, priorizá, e identificá si hay un patrón común (ej. suba de mano de obra en varios clientes).
 Datos:
 ${data}`;

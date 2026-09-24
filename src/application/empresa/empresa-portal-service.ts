@@ -25,7 +25,7 @@ import { SystemAlertService } from '../system/system-alert-service.js';
  *   3. Se envía email con SOLO el código de invitación (sin contraseña).
  *   4. El operador acepta el código desde su dashboard.
  *
- *  CASO C — email pertenece a un COSTISTA:
+ *  CASO C — email pertenece a un EMPRESA_ADMIN:
  *   Se rechaza con error explicativo.
  */
 export class EmpresaPortalService {
@@ -77,7 +77,7 @@ export class EmpresaPortalService {
     const normalizedEmail = operatorEmail.toLowerCase().trim();
 
     const company = await this.db.company.findFirst({ where: { id: companyId, userId: costistId } });
-    if (!company) throw new NotFoundError('Empresa no encontrada');
+    if (!company) throw new NotFoundError('Negocio no encontrado');
 
     const connection = await this.getOrCreateConnection(companyId, costistId);
 
@@ -93,7 +93,7 @@ export class EmpresaPortalService {
         where: { operatorId_connectionId: { operatorId: existingUser.id, connectionId: connection.id } },
       });
       if (alreadyMember?.isActive) {
-        throw new ConflictError(`${normalizedEmail} ya es operador activo de esta empresa.`);
+        throw new ConflictError(`${normalizedEmail} ya es operador activo de este negocio.`);
       }
 
       // Cancelar invitaciones anteriores pendientes para evitar acumulación
@@ -215,7 +215,7 @@ export class EmpresaPortalService {
       throw new NotFoundError('Código de invitación inválido o ya utilizado.');
     }
     if (invite.expiresAt < new Date()) {
-      throw new ForbiddenError('El código de invitación venció. Pedile uno nuevo al costista.');
+      throw new ForbiddenError('El código de invitación venció. Pedile uno nuevo a quien administra el negocio.');
     }
     if (invite.inviteeEmail !== (await this.db.user.findUnique({ where: { id: operatorId }, select: { email: true } }))?.email) {
       throw new ForbiddenError('Este código no corresponde a tu email.');
@@ -254,7 +254,11 @@ export class EmpresaPortalService {
 
     const memberships = await this.db.operatorMembership.findMany({
       where: { connectionId: connection.id },
-      include: { operator: { select: { id: true, name: true, email: true, createdAt: true } } },
+      include: {
+        operator: { select: { id: true, name: true, email: true, createdAt: true } },
+        unidadesAutorizadas: { select: { unidadProductiva: { select: { id: true, referencia: true } } } },
+        depositosAutorizados: { select: { deposito: { select: { id: true, referencia: true } } } },
+      },
       orderBy: { joinedAt: 'desc' },
     });
 
@@ -264,6 +268,10 @@ export class EmpresaPortalService {
       email: m.operator.email,
       isActive: m.isActive,
       createdAt: m.operator.createdAt,
+      alcance: {
+        unidadesProductivas: m.unidadesAutorizadas.map((x) => x.unidadProductiva),
+        depositos: m.depositosAutorizados.map((x) => x.deposito),
+      },
     }));
   }
 
@@ -274,7 +282,7 @@ export class EmpresaPortalService {
         connection: { costistId },
       },
     });
-    if (!membership) throw new NotFoundError('Operador no encontrado en ninguna de tus empresas');
+    if (!membership) throw new NotFoundError('Operador no encontrado en ninguno de tus negocios');
 
     // Eliminar la membresía para liberar la relación
     await this.db.operatorMembership.delete({
@@ -313,7 +321,7 @@ export class EmpresaPortalService {
       where: { operatorId, connection: { costistId } },
       include: { operator: { select: { id: true, email: true, role: true } } },
     });
-    if (!membership) throw new NotFoundError('Operador no encontrado en tus empresas');
+    if (!membership) throw new NotFoundError('Operador no encontrado en tus negocios');
     if (membership.operator.role !== 'EMPRESA_OPERATOR') throw new ForbiddenError('Solo se puede resetear contraseña de operadores');
 
     const tempPassword = randomBytes(6).toString('hex');
@@ -370,16 +378,16 @@ export class EmpresaPortalService {
     });
 
     if (memberships.length === 0) {
-      throw new ForbiddenError('No tenés acceso activo a ninguna empresa.');
+      throw new ForbiddenError('No tenés acceso activo a ningún negocio.');
     }
 
     let membership = memberships[0]!;
     if (input.connectionId) {
       const found = memberships.find((m) => m.connectionId === input.connectionId);
-      if (!found) throw new ForbiddenError('No tenés acceso a esa empresa.');
+      if (!found) throw new ForbiddenError('No tenés acceso a ese negocio.');
       membership = found;
     } else if (memberships.length > 1 && !input.connectionId) {
-      throw new ForbiddenError('Tenés acceso a varias empresas. Indicá a cuál querés enviar.');
+      throw new ForbiddenError('Tenés acceso a varios negocios. Indicá a cuál querés enviar.');
     }
 
     const costistId = membership.connection.costistId;
@@ -395,7 +403,7 @@ export class EmpresaPortalService {
         select: { id: true },
       });
       if (!structure) {
-        throw new ForbiddenError('El producto seleccionado no pertenece a esta empresa.');
+        throw new ForbiddenError('El producto seleccionado no pertenece a este negocio.');
       }
       costStructureId = structure.id;
     }
@@ -434,7 +442,7 @@ export class EmpresaPortalService {
       where: { operatorId, connectionId, isActive: true },
       include: { connection: { select: { companyId: true } } },
     });
-    if (!membership) throw new ForbiddenError('No tenés acceso a esa empresa.');
+    if (!membership) throw new ForbiddenError('No tenés acceso a ese negocio.');
 
     return this.db.costStructure.findMany({
       where: { companyId: membership.connection.companyId, deletedAt: null },
@@ -498,14 +506,14 @@ export class EmpresaPortalService {
       where: { operatorId, connectionId, isActive: true },
       include: { connection: { select: { companyId: true } } },
     });
-    if (!membership) throw new ForbiddenError('No tenés acceso a esta empresa.');
+    if (!membership) throw new ForbiddenError('No tenés acceso a este negocio.');
 
     // Verificar que la estructura pertenece a esa empresa
     const structure = await this.db.costStructure.findFirst({
       where: { id: structureId, companyId: membership.connection.companyId, deletedAt: null },
       select: { id: true, productName: true }
     });
-    if (!structure) throw new NotFoundError('Estructura no encontrada o no pertenece a la empresa.');
+    if (!structure) throw new NotFoundError('Estructura no encontrada o no pertenece al negocio.');
 
     // Traer el último CostCalculation para esta estructura
     const latestCalc = await this.db.costCalculation.findFirst({

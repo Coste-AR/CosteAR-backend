@@ -187,7 +187,58 @@ export class CostPeriodService {
     });
   }
 
+  /**
+   * GASTOS DE NO FABRICACIÓN del período (M2-01): el gasto variable de
+   * comercialización (por unidad vendida) y el gasto fijo de administración.
+   * `CostElement.VENTA` existe en el schema hace tiempo pero no tenía dónde
+   * cargarse — el punto de equilibrio del tablero era de PRODUCCIÓN, no de
+   * la empresa.
+   *
+   * Solo en `CostPeriod` (a diferencia de `thirdPartyWork`, que también vive
+   * en `CostStructure`): son gastos SG&A que se re-cargan cada período
+   * (alquiler, sueldos administrativos, comisiones), no una config que tenga
+   * sentido heredar de un período al siguiente.
+   */
+  async setGastosDeNoFabricacion(
+    userId: string,
+    periodId: string,
+    input: { gastoVariableComercializacionPorUnidad: number; gastoFijoAdministracion: number },
+    ctx: AuditContext,
+  ) {
+    const before = await this.requirePeriod(userId, periodId);
+    if (before.status === 'CLOSED') {
+      throw new ValidationError(
+        `El período "${before.label}" está cerrado: los números quedaron congelados y no se pueden editar. ` +
+          'Reabrilo (queda registrado) o abrí el período siguiente.',
+      );
+    }
 
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.costPeriod.update({
+        where: { id: periodId },
+        data: {
+          gastoVariableComercializacionPorUnidad: input.gastoVariableComercializacionPorUnidad,
+          gastoFijoAdministracion: input.gastoFijoAdministracion,
+        },
+      });
+      await recordAudit(
+        {
+          ...ctx,
+          userId,
+          action: 'cost_period.gastos_no_fabricacion.update',
+          entityType: 'CostPeriod',
+          entityId: periodId,
+          oldValue: {
+            gastoVariableComercializacionPorUnidad: before.gastoVariableComercializacionPorUnidad,
+            gastoFijoAdministracion: before.gastoFijoAdministracion,
+          },
+          newValue: input,
+        },
+        tx,
+      );
+      return updated;
+    });
+  }
 
   /**
    * Cierra el período: congela los números.
@@ -371,9 +422,25 @@ export class CostPeriodService {
     const [older, newer] = from.code < to.code ? [from, to] : [to, from];
 
     const estructura = await this.requireStructure(userId, structureId);
+    const priceIndexDelegate = (this.db as unknown as {
+      priceIndexSeriesVersion?: { findFirst(args: unknown): Promise<{ id: string; values: { periodCode: string; indexValue: unknown }[] } | null> };
+    }).priceIndexSeriesVersion;
+    const priceIndexVersion = priceIndexDelegate
+      ? await priceIndexDelegate.findFirst({
+          where: { companyId: older.companyId },
+          orderBy: { version: 'desc' },
+          include: { values: true },
+        })
+      : null;
     const comparison = comparePeriods(
       await this.toSide(older, estructura),
       await this.toSide(newer, estructura),
+      priceIndexVersion
+        ? {
+            seriesVersionId: priceIndexVersion.id,
+            values: Object.fromEntries(priceIndexVersion.values.map((value) => [value.periodCode, Number(value.indexValue)])),
+          }
+        : undefined,
     );
 
     let macroContrast: MacroContrast | null = null;

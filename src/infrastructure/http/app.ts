@@ -18,7 +18,9 @@ import { registerCompanyRoutes } from './routes/company.routes.js';
 import { registerCostStructureRoutes } from './routes/cost-structure.routes.js';
 import { registerMacroRoutes } from './routes/macro.routes.js';
 import { registerAlertRoutes } from './routes/alert.routes.js';
+import { registerReglaAlertaRoutes } from './routes/regla-alerta.routes.js';
 import { registerUserRoutes } from './routes/user.routes.js';
+import { registerUserPreferencesRoutes } from './routes/user-preferences.routes.js';
 import { registerValidacionesRoutes } from './routes/validaciones.routes.js';
 import { registerEmpresaPortalRoutes } from './routes/empresa-portal.routes.js';
 import { registerCostitaChatRoutes } from './routes/costista-chat.routes.js';
@@ -35,6 +37,7 @@ import { registerCostPeriodRoutes } from './routes/cost-period.routes.js';
 import { registerOwnerDashboardRoutes } from './routes/owner-dashboard.routes.js';
 import { registerDesperdicioRoutes } from './routes/desperdicio.routes.js';
 import { registerParametrosCosteoRoutes } from './routes/parametros-costeo.routes.js';
+import { registerConceptoCosteoRoutes } from './routes/concepto-costeo.routes.js';
 import { registerActivoAmortizableRoutes } from './routes/activo-amortizable.routes.js';
 import { registerEventosLoteRoutes } from './routes/eventos-lote.routes.js';
 import { registerLotesProductivosRoutes } from './routes/lotes-productivos.routes.js';
@@ -53,6 +56,16 @@ import { registerTelegramRoutes } from './routes/telegram.routes.js';
 import { registerTermsRoutes } from './routes/terms.routes.js';
 import { registerIndustryProfileRoutes } from './routes/industry-profile.routes.js';
 import { registerModulosRubroRoutes } from './routes/modulos-rubro.routes.js';
+import { registerTelemetriaPanelRoutes } from './routes/telemetria-panel.routes.js';
+import { registerPriceIndexRoutes } from './routes/price-index.routes.js';
+import { registerClassifierAiCostRoutes } from './routes/classifier-ai-cost.routes.js';
+import { registerSegmentoAnalisisRoutes } from './routes/segmento-analisis.routes.js';
+import { registerCapacidadOciosaRoutes } from './routes/capacidad-ociosa.routes.js';
+import { registerPlaneamientoResultadosRoutes } from './routes/planeamiento-resultados.routes.js';
+import { registerPuntoIndiferenciaRoutes } from './routes/punto-indiferencia.routes.js';
+import { registerRelacionReemplazoRoutes } from './routes/relacion-reemplazo.routes.js';
+import { registerMezclaOptimaRoutes } from './routes/mezcla-optima.routes.js';
+import { registerPrecioTransferenciaRoutes } from './routes/precio-transferencia.routes.js';
 
 /**
  * Construye la instancia Fastify con toda la cadena de seguridad montada.
@@ -198,7 +211,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       api.setValidatorCompiler(validatorCompiler);
       api.setSerializerCompiler(serializerCompiler);
       await api.register(swagger, {
-        openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '0.1.0' } },
+        openapi: { openapi: '3.1.0', info: { title: 'CosteAR API', version: '1.0.0' } },
         transform: jsonSchemaTransform,
       });
 
@@ -208,7 +221,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerCostStructureRoutes(api);
       await registerMacroRoutes(api);
       await registerAlertRoutes(api);
+      await registerReglaAlertaRoutes(api);
       await registerUserRoutes(api);
+      await registerUserPreferencesRoutes(api);
       await registerValidacionesRoutes(api);
       await registerEmpresaPortalRoutes(api);
       await registerBenchmarkRoutes(api);
@@ -226,7 +241,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerOwnerDashboardRoutes(api);
       await registerDesperdicioRoutes(api);
       await registerParametrosCosteoRoutes(api);
+      await registerConceptoCosteoRoutes(api);
       await registerModulosRubroRoutes(api);
+      await registerTelemetriaPanelRoutes(api);
+      await registerPriceIndexRoutes(api);
+      await registerClassifierAiCostRoutes(api);
+      await registerSegmentoAnalisisRoutes(api);
+      await registerCapacidadOciosaRoutes(api);
+      await registerPlaneamientoResultadosRoutes(api);
+      await registerPuntoIndiferenciaRoutes(api);
+      await registerRelacionReemplazoRoutes(api);
+      await registerMezclaOptimaRoutes(api);
+      await registerPrecioTransferenciaRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerLotesProductivosRoutes(api);

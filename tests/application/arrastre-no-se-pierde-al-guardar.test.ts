@@ -77,7 +77,7 @@ vi.mock('@/infrastructure/database/prisma.js', () => ({
   withTenant: (_u: string, fn: (tx: unknown) => unknown) => fn(globalThis.__tx),
 }));
 
-const actor = { id: 'user-1', role: 'COSTISTA', area: 'planta' };
+const actor = { id: 'user-1', role: 'EMPRESA_ADMIN', area: 'planta' };
 
 async function guardar(db: ReturnType<typeof makeDb>, body: Record<string, unknown>) {
   (globalThis as Record<string, unknown>).__tx = db;

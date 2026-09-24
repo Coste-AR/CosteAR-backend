@@ -23,7 +23,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
   // Register multipart specifically for transcription
   await app.register(fastifyMultipart);
 
-  app.post('/vault/query', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/vault/query', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const { question } = vaultQuerySchema.parse(request.body);
     const result = await service.query(question, { userId: request.authUser!.id });
     return reply.status(200).send({ data: result });
@@ -33,7 +33,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
   // `vault_query_log` que devolvió `queryLogId`.
   app.post(
     '/vault/query/:id/feedback',
-    { preHandler: [authenticate, requireRole('ADMIN')] },
+    { preHandler: [authenticate, requireRole('SUPER_ADMIN')] },
     async (request, reply) => {
       const params = z.object({ id: z.string().uuid() }).parse(request.params);
       const { useful } = z.object({ useful: z.boolean() }).parse(request.body);
@@ -51,7 +51,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
 
   // --- Session Management ---
   
-  app.get('/vault/sessions', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.get('/vault/sessions', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const sessions = await prisma.vaultChatSession.findMany({
       where: { 
         userId: request.authUser!.id,
@@ -62,7 +62,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(200).send({ data: sessions });
   });
 
-  app.post('/vault/sessions', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/vault/sessions', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const session = await prisma.vaultChatSession.create({
       data: {
         userId: request.authUser!.id,
@@ -72,7 +72,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(201).send({ data: session });
   });
 
-  app.get('/vault/sessions/:id', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.get('/vault/sessions/:id', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const session = await prisma.vaultChatSession.findUnique({
       where: { id: params.id, userId: request.authUser!.id },
@@ -84,7 +84,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(200).send({ data: session });
   });
 
-  app.post('/vault/sessions/:id/query', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/vault/sessions/:id/query', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const { question } = vaultQuerySchema.parse(request.body);
 
@@ -128,7 +128,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // --- Voice Transcription ---
-  app.post('/vault/transcribe', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/vault/transcribe', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const data = await request.file();
     if (!data) {
       return reply.status(400).send({ error: 'No audio file provided' });
@@ -161,7 +161,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(200).send({ data: { success: true } });
   });
 
-  app.post('/vault/index', { preHandler: [authenticate, requireRole('ADMIN')] }, async (request, reply) => {
+  app.post('/vault/index', { preHandler: [authenticate, requireRole('SUPER_ADMIN')] }, async (request, reply) => {
     const { VaultIndexerService } = await import('../../../application/vault-indexer/vault-indexer-service.js');
     const path = await import('node:path');
 
@@ -173,7 +173,7 @@ export async function registerVaultRoutes(app: FastifyInstance): Promise<void> {
       const result = await indexer.indexVault(resolvedVaultPath, { forceClone });
       return reply.status(200).send({ data: result });
     } catch (err) {
-      // Este endpoint es solo-admin (requireRole('ADMIN') arriba): a diferencia
+      // Este endpoint es solo-admin (requireRole('SUPER_ADMIN') arriba): a diferencia
       // del resto de la API, acá SÍ tiene sentido que el motivo real del fallo
       // llegue al panel — es información operativa para quien mantiene el
       // sistema, no un dato sensible de un tenant. Sin esto, cualquier falla acá

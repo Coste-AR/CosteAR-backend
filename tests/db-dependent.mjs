@@ -69,6 +69,7 @@ export const CON_ROL_DUENO = [
 
   // Criterio del backfill del libro mayor: mira la migración de verdad.
   'tests/validaciones/ledger-criterio-importe-iva.test.ts',
+  'tests/validaciones/user-role-migration.test.ts',
 ];
 
 /** Todo lo que necesita base, para que la suite rápida lo excluya. */

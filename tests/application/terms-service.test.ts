@@ -28,8 +28,8 @@ beforeEach(() => {
 });
 
 describe('TermsService.needsAcceptance', () => {
-  it('false para ADMIN — nunca consulta la base (personal interno, no pasa por el frontend de costistas)', async () => {
-    const result = await service().needsAcceptance('user-1', 'ADMIN');
+  it('false para SUPER_ADMIN — nunca consulta la base (personal interno, no pasa por el frontend de costistas)', async () => {
+    const result = await service().needsAcceptance('user-1', 'SUPER_ADMIN');
     expect(result).toEqual({ needs: false, current: null });
     expect(db.termsVersion.findFirst).not.toHaveBeenCalled();
   });
@@ -47,7 +47,7 @@ describe('TermsService.needsAcceptance', () => {
     db.termsVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1 });
     db.termsAcceptance.findUnique.mockResolvedValue(null);
 
-    const result = await service().needsAcceptance('user-1', 'COSTISTA');
+    const result = await service().needsAcceptance('user-1', 'EMPRESA_ADMIN');
 
     expect(result.needs).toBe(true);
     expect(result.current).toEqual({ id: 'v1', version: 1 });
@@ -57,7 +57,7 @@ describe('TermsService.needsAcceptance', () => {
     db.termsVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1 });
     db.termsAcceptance.findUnique.mockResolvedValue({ id: 'acc-1' });
 
-    const result = await service().needsAcceptance('user-1', 'COSTISTA');
+    const result = await service().needsAcceptance('user-1', 'EMPRESA_ADMIN');
 
     expect(result.needs).toBe(false);
   });
@@ -67,7 +67,7 @@ describe('TermsService.needsAcceptance', () => {
     // Su aceptación es de v1 — el lookup busca específicamente v2, no la encuentra.
     db.termsAcceptance.findUnique.mockResolvedValue(null);
 
-    const result = await service().needsAcceptance('user-1', 'COSTISTA');
+    const result = await service().needsAcceptance('user-1', 'EMPRESA_ADMIN');
 
     expect(result.needs).toBe(true);
     expect(db.termsAcceptance.findUnique).toHaveBeenCalledWith({

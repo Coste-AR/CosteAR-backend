@@ -3,6 +3,14 @@ import { z } from 'zod';
 import { CostPeriodService } from '../../../application/cost-structures/cost-period-service.js';
 import { CostPeriodPropagationService } from '../../../application/cost-structures/cost-period-propagation-service.js';
 import { authenticate, auditContext } from '../plugins/authenticate.js';
+import { updateGastosDeNoFabricacionSchema } from '../../../shared/schemas/cost.schema.js';
+import { serializerCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import {
+  apiErrorResponses,
+  periodComparisonEnvelopeSchema,
+  periodEnvelopeSchema,
+  periodsEnvelopeSchema,
+} from '../../../shared/schemas/api-contract.schema.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -31,18 +39,26 @@ const compareQuery = z.object({
  * El período es dueño de los datos y del resultado de su mes.
  */
 export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<void> {
+  app.setSerializerCompiler(serializerCompiler);
   const service = new CostPeriodService();
   const propagationService = new CostPeriodPropagationService();
+  const contract = app.withTypeProvider<ZodTypeProvider>();
 
   // Todos los períodos de una estructura (del más nuevo al más viejo).
-  app.get('/structures/:id/periods', { preHandler: authenticate }, async (request) => {
+  contract.get('/structures/:id/periods', {
+    preHandler: authenticate,
+    schema: { response: { 200: periodsEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id: structureId } = idParam.parse(request.params);
     const periods = await service.list(request.authUser!.id, structureId);
     return { data: periods };
   });
 
   // El período en el que se está trabajando.
-  app.get('/structures/:id/periods/open', { preHandler: authenticate }, async (request) => {
+  contract.get('/structures/:id/periods/open', {
+    preHandler: authenticate,
+    schema: { response: { 200: periodEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id: structureId } = idParam.parse(request.params);
     const period = await service.getOpen(request.authUser!.id, structureId);
     return { data: period };
@@ -59,7 +75,10 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
 
   // Comparar dos períodos (Fase 4): qué cambió y de dónde vino el cambio.
   // Sin query params compara los dos últimos (el más nuevo contra el anterior).
-  app.get('/structures/:id/periods/compare', { preHandler: authenticate }, async (request) => {
+  contract.get('/structures/:id/periods/compare', {
+    preHandler: authenticate,
+    schema: { response: { 200: periodComparisonEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id: structureId } = idParam.parse(request.params);
     const { from, to } = compareQuery.parse(request.query ?? {});
     const comparison = await service.compare(request.authUser!.id, structureId, from, to);
@@ -80,7 +99,10 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
   });
 
   // Cerrar el período (congela los números). Falla si falta el cierre de algún centro.
-  app.post('/periods/:id/close', { preHandler: authenticate }, async (request) => {
+  contract.post('/periods/:id/close', {
+    preHandler: authenticate,
+    schema: { response: { 200: periodEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
     const { id } = idParam.parse(request.params);
     const { runId } = closeSchema.parse(request.body ?? {});
     const closed = await service.close(request.authUser!.id, id, runId, auditContext(request));
@@ -93,5 +115,20 @@ export async function registerCostPeriodRoutes(app: FastifyInstance): Promise<vo
     const { reason } = reopenSchema.parse(request.body);
     const reopened = await service.reopen(request.authUser!.id, id, reason, auditContext(request));
     return { data: reopened };
+  });
+
+  // Gastos de no fabricación del período (M2-01): comercialización variable
+  // por unidad vendida + administración fija. Alimentan la contribución
+  // marginal y el punto de equilibrio de la EMPRESA, no solo de producción.
+  app.put('/periods/:id/gastos-no-fabricacion', { preHandler: authenticate }, async (request) => {
+    const { id } = idParam.parse(request.params);
+    const input = updateGastosDeNoFabricacionSchema.parse(request.body);
+    const updated = await service.setGastosDeNoFabricacion(
+      request.authUser!.id,
+      id,
+      input,
+      auditContext(request),
+    );
+    return { data: updated };
   });
 }
