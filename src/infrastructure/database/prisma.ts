@@ -90,6 +90,8 @@ export const RLS_MODELS = new Set([
   'ConsumoCorrida',
   'PaqueteRubro',
   'ConfiguracionModuloRubro',
+  // C1-F1a: órdenes que atraviesan períodos.
+  'OrdenTrabajo',
   // S-03 y S-04.
   'ActivoAmortizable',
   'DesperdicioRegistro',
