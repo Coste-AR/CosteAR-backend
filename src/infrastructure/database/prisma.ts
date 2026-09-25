@@ -97,6 +97,9 @@ export const RLS_MODELS = new Set([
   'PlantillaOrden',
   'EtapaPlantillaOrden',
   'EtapaOrden',
+  // C1-F2: versiones y renglones del presupuesto de cada orden.
+  'VersionPresupuesto',
+  'RenglonPresupuesto',
   // S-03 y S-04.
   'ActivoAmortizable',
   'DesperdicioRegistro',

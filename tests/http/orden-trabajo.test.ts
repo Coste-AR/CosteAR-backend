@@ -9,6 +9,8 @@ const { db, auth } = vi.hoisted(() => ({ auth: { role: 'EMPRESA_ADMIN' }, db: {
   ordenTrabajo: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   plantillaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
   etapaOrden: { findMany: vi.fn() },
+  versionPresupuesto: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  parametroCosteo: { findFirst: vi.fn() },
   traceAuditLog: { create: vi.fn() },
   operatorMembership: { findFirst: vi.fn() },
   operatorOrdenTrabajo: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -45,6 +47,8 @@ beforeEach(() => {
   db.etapaOrden.findMany.mockResolvedValue([]);
   db.operatorMembership.findFirst.mockResolvedValue(null);
   db.operatorOrdenTrabajo.findMany.mockResolvedValue([]);
+  db.versionPresupuesto.findFirst.mockResolvedValue(null);
+  db.versionPresupuesto.findMany.mockResolvedValue([]);
 });
 
 describe('rutas de órdenes de trabajo', () => {
@@ -116,5 +120,17 @@ describe('rutas de órdenes de trabajo', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(db.ordenTrabajo.update).not.toHaveBeenCalled();
+  });
+
+  it('aprobar un presupuesto vencido responde 400 tipado, no 500', async () => {
+    db.versionPresupuesto.findFirst.mockResolvedValue({
+      id: ORDER, userId: USER, estado: 'PREPARADO', preparadoPor: COMPANY,
+      vigenteDesde: new Date('2026-01-01T00:00:00Z'), vigenciaDias: 7, renglones: [],
+    });
+    const api = await app();
+    const res = await api.inject({ method: 'POST', url: `/presupuestos/${ORDER}/aprobar` });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('BUDGET_EXPIRED');
+    expect(db.versionPresupuesto.update).not.toHaveBeenCalled();
   });
 });

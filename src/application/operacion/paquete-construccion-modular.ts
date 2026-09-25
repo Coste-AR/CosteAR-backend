@@ -13,7 +13,7 @@ export const PAQUETE_CONSTRUCCION_MODULAR = {
   },
   icons: {},
   access: {
-    entities: ['OrdenTrabajo', 'Deposito'],
+    entities: ['OrdenTrabajo', 'VersionPresupuesto', 'Deposito'],
     permissions: [
       'ordenes.ver', 'ordenes.editar', 'ordenes.ver_margen', 'ordenes.aprobar_presupuesto',
       'ordenes.cerrar', 'inventario.mover', 'horas.cargar', 'horas.aprobar',
