@@ -607,6 +607,20 @@ CREATE POLICY tenant_isolation ON movimientos_deposito
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE articulos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE articulos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON articulos;
+CREATE POLICY tenant_isolation ON articulos
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE movimientos_inventario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimientos_inventario FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON movimientos_inventario;
+CREATE POLICY tenant_isolation ON movimientos_inventario
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 ALTER TABLE corridas_produccion ENABLE ROW LEVEL SECURITY;
 ALTER TABLE corridas_produccion FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON corridas_produccion;
