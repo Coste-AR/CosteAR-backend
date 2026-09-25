@@ -173,6 +173,36 @@ describe('Caso Dorado — costeo Por Órdenes', () => {
    * no se llamaba desde ningún lado: el detector de inconsistencias estaba
    * implementado y apagado. Ahora el cálculo lo corre e informa el resultado.
    */
+  /**
+   * EL OTRO CONTROL QUE ESTABA APAGADO.
+   *
+   * `var. presupuesto + var. volumen = −(sobre/sub-aplicación)` es un control de
+   * cátedra que la documentación de `calcVarianceAnalysis` enunciaba desde el
+   * primer día, y que el motor no corría. Exactamente el mismo patrón que el de
+   * materia prima de acá abajo — por eso van juntos.
+   *
+   * La aritmética fina, con el caso Terminación al centavo, vive en
+   * `tests/domain/indirect-costs.test.ts`. Acá se verifica lo que le falta a
+   * eso: que el CÁLCULO lo corra y lo informe.
+   */
+  describe('Identidad de las variaciones', () => {
+    it('el cálculo la informa, centro por centro', () => {
+      const r = runCalculation(input);
+
+      expect(r.consistency).toBeDefined();
+      expect(typeof r.consistency!.varianceIdentityMatches).toBe('boolean');
+      expect(typeof r.consistency!.varianceIdentityWorstDifference).toBe('number');
+    });
+
+    it('sobre el caso de cátedra ningún centro se pasa de la tolerancia', () => {
+      const r = runCalculation(input);
+
+      expect(r.consistency!.varianceIdentityMatches).toBe(true);
+      expect(r.consistency!.varianceIdentityOffenders).toEqual([]);
+      expect(Math.abs(r.consistency!.varianceIdentityWorstDifference)).toBeLessThanOrEqual(0.01);
+    });
+  });
+
   describe('Consistencia de materia prima', () => {
     it('el cálculo la informa', () => {
       const r = runCalculation(input);

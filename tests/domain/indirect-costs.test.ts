@@ -5,6 +5,8 @@ import {
   secondaryProration,
   calcPredeterminedQuota,
   calcVarianceAnalysis,
+  checkVarianceIdentity,
+  TOLERANCIA_IDENTIDAD_VARIACIONES,
   type CostCenter,
   type IndirectCostConcept,
 } from '@/domain/calculations/indirect-costs.js';
@@ -198,4 +200,120 @@ describe('Hoja 3 — Costos Indirectos de Producción (CIP)', () => {
       ).not.toThrow();
     });
   });
+
+/**
+ * CONTROL DE CÁTEDRA: var. presupuesto + var. volumen = −(sobre/sub-aplicación).
+ *
+ * La regla estaba escrita en la documentación de `calcVarianceAnalysis` desde
+ * el primer día y el motor NUNCA la corría. Mismo patrón que
+ * `checkRawMaterialConsistency`, que también existía apagada y fue un defecto
+ * real cuando se la encontró.
+ *
+ * Los dos centros de abajo son el caso D02 de la auditoría de Órdenes del
+ * 20-08-2026, y están elegidos a propósito: uno cierra exacto y el otro deja el
+ * centavo que motivó el hallazgo.
+ */
+describe('Identidad de las variaciones (control de cátedra)', () => {
+  /**
+   * D02 · "Terminación" — el centro cuyas cuotas tienen decimales periódicos.
+   *
+   * Presupuesto 218.000 fijo / 234.500 variable, capacidad normal 3.000,
+   * actividad real 2.800, CIP real 430.000. De ahí salen:
+   *
+   *     cuota fija      72,666666…   cuota variable  78,166666…
+   *     var. presupuesto  −6.866,67   var. volumen    14.533,33
+   *     sobre/sub aplic.  −7.666,67
+   *
+   * y el control de cátedra da 7.666,66 contra 7.666,67.
+   */
+  const terminacion = () => {
+    const budget = { fixed: Money.of(218000), variable: Money.of(234500) };
+    const quota = calcPredeterminedQuota(budget, 3000);
+    return calcVarianceAnalysis(quota, budget, 3000, 2800, Money.of(430000), 'Terminación');
+  };
+
+  it('reproduce el caso Terminación: 7.666,66 contra 7.666,67', () => {
+    const v = terminacion();
+
+    // Los tres números tal como los serializa la API.
+    expect(v.budgetVariance.toNumber()).toBe(-6866.67);
+    expect(v.volumeVariance.toNumber()).toBe(14533.33);
+    expect(v.overUnderApplied.toNumber()).toBe(-7666.67);
+
+    // El control de la cátedra, escrito como lo escribe la cátedra.
+    const suma = v.budgetVariance.toNumber() + v.volumeVariance.toNumber();
+    expect(suma).toBeCloseTo(7666.66, 2);
+    expect(-v.overUnderApplied.toNumber()).toBe(7666.67);
+  });
+
+  it('Terminación PASA el control: el centavo está dentro de la tolerancia', () => {
+    const check = checkVarianceIdentity(terminacion());
+
+    // Un centavo exacto: es el residuo de redondear tres veces por separado,
+    // no un error de cálculo. El motor mantiene 28 dígitos internamente.
+    expect(check.difference.toNumber()).toBe(-0.01);
+    expect(check.matches).toBe(true);
+  });
+
+  it('D02 · "Inyección" cierra exacto, sin residuo', () => {
+    // Mismo caso, el centro cuyas cuotas dan redondas: 382.000/445.500 sobre
+    // capacidad 4.000, actividad real 3.600, CIP real 800.000.
+    const budget = { fixed: Money.of(382000), variable: Money.of(445500) };
+    const quota = calcPredeterminedQuota(budget, 4000);
+    const v = calcVarianceAnalysis(quota, budget, 4000, 3600, Money.of(800000), 'Inyección');
+
+    expect(v.budgetVariance.toNumber()).toBe(17050);
+    expect(v.volumeVariance.toNumber()).toBe(38200);
+    expect(v.overUnderApplied.toNumber()).toBe(-55250);
+
+    const check = checkVarianceIdentity(v);
+    expect(check.difference.toNumber()).toBe(0);
+    expect(check.matches).toBe(true);
+  });
+
+  it('una diferencia de $1,00 SÍ rompe el control', () => {
+    // Se parte del caso que cierra exacto y se desplaza UNA de las tres
+    // variaciones un peso: es lo que pasaría si alguien tocara una fórmula sin
+    // tocar las otras dos. Eso no es redondeo y tiene que avisar.
+    const budget = { fixed: Money.of(382000), variable: Money.of(445500) };
+    const quota = calcPredeterminedQuota(budget, 4000);
+    const sano = calcVarianceAnalysis(quota, budget, 4000, 3600, Money.of(800000), 'Inyección');
+
+    const roto = { ...sano, budgetVariance: sano.budgetVariance.add(Money.of(1)) };
+    const check = checkVarianceIdentity(roto);
+
+    expect(check.matches).toBe(false);
+    expect(check.difference.toNumber()).toBe(1);
+  });
+
+  it('la tolerancia es exactamente un centavo: $0,02 ya no pasa', () => {
+    // Fija el borde. Sin esto, alguien podría aflojar la tolerancia a $0,10
+    // "para que deje de molestar" y ningún test se enteraría.
+    const budget = { fixed: Money.of(382000), variable: Money.of(445500) };
+    const quota = calcPredeterminedQuota(budget, 4000);
+    const sano = calcVarianceAnalysis(quota, budget, 4000, 3600, Money.of(800000), 'Inyección');
+
+    expect(TOLERANCIA_IDENTIDAD_VARIACIONES).toBe(0.01);
+
+    const justo = { ...sano, volumeVariance: sano.volumeVariance.add(Money.of(0.01)) };
+    expect(checkVarianceIdentity(justo).matches).toBe(true);
+
+    const pasado = { ...sano, volumeVariance: sano.volumeVariance.add(Money.of(0.02)) };
+    expect(checkVarianceIdentity(pasado).matches).toBe(false);
+  });
+
+  it('un centro pendiente de cierre (todo en cero) cierra la identidad solo', () => {
+    // Documenta el borde honesto: sin actividad real ni CIP real, las tres
+    // variaciones valen cero y el control da verde. Verde acá NO significa
+    // "el cierre del mes está verificado".
+    const cero = {
+      cipApplied: Money.zero(),
+      overUnderApplied: Money.zero(),
+      budgetVariance: Money.zero(),
+      volumeVariance: Money.zero(),
+    };
+    expect(checkVarianceIdentity(cero).matches).toBe(true);
+  });
+});
+
 });
