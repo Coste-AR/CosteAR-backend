@@ -1,0 +1,401 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`paquete avícola de postura > declara léxico, variantes sin confirmar, parámetros sin confirmar y reglas configurables 1`] = `
+{
+  "alertRules": [
+    {
+      "condicion": "MENOR",
+      "etiqueta": "Nivel del depósito",
+      "indicador": "nivel_deposito_bajo",
+      "umbral": "configurable",
+      "unidad": "%",
+    },
+    {
+      "condicion": "MAYOR",
+      "etiqueta": "Humedad al ingreso",
+      "indicador": "humedad_ingreso",
+      "umbral": "configurable",
+      "unidad": "%",
+    },
+    {
+      "condicion": "MENOR",
+      "etiqueta": "Postura media",
+      "indicador": "postura_media_movil",
+      "umbral": "configurable",
+      "unidad": "%",
+    },
+    {
+      "condicion": "MAYOR",
+      "etiqueta": "Antigüedad del stock",
+      "indicador": "antiguedad_stock",
+      "umbral": "configurable",
+      "unidad": "días",
+    },
+    {
+      "condicion": "MAYOR",
+      "etiqueta": "Desvío de consumo",
+      "indicador": "desvio_consumo",
+      "umbral": "configurable",
+      "unidad": "%",
+    },
+  ],
+  "icons": {
+    "CorridaProduccion": "flask",
+    "Deposito": "container",
+    "LoteProductivo": "bird",
+    "UnidadProductiva": "warehouse",
+  },
+  "lexicon": {
+    "CorridaProduccion": "Bachada",
+    "Deposito": "Silo",
+    "LoteProductivo": "Lote de aves",
+    "UnidadProductiva": "Galpón",
+  },
+  "modulos": [
+    {
+      "activoPorDefecto": true,
+      "alertas": [],
+      "clave": "produccion",
+      "dependeDe": [],
+      "descripcion": "Registrá lo que produjo cada lote durante el día.",
+      "destinos": {
+        "carga.produccion-diaria": "/panel-campo",
+      },
+      "nombre": "Producción diaria",
+      "parametros": [
+        "huevos_por_cajon",
+        "huevos_por_maple",
+        "maples_por_cajon",
+        "costo_maple",
+        "unidad_carga",
+        "unidad_gestion",
+      ],
+      "superficies": [
+        "carga.produccion-diaria",
+      ],
+    },
+    {
+      "activoPorDefecto": true,
+      "alertas": [
+        "postura_media_movil",
+      ],
+      "clave": "plantel",
+      "dependeDe": [],
+      "descripcion": "Registrá bajas y otros eventos del lote.",
+      "destinos": {
+        "carga.bajas-plantel": "/panel-campo",
+      },
+      "nombre": "Plantel",
+      "parametros": [
+        "vida_util_lote_meses",
+      ],
+      "superficies": [
+        "carga.bajas-plantel",
+      ],
+    },
+    {
+      "activoPorDefecto": false,
+      "alertas": [],
+      "clave": "variantes",
+      "dependeDe": [
+        "produccion",
+      ],
+      "descripcion": "Separá la producción por tipo y repartí el costo entre ellos.",
+      "nombre": "Tipos de producto",
+      "parametros": [],
+      "superficies": [
+        "tablero.variantes",
+      ],
+    },
+    {
+      "activoPorDefecto": false,
+      "alertas": [
+        "nivel_deposito_bajo",
+        "humedad_ingreso",
+        "antiguedad_stock",
+      ],
+      "clave": "depositos",
+      "dependeDe": [],
+      "descripcion": "Registrá el nivel del depósito y sus alertas de reposición.",
+      "nombre": "Silos",
+      "parametros": [],
+      "superficies": [
+        "carga.depositos",
+      ],
+    },
+    {
+      "activoPorDefecto": false,
+      "alertas": [
+        "desvio_consumo",
+      ],
+      "clave": "alimento",
+      "dependeDe": [],
+      "descripcion": "Registrá bachadas, fórmulas activas y consumo por lote.",
+      "nombre": "Alimento propio",
+      "parametros": [
+        "gramaje_estandar_gr",
+        "alimento_origen",
+      ],
+      "superficies": [
+        "carga.alimento-propio",
+      ],
+    },
+    {
+      "activoPorDefecto": false,
+      "alertas": [],
+      "clave": "peso",
+      "dependeDe": [
+        "plantel",
+      ],
+      "descripcion": "Registrá peso por muestreo contra tabla estándar.",
+      "nombre": "Muestreo de peso",
+      "parametros": [],
+      "superficies": [
+        "carga.muestreo-peso",
+      ],
+    },
+    {
+      "activoPorDefecto": false,
+      "alertas": [],
+      "clave": "amortizacion_plantel",
+      "dependeDe": [
+        "plantel",
+      ],
+      "descripcion": "Amortizá el lote en vez de imputarlo al período.",
+      "nombre": "Plantel como activo",
+      "parametros": [
+        "vida_util_lote_meses",
+      ],
+      "superficies": [
+        "costeo.amortizacion-plantel",
+      ],
+    },
+    {
+      "activoPorDefecto": false,
+      "alertas": [],
+      "clave": "desperdicio",
+      "dependeDe": [],
+      "descripcion": "Registrá mermas con su naturaleza declarada.",
+      "nombre": "Desperdicio",
+      "parametros": [
+        "umbral_merma_normal_pct",
+      ],
+      "superficies": [
+        "carga.desperdicio",
+      ],
+    },
+  ],
+  "nombreProducto": "AVI",
+  "nombreProductoConfirmado": true,
+  "screens": {
+    "home": {
+      "kpis": [
+        {
+          "campo": "costoPorCajon.total",
+          "clave": "costo_cajon",
+          "etiqueta": "Costo por cajón",
+          "unidad": "ARS/cajon",
+        },
+        {
+          "campo": "contribucionMarginalPorCajon",
+          "clave": "contribucion_marginal_cajon",
+          "etiqueta": "Contribución marginal por cajón",
+          "unidad": "ARS/cajon",
+        },
+        {
+          "campo": "puntoEquilibrioCajones",
+          "clave": "punto_equilibrio",
+          "etiqueta": "Punto de equilibrio",
+          "unidad": "cajones",
+        },
+      ],
+    },
+    "indicadoresMacro": [
+      {
+        "clave": "USD_BLUE",
+        "etiqueta": "Dólar blue",
+        "fuente": "DOLARAPI",
+        "unidad": "ARS/USD",
+      },
+      {
+        "clave": "CAPIA_HUEVO_BLANCO_CAJON",
+        "etiqueta": "Huevo blanco",
+        "fuente": "CAPIA",
+        "unidad": "cajon",
+      },
+      {
+        "clave": "CAPIA_HUEVO_COLOR_CAJON",
+        "etiqueta": "Huevo color",
+        "fuente": "CAPIA",
+        "unidad": "cajon",
+      },
+      {
+        "clave": "CAPIA_ALIMENTO_PONEDORA_KG",
+        "etiqueta": "Alimento ponedora",
+        "fuente": "CAPIA",
+        "unidad": "kg",
+      },
+      {
+        "clave": "CAPIA_MAIZ_TON",
+        "etiqueta": "Maíz",
+        "fuente": "CAPIA",
+        "unidad": "ton",
+      },
+      {
+        "clave": "CAPIA_SOJA_TON",
+        "etiqueta": "Soja",
+        "fuente": "CAPIA",
+        "unidad": "ton",
+      },
+      {
+        "clave": "CAPIA_MAPLE_UNIDAD",
+        "etiqueta": "Maple",
+        "fuente": "CAPIA",
+        "unidad": "unidad",
+      },
+    ],
+  },
+  "seedParameters": [
+    {
+      "clave": "umbral_variacion_punto_equilibrio_pct",
+      "descripcion": "Variación porcentual que dispara una alerta de punto de equilibrio.",
+      "seguro": false,
+      "valor": 10,
+    },
+    {
+      "clave": "huevos_por_cajon",
+      "descripcion": "Huevos que entran en un cajón.",
+      "seguro": true,
+      "unidad": "huevo",
+      "valor": 360,
+    },
+    {
+      "clave": "huevos_por_maple",
+      "descripcion": "Huevos que entran en un maple.",
+      "seguro": true,
+      "unidad": "huevo",
+      "valor": 30,
+    },
+    {
+      "clave": "maples_por_cajon",
+      "descripcion": "Maples que entran en un cajón.",
+      "seguro": true,
+      "unidad": "maple",
+      "valor": 12,
+    },
+    {
+      "clave": "costo_maple",
+      "descripcion": "Costo unitario del maple.",
+      "seguro": false,
+      "valor": 200,
+    },
+    {
+      "clave": "gramaje_estandar_gr",
+      "descripcion": "Gramos de alimento por ave por día.",
+      "seguro": false,
+      "valor": 120,
+    },
+    {
+      "clave": "vida_util_lote_meses",
+      "descripcion": "Meses de vida productiva del lote.",
+      "seguro": false,
+      "valor": 24,
+    },
+    {
+      "clave": "vida_util_producto_dias",
+      "descripcion": "Días de vida útil del producto terminado.",
+      "seguro": false,
+      "unidad": "dia",
+      "valor": 7,
+    },
+    {
+      "clave": "tamanos_huevo",
+      "descripcion": "Cantidad de tamaños de huevo que se separan.",
+      "seguro": false,
+      "valor": 3,
+    },
+    {
+      "clave": "umbral_merma_normal_pct",
+      "descripcion": "Porcentaje de merma considerado normal.",
+      "seguro": false,
+      "valor": 0,
+    },
+    {
+      "clave": "unidad_carga",
+      "descripcion": "Cuando anotan la producción del día, ¿en qué la anotan?",
+      "opciones": [
+        {
+          "etiqueta": "Huevo",
+          "valor": "huevo",
+        },
+        {
+          "etiqueta": "Maple",
+          "valor": "maple",
+        },
+        {
+          "etiqueta": "Cajón",
+          "valor": "cajon",
+        },
+      ],
+      "tipo": "texto",
+    },
+    {
+      "clave": "unidad_gestion",
+      "descripcion": "¿En qué unidad querés ver los costos y el precio?",
+      "opciones": [
+        {
+          "etiqueta": "Huevo",
+          "valor": "huevo",
+        },
+        {
+          "etiqueta": "Maple",
+          "valor": "maple",
+        },
+        {
+          "etiqueta": "Cajón",
+          "valor": "cajon",
+        },
+      ],
+      "tipo": "unidad_gestion",
+    },
+    {
+      "clave": "alimento_origen",
+      "descripcion": "¿El alimento lo comprás hecho o lo preparás vos?",
+      "opciones": [
+        {
+          "etiqueta": "Lo compro hecho",
+          "valor": "compro",
+        },
+        {
+          "etiqueta": "Lo preparo",
+          "valor": "preparo",
+        },
+        {
+          "etiqueta": "Ambas opciones",
+          "valor": "mixto",
+        },
+      ],
+      "propuestaModulo": {
+        "clave": "alimento",
+        "valores": [
+          "preparo",
+          "mixto",
+        ],
+      },
+      "tipo": "texto",
+    },
+  ],
+  "variants": [
+    {
+      "codigo": "variante_1",
+      "confirmado": false,
+      "etiqueta": "Variante 1",
+    },
+    {
+      "codigo": "variante_2",
+      "confirmado": false,
+      "etiqueta": "Variante 2",
+    },
+  ],
+}
+`;

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { CATEGORIA_AVICOLA_POSTURA, PAQUETE_AVICOLA_POSTURA } from '../src/application/operacion/paquete-avicola.js';
+import { CATEGORIA_CONSTRUCCION_MODULAR, PAQUETE_CONSTRUCCION_MODULAR } from '../src/application/operacion/paquete-construccion-modular.js';
 
 const prisma = new PrismaClient();
 
@@ -16,6 +17,7 @@ export async function seedPaqueteAvicola(db: PrismaClient = prisma) {
       data: {
         lexicon: PAQUETE_AVICOLA_POSTURA.lexicon,
         nombreProducto: PAQUETE_AVICOLA_POSTURA.nombreProducto,
+        nombreProductoConfirmado: PAQUETE_AVICOLA_POSTURA.nombreProductoConfirmado,
         icons: PAQUETE_AVICOLA_POSTURA.icons,
         variants: PAQUETE_AVICOLA_POSTURA.variants,
         seedParameters: PAQUETE_AVICOLA_POSTURA.seedParameters,
@@ -30,6 +32,33 @@ export async function seedPaqueteAvicola(db: PrismaClient = prisma) {
     data: { category: CATEGORIA_AVICOLA_POSTURA, companyId: null, structureId: null, periodId: null, userId: null, ...PAQUETE_AVICOLA_POSTURA },
   });
   return { created: true, paquete };
+}
+
+/** Inserta o sincroniza sólo la declaración global del paquete de construcción modular. */
+export async function seedPaqueteConstruccionModular(db: PrismaClient = prisma) {
+  const alcance = {
+    category: CATEGORIA_CONSTRUCCION_MODULAR,
+    companyId: null,
+    structureId: null,
+    periodId: null,
+    userId: null,
+  };
+  const existente = await db.paqueteRubro.findFirst({ where: alcance });
+  const data = {
+    nombreProducto: PAQUETE_CONSTRUCCION_MODULAR.nombreProducto,
+    nombreProductoConfirmado: PAQUETE_CONSTRUCCION_MODULAR.nombreProductoConfirmado,
+    lexicon: PAQUETE_CONSTRUCCION_MODULAR.lexicon,
+    icons: PAQUETE_CONSTRUCCION_MODULAR.icons,
+    variants: PAQUETE_CONSTRUCCION_MODULAR.variants,
+    seedParameters: PAQUETE_CONSTRUCCION_MODULAR.seedParameters,
+    alertRules: PAQUETE_CONSTRUCCION_MODULAR.alertRules,
+    screens: PAQUETE_CONSTRUCCION_MODULAR.screens,
+    modulos: PAQUETE_CONSTRUCCION_MODULAR.modulos,
+  };
+  const paquete = existente
+    ? await db.paqueteRubro.update({ where: { id: existente.id }, data })
+    : await db.paqueteRubro.create({ data: { ...alcance, ...data } });
+  return { created: !existente, paquete };
 }
 
 /** Carga sólo valores faltantes: una decisión existente jamás la pisa un seed. */
@@ -55,5 +84,6 @@ export async function aplicarParametrosSemilla(
 }
 
 if (process.argv[1]?.endsWith('seed-paquete-avicola.ts')) {
-  seedPaqueteAvicola().finally(() => prisma.$disconnect());
+  Promise.all([seedPaqueteAvicola(), seedPaqueteConstruccionModular()])
+    .finally(() => prisma.$disconnect());
 }

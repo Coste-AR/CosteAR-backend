@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { ParametrosCosteoService } from '@/application/parametros/parametros-costeo-service.js';
 import { NotFoundError, UnprocessableEntityError } from '@/domain/errors/domain-error.js';
 import { PAQUETE_AVICOLA_POSTURA } from '@/application/operacion/paquete-avicola.js';
+import { PAQUETE_CONSTRUCCION_MODULAR } from '@/application/operacion/paquete-construccion-modular.js';
 
 const recordTraceAudit = vi.fn(async () => undefined);
 vi.mock('@/application/audit/trace-audit.js', () => ({
@@ -269,6 +270,50 @@ describe('#115 — resolución de parámetros de costeo', () => {
       expect(r.origen).toBe('default');
       expect((db.parametroCosteo as { update: ReturnType<typeof vi.fn> }).update).not.toHaveBeenCalled();
       expect(recordTraceAudit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('paquete de construcción modular', () => {
+    function makeDbConstruccion() {
+      return makeDb({
+        company: { findFirst: vi.fn(async () => ({ ...COMPANY, industry: 'CONSTRUCCION_MODULAR' })) },
+        paqueteRubro: {
+          findMany: vi.fn(async () => [{
+            category: 'CONSTRUCCION_MODULAR', userId: null, companyId: null,
+            structureId: null, periodId: null, ...PAQUETE_CONSTRUCCION_MODULAR, scale: null,
+          }]),
+        },
+        configuracionModuloRubro: {
+          findMany: vi.fn(async () => []),
+          findUnique: vi.fn(async () => null),
+          upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+            id: 'config-1', ...create, ...update,
+          })),
+        },
+      });
+    }
+
+    it('declara ausente un umbral sin valor en vez de inventar cero', async () => {
+      const db = makeDbConstruccion();
+      await expect(service(db).resolver(USER, 'comp-1', 'umbral_desvio_margen_pp'))
+        .resolves.toMatchObject({ valor: null, valorDefault: null, origen: 'ausente', confirmado: false });
+    });
+
+    it('apaga inventario al responder no y permite volver a prenderlo al responder sí', async () => {
+      const db = makeDbConstruccion();
+      const configuracion = db.configuracionModuloRubro as { upsert: ReturnType<typeof vi.fn> };
+
+      await service(db).set(USER, 'comp-1', 'deposito_propio', { valorTexto: 'no', confirmado: true }, ACTOR);
+      await service(db).set(USER, 'comp-1', 'deposito_propio', { valorTexto: 'si', confirmado: true }, ACTOR);
+
+      expect(configuracion.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        create: expect.objectContaining({ moduleId: 'inventario', activo: false }),
+        update: { activo: false },
+      }));
+      expect(configuracion.upsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        create: expect.objectContaining({ moduleId: 'inventario', activo: true }),
+        update: { activo: true },
+      }));
     });
   });
 });

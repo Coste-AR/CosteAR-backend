@@ -2478,6 +2478,8 @@ model PaqueteRubro {
   /// Nombre corto visible del producto que declara el paquete (por ejemplo,
   /// "AVI"). Nullable para paquetes históricos o que no necesiten marca.
   nombreProducto String?
+  /// Distingue un nombre decidido de una propuesta editable del paquete.
+  nombreProductoConfirmado Boolean @default(true)
   lexicon        Json
   icons          Json
   variants       Json

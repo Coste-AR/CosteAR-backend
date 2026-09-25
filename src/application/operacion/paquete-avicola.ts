@@ -3,11 +3,13 @@ export const CATEGORIA_AVICOLA_POSTURA = 'AVICOLA_POSTURA';
 /** El primer perfil que consume la escala del paquete es el de postura. */
 export const CATEGORY_BY_INDUSTRY = {
   AVICULTURA: CATEGORIA_AVICOLA_POSTURA,
+  CONSTRUCCION_MODULAR: 'CONSTRUCCION_MODULAR',
 } as const;
 
 /** Contenido declarativo del paquete; no contiene reglas de dominio. */
 export const PAQUETE_AVICOLA_POSTURA = {
   nombreProducto: 'AVI',
+  nombreProductoConfirmado: true,
   lexicon: {
     UnidadProductiva: 'Galpón',
     LoteProductivo: 'Lote de aves',

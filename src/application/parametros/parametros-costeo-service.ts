@@ -29,6 +29,17 @@ interface ParametroPaquete {
   propuestaModulo?: { valores: string[]; clave: string };
 }
 
+interface ParametroNumericoPaqueteResuelto {
+  clave: string;
+  valor: number | null;
+  descripcion: string;
+  unidad: string | null;
+  valorDefault: number | null;
+  seguro: boolean;
+  origen: OrigenParametro | 'ausente';
+  confirmado: boolean;
+}
+
 interface PreguntaTextoResuelta {
   clave: string;
   valor: string | null;
@@ -144,6 +155,32 @@ export class ParametrosCosteoService {
     });
   }
 
+  private resolverNumericoDePaquete(
+    parametro: ParametroPaquete,
+    filas: FilaParametro[],
+    ctx: { structureId?: string | null; periodId?: string | null },
+  ): ParametroNumericoPaqueteResuelto {
+    const candidatas = filas.filter((fila) => fila.clave === parametro.clave && fila.valorNum !== null);
+    const fila = (ctx.periodId ? candidatas.find((item) => item.periodId === ctx.periodId) : undefined)
+      ?? (ctx.structureId
+        ? candidatas.find((item) => item.periodId === null && item.structureId === ctx.structureId)
+        : undefined)
+      ?? candidatas.find((item) => item.periodId === null && item.structureId === null);
+    const origen: ParametroNumericoPaqueteResuelto['origen'] = fila
+      ? (fila.periodId ? 'periodo' : fila.structureId ? 'estructura' : 'empresa')
+      : parametro.valor === undefined ? 'ausente' : 'default';
+    return {
+      clave: parametro.clave,
+      valor: fila?.valorNum ?? parametro.valor ?? null,
+      descripcion: parametro.descripcion,
+      unidad: parametro.unidad ?? null,
+      valorDefault: parametro.valor ?? null,
+      seguro: parametro.seguro ?? false,
+      origen,
+      confirmado: fila?.confirmado ?? false,
+    };
+  }
+
   /**
    * Resuelve un parámetro puntual con la cascada período → estructura → empresa
    * → default del catálogo. El resultado dice de qué nivel salió (`origen`) y
@@ -154,7 +191,7 @@ export class ParametrosCosteoService {
     companyId: string,
     clave: string,
     ctx: { structureId?: string | null; periodId?: string | null } = {},
-  ): Promise<ValorResuelto | PreguntaTextoResuelta | ReturnType<typeof resolverComportamiento> | {
+  ): Promise<ValorResuelto | ParametroNumericoPaqueteResuelto | PreguntaTextoResuelta | ReturnType<typeof resolverComportamiento> | {
     clave: 'velocidad_rotacion_default'; valor: number | null; descripcion: string;
     unidad: 'veces_por_periodo'; origen: 'periodo' | 'empresa' | 'ausente'; confirmado: boolean;
   }> {
@@ -181,7 +218,9 @@ export class ParametrosCosteoService {
       };
     }
     if (!definicion && !definicionComportamiento) {
-      throw new NotFoundError(`No existe el parámetro de costeo "${clave}"`);
+      if (!pregunta) throw new NotFoundError(`No existe el parámetro de costeo "${clave}"`);
+      await this.validarAlcance(companyId, ctx);
+      return this.resolverNumericoDePaquete(pregunta, await this.filasDe(companyId), ctx);
     }
     await this.validarAlcance(companyId, ctx);
     if (definicionComportamiento) {
@@ -199,7 +238,7 @@ export class ParametrosCosteoService {
     userId: string,
     companyId: string,
     ctx: { structureId?: string | null; periodId?: string | null } = {},
-  ): Promise<Array<ValorResuelto | PreguntaTextoResuelta>> {
+  ): Promise<Array<ValorResuelto | ParametroNumericoPaqueteResuelto | PreguntaTextoResuelta>> {
     const company = await this.companyDe(userId, companyId);
     await this.validarAlcance(companyId, ctx);
     const filas = await this.filasDe(companyId);
@@ -208,7 +247,10 @@ export class ParametrosCosteoService {
       if (!pregunta.tipo) {
         // El motor conoce cómo resolver la cascada numérica; los metadatos que
         // se exhiben vinieron del paquete y no del catálogo del código.
-        const resuelto = resolverParametro(pregunta.clave, filas, ctx);
+        const definicion = definicionDe(pregunta.clave);
+        const resuelto = definicion
+          ? resolverParametro(pregunta.clave, filas, ctx)
+          : this.resolverNumericoDePaquete(pregunta, filas, ctx);
         return {
           ...resuelto,
           descripcion: pregunta.descripcion,
@@ -297,7 +339,7 @@ export class ParametrosCosteoService {
       }
     }
 
-    if ((definicion || esVelocidadRotacionDefault) && input.valor === undefined) {
+    if ((definicion || esVelocidadRotacionDefault || (pregunta && !pregunta.tipo)) && input.valor === undefined) {
       throw new UnprocessableEntityError(`El parámetro "${clave}" requiere un valor numérico.`, { field: 'valor' });
     }
     if (esVelocidadRotacionDefault && input.valor !== undefined && input.valor <= 0) {
@@ -352,6 +394,24 @@ export class ParametrosCosteoService {
       const guardado = existente
         ? await tx.parametroCosteo.update({ where: { id: existente.id }, data })
         : await tx.parametroCosteo.create({ data });
+
+      if (pregunta?.propuestaModulo && input.valorTexto !== undefined) {
+        const activo = pregunta.propuestaModulo.valores.includes(input.valorTexto);
+        const configuracionAnterior = await tx.configuracionModuloRubro.findUnique({
+          where: { companyId_moduleId: { companyId, moduleId: pregunta.propuestaModulo.clave } },
+        });
+        const configuracion = await tx.configuracionModuloRubro.upsert({
+          where: { companyId_moduleId: { companyId, moduleId: pregunta.propuestaModulo.clave } },
+          create: { companyId, userId, moduleId: pregunta.propuestaModulo.clave, activo },
+          update: { activo },
+        });
+        await recordTraceAudit({
+          entityType: 'ConfiguracionModuloRubro', entityId: configuracion.id,
+          action: configuracionAnterior ? 'update' : 'create', actor,
+          before: configuracionAnterior ?? undefined, after: configuracion,
+          comment: `La respuesta "${input.valorTexto}" dejó el módulo "${pregunta.propuestaModulo.clave}" ${activo ? 'prendido' : 'apagado'}.`,
+        }, tx);
+      }
 
       // DOM-02: la bitácora va en la MISMA transacción. Si falla, no queda un
       // valor de negocio cambiado sin rastro de quién lo cargó.
