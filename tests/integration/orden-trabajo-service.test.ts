@@ -11,6 +11,57 @@ beforeAll(async () => { A = await createTenant('orden-a'); B = await createTenan
 afterAll(disconnect);
 
 describe('FX-OT — orden de trabajo con RLS real', () => {
+  it('copia las siete etapas del modelo de 40 pies y no cambia si se edita el modelo', async () => {
+    const service = new OrdenTrabajoService();
+    await withTenant(A.userId, (tx) => tx.company.update({
+      where: { id: A.companyId }, data: { industry: 'CONSTRUCCION_MODULAR' },
+    }));
+    const etapas = [
+      ['metalurgica', 'Metalúrgica', false], ['aislacion', 'Aislación', false],
+      ['aberturas', 'Aberturas', false], ['instalaciones', 'Instalaciones', false],
+      ['terminaciones', 'Terminaciones', false], ['transporte', 'Transporte', true],
+      ['montaje', 'Montaje', true],
+    ] as const;
+    const modelo = await withTenant(A.userId, (tx) => tx.plantillaOrden.create({
+      data: {
+        companyId: A.companyId, userId: A.userId, nombre: 'Módulo de 40 pies',
+        renglonesBase: [{ clave: 'estructura_base', descripcion: 'Estructura base' }],
+        etapas: { create: etapas.map(([clave, nombre, esEntrega], index) => ({
+          userId: A.userId, clave, nombre, orden: index + 1, esEntrega,
+        })) },
+      },
+    }));
+    expect(await service.listTemplates(A.userId, A.companyId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ nombre: 'Módulo de 40 pies' }),
+    ]));
+    const order = await service.create(A.userId, A.companyId, {
+      codigo: 'OT-MODELO', descripcion: 'Obra X', cliente: 'Cliente ficticio',
+      plantillaId: modelo.id, fechaInicio: null,
+    }, actor(A.userId));
+
+    const originales = await service.listStages(A.userId, order.id);
+    expect(originales).toHaveLength(7);
+    expect(originales.filter((etapa) => etapa.esEntrega)).toHaveLength(2);
+    expect(order.renglonesBase).toEqual([{ clave: 'estructura_base', descripcion: 'Estructura base' }]);
+
+    await withTenant(A.userId, (tx) => tx.plantillaOrden.update({
+      where: { id: modelo.id }, data: { nombre: 'Modelo editado' },
+    }));
+    expect(await service.listStages(A.userId, order.id)).toEqual(originales);
+  });
+
+  it('rechaza con 404 una plantilla de otra empresa', async () => {
+    const service = new OrdenTrabajoService();
+    const plantillaAjena = await withTenant(B.userId, (tx) => tx.plantillaOrden.create({
+      data: { companyId: B.companyId, userId: B.userId, nombre: 'Modelo privado', renglonesBase: [] },
+    }));
+
+    await expect(service.create(A.userId, A.companyId, {
+      codigo: 'OT-AJENA', descripcion: 'Obra X', cliente: 'Cliente ficticio',
+      plantillaId: plantillaAjena.id, fechaInicio: null,
+    }, actor(A.userId))).rejects.toMatchObject({ statusCode: 404 });
+  });
+
   it('recorre el ciclo hasta pendiente de cierre y audita cada paso', async () => {
     const service = new OrdenTrabajoService();
     const order = await service.create(A.userId, A.companyId, {

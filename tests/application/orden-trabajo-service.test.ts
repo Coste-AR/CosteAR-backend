@@ -8,6 +8,8 @@ const ORDER = '44444444-4444-4444-4444-444444444444';
 const { db, recordTraceAudit } = vi.hoisted(() => {
   const tx = {
     ordenTrabajo: { create: vi.fn(), update: vi.fn() },
+    plantillaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
+    etapaOrden: { findMany: vi.fn() },
     traceAuditLog: { create: vi.fn() },
   };
   return {
@@ -15,6 +17,8 @@ const { db, recordTraceAudit } = vi.hoisted(() => {
     db: {
       company: { findFirst: vi.fn() },
       ordenTrabajo: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+      plantillaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
+      etapaOrden: { findMany: vi.fn() },
       traceAuditLog: { create: vi.fn() },
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     },
@@ -61,6 +65,22 @@ describe('OrdenTrabajoService', () => {
 
     expect(db.ordenTrabajo.findFirst).toHaveBeenCalledWith({ where: { companyId: COMPANY, codigo: 'OT-001' } });
     expect(recordTraceAudit).toHaveBeenCalledOnce();
+  });
+
+  it('copia las etapas por defecto del paquete cuando no se eligió modelo', async () => {
+    const { OrdenTrabajoService } = await import('@/application/ordenes/orden-trabajo-service.js');
+    db.company.findFirst.mockResolvedValue({ id: COMPANY, userId: USER, industry: 'CONSTRUCCION_MODULAR' });
+    db.ordenTrabajo.create.mockResolvedValue({ id: ORDER, companyId: COMPANY, codigo: 'OT-001', estado: 'BORRADOR', etapas: [] });
+    const service = new OrdenTrabajoService(db as never);
+
+    await service.create(USER, COMPANY, {
+      codigo: 'OT-001', descripcion: 'Obra X', cliente: 'Cliente ficticio', plantillaId: null,
+      fechaInicio: null,
+    }, actor);
+
+    const data = db.ordenTrabajo.create.mock.calls[0][0].data;
+    expect(data.etapas.create).toHaveLength(7);
+    expect(data.etapas.create.filter((etapa: { esEntrega: boolean }) => etapa.esEntrega)).toHaveLength(2);
   });
 
   it('rechaza saltar de BORRADOR a EN_PRODUCCION con error tipado', async () => {

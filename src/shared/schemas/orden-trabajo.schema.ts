@@ -33,3 +33,14 @@ export const ordenTrabajoSchema = z.object({
 }).passthrough();
 export const ordenTrabajoEnvelopeSchema = z.object({ data: ordenTrabajoSchema });
 export const ordenesTrabajoEnvelopeSchema = z.object({ data: z.array(ordenTrabajoSchema) });
+
+export const etapaOrdenSchema = z.object({
+  id: z.string().uuid(), clave: z.string(), nombre: z.string(), orden: z.number().int(), esEntrega: z.boolean(),
+}).passthrough();
+export const etapasOrdenEnvelopeSchema = z.object({ data: z.array(etapaOrdenSchema) });
+
+export const plantillaOrdenSchema = z.object({
+  id: z.string().uuid(), companyId: z.string().uuid().nullable(), nombre: z.string(),
+  renglonesBase: z.array(z.unknown()), etapas: z.array(etapaOrdenSchema),
+}).passthrough();
+export const plantillasOrdenEnvelopeSchema = z.object({ data: z.array(plantillaOrdenSchema) });

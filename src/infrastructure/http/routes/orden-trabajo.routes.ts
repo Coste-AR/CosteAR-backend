@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import { OrdenTrabajoService } from '../../../application/ordenes/orden-trabajo-service.js';
-import { ordenTrabajoCreateSchema, ordenTrabajoEnvelopeSchema, ordenesTrabajoEnvelopeSchema, ordenTrabajoTransitionSchema } from '../../../shared/schemas/orden-trabajo.schema.js';
+import { etapasOrdenEnvelopeSchema, ordenTrabajoCreateSchema, ordenTrabajoEnvelopeSchema, ordenesTrabajoEnvelopeSchema, ordenTrabajoTransitionSchema, plantillasOrdenEnvelopeSchema } from '../../../shared/schemas/orden-trabajo.schema.js';
 import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 import { authenticate } from '../plugins/authenticate.js';
 
@@ -29,9 +29,17 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
     const { companyId } = companyParams.parse(request.params);
     return { data: await service.list(request.authUser!.id, companyId) };
   });
+  contract.get('/companies/:companyId/plantillas-orden', { preHandler: authenticate, schema: { response: { 200: plantillasOrdenEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
+    const { companyId } = companyParams.parse(request.params);
+    return { data: await service.listTemplates(request.authUser!.id, companyId) };
+  });
   contract.get('/ordenes-trabajo/:id', { preHandler: authenticate, schema: { response: { 200: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
     const { id } = idParams.parse(request.params);
     return { data: await service.get(request.authUser!.id, id) };
+  });
+  contract.get('/ordenes-trabajo/:id/etapas', { preHandler: authenticate, schema: { response: { 200: etapasOrdenEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { data: await service.listStages(request.authUser!.id, id) };
   });
   contract.post('/ordenes-trabajo/:id/transiciones', {
     preHandler: authenticate, schema: { body: ordenTrabajoTransitionSchema, response: { 200: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } },

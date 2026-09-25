@@ -92,6 +92,10 @@ export const RLS_MODELS = new Set([
   'ConfiguracionModuloRubro',
   // C1-F1a: órdenes que atraviesan períodos.
   'OrdenTrabajo',
+  // C1-F1b: modelos y snapshots de sus etapas.
+  'PlantillaOrden',
+  'EtapaPlantillaOrden',
+  'EtapaOrden',
   // S-03 y S-04.
   'ActivoAmortizable',
   'DesperdicioRegistro',
