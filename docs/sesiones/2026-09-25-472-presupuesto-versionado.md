@@ -1,7 +1,7 @@
 ---
 issue: 472
 repo: CosteAR-backend
-pr: pendiente
+pr: 490
 rama: feat/presupuestos-por-version
 agente: codex
 modelo: gpt-5
