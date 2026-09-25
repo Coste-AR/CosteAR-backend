@@ -7,6 +7,8 @@ const ORDER = '44444444-4444-4444-4444-444444444444';
 const { db } = vi.hoisted(() => ({ db: {
   company: { findFirst: vi.fn() },
   ordenTrabajo: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  plantillaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
+  etapaOrden: { findMany: vi.fn() },
   traceAuditLog: { create: vi.fn() },
 } }));
 vi.mock('@/infrastructure/database/prisma.js', () => ({
@@ -36,6 +38,8 @@ beforeEach(() => {
   db.company.findFirst.mockResolvedValue({ id: COMPANY, userId: USER });
   db.ordenTrabajo.findFirst.mockResolvedValue(null);
   db.ordenTrabajo.create.mockResolvedValue({ id: ORDER, companyId: COMPANY, codigo: 'OT-001', descripcion: 'Obra X', cliente: 'Cliente ficticio', estado: 'BORRADOR' });
+  db.plantillaOrden.findMany.mockResolvedValue([]);
+  db.etapaOrden.findMany.mockResolvedValue([]);
 });
 
 describe('rutas de órdenes de trabajo', () => {
@@ -64,5 +68,21 @@ describe('rutas de órdenes de trabajo', () => {
     const res = await api.inject({ method: 'POST', url: `/ordenes-trabajo/${ORDER}/transiciones`, payload: { estado: 'EN_PRODUCCION' } });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('INVALID_STATE_TRANSITION');
+  });
+
+  it('expone los modelos de la empresa', async () => {
+    const api = await app();
+    const res = await api.inject({ method: 'GET', url: `/companies/${COMPANY}/plantillas-orden` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ data: [] });
+  });
+
+  it('expone las etapas visibles de una orden', async () => {
+    db.ordenTrabajo.findFirst.mockResolvedValue({ id: ORDER, userId: USER, estado: 'BORRADOR' });
+    db.etapaOrden.findMany.mockResolvedValue([{ id: COMPANY, clave: 'montaje', nombre: 'Montaje', orden: 1, esEntrega: true }]);
+    const api = await app();
+    const res = await api.inject({ method: 'GET', url: `/ordenes-trabajo/${ORDER}/etapas` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([expect.objectContaining({ nombre: 'Montaje', esEntrega: true })]);
   });
 });

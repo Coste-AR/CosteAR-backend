@@ -214,6 +214,7 @@ enum CondicionIva {
 
 model Company {
   ordenesTrabajo           OrdenTrabajo[]
+  plantillasOrden          PlantillaOrden[]
   classifierAiCalls        ClassifierAiCall[]
   panelTelemetryEvents     PanelTelemetryEvent[]
   priceIndexSeries         PriceIndexSeries?
@@ -319,6 +320,9 @@ model OrdenTrabajo {
   descripcion      String              @db.VarChar(500)
   cliente          String              @db.VarChar(200)
   plantillaId      String?             @db.Uuid
+  plantilla        PlantillaOrden?     @relation(fields: [plantillaId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  renglonesBase    Json                @default("[]")
+  etapas           EtapaOrden[]
   estado           EstadoOrdenTrabajo  @default(BORRADOR)
   fechaInicio      DateTime?           @db.Date
   fechaFinTecnica  DateTime?           @db.Timestamptz
@@ -330,6 +334,60 @@ model OrdenTrabajo {
   @@index([userId])
   @@index([companyId, estado])
   @@map("ordenes_trabajo")
+}
+
+/// Modelo reutilizable. `companyId = null` identifica una plantilla declarada
+/// por el paquete; una empresa puede sumar las propias sin modificarla.
+model PlantillaOrden {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId      String?                 @db.Uuid
+  company        Company?                @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId         String?                 @db.Uuid
+  nombre         String                  @db.VarChar(160)
+  renglonesBase  Json                    @default("[]")
+  etapas         EtapaPlantillaOrden[]
+  ordenes        OrdenTrabajo[]
+  createdAt      DateTime                @default(now()) @db.Timestamptz
+  updatedAt      DateTime                @updatedAt @db.Timestamptz
+
+  @@index([userId])
+  @@index([companyId])
+  @@map("plantillas_orden")
+}
+
+model EtapaPlantillaOrden {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  plantillaId String          @db.Uuid
+  plantilla   PlantillaOrden  @relation(fields: [plantillaId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId      String?         @db.Uuid
+  clave       String          @db.VarChar(80)
+  nombre      String          @db.VarChar(160)
+  orden       Int
+  esEntrega   Boolean         @default(false)
+
+  @@unique([plantillaId, clave])
+  @@unique([plantillaId, orden])
+  @@index([userId])
+  @@map("etapas_plantilla_orden")
+}
+
+/// Snapshot de una etapa sobre la orden: no se enlaza a la etapa del modelo
+/// para que una edición posterior no reescriba el alcance histórico.
+model EtapaOrden {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ordenId   String        @db.Uuid
+  ordenObra OrdenTrabajo  @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId    String        @db.Uuid
+  clave     String        @db.VarChar(80)
+  nombre    String        @db.VarChar(160)
+  orden     Int
+  esEntrega Boolean       @default(false)
+  createdAt DateTime      @default(now()) @db.Timestamptz
+
+  @@unique([ordenId, clave])
+  @@unique([ordenId, orden])
+  @@index([userId])
+  @@map("etapas_orden")
 }
 
 model SegmentoAnalisis {

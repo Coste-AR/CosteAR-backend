@@ -592,6 +592,35 @@ CREATE POLICY tenant_isolation ON ordenes_trabajo
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE plantillas_orden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plantillas_orden FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON plantillas_orden;
+DROP POLICY IF EXISTS tenant_select ON plantillas_orden;
+DROP POLICY IF EXISTS tenant_write ON plantillas_orden;
+CREATE POLICY tenant_select ON plantillas_orden FOR SELECT
+  USING ("userId" IS NULL OR "userId" = current_app_user_id());
+CREATE POLICY tenant_write ON plantillas_orden FOR ALL
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE etapas_plantilla_orden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE etapas_plantilla_orden FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON etapas_plantilla_orden;
+DROP POLICY IF EXISTS tenant_select ON etapas_plantilla_orden;
+DROP POLICY IF EXISTS tenant_write ON etapas_plantilla_orden;
+CREATE POLICY tenant_select ON etapas_plantilla_orden FOR SELECT
+  USING ("userId" IS NULL OR "userId" = current_app_user_id());
+CREATE POLICY tenant_write ON etapas_plantilla_orden FOR ALL
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE etapas_orden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE etapas_orden FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON etapas_orden;
+CREATE POLICY tenant_isolation ON etapas_orden
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;
