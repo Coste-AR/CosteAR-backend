@@ -183,3 +183,6 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 485,468,AlanArevalo1,dev,2026-09-25T13:24:53Z,2026-09-25T13:28:34Z,0.1,12,795,7,9,0,,,docs/sesiones/2026-09-25-468-paquete-construccion-modular.md
 486,469,AlanArevalo1,dev,2026-09-25T14:23:09Z,2026-09-25T14:30:02Z,0.1,15,3620,0,11,2,,,docs/sesiones/2026-09-25-469-ordenes-trabajo.md
 487,470,AlanArevalo1,dev,2026-09-25T15:24:59Z,2026-09-25T15:28:20Z,0.1,14,1996,32,8,0,,,docs/sesiones/2026-09-25-470-plantillas-etapas-orden.md
+489,471,AlanArevalo1,dev,2026-09-25T19:21:24Z,2026-09-25T19:24:47Z,0.1,23,547,26,8,0,,,docs/sesiones/2026-09-25-471-acceso-ordenes-depositos.md
+490,472,AlanArevalo1,dev,2026-09-25T20:15:10Z,2026-09-25T20:18:03Z,0.0,16,5270,66,9,0,,,docs/sesiones/2026-09-25-472-presupuesto-versionado.md
+491,473,AlanArevalo1,dev,2026-09-25T21:18:25Z,2026-09-25T21:21:47Z,0.1,17,2838,0,9,0,,,docs/sesiones/2026-09-25-473-inventario-ppp.md
