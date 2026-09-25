@@ -1,14 +1,14 @@
 ---
 issue: 473
 repo: CosteAR-backend
-pr: PENDIENTE
+pr: 491
 rama: feat/inventario-ppp
 agente: codex
 modelo: gpt-5
 tanda: C1
 inicio: 2026-09-25T17:56:00-03:00
-fin: 2026-09-25T18:14:00-03:00
-minutos: 18
+fin: 2026-09-25T18:18:31-03:00
+minutos: 23
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 4
