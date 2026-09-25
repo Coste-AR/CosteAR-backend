@@ -661,3 +661,11 @@ ALTER TABLE precios_transferencia ENABLE ROW LEVEL SECURITY;
 ALTER TABLE precios_transferencia FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON precios_transferencia;
 CREATE POLICY tenant_isolation ON precios_transferencia USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+
+-- rotaciones_segmento (M14-01): declaraciones append-only por tenant.
+ALTER TABLE rotaciones_segmento ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rotaciones_segmento FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON rotaciones_segmento;
+CREATE POLICY tenant_isolation ON rotaciones_segmento
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
