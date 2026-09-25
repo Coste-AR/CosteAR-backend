@@ -1,14 +1,14 @@
 ---
 issue: 428
 repo: CosteAR-backend
-pr: pendiente
+pr: 483
 rama: feat/ranking-rotacion
 agente: codex
 modelo: gpt-5
 tanda: B3
 inicio: 2026-09-25T01:59-03:00
-fin: 2026-09-25T02:10-03:00
-minutos: 11
+fin: 2026-09-25T02:13-03:00
+minutos: 14
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 2
