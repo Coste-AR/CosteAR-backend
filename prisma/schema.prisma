@@ -243,6 +243,7 @@ model Company {
   operationScaleValue      Decimal?                   @db.Decimal(18, 4)
   operationScaleUnit       String?
   parametrosCosteo         ParametroCosteo[]
+  versionesPresupuesto     VersionPresupuesto[]
   conceptosCosteo          ConceptoCosteo[]
   importesConceptoCosteo   ConceptoCosteoImporte[]
   tramosSemifijos          TramoSemifijo[]
@@ -312,24 +313,25 @@ enum EstadoOrdenTrabajo {
 /// períodos. Los hechos conservan su propio `periodoImputado`: la orden no
 /// pertenece a un período.
 model OrdenTrabajo {
-  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  companyId        String              @db.Uuid
-  company          Company             @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  userId           String              @db.Uuid
-  codigo           String              @db.VarChar(80)
-  descripcion      String              @db.VarChar(500)
-  cliente          String              @db.VarChar(200)
-  plantillaId      String?             @db.Uuid
-  plantilla        PlantillaOrden?     @relation(fields: [plantillaId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  renglonesBase    Json                @default("[]")
-  etapas           EtapaOrden[]
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId             String                 @db.Uuid
+  company               Company                @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId                String                 @db.Uuid
+  codigo                String                 @db.VarChar(80)
+  descripcion           String                 @db.VarChar(500)
+  cliente               String                 @db.VarChar(200)
+  plantillaId           String?                @db.Uuid
+  plantilla             PlantillaOrden?        @relation(fields: [plantillaId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  renglonesBase         Json                   @default("[]")
+  etapas                EtapaOrden[]
+  presupuestos          VersionPresupuesto[]
   operadoresAutorizados OperatorOrdenTrabajo[]
-  estado           EstadoOrdenTrabajo  @default(BORRADOR)
-  fechaInicio      DateTime?           @db.Date
-  fechaFinTecnica  DateTime?           @db.Timestamptz
-  fechaCierre      DateTime?           @db.Timestamptz
-  createdAt        DateTime            @default(now()) @db.Timestamptz
-  updatedAt        DateTime            @updatedAt @db.Timestamptz
+  estado                EstadoOrdenTrabajo     @default(BORRADOR)
+  fechaInicio           DateTime?              @db.Date
+  fechaFinTecnica       DateTime?              @db.Timestamptz
+  fechaCierre           DateTime?              @db.Timestamptz
+  createdAt             DateTime               @default(now()) @db.Timestamptz
+  updatedAt             DateTime               @updatedAt @db.Timestamptz
 
   @@unique([companyId, codigo])
   @@index([userId])
@@ -340,16 +342,16 @@ model OrdenTrabajo {
 /// Modelo reutilizable. `companyId = null` identifica una plantilla declarada
 /// por el paquete; una empresa puede sumar las propias sin modificarla.
 model PlantillaOrden {
-  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  companyId      String?                 @db.Uuid
-  company        Company?                @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  userId         String?                 @db.Uuid
-  nombre         String                  @db.VarChar(160)
-  renglonesBase  Json                    @default("[]")
-  etapas         EtapaPlantillaOrden[]
-  ordenes        OrdenTrabajo[]
-  createdAt      DateTime                @default(now()) @db.Timestamptz
-  updatedAt      DateTime                @updatedAt @db.Timestamptz
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId     String?               @db.Uuid
+  company       Company?              @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId        String?               @db.Uuid
+  nombre        String                @db.VarChar(160)
+  renglonesBase Json                  @default("[]")
+  etapas        EtapaPlantillaOrden[]
+  ordenes       OrdenTrabajo[]
+  createdAt     DateTime              @default(now()) @db.Timestamptz
+  updatedAt     DateTime              @updatedAt @db.Timestamptz
 
   @@index([userId])
   @@index([companyId])
@@ -357,14 +359,14 @@ model PlantillaOrden {
 }
 
 model EtapaPlantillaOrden {
-  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  plantillaId String          @db.Uuid
-  plantilla   PlantillaOrden  @relation(fields: [plantillaId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  userId      String?         @db.Uuid
-  clave       String          @db.VarChar(80)
-  nombre      String          @db.VarChar(160)
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  plantillaId String         @db.Uuid
+  plantilla   PlantillaOrden @relation(fields: [plantillaId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId      String?        @db.Uuid
+  clave       String         @db.VarChar(80)
+  nombre      String         @db.VarChar(160)
   orden       Int
-  esEntrega   Boolean         @default(false)
+  esEntrega   Boolean        @default(false)
 
   @@unique([plantillaId, clave])
   @@unique([plantillaId, orden])
@@ -375,20 +377,89 @@ model EtapaPlantillaOrden {
 /// Snapshot de una etapa sobre la orden: no se enlaza a la etapa del modelo
 /// para que una edición posterior no reescriba el alcance histórico.
 model EtapaOrden {
-  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  ordenId   String        @db.Uuid
-  ordenObra OrdenTrabajo  @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  userId    String        @db.Uuid
-  clave     String        @db.VarChar(80)
-  nombre    String        @db.VarChar(160)
-  orden     Int
-  esEntrega Boolean       @default(false)
-  createdAt DateTime      @default(now()) @db.Timestamptz
+  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ordenId              String               @db.Uuid
+  ordenObra            OrdenTrabajo         @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId               String               @db.Uuid
+  clave                String               @db.VarChar(80)
+  nombre               String               @db.VarChar(160)
+  orden                Int
+  esEntrega            Boolean              @default(false)
+  createdAt            DateTime             @default(now()) @db.Timestamptz
+  renglonesPresupuesto RenglonPresupuesto[]
 
   @@unique([ordenId, clave])
   @@unique([ordenId, orden])
   @@index([userId])
   @@map("etapas_orden")
+}
+
+enum TipoVersionPresupuesto {
+  BASE
+  ADICIONAL
+  REVISION
+}
+
+enum EstadoVersionPresupuesto {
+  BORRADOR
+  PREPARADO
+  APROBADO
+  RECHAZADO
+  VENCIDO
+}
+
+enum ElementoPresupuesto {
+  MP
+  MOD
+  CIP
+  TERCEROS
+  ENTREGA
+}
+
+model VersionPresupuesto {
+  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId      String                   @db.Uuid
+  company        Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ordenId        String                   @db.Uuid
+  orden          OrdenTrabajo             @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId         String                   @db.Uuid
+  tipo           TipoVersionPresupuesto
+  numero         Int
+  vigenteDesde   DateTime                 @db.Date
+  vigenciaDias   Int
+  estado         EstadoVersionPresupuesto @default(BORRADOR)
+  costoPrevisto  Decimal                  @db.Decimal(18, 4)
+  precio         Decimal                  @db.Decimal(18, 4)
+  plazoDias      Int
+  preparadoPor   String?                  @db.Uuid
+  aprobadoPor    String?                  @db.Uuid
+  causaAdicional String?                  @db.VarChar(500)
+  renglones      RenglonPresupuesto[]
+  createdAt      DateTime                 @default(now()) @db.Timestamptz
+  updatedAt      DateTime                 @updatedAt @db.Timestamptz
+
+  @@unique([ordenId, numero])
+  @@index([userId])
+  @@index([companyId, estado])
+  @@map("versiones_presupuesto")
+}
+
+model RenglonPresupuesto {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  presupuestoId String              @db.Uuid
+  presupuesto   VersionPresupuesto  @relation(fields: [presupuestoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId        String              @db.Uuid
+  elemento      ElementoPresupuesto
+  etapaId       String?             @db.Uuid
+  etapa         EtapaOrden?         @relation(fields: [etapaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  cantidad      Decimal             @db.Decimal(18, 4)
+  unidadId      String              @db.Uuid
+  unidad        UnidadMedida        @relation(fields: [unidadId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  precio        Decimal             @db.Decimal(18, 4)
+
+  @@index([userId])
+  @@index([presupuestoId])
+  @@map("renglones_presupuesto")
 }
 
 model SegmentoAnalisis {
@@ -899,6 +970,7 @@ model CostStructure {
    * /**
    * /**
    * /**
+   * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
    */
   periodicity      Periodicity?
@@ -927,6 +999,7 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -1859,6 +1932,7 @@ model CalculationRun {
    * /**
    * /**
    * /**
+   * /**
    * Período al que pertenece. Nullable: las corridas anteriores al modelo de
    * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
    * dejarlas sin él.
@@ -2266,6 +2340,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -2292,6 +2367,7 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2342,6 +2418,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
   periodCostMp           Decimal? @db.Decimal(18, 4)
@@ -2377,6 +2454,7 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2581,35 +2659,35 @@ model IndustryProfile {
 }
 
 model PaqueteRubro {
-  id             String   @id @default(uuid()) @db.Uuid
-  category       String
-  companyId      String?  @db.Uuid
-  structureId    String?  @db.Uuid
-  periodId       String?  @db.Uuid
-  userId         String?  @db.Uuid
+  id                       String   @id @default(uuid()) @db.Uuid
+  category                 String
+  companyId                String?  @db.Uuid
+  structureId              String?  @db.Uuid
+  periodId                 String?  @db.Uuid
+  userId                   String?  @db.Uuid
   /// Nombre corto visible del producto que declara el paquete (por ejemplo,
   /// "AVI"). Nullable para paquetes históricos o que no necesiten marca.
-  nombreProducto String?
+  nombreProducto           String?
   /// Distingue un nombre decidido de una propuesta editable del paquete.
-  nombreProductoConfirmado Boolean @default(true)
-  lexicon        Json
-  icons          Json
+  nombreProductoConfirmado Boolean  @default(true)
+  lexicon                  Json
+  icons                    Json
   /// Entidades y capacidades que el paquete permite asignar a una membresía.
   /// Nullable en paquetes históricos: ausencia declarada, nunca permisos implícitos.
-  access         Json?
-  variants       Json
-  seedParameters Json
-  alertRules     Json
-  screens        Json
+  access                   Json?
+  variants                 Json
+  seedParameters           Json
+  alertRules               Json
+  screens                  Json
   /// Módulos declarativos del rubro. Cada uno informa qué habilita, qué
   /// preguntas vuelven relevantes y su estado inicial para un tenant nuevo.
-  modulos        Json     @default("[]")
+  modulos                  Json     @default("[]")
   // Escala de calibración del perfil: { value, unit }. Nullable hasta que el
   // rubro la declare; la cascada no inventa una si no hay dato.
-  scale          Json?
-  company        Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paquetes_rubro_company_fkey")
-  createdAt      DateTime @default(now()) @db.Timestamptz
-  updatedAt      DateTime @updatedAt @db.Timestamptz
+  scale                    Json?
+  company                  Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paquetes_rubro_company_fkey")
+  createdAt                DateTime @default(now()) @db.Timestamptz
+  updatedAt                DateTime @updatedAt @db.Timestamptz
 
   @@index([category, companyId, structureId, periodId], map: "paquetes_rubro_scope_idx")
   @@map("paquetes_rubro")
@@ -2681,7 +2759,8 @@ model UnidadMedida {
   baseId String?       @db.Uuid
   base   UnidadMedida? @relation("UnidadBase", fields: [baseId], references: [id], onDelete: Restrict)
 
-  derivadas UnidadMedida[] @relation("UnidadBase")
+  derivadas            UnidadMedida[]       @relation("UnidadBase")
+  renglonesPresupuesto RenglonPresupuesto[]
 
   /**
    * Cuántas unidades BASE entran en UNA de esta. Cajón sobre huevo = 360.

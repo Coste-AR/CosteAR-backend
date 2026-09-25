@@ -6,6 +6,8 @@ import { etapasOrdenEnvelopeSchema, ordenTrabajoCreateSchema, ordenTrabajoEnvelo
 import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 import { authenticate } from '../plugins/authenticate.js';
 import { OperatorScopeService, type PermisoOperador } from '../../../application/empresa/operator-scope-service.js';
+import { PresupuestoOrdenService } from '../../../application/ordenes/presupuesto-orden-service.js';
+import { presupuestoCreateSchema, presupuestoEnvelopeSchema, presupuestosEnvelopeSchema, presupuestoRevalidarSchema } from '../../../shared/schemas/presupuesto-orden.schema.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const idParams = z.object({ id: z.string().uuid() });
@@ -23,6 +25,7 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
   app.setValidatorCompiler(validatorCompiler);
   const contract = app.withTypeProvider<ZodTypeProvider>();
   const service = new OrdenTrabajoService();
+  const presupuestos = new PresupuestoOrdenService();
   const scopes = new OperatorScopeService();
   contract.post('/companies/:companyId/ordenes-trabajo', {
     preHandler: authenticate, schema: { body: ordenTrabajoCreateSchema, response: { 201: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } },
@@ -66,5 +69,40 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
     const permission: PermisoOperador = input.estado === 'PENDIENTE_CIERRE' || input.estado === 'CERRADA' ? 'ordenes.cerrar' : 'ordenes.editar';
     const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, permission) : request.authUser!.id;
     return { data: await service.transition(tenantId, id, input, actorFrom(request)) };
+  });
+  contract.post('/ordenes-trabajo/:id/presupuestos', {
+    preHandler: authenticate, schema: { body: presupuestoCreateSchema, response: { 201: presupuestoEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.editar') : request.authUser!.id;
+    return reply.code(201).send({ data: await presupuestos.create(tenantId, id, presupuestoCreateSchema.parse(request.body), actorFrom(request)) });
+  });
+  contract.get('/ordenes-trabajo/:id/presupuestos', {
+    preHandler: authenticate, schema: { response: { 200: presupuestosEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.ver') : request.authUser!.id;
+    const data = await presupuestos.list(tenantId, id);
+    if (!esOperador(request)) return { data };
+    const canSeeMargin = await scopes.assertPermission(request.authUser!.id, 'ordenes.ver_margen').then(() => true, () => false);
+    if (canSeeMargin) return { data };
+    const { precioContractual: _precioContractual, ...visible } = data;
+    return { data: { ...visible, presupuestos: data.presupuestos.map(sinMargen) } };
+  });
+  const transition = (action: 'prepare' | 'approve' | 'reject') => async (request: FastifyRequest) => {
+    const { id } = idParams.parse(request.params);
+    const permission: PermisoOperador = action === 'approve' ? 'ordenes.aprobar_presupuesto' : 'ordenes.editar';
+    const tenantId = esOperador(request) ? await scopes.tenantForPresupuesto(request.authUser!.id, id, permission) : request.authUser!.id;
+    return { data: await presupuestos[action](tenantId, id, actorFrom(request)) };
+  };
+  contract.post('/presupuestos/:id/preparar', { preHandler: authenticate, schema: { response: { 200: presupuestoEnvelopeSchema, ...apiErrorResponses } } }, transition('prepare'));
+  contract.post('/presupuestos/:id/aprobar', { preHandler: authenticate, schema: { response: { 200: presupuestoEnvelopeSchema, ...apiErrorResponses } } }, transition('approve'));
+  contract.post('/presupuestos/:id/rechazar', { preHandler: authenticate, schema: { response: { 200: presupuestoEnvelopeSchema, ...apiErrorResponses } } }, transition('reject'));
+  contract.post('/presupuestos/:id/revalidar', {
+    preHandler: authenticate, schema: { body: presupuestoRevalidarSchema, response: { 200: presupuestoEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForPresupuesto(request.authUser!.id, id, 'ordenes.editar') : request.authUser!.id;
+    return { data: await presupuestos.revalidate(tenantId, id, presupuestoRevalidarSchema.parse(request.body), actorFrom(request)) };
   });
 }

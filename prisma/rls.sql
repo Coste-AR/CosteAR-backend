@@ -678,6 +678,39 @@ CREATE POLICY tenant_isolation ON etapas_orden
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE versiones_presupuesto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE versiones_presupuesto FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_select ON versiones_presupuesto;
+DROP POLICY IF EXISTS tenant_write ON versiones_presupuesto;
+CREATE POLICY tenant_select ON versiones_presupuesto FOR SELECT USING (
+  "userId" = current_app_user_id() OR EXISTS (
+    SELECT 1 FROM operator_ordenes_trabajo oot
+    JOIN operator_memberships om ON om.id = oot."membershipId"
+    WHERE oot."ordenId" = versiones_presupuesto."ordenId"
+      AND om."operatorId" = current_app_user_id() AND om."isActive" = true
+      AND 'ordenes.ver' = ANY(om."permisos")
+  )
+);
+CREATE POLICY tenant_write ON versiones_presupuesto FOR ALL
+  USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE renglones_presupuesto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE renglones_presupuesto FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_select ON renglones_presupuesto;
+DROP POLICY IF EXISTS tenant_write ON renglones_presupuesto;
+CREATE POLICY tenant_select ON renglones_presupuesto FOR SELECT USING (
+  "userId" = current_app_user_id() OR EXISTS (
+    SELECT 1 FROM versiones_presupuesto vp
+    JOIN operator_ordenes_trabajo oot ON oot."ordenId" = vp."ordenId"
+    JOIN operator_memberships om ON om.id = oot."membershipId"
+    WHERE vp.id = renglones_presupuesto."presupuestoId"
+      AND om."operatorId" = current_app_user_id() AND om."isActive" = true
+      AND 'ordenes.ver' = ANY(om."permisos")
+  )
+);
+CREATE POLICY tenant_write ON renglones_presupuesto FOR ALL
+  USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;

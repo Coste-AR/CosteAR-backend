@@ -10,7 +10,7 @@ describe('paquete de construcción modular', () => {
       'ordenes.ver', 'ordenes.editar', 'ordenes.ver_margen', 'ordenes.aprobar_presupuesto',
       'ordenes.cerrar', 'inventario.mover', 'horas.cargar', 'horas.aprobar',
     ]);
-    expect(PAQUETE_CONSTRUCCION_MODULAR.access.entities).toEqual(['OrdenTrabajo', 'Deposito']);
+    expect(PAQUETE_CONSTRUCCION_MODULAR.access.entities).toEqual(['OrdenTrabajo', 'VersionPresupuesto', 'Deposito']);
   });
 
   it('camino de falla: un parámetro sin valor declarado queda ausente y sin confirmar', () => {
