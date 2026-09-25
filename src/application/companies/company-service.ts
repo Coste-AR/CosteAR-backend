@@ -129,6 +129,7 @@ export class CompanyService {
         }),
         periodicity: input.periodicity ?? existing.periodicity,
         condicionIva: input.condicionIva ?? existing.condicionIva,
+        politicaPpp: input.politicaPpp ?? existing.politicaPpp,
         ...(confirmaCondicion
           ? { condicionIvaRevisar: false, condicionIvaRevisarNota: null, condicionIvaRevisarAt: null }
           : {}),

@@ -49,6 +49,7 @@ export type OperationScaleInput = z.infer<typeof operationScaleSchema>;
  * Monotributo / Exento  → el IVA no se recupera, es costo: se costea sobre el TOTAL.
  */
 export const condicionIvaSchema = z.enum(['RESPONSABLE_INSCRIPTO', 'MONOTRIBUTO', 'EXENTO']);
+export const politicaPppSchema = z.enum(['MOVIL', 'PERIODO']);
 export type CondicionIvaInput = z.infer<typeof condicionIvaSchema>;
 
 export const PREDEFINED_INDUSTRIES = [
@@ -72,6 +73,7 @@ export const createCompanySchema = z.object({
   // Opcional en el contrato: omitirla deja el default de la DB
   // (RESPONSABLE_INSCRIPTO), que es lo que asume el resto del sistema.
   condicionIva: condicionIvaSchema.optional(),
+  politicaPpp: politicaPppSchema.optional(),
 });
 export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
 

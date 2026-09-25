@@ -213,6 +213,8 @@ enum CondicionIva {
 }
 
 model Company {
+  articulos                Articulo[]
+  movimientosInventario   MovimientoInventario[]
   ordenesTrabajo           OrdenTrabajo[]
   plantillasOrden          PlantillaOrden[]
   classifierAiCalls        ClassifierAiCall[]
@@ -279,6 +281,7 @@ model Company {
   // `ledger-builder` costeaba sobre el neto sin preguntar. Cualquier otro
   // default revaluaría en silencio datos vivos. Ver DECISIONES.md (CL-09).
   condicionIva CondicionIva @default(RESPONSABLE_INSCRIPTO)
+  politicaPpp PoliticaPpp @default(MOVIL)
 
   // Señal de la IA: el comprobante mostró indicios ("Factura C", "Consumidor
   // Final", "Monotributista", "Responsable No Inscripto") de que la condición
@@ -325,6 +328,8 @@ model OrdenTrabajo {
   renglonesBase         Json                   @default("[]")
   etapas                EtapaOrden[]
   presupuestos          VersionPresupuesto[]
+  movimientosInventario MovimientoInventario[] @relation("OrdenMovimientoInventario")
+  movimientosDestino    MovimientoInventario[] @relation("OrdenDestinoMovimientoInventario")
   operadoresAutorizados OperatorOrdenTrabajo[]
   estado                EstadoOrdenTrabajo     @default(BORRADOR)
   fechaInicio           DateTime?              @db.Date
@@ -2735,6 +2740,7 @@ model UnidadMedida {
   activosAmortizables    ActivoAmortizable[]
   desperdicioRegistros   DesperdicioRegistro[]
   depositos              Deposito[]
+  articulos              Articulo[]
   ventasProducto         VentaProducto[]
   recursosEscasos        RecursoEscaso[]
   id                     String                @id @default(uuid()) @db.Uuid
@@ -3144,6 +3150,68 @@ enum TipoMovimientoDeposito {
   EGRESO
 }
 
+enum PoliticaPpp {
+  MOVIL
+  PERIODO
+}
+
+enum TipoMovimientoInventario {
+  INGRESO
+  SALIDA
+  DEVOLUCION
+  TRANSFERENCIA
+  AJUSTE
+}
+
+model Articulo {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId      String   @db.Uuid
+  codigo      String   @db.VarChar(80)
+  descripcion String   @db.VarChar(300)
+  unidadId    String   @db.Uuid
+  unidad      UnidadMedida @relation(fields: [unidadId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  almacenable Boolean  @default(true)
+  movimientos MovimientoInventario[]
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@unique([companyId, codigo])
+  @@index([userId])
+  @@map("articulos")
+}
+
+model MovimientoInventario {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId          String   @db.Uuid
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId             String   @db.Uuid
+  articuloId         String   @db.Uuid
+  articulo           Articulo @relation(fields: [articuloId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  depositoId         String?  @db.Uuid
+  deposito           Deposito? @relation(fields: [depositoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tipo               TipoMovimientoInventario
+  cantidad           Decimal  @db.Decimal(18, 4)
+  costoUnitario      Decimal  @db.Decimal(18, 4)
+  fecha              DateTime @db.Date
+  ordenId            String?  @db.Uuid
+  orden              OrdenTrabajo? @relation("OrdenMovimientoInventario", fields: [ordenId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  ordenDestinoId     String?  @db.Uuid
+  ordenDestino       OrdenTrabajo? @relation("OrdenDestinoMovimientoInventario", fields: [ordenDestinoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  movimientoOrigenId String?  @db.Uuid
+  movimientoOrigen   MovimientoInventario? @relation("MovimientoInventarioOrigen", fields: [movimientoOrigenId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  derivados          MovimientoInventario[] @relation("MovimientoInventarioOrigen")
+  documento          String?  @db.VarChar(300)
+  periodoImputado    DateTime @db.Date
+  createdAt          DateTime @default(now()) @db.Timestamptz
+
+  @@index([companyId, articuloId, fecha, createdAt])
+  @@index([userId])
+  @@index([ordenId])
+  @@map("movimientos_inventario")
+}
+
 /**
  * Almacén físico genérico; su nombre visible corresponde al paquete de rubro.
  */
@@ -3161,6 +3229,7 @@ model Deposito {
   umbralBajo Decimal      @db.Decimal(18, 4)
 
   movimientos           MovimientoDeposito[]
+  movimientosInventario MovimientoInventario[]
   operadoresAutorizados OperatorDeposito[]
   createdAt             DateTime             @default(now()) @db.Timestamptz
   updatedAt             DateTime             @updatedAt @db.Timestamptz
