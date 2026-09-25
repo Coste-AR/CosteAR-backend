@@ -4,6 +4,7 @@ import { aplicarParametrosSemilla } from '../../prisma/seed-paquete-avicola.js';
 
 describe('paquete avícola de postura', () => {
   it('declara léxico, variantes sin confirmar, parámetros sin confirmar y reglas configurables', () => {
+    expect(PAQUETE_AVICOLA_POSTURA).toMatchSnapshot();
     expect(CATEGORIA_AVICOLA_POSTURA).toBe('AVICOLA_POSTURA');
     expect(PAQUETE_AVICOLA_POSTURA.nombreProducto).toBe('AVI');
     expect(PAQUETE_AVICOLA_POSTURA.lexicon.UnidadProductiva).toBe('Galpón');
