@@ -1,14 +1,14 @@
 ---
 issue: 470
 repo: CosteAR-backend
-pr: pendiente
+pr: 487
 rama: feat/plantillas-etapas-orden
 agente: codex
 modelo: gpt-5
 tanda: C1
 inicio: 2026-09-25T12:08:00-03:00
-fin: 2026-09-25T12:23:00-03:00
-minutos: 15
+fin: 2026-09-25T12:25:00-03:00
+minutos: 17
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 5
@@ -30,7 +30,7 @@ rebotes_de_guarda: 0
 
 ## Recursos
 
-- Tiempo: 15 minutos.
+- Tiempo: 17 minutos.
 - Tokens: no informado.
 - Intentos hasta verde: 5. El rojo deliberado produjo dos fallas funcionales;
   los otros rojos fueron de preparación local (`node_modules`, variables de
