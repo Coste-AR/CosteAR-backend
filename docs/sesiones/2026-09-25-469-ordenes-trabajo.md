@@ -7,13 +7,13 @@ agente: codex
 modelo: gpt-5
 tanda: C1
 inicio: 2026-09-25T11:04:00-03:00
-fin: 2026-09-25T11:23:00-03:00
-minutos: 19
+fin: 2026-09-25T11:28:00-03:00
+minutos: 24
 tokens: no-informado
 clears: 0
-intentos_hasta_verde: 4
+intentos_hasta_verde: 5
 rojos_deliberados: 1
-rebotes_de_guarda: 1
+rebotes_de_guarda: 2
 ---
 
 # 2026-09-25 — Órdenes de trabajo
@@ -33,12 +33,15 @@ rebotes_de_guarda: 1
 
 ## Recursos
 
-- Tiempo: 19 minutos.
+- Tiempo: 24 minutos.
 - Tokens: no informado.
 - Intentos hasta verde: 4. El rojo deliberado verificó que el servicio aún no
   existía; luego la integración encontró dos defectos del camino real (lecturas
   fuera del contexto RLS y conversión de fecha) antes de quedar verde. La matriz
   completa encontró la omisión inicial en `RLS_MODELS`.
+  El primer CI remoto probó una base totalmente vacía y detectó que la política
+  RLS no puede crearse dentro de la migración antes de que `apply-rls` instale
+  su función auxiliar; la política quedó en la fuente canónica `rls.sql`.
 - Comandos: `npm run briefing`, `npm ci`, `npm run prisma:generate`,
   `npm run db:setup`, `npm run lint`, `npm run typecheck`, `npm run test`,
   `npm run test:http`, `npm run test:integration`, `npm run test:db`,

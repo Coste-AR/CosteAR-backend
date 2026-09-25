@@ -25,9 +25,3 @@ CREATE TABLE "ordenes_trabajo" (
 CREATE UNIQUE INDEX "ordenes_trabajo_companyId_codigo_key" ON "ordenes_trabajo"("companyId", "codigo");
 CREATE INDEX "ordenes_trabajo_userId_idx" ON "ordenes_trabajo"("userId");
 CREATE INDEX "ordenes_trabajo_companyId_estado_idx" ON "ordenes_trabajo"("companyId", "estado");
-
-ALTER TABLE "ordenes_trabajo" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "ordenes_trabajo" FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON "ordenes_trabajo"
-  USING ("userId" = current_app_user_id())
-  WITH CHECK ("userId" = current_app_user_id());
