@@ -154,7 +154,10 @@ export class ParametrosCosteoService {
     companyId: string,
     clave: string,
     ctx: { structureId?: string | null; periodId?: string | null } = {},
-  ): Promise<ValorResuelto | PreguntaTextoResuelta | ReturnType<typeof resolverComportamiento>> {
+  ): Promise<ValorResuelto | PreguntaTextoResuelta | ReturnType<typeof resolverComportamiento> | {
+    clave: 'velocidad_rotacion_default'; valor: number | null; descripcion: string;
+    unidad: 'veces_por_periodo'; origen: 'periodo' | 'empresa' | 'ausente'; confirmado: boolean;
+  }> {
     const company = await this.companyDe(userId, companyId);
     const pregunta = (await this.catalogoDe(userId, companyId, company.industry)).find((item) => item.clave === clave);
     if (pregunta?.tipo) {
@@ -165,6 +168,18 @@ export class ParametrosCosteoService {
     }
     const definicion = definicionDe(clave);
     const definicionComportamiento = definicionComportamientoDe(clave);
+    if (clave === 'velocidad_rotacion_default') {
+      await this.validarAlcance(companyId, ctx);
+      const filas = await this.filasDe(companyId);
+      const fila = (ctx.periodId ? filas.find((item) => item.clave === clave && item.periodId === ctx.periodId) : undefined)
+        ?? filas.find((item) => item.clave === clave && item.periodId === null && item.structureId === null);
+      return {
+        clave, valor: fila?.valorNum ?? null,
+        descripcion: 'Rotaciones de stock por período usadas cuando un segmento no tiene una declaración propia.',
+        unidad: 'veces_por_periodo', origen: fila ? (fila.periodId ? 'periodo' : 'empresa') : 'ausente',
+        confirmado: fila?.confirmado ?? false,
+      };
+    }
     if (!definicion && !definicionComportamiento) {
       throw new NotFoundError(`No existe el parámetro de costeo "${clave}"`);
     }
@@ -238,13 +253,16 @@ export class ParametrosCosteoService {
     const company = await this.companyDe(userId, companyId);
     const definicion = definicionDe(clave);
     const definicionComportamiento = definicionComportamientoDe(clave);
+    // M14-01: existe como clave cargable, pero deliberadamente no pertenece al
+    // catálogo de defaults. Sin una fila declarada, la rotación queda ausente.
+    const esVelocidadRotacionDefault = clave === 'velocidad_rotacion_default';
     // Los parámetros numéricos ya tienen una definición pura que consume el
     // motor. Sólo las preguntas declarativas necesitan consultar el paquete.
     const catalogo = definicion || definicionComportamiento
       ? []
       : await this.catalogoDe(userId, companyId, company.industry);
     const pregunta = catalogo.find((item) => item.clave === clave);
-    if (!pregunta && !definicion && !definicionComportamiento) {
+    if (!pregunta && !definicion && !definicionComportamiento && !esVelocidadRotacionDefault) {
       throw new UnprocessableEntityError(`No existe el parámetro de costeo "${clave}"`, {
         field: 'clave',
       });
@@ -279,8 +297,11 @@ export class ParametrosCosteoService {
       }
     }
 
-    if (definicion && input.valor === undefined) {
+    if ((definicion || esVelocidadRotacionDefault) && input.valor === undefined) {
       throw new UnprocessableEntityError(`El parámetro "${clave}" requiere un valor numérico.`, { field: 'valor' });
+    }
+    if (esVelocidadRotacionDefault && input.valor !== undefined && input.valor <= 0) {
+      throw new UnprocessableEntityError('La velocidad de rotación por defecto debe ser mayor que cero.', { field: 'valor' });
     }
     if (definicionComportamiento && input.comportamientoVolumen === undefined) {
       throw new UnprocessableEntityError(
@@ -320,7 +341,7 @@ export class ParametrosCosteoService {
         // Las respuestas cerradas son una declaración explícita; no pueden
         // quedar como propuesta sin confirmar por un flag del cliente.
         confirmado: pregunta?.tipo ? true : input.confirmado,
-        descripcion: definicionComportamiento?.descripcion ?? pregunta?.descripcion ?? definicion!.descripcion,
+        descripcion: definicionComportamiento?.descripcion ?? pregunta?.descripcion ?? definicion?.descripcion ?? 'Rotaciones de stock por período usadas cuando un segmento no tiene una declaración propia.',
         comportamientoVolumen: clasificacion ?? null,
         // Proponer no es confirmar: la semilla no atribuye una decisión a una
         // persona. Una edición explícita sí deja el autor y reloj del servidor.
@@ -366,7 +387,8 @@ export class ParametrosCosteoService {
   ) {
     const definicion = definicionDe(clave);
     const definicionComportamiento = definicionComportamientoDe(clave);
-    if (!definicion && !definicionComportamiento) {
+    const esVelocidadRotacionDefault = clave === 'velocidad_rotacion_default';
+    if (!definicion && !definicionComportamiento && !esVelocidadRotacionDefault) {
       throw new NotFoundError(`No existe el parámetro de costeo "${clave}"`);
     }
     await this.companyDe(userId, companyId);

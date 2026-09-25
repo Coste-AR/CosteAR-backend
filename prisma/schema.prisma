@@ -247,6 +247,7 @@ model Company {
   tramosCosto              TramoCosto[]
   calculosEquilibrioTramos EquilibrioTramosCalculo[]
   segmentosAnalisis        SegmentoAnalisis[]
+  rotacionesSegmento       RotacionSegmento[]
   preciosTransferencia     PrecioTransferencia[]
   recursosEscasos          RecursoEscaso[]
   consumosRecurso          ConsumoRecursoPorUnidad[]
@@ -306,6 +307,7 @@ model SegmentoAnalisis {
   consumosRecurso       ConsumoRecursoPorUnidad[]
   transferenciasOrigen  PrecioTransferencia[]     @relation("TransferenciaOrigen")
   transferenciasDestino PrecioTransferencia[]     @relation("TransferenciaDestino")
+  rotaciones            RotacionSegmento[]
 
   nombre                String   @db.VarChar(120)
   nivel                 String   @db.VarChar(20)
@@ -323,6 +325,28 @@ model SegmentoAnalisis {
 
   @@index([companyId, parentId, deletedAt])
   @@map("segmentos_analisis")
+}
+
+enum OrigenRotacion {
+  DECLARADA
+}
+
+model RotacionSegmento {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId  String           @db.Uuid
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId     String           @db.Uuid
+  segmentoId String           @db.Uuid
+  segmento   SegmentoAnalisis @relation(fields: [segmentoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  periodId   String           @db.Uuid
+  period     CostPeriod       @relation(fields: [periodId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  rotacion   Decimal          @db.Decimal(18, 6)
+  origen     OrigenRotacion   @default(DECLARADA)
+  cargadoPor String           @db.Uuid
+  fecha      DateTime         @default(now()) @db.Timestamptz
+
+  @@index([companyId, periodId, segmentoId, fecha])
+  @@map("rotaciones_segmento")
 }
 
 enum CriterioPrecioTransferencia {
@@ -618,6 +642,7 @@ model CostPeriod {
   parametrosCosteo     ParametroCosteo[]
   conceptosCosteo      ConceptoCosteo[]
   preciosTransferencia PrecioTransferencia[]
+  rotacionesSegmento   RotacionSegmento[]
   // DEFAULT gen_random_uuid() a nivel SQL (migración 20260712000000) — ver AllocationBase.id.
   id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   structureId          String                @db.Uuid
@@ -777,6 +802,7 @@ model CostStructure {
    * /**
    * /**
    * /**
+   * /**
    * Override del ritmo de la empresa. Null = hereda de `Company.periodicity`.
    */
   periodicity      Periodicity?
@@ -805,6 +831,7 @@ model CostStructure {
   // mapa productivo. Con eso la IA deja de adivinar y solo tiene que adjudicar.
   // ---------------------------------------------------------------------------
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -1719,6 +1746,7 @@ model CalculationRun {
    * /**
    * /**
    * /**
+   * /**
    * Período al que pertenece. Nullable: las corridas anteriores al modelo de
    * períodos no tienen a cuál apuntar, y mentirles un período sería peor que
    * dejarlas sin él.
@@ -2125,6 +2153,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Existencia inicial de producción en proceso (EI), en unidades.
    */
   initialWip           Decimal  @default(0) @db.Decimal(18, 4)
@@ -2151,6 +2180,7 @@ model UnitMovementSchedule {
 
   // --- SALIDAS (unidades) ---
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -2199,6 +2229,7 @@ model UnitMovementSchedule {
    * /**
    * /**
    * /**
+   * /**
    * /** Costo de Materia Prima incurrido en el período.
    */
   periodCostMp           Decimal? @db.Decimal(18, 4)
@@ -2234,6 +2265,7 @@ model UnitMovementSchedule {
 
   // --- PROCEDENCIA DEL RECUENTO ---
   /**
+   * /**
    * /**
    * /**
    * /**

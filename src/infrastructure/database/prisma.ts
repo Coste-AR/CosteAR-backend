@@ -106,6 +106,7 @@ export const RLS_MODELS = new Set([
   'RecursoEscaso',
   'ConsumoRecursoPorUnidad',
   'PrecioTransferencia',
+  'RotacionSegmento',
   'PriceIndexSeries',
   'PriceIndexSeriesVersion',
   'PriceIndexValue',

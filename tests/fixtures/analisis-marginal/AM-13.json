@@ -1,0 +1,11 @@
+{
+  "input": [
+    { "producto": "A", "margen": 0.2, "rotacion": 12, "rotacionOrigen": "DECLARADA" },
+    { "producto": "B", "margen": 0.6, "rotacion": 2, "rotacionOrigen": "DECLARADA" }
+  ],
+  "expected": [
+    { "producto": "A", "rendimiento": 2.4 },
+    { "producto": "B", "rendimiento": 1.2 }
+  ],
+  "porQue": "R32: el ranking de comercio usa cm/S = Vel × m; ordenar sólo por margen invierte la prioridad."
+}

@@ -4,6 +4,8 @@ import { NotFoundError, UnprocessableEntityError } from '../../domain/errors/dom
 import { calcularEquilibrioSectorial, type CoproductoSectorial } from '../../domain/calculations/equilibrio-sectorial.js';
 import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import type { ActualizarSegmentoAnalisisInput, CrearSegmentoAnalisisInput } from '../../shared/schemas/segmento-analisis.schema.js';
+import type { CrearRotacionSegmentoInput } from '../../shared/schemas/segmento-analisis.schema.js';
+import { rankingRotacion, type CriterioRankingRotacion } from '../../domain/calculations/rotacion.js';
 
 export class SegmentoAnalisisService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -99,5 +101,56 @@ export class SegmentoAnalisisService {
   async calcular(userId: string, companyId: string) {
     const segmentos = await this.listar(userId, companyId);
     return calcularEquilibrioSectorial(segmentos);
+  }
+
+  async cargarRotacion(userId: string, companyId: string, segmentoId: string, input: CrearRotacionSegmentoInput, actor: TraceActor) {
+    await this.companyDe(userId, companyId);
+    const [segmento, periodo] = await Promise.all([
+      this.db.segmentoAnalisis.findFirst({ where: { id: segmentoId, companyId, deletedAt: null } }),
+      this.db.costPeriod.findFirst({ where: { id: input.periodoId, companyId } }),
+    ]);
+    if (!segmento) throw new NotFoundError('Segmento no encontrado');
+    if (!periodo) throw new NotFoundError('Período no encontrado');
+    return withTenant(userId, async (tx) => {
+      const creada = await tx.rotacionSegmento.create({ data: {
+        companyId, userId, segmentoId, periodId: input.periodoId, rotacion: input.rotacion,
+        origen: 'DECLARADA', cargadoPor: actor.id,
+      } });
+      await recordTraceAudit({
+        entityType: 'RotacionSegmento', entityId: creada.id, action: 'create', actor, after: creada,
+        comment: `Rotación declarada para "${segmento.nombre}" en el período ${periodo.code}.`,
+      }, tx);
+      return { id: creada.id, segmentoId, periodoId: creada.periodId, rotacion: Number(creada.rotacion), origen: creada.origen, fecha: creada.fecha.toISOString() };
+    });
+  }
+
+  async ranking(userId: string, companyId: string, periodId: string, criterio: CriterioRankingRotacion) {
+    await this.companyDe(userId, companyId);
+    const periodo = await this.db.costPeriod.findFirst({ where: { id: periodId, companyId } });
+    if (!periodo) throw new NotFoundError('Período no encontrado');
+    const [segmentos, rotaciones, parametros] = await Promise.all([
+      this.db.segmentoAnalisis.findMany({ where: { companyId, deletedAt: null, precioUnitario: { not: null }, costoVariableUnitario: { not: null } } }),
+      this.db.rotacionSegmento.findMany({ where: { companyId, periodId }, orderBy: { fecha: 'desc' } }),
+      this.db.parametroCosteo.findMany({ where: { companyId, clave: 'velocidad_rotacion_default', deletedAt: null, OR: [{ periodId }, { periodId: null, structureId: null }] } }),
+    ]);
+    const declaradaPorSegmento = new Map<string, number>();
+    for (const fila of rotaciones) if (!declaradaPorSegmento.has(fila.segmentoId)) declaradaPorSegmento.set(fila.segmentoId, Number(fila.rotacion));
+    const parametro = parametros.find((fila) => fila.periodId === periodId) ?? parametros.find((fila) => fila.periodId === null);
+    const valorDefault = parametro?.valorNum == null ? null : Number(parametro.valorNum);
+    const productos = [];
+    const excluidos: Array<{ producto: string; motivo: 'ROTACION_SIN_DECLARAR' }> = [];
+    for (const segmento of segmentos) {
+      const declarada = declaradaPorSegmento.get(segmento.id);
+      const rotacion = declarada ?? valorDefault;
+      if (rotacion == null) { excluidos.push({ producto: segmento.nombre, motivo: 'ROTACION_SIN_DECLARAR' }); continue; }
+      const precio = Number(segmento.precioUnitario);
+      const margen = precio === 0 ? 0 : (precio - Number(segmento.costoVariableUnitario)) / precio;
+      productos.push({ producto: segmento.nombre, margen, rotacion, rotacionOrigen: declarada === undefined ? 'DEFAULT' as const : 'DECLARADA' as const });
+    }
+    return {
+      ranking: rankingRotacion(productos, criterio), criterio,
+      advertencia: criterio === 'margen' ? 'Ordenar sólo por margen ignora cuántas veces rota el stock y puede invertir la prioridad comercial.' : null,
+      excluidos,
+    };
   }
 }
