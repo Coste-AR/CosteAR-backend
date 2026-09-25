@@ -43,6 +43,7 @@ import { registerPuntoIndiferenciaRoutes } from '../src/infrastructure/http/rout
 import { registerRelacionReemplazoRoutes } from '../src/infrastructure/http/routes/relacion-reemplazo.routes.js';
 import { registerMezclaOptimaRoutes } from '../src/infrastructure/http/routes/mezcla-optima.routes.js';
 import { registerPrecioTransferenciaRoutes } from '../src/infrastructure/http/routes/precio-transferencia.routes.js';
+import { registerOrdenTrabajoRoutes } from '../src/infrastructure/http/routes/orden-trabajo.routes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -71,6 +72,7 @@ const CONVERTED_ROUTES = [
   registerRelacionReemplazoRoutes,
   registerMezclaOptimaRoutes,
   registerPrecioTransferenciaRoutes,
+  registerOrdenTrabajoRoutes,
   (app) => registerEmpresaPortalRoutes(app, { portal: {} as never, scopes: {} as never }),
 ];
 

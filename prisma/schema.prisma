@@ -213,6 +213,7 @@ enum CondicionIva {
 }
 
 model Company {
+  ordenesTrabajo           OrdenTrabajo[]
   classifierAiCalls        ClassifierAiCall[]
   panelTelemetryEvents     PanelTelemetryEvent[]
   priceIndexSeries         PriceIndexSeries?
@@ -293,6 +294,42 @@ model Company {
 
   @@index([userId])
   @@map("companies")
+}
+
+enum EstadoOrdenTrabajo {
+  BORRADOR
+  COTIZADA
+  APROBADA
+  EN_PRODUCCION
+  TERMINADA_TECNICA
+  PENDIENTE_CIERRE
+  CERRADA
+  CANCELADA
+}
+
+/// Trabajo identificable que acumula hechos económicos a lo largo de varios
+/// períodos. Los hechos conservan su propio `periodoImputado`: la orden no
+/// pertenece a un período.
+model OrdenTrabajo {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId        String              @db.Uuid
+  company          Company             @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId           String              @db.Uuid
+  codigo           String              @db.VarChar(80)
+  descripcion      String              @db.VarChar(500)
+  cliente          String              @db.VarChar(200)
+  plantillaId      String?             @db.Uuid
+  estado           EstadoOrdenTrabajo  @default(BORRADOR)
+  fechaInicio      DateTime?           @db.Date
+  fechaFinTecnica  DateTime?           @db.Timestamptz
+  fechaCierre      DateTime?           @db.Timestamptz
+  createdAt        DateTime            @default(now()) @db.Timestamptz
+  updatedAt        DateTime            @updatedAt @db.Timestamptz
+
+  @@unique([companyId, codigo])
+  @@index([userId])
+  @@index([companyId, estado])
+  @@map("ordenes_trabajo")
 }
 
 model SegmentoAnalisis {

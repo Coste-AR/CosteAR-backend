@@ -66,6 +66,7 @@ import { registerPuntoIndiferenciaRoutes } from './routes/punto-indiferencia.rou
 import { registerRelacionReemplazoRoutes } from './routes/relacion-reemplazo.routes.js';
 import { registerMezclaOptimaRoutes } from './routes/mezcla-optima.routes.js';
 import { registerPrecioTransferenciaRoutes } from './routes/precio-transferencia.routes.js';
+import { registerOrdenTrabajoRoutes } from './routes/orden-trabajo.routes.js';
 import { createCorsOriginHandler } from './cors-policy.js';
 
 /**
@@ -235,6 +236,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await registerRelacionReemplazoRoutes(api);
       await registerMezclaOptimaRoutes(api);
       await registerPrecioTransferenciaRoutes(api);
+      await registerOrdenTrabajoRoutes(api);
       await registerActivoAmortizableRoutes(api);
       await registerEventosLoteRoutes(api);
       await registerLotesProductivosRoutes(api);

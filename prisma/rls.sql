@@ -585,6 +585,13 @@ CREATE POLICY tenant_isolation ON configuracion_modulos_rubro
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE ordenes_trabajo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ordenes_trabajo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON ordenes_trabajo;
+CREATE POLICY tenant_isolation ON ordenes_trabajo
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;
