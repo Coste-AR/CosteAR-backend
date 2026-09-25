@@ -14,15 +14,23 @@ export async function registerDepositoRoutes(app: FastifyInstance): Promise<void
   const scopes = new OperatorScopeService();
   app.post('/companies/:companyId/depositos', { preHandler: authenticate }, async (request, reply) => {
     const { companyId } = companyParams.parse(request.params);
-    return reply.code(201).send({ data: await service.create(request.authUser!.id, companyId, depositoCreateSchema.parse(request.body), actor(request)) });
+    const tenantId = request.authUser!.role === 'EMPRESA_OPERATOR'
+      ? await scopes.tenantForCompany(request.authUser!.id, companyId, 'inventario.mover')
+      : request.authUser!.id;
+    return reply.code(201).send({ data: await service.create(tenantId, companyId, depositoCreateSchema.parse(request.body), actor(request)) });
   });
   app.get('/depositos/:depositoId/nivel', { preHandler: authenticate }, async (request) => {
     const { depositoId } = depositoParams.parse(request.params);
-    return { data: await service.nivel(request.authUser!.id, depositoId) };
+    const tenantId = request.authUser!.role === 'EMPRESA_OPERATOR'
+      ? await scopes.tenantForDeposito(request.authUser!.id, depositoId, 'inventario.mover')
+      : request.authUser!.id;
+    return { data: await service.nivel(tenantId, depositoId) };
   });
   app.post('/depositos/:depositoId/movimientos', { preHandler: authenticate }, async (request, reply) => {
     const { depositoId } = depositoParams.parse(request.params);
-    if (request.authUser!.role === 'EMPRESA_OPERATOR') await scopes.assertDeposito(request.authUser!.id, depositoId, actor(request));
-    return reply.code(201).send({ data: await service.movimiento(request.authUser!.id, depositoId, movimientoDepositoCreateSchema.parse(request.body), actor(request)) });
+    const tenantId = request.authUser!.role === 'EMPRESA_OPERATOR'
+      ? await scopes.tenantForDeposito(request.authUser!.id, depositoId, 'inventario.mover')
+      : request.authUser!.id;
+    return reply.code(201).send({ data: await service.movimiento(tenantId, depositoId, movimientoDepositoCreateSchema.parse(request.body), actor(request)) });
   });
 }

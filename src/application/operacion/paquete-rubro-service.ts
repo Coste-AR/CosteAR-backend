@@ -19,6 +19,7 @@ export class PaqueteRubroService {
     const result: Record<string, unknown> = {};
     for (const row of eligible) {
       Object.assign(result, { nombreProducto: row.nombreProducto, nombreProductoConfirmado: row.nombreProductoConfirmado, lexicon: row.lexicon, icons: row.icons, variants: row.variants, seedParameters: row.seedParameters, alertRules: row.alertRules, screens: row.screens, modulos: row.modulos });
+      if (row.access !== null) result.access = row.access;
       // Un override sin escala no borra la calibración menos específica: la
       // ausencia es ausencia declarada, no un valor por defecto plausible.
       if (row.scale !== null) result.scale = row.scale;

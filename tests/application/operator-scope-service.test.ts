@@ -5,6 +5,8 @@ function db(overrides: Record<string, unknown> = {}) {
   return {
     operatorUnidadProductiva: { findFirst: vi.fn().mockResolvedValue(null) },
     operatorDeposito: { findFirst: vi.fn().mockResolvedValue(null) },
+    operatorOrdenTrabajo: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    operatorMembership: { findFirst: vi.fn().mockResolvedValue(null) },
     loteProductivo: { findUnique: vi.fn() },
     traceAuditLog: { create: vi.fn().mockResolvedValue({}) },
     ...overrides,
@@ -30,5 +32,20 @@ describe('alcance por entidad del cargador', () => {
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ membership: { operatorId: actor.id, isActive: true } }),
     }));
+  });
+
+  it('niega por defecto el informe de margen sin permiso explícito', async () => {
+    await expect(new OperatorScopeService(db()).assertPermission(actor.id, 'ordenes.ver_margen'))
+      .rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('exige entidad y función para acceder a una orden', async () => {
+    const findFirst = vi.fn().mockResolvedValue({ membershipId: 'membership' });
+    const mock = db({ operatorOrdenTrabajo: { findFirst, findMany: vi.fn() } });
+    await expect(new OperatorScopeService(mock).assertOrden(actor.id, '33333333-3333-4333-8333-333333333333', 'ordenes.ver'))
+      .resolves.toBeUndefined();
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      membership: { operatorId: actor.id, isActive: true, permisos: { has: 'ordenes.ver' } },
+    }) }));
   });
 });

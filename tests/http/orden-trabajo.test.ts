@@ -4,19 +4,21 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 const USER = '11111111-1111-1111-1111-111111111111';
 const COMPANY = '33333333-3333-3333-3333-333333333333';
 const ORDER = '44444444-4444-4444-4444-444444444444';
-const { db } = vi.hoisted(() => ({ db: {
+const { db, auth } = vi.hoisted(() => ({ auth: { role: 'EMPRESA_ADMIN' }, db: {
   company: { findFirst: vi.fn() },
   ordenTrabajo: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   plantillaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
   etapaOrden: { findMany: vi.fn() },
   traceAuditLog: { create: vi.fn() },
+  operatorMembership: { findFirst: vi.fn() },
+  operatorOrdenTrabajo: { findFirst: vi.fn(), findMany: vi.fn() },
 } }));
 vi.mock('@/infrastructure/database/prisma.js', () => ({
   prisma: db, withTenant: async (_id: string, fn: (tx: typeof db) => unknown) => fn(db),
 }));
 vi.mock('@/infrastructure/http/plugins/authenticate.js', () => ({
   authenticate: async (request: FastifyRequest, _reply: FastifyReply) => {
-    request.authUser = { id: USER, role: 'EMPRESA_ADMIN', jobTitle: null };
+    request.authUser = { id: USER, tenantId: USER, role: auth.role, jobTitle: null };
   },
 }));
 
@@ -35,11 +37,14 @@ async function app() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  auth.role = 'EMPRESA_ADMIN';
   db.company.findFirst.mockResolvedValue({ id: COMPANY, userId: USER });
   db.ordenTrabajo.findFirst.mockResolvedValue(null);
   db.ordenTrabajo.create.mockResolvedValue({ id: ORDER, companyId: COMPANY, codigo: 'OT-001', descripcion: 'Obra X', cliente: 'Cliente ficticio', estado: 'BORRADOR' });
   db.plantillaOrden.findMany.mockResolvedValue([]);
   db.etapaOrden.findMany.mockResolvedValue([]);
+  db.operatorMembership.findFirst.mockResolvedValue(null);
+  db.operatorOrdenTrabajo.findMany.mockResolvedValue([]);
 });
 
 describe('rutas de órdenes de trabajo', () => {
@@ -84,5 +89,32 @@ describe('rutas de órdenes de trabajo', () => {
     const res = await api.inject({ method: 'GET', url: `/ordenes-trabajo/${ORDER}/etapas` });
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual([expect.objectContaining({ nombre: 'Montaje', esEntrega: true })]);
+  });
+
+  it('un usuario de planta ve la orden sin precio ni margen', async () => {
+    auth.role = 'EMPRESA_OPERATOR';
+    db.operatorOrdenTrabajo.findFirst.mockResolvedValue({ orden: { userId: USER } });
+    db.ordenTrabajo.findFirst.mockResolvedValue({
+      id: ORDER, userId: USER, codigo: 'OT-001', descripcion: 'Obra X', cliente: 'Cliente ficticio',
+      estado: 'EN_PRODUCCION', precio: 2_100_000,
+      precioContractual: 2_250_000, margenReal: 700_000,
+    });
+    const api = await app();
+    const res = await api.inject({ method: 'GET', url: `/ordenes-trabajo/${ORDER}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).not.toHaveProperty('precio');
+    expect(res.json().data).not.toHaveProperty('precioContractual');
+    expect(res.json().data).not.toHaveProperty('margenReal');
+  });
+
+  it('compras sin ordenes.cerrar recibe 403 al pasar a pendiente de cierre', async () => {
+    auth.role = 'EMPRESA_OPERATOR';
+    db.operatorOrdenTrabajo.findFirst.mockResolvedValue(null);
+    const api = await app();
+    const res = await api.inject({
+      method: 'POST', url: `/ordenes-trabajo/${ORDER}/transiciones`, payload: { estado: 'PENDIENTE_CIERRE' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(db.ordenTrabajo.update).not.toHaveBeenCalled();
   });
 });

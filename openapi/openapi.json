@@ -34579,13 +34579,54 @@
                                   ],
                                   "additionalProperties": false
                                 }
+                              },
+                              "ordenesTrabajo": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "codigo": {
+                                      "type": "string"
+                                    },
+                                    "descripcion": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "codigo",
+                                    "descripcion"
+                                  ],
+                                  "additionalProperties": false
+                                }
                               }
                             },
                             "required": [
                               "unidadesProductivas",
-                              "depositos"
+                              "depositos",
+                              "ordenesTrabajo"
                             ],
                             "additionalProperties": false
+                          },
+                          "permisos": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "ordenes.ver",
+                                "ordenes.editar",
+                                "ordenes.ver_margen",
+                                "ordenes.aprobar_presupuesto",
+                                "ordenes.cerrar",
+                                "inventario.mover",
+                                "horas.cargar",
+                                "horas.aprobar"
+                              ]
+                            }
                           }
                         },
                         "required": [
@@ -34594,7 +34635,8 @@
                           "email",
                           "isActive",
                           "createdAt",
-                          "alcance"
+                          "alcance",
+                          "permisos"
                         ],
                         "additionalProperties": false
                       }
@@ -35606,6 +35648,31 @@
                     "items": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "default": []
+                  },
+                  "ordenTrabajoIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "default": []
+                  },
+                  "permisos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "ordenes.ver",
+                        "ordenes.editar",
+                        "ordenes.ver_margen",
+                        "ordenes.aprobar_presupuesto",
+                        "ordenes.cerrar",
+                        "inventario.mover",
+                        "horas.cargar",
+                        "horas.aprobar"
+                      ]
                     },
                     "default": []
                   }

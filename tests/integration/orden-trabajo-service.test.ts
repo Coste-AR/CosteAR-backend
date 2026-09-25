@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OrdenTrabajoService } from '@/application/ordenes/orden-trabajo-service.js';
-import { withTenant } from '@/infrastructure/database/prisma.js';
+import { prisma, withTenant } from '@/infrastructure/database/prisma.js';
+import { randomUUID } from 'node:crypto';
 import { createTenant, disconnect, type Tenant } from './helpers/tenants.js';
 
 let A: Tenant;
@@ -84,5 +85,36 @@ describe('FX-OT — orden de trabajo con RLS real', () => {
     await expect(service.create(B.userId, B.companyId, {
       codigo: 'OT-001', descripcion: 'Otra empresa', cliente: 'Cliente ficticio', plantillaId: null, fechaInicio: null,
     }, actor(B.userId))).resolves.toMatchObject({ codigo: 'OT-001' });
+  });
+
+  it('RLS niega por defecto y sólo expone una orden con entidad y permiso explícitos', async () => {
+    const service = new OrdenTrabajoService();
+    const order = await service.create(A.userId, A.companyId, {
+      codigo: `OT-RLS-${randomUUID().slice(0, 8)}`, descripcion: 'Obra X', cliente: 'Cliente ficticio',
+      plantillaId: null, fechaInicio: null,
+    }, actor(A.userId));
+    const operator = await prisma.user.create({ data: {
+      email: `planta-${randomUUID()}@test.local`, name: 'Personal de planta',
+      passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$0000000000000000$0000000000000000000000000000000',
+      role: 'EMPRESA_OPERATOR',
+    } });
+    const membership = await withTenant(A.userId, async (tx) => {
+      const connection = await tx.empresaConnection.upsert({
+        where: { companyId_costistId: { companyId: A.companyId, costistId: A.userId } },
+        create: { companyId: A.companyId, costistId: A.userId }, update: {},
+      });
+      return tx.operatorMembership.create({ data: {
+        operatorId: operator.id, connectionId: connection.id, permisos: ['ordenes.ver'],
+        ordenesAutorizadas: { create: { ordenId: order.id } },
+      } });
+    });
+
+    expect(await withTenant(operator.id, (tx) => tx.ordenTrabajo.findMany({ where: { id: order.id } })))
+      .toHaveLength(1);
+    await withTenant(A.userId, (tx) => tx.operatorMembership.update({
+      where: { id: membership.id }, data: { permisos: [] },
+    }));
+    expect(await withTenant(operator.id, (tx) => tx.ordenTrabajo.findMany({ where: { id: order.id } })))
+      .toEqual([]);
   });
 });

@@ -86,6 +86,7 @@ export const RLS_MODELS = new Set([
   'MovimientoDeposito',
   'OperatorUnidadProductiva',
   'OperatorDeposito',
+  'OperatorOrdenTrabajo',
   'CorridaProduccion',
   'ConsumoCorrida',
   'PaqueteRubro',

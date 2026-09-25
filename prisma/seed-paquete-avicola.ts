@@ -49,6 +49,7 @@ export async function seedPaqueteConstruccionModular(db: PrismaClient = prisma) 
     nombreProductoConfirmado: PAQUETE_CONSTRUCCION_MODULAR.nombreProductoConfirmado,
     lexicon: PAQUETE_CONSTRUCCION_MODULAR.lexicon,
     icons: PAQUETE_CONSTRUCCION_MODULAR.icons,
+    access: PAQUETE_CONSTRUCCION_MODULAR.access,
     variants: PAQUETE_CONSTRUCCION_MODULAR.variants,
     seedParameters: PAQUETE_CONSTRUCCION_MODULAR.seedParameters,
     alertRules: PAQUETE_CONSTRUCCION_MODULAR.alertRules,

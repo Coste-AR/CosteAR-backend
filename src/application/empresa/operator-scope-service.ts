@@ -6,7 +6,17 @@ import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 export interface OperatorScopeInput {
   unidadProductivaIds: string[];
   depositoIds: string[];
+  ordenTrabajoIds: string[];
+  permisos: string[];
 }
+
+export const PERMISOS_OPERADOR = [
+  'ordenes.ver', 'ordenes.editar', 'ordenes.ver_margen', 'ordenes.aprobar_presupuesto',
+  'ordenes.cerrar', 'inventario.mover', 'horas.cargar', 'horas.aprobar',
+] as const;
+export type PermisoOperador = typeof PERMISOS_OPERADOR[number];
+export const esPermisoOperador = (value: string): value is PermisoOperador =>
+  (PERMISOS_OPERADOR as readonly string[]).includes(value);
 
 export class OperatorScopeService {
   constructor(private readonly db: PrismaClient = prisma) {}
@@ -33,6 +43,59 @@ export class OperatorScopeService {
     }
   }
 
+  async tenantForDeposito(operatorId: string, depositoId: string, permission: PermisoOperador): Promise<string> {
+    const allowed = await this.db.operatorDeposito.findFirst({
+      where: { depositoId, membership: { operatorId, isActive: true, permisos: { has: permission } } },
+      select: { membership: { select: { connection: { select: { costistId: true } } } } },
+    });
+    if (!allowed) throw new ForbiddenError('No tenés autorización para acceder a ese depósito.');
+    return allowed.membership.connection.costistId;
+  }
+
+  async assertPermission(operatorId: string, permission: PermisoOperador): Promise<void> {
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId, isActive: true, permisos: { has: permission } }, select: { id: true },
+    });
+    if (!membership) throw new ForbiddenError('No tenés permisos para esta acción.');
+  }
+
+  async tenantForCompany(operatorId: string, companyId: string, permission: PermisoOperador): Promise<string> {
+    const membership = await this.db.operatorMembership.findFirst({
+      where: { operatorId, isActive: true, permisos: { has: permission }, connection: { companyId } },
+      select: { connection: { select: { costistId: true } } },
+    });
+    if (!membership) throw new ForbiddenError('No tenés permisos para esta acción.');
+    return membership.connection.costistId;
+  }
+
+  async tenantForOrden(operatorId: string, ordenId: string, permission: PermisoOperador): Promise<string> {
+    const allowed = await this.db.operatorOrdenTrabajo.findFirst({
+      where: { ordenId, membership: { operatorId, isActive: true, permisos: { has: permission } } },
+      select: { orden: { select: { userId: true } } },
+    });
+    if (!allowed) throw new ForbiddenError('No tenés autorización para acceder a esa orden de trabajo.');
+    return allowed.orden.userId;
+  }
+
+  async ordenIds(operatorId: string, companyId: string): Promise<string[]> {
+    const rows = await this.db.operatorOrdenTrabajo.findMany({
+      where: { orden: { companyId }, membership: { operatorId, isActive: true, permisos: { has: 'ordenes.ver' } } },
+      select: { ordenId: true },
+    });
+    return rows.map((row) => row.ordenId);
+  }
+
+  async assertOrden(operatorId: string, ordenId: string, permission: PermisoOperador): Promise<void> {
+    const allowed = await this.db.operatorOrdenTrabajo.findFirst({
+      where: {
+        ordenId,
+        membership: { operatorId, isActive: true, permisos: { has: permission } },
+      },
+      select: { membershipId: true },
+    });
+    if (!allowed) throw new ForbiddenError('No tenés autorización para acceder a esa orden de trabajo.');
+  }
+
   async assertLote(operatorId: string, loteId: string, actor?: TraceActor): Promise<void> {
     const lote = await this.db.loteProductivo.findUnique({ where: { id: loteId }, select: { unidadProductivaId: true } });
     if (!lote?.unidadProductivaId) {
@@ -51,26 +114,30 @@ export class OperatorScopeService {
   ): Promise<void> {
     const membership = await this.db.operatorMembership.findFirst({
       where: { operatorId, connection: { companyId, company: { userId: administratorId } } },
-      include: { unidadesAutorizadas: true, depositosAutorizados: true },
+      include: { unidadesAutorizadas: true, depositosAutorizados: true, ordenesAutorizadas: true },
     });
     // 404 evita confirmar operadores o empresas de otro tenant.
     if (!membership) throw new NotFoundError('Cargador no encontrado');
 
-    const [units, deposits] = await Promise.all([
+    const [units, deposits, orders] = await Promise.all([
       this.db.unidadProductiva.count({ where: { id: { in: input.unidadProductivaIds }, companyId, deletedAt: null } }),
       this.db.deposito.count({ where: { id: { in: input.depositoIds }, companyId, deletedAt: null } }),
+      this.db.ordenTrabajo.count({ where: { id: { in: input.ordenTrabajoIds }, companyId } }),
     ]);
-    if (units !== new Set(input.unidadProductivaIds).size || deposits !== new Set(input.depositoIds).size) {
+    if (units !== new Set(input.unidadProductivaIds).size || deposits !== new Set(input.depositoIds).size || orders !== new Set(input.ordenTrabajoIds).size) {
       throw new NotFoundError('Una o más entidades autorizadas no pertenecen a la empresa');
     }
 
     const before = {
       unidadProductivaIds: membership.unidadesAutorizadas.map((x) => x.unidadProductivaId),
       depositoIds: membership.depositosAutorizados.map((x) => x.depositoId),
+      ordenTrabajoIds: membership.ordenesAutorizadas.map((x) => x.ordenId),
+      permisos: membership.permisos,
     };
     await this.db.$transaction(async (tx) => {
       await tx.operatorUnidadProductiva.deleteMany({ where: { membershipId: membership.id } });
       await tx.operatorDeposito.deleteMany({ where: { membershipId: membership.id } });
+      await tx.operatorOrdenTrabajo.deleteMany({ where: { membershipId: membership.id } });
       if (input.unidadProductivaIds.length) {
         await tx.operatorUnidadProductiva.createMany({
           data: [...new Set(input.unidadProductivaIds)].map((unidadProductivaId) => ({ membershipId: membership.id, unidadProductivaId })),
@@ -81,6 +148,12 @@ export class OperatorScopeService {
           data: [...new Set(input.depositoIds)].map((depositoId) => ({ membershipId: membership.id, depositoId })),
         });
       }
+      if (input.ordenTrabajoIds.length) {
+        await tx.operatorOrdenTrabajo.createMany({
+          data: [...new Set(input.ordenTrabajoIds)].map((ordenId) => ({ membershipId: membership.id, ordenId })),
+        });
+      }
+      await tx.operatorMembership.update({ where: { id: membership.id }, data: { permisos: [...new Set(input.permisos)] } });
       await recordTraceAudit({ entityType: 'OperatorMembership', entityId: membership.id, action: 'scope.update', actor, before, after: input }, tx as Prisma.TransactionClient);
     });
   }

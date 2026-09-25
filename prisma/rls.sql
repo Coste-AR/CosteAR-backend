@@ -252,7 +252,19 @@ CREATE POLICY tenant_isolation ON cost_ledger_entries
 ALTER TABLE empresa_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE empresa_connections FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON empresa_connections;
-CREATE POLICY tenant_isolation ON empresa_connections
+DROP POLICY IF EXISTS tenant_select ON empresa_connections;
+DROP POLICY IF EXISTS tenant_write ON empresa_connections;
+CREATE POLICY tenant_select ON empresa_connections FOR SELECT
+  USING (
+    "costistId" = current_app_user_id()
+    OR EXISTS (
+      SELECT 1 FROM operator_memberships om
+      WHERE om."connectionId" = empresa_connections.id
+        AND om."operatorId" = current_app_user_id()
+        AND om."isActive" = true
+    )
+  );
+CREATE POLICY tenant_write ON empresa_connections FOR ALL
   USING ("costistId" = current_app_user_id())
   WITH CHECK ("costistId" = current_app_user_id());
 
@@ -516,7 +528,16 @@ ALTER TABLE depositos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE depositos FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON depositos;
 CREATE POLICY tenant_isolation ON depositos
-  USING ("userId" = current_app_user_id())
+  USING (
+    "userId" = current_app_user_id()
+    OR EXISTS (
+      SELECT 1 FROM operator_depositos od
+      JOIN operator_memberships om ON om.id = od."membershipId"
+      WHERE od."depositoId" = depositos.id
+        AND om."operatorId" = current_app_user_id()
+        AND om."isActive" = true
+    )
+  )
   WITH CHECK ("userId" = current_app_user_id());
 
 -- Alcance del cargador: el dueño de la empresa administra las filas y el
@@ -543,12 +564,34 @@ ALTER TABLE operator_depositos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operator_depositos FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON operator_depositos;
 CREATE POLICY tenant_isolation ON operator_depositos
-  USING (EXISTS (
+  USING (
+    EXISTS (SELECT 1 FROM operator_memberships om
+      WHERE om.id = "membershipId" AND om."operatorId" = current_app_user_id())
+    OR EXISTS (
     SELECT 1 FROM operator_memberships om
     JOIN empresa_connections ec ON ec.id = om."connectionId"
     JOIN companies c ON c.id = ec."companyId"
-    WHERE om.id = "membershipId"
-      AND (om."operatorId" = current_app_user_id() OR c."userId" = current_app_user_id())
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
+  ));
+
+ALTER TABLE operator_ordenes_trabajo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operator_ordenes_trabajo FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON operator_ordenes_trabajo;
+CREATE POLICY tenant_isolation ON operator_ordenes_trabajo
+  USING (
+    EXISTS (SELECT 1 FROM operator_memberships om
+      WHERE om.id = "membershipId" AND om."operatorId" = current_app_user_id())
+    OR EXISTS (
+    SELECT 1 FROM operator_memberships om
+    JOIN empresa_connections ec ON ec.id = om."connectionId"
+    JOIN companies c ON c.id = ec."companyId"
+    WHERE om.id = "membershipId" AND c."userId" = current_app_user_id()
   ))
   WITH CHECK (EXISTS (
     SELECT 1 FROM operator_memberships om
@@ -588,7 +631,21 @@ CREATE POLICY tenant_isolation ON configuracion_modulos_rubro
 ALTER TABLE ordenes_trabajo ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordenes_trabajo FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON ordenes_trabajo;
-CREATE POLICY tenant_isolation ON ordenes_trabajo
+DROP POLICY IF EXISTS tenant_select ON ordenes_trabajo;
+DROP POLICY IF EXISTS tenant_write ON ordenes_trabajo;
+CREATE POLICY tenant_select ON ordenes_trabajo FOR SELECT
+  USING (
+    "userId" = current_app_user_id()
+    OR EXISTS (
+      SELECT 1 FROM operator_ordenes_trabajo oot
+      JOIN operator_memberships om ON om.id = oot."membershipId"
+      WHERE oot."ordenId" = ordenes_trabajo.id
+        AND om."operatorId" = current_app_user_id()
+        AND om."isActive" = true
+        AND 'ordenes.ver' = ANY(om."permisos")
+    )
+  );
+CREATE POLICY tenant_write ON ordenes_trabajo FOR ALL
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
