@@ -12,6 +12,13 @@ export const PAQUETE_CONSTRUCCION_MODULAR = {
     PlantillaOrden: 'Modelo',
   },
   icons: {},
+  access: {
+    entities: ['OrdenTrabajo', 'Deposito'],
+    permissions: [
+      'ordenes.ver', 'ordenes.editar', 'ordenes.ver_margen', 'ordenes.aprobar_presupuesto',
+      'ordenes.cerrar', 'inventario.mover', 'horas.cargar', 'horas.aprobar',
+    ],
+  },
   variants: [
     { codigo: 'modulo_20_pies', etiqueta: 'Módulo de 20 pies', confirmado: false },
     { codigo: 'modulo_40_pies', etiqueta: 'Módulo de 40 pies', confirmado: false },

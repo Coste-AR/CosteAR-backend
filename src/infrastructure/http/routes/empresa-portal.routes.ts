@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { EmpresaPortalService } from '../../../application/empresa/empresa-portal-service.js';
 import { authenticate } from '../plugins/authenticate.js';
 import { requireRole } from '../plugins/authenticate.js';
-import { OperatorScopeService } from '../../../application/empresa/operator-scope-service.js';
+import { OperatorScopeService, PERMISOS_OPERADOR } from '../../../application/empresa/operator-scope-service.js';
 import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 
 const inviteOperatorSchema = z.object({
@@ -21,6 +21,8 @@ const inviteOperatorSchema = z.object({
 const scopeSchema = z.object({
   unidadProductivaIds: z.array(z.string().uuid()).default([]),
   depositoIds: z.array(z.string().uuid()).default([]),
+  ordenTrabajoIds: z.array(z.string().uuid()).default([]),
+  permisos: z.array(z.enum(PERMISOS_OPERADOR)).default([]),
 });
 const companyOperatorParams = z.object({ companyId: z.string().uuid(), operatorId: z.string().uuid() });
 const companyParams = z.object({ companyId: z.string().uuid() });
@@ -35,7 +37,9 @@ const operatorListEnvelope = z.object({ data: z.array(z.object({
   alcance: z.object({
     unidadesProductivas: z.array(z.object({ id: z.string().uuid(), referencia: z.string() })),
     depositos: z.array(z.object({ id: z.string().uuid(), referencia: z.string() })),
+    ordenesTrabajo: z.array(z.object({ id: z.string().uuid(), codigo: z.string(), descripcion: z.string() })),
   }),
+  permisos: z.array(z.enum(PERMISOS_OPERADOR)),
 })) });
 
 const submitDocSchema = z.object({

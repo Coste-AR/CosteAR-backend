@@ -6,6 +6,10 @@ vi.mock('../../src/application/empresa/empresa-portal-service.js', () => ({
   EmpresaPortalService: class { inviteOperator = inviteOperator; },
 }));
 vi.mock('../../src/application/empresa/operator-scope-service.js', () => ({
+  PERMISOS_OPERADOR: [
+    'ordenes.ver', 'ordenes.editar', 'ordenes.ver_margen', 'ordenes.aprobar_presupuesto',
+    'ordenes.cerrar', 'inventario.mover', 'horas.cargar', 'horas.aprobar',
+  ],
   OperatorScopeService: class {},
 }));
 vi.mock('../../src/infrastructure/http/plugins/authenticate.js', async (original) => {

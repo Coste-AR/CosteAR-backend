@@ -323,6 +323,7 @@ model OrdenTrabajo {
   plantilla        PlantillaOrden?     @relation(fields: [plantillaId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   renglonesBase    Json                @default("[]")
   etapas           EtapaOrden[]
+  operadoresAutorizados OperatorOrdenTrabajo[]
   estado           EstadoOrdenTrabajo  @default(BORRADOR)
   fechaInicio      DateTime?           @db.Date
   fechaFinTecnica  DateTime?           @db.Timestamptz
@@ -1250,6 +1251,9 @@ model OperatorMembership {
    */
   jobTitle String?
 
+  /// Capacidades funcionales declaradas por el paquete. Vacío = sin acceso.
+  permisos String[] @default([])
+
   /**
    * Chat privado que este operador vinculó al bot. Es único globalmente: un
    * chat no puede inyectar datos en dos empresas.
@@ -1258,6 +1262,7 @@ model OperatorMembership {
 
   unidadesAutorizadas  OperatorUnidadProductiva[]
   depositosAutorizados OperatorDeposito[]
+  ordenesAutorizadas   OperatorOrdenTrabajo[]
 
   @@unique([operatorId, connectionId])
   @@index([operatorId])
@@ -1287,6 +1292,18 @@ model OperatorDeposito {
   @@id([membershipId, depositoId])
   @@index([depositoId])
   @@map("operator_depositos")
+}
+
+model OperatorOrdenTrabajo {
+  membershipId String             @db.Uuid
+  membership   OperatorMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  ordenId      String             @db.Uuid
+  orden        OrdenTrabajo       @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  grantedAt    DateTime           @default(now()) @db.Timestamptz
+
+  @@id([membershipId, ordenId])
+  @@index([ordenId])
+  @@map("operator_ordenes_trabajo")
 }
 
 // Código de invitación para que un operador se una a una empresa
@@ -2577,6 +2594,9 @@ model PaqueteRubro {
   nombreProductoConfirmado Boolean @default(true)
   lexicon        Json
   icons          Json
+  /// Entidades y capacidades que el paquete permite asignar a una membresía.
+  /// Nullable en paquetes históricos: ausencia declarada, nunca permisos implícitos.
+  access         Json?
   variants       Json
   seedParameters Json
   alertRules     Json

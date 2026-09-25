@@ -5,6 +5,7 @@ import { OrdenTrabajoService } from '../../../application/ordenes/orden-trabajo-
 import { etapasOrdenEnvelopeSchema, ordenTrabajoCreateSchema, ordenTrabajoEnvelopeSchema, ordenesTrabajoEnvelopeSchema, ordenTrabajoTransitionSchema, plantillasOrdenEnvelopeSchema } from '../../../shared/schemas/orden-trabajo.schema.js';
 import { apiErrorResponses } from '../../../shared/schemas/api-contract.schema.js';
 import { authenticate } from '../plugins/authenticate.js';
+import { OperatorScopeService, type PermisoOperador } from '../../../application/empresa/operator-scope-service.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const idParams = z.object({ id: z.string().uuid() });
@@ -12,22 +13,33 @@ const actorFrom = (request: FastifyRequest) => ({
   id: request.authUser!.id, role: request.authUser!.role, jobTitle: request.authUser!.jobTitle,
   area: 'costista', method: 'manual', device: `${request.headers['user-agent'] ?? 'desconocido'} · ${request.ip}`,
 });
+const esOperador = (request: FastifyRequest) => request.authUser!.role === 'EMPRESA_OPERATOR';
+const sinMargen = <T extends Record<string, unknown>>(value: T): T => Object.fromEntries(
+  Object.entries(value).filter(([key]) => key !== 'precio' && key !== 'precioContractual' && !key.startsWith('margen')),
+) as T;
 
 export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<void> {
   app.setSerializerCompiler(serializerCompiler);
   app.setValidatorCompiler(validatorCompiler);
   const contract = app.withTypeProvider<ZodTypeProvider>();
   const service = new OrdenTrabajoService();
+  const scopes = new OperatorScopeService();
   contract.post('/companies/:companyId/ordenes-trabajo', {
     preHandler: authenticate, schema: { body: ordenTrabajoCreateSchema, response: { 201: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } },
   }, async (request, reply) => {
     const { companyId } = companyParams.parse(request.params);
-    const data = await service.create(request.authUser!.id, companyId, ordenTrabajoCreateSchema.parse(request.body), actorFrom(request));
+    const tenantId = esOperador(request) ? await scopes.tenantForCompany(request.authUser!.id, companyId, 'ordenes.editar') : request.authUser!.id;
+    const data = await service.create(tenantId, companyId, ordenTrabajoCreateSchema.parse(request.body), actorFrom(request));
     return reply.code(201).send({ data });
   });
   contract.get('/companies/:companyId/ordenes-trabajo', { preHandler: authenticate, schema: { response: { 200: ordenesTrabajoEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
     const { companyId } = companyParams.parse(request.params);
-    return { data: await service.list(request.authUser!.id, companyId) };
+    if (!esOperador(request)) return { data: await service.list(request.authUser!.id, companyId) };
+    const tenantId = await scopes.tenantForCompany(request.authUser!.id, companyId, 'ordenes.ver');
+    const ordenIds = await scopes.ordenIds(request.authUser!.id, companyId);
+    const canSeeMargin = await scopes.assertPermission(request.authUser!.id, 'ordenes.ver_margen').then(() => true, () => false);
+    const data = await service.list(tenantId, companyId, ordenIds);
+    return { data: canSeeMargin ? data : data.map(sinMargen) };
   });
   contract.get('/companies/:companyId/plantillas-orden', { preHandler: authenticate, schema: { response: { 200: plantillasOrdenEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
     const { companyId } = companyParams.parse(request.params);
@@ -35,16 +47,24 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
   });
   contract.get('/ordenes-trabajo/:id', { preHandler: authenticate, schema: { response: { 200: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
     const { id } = idParams.parse(request.params);
-    return { data: await service.get(request.authUser!.id, id) };
+    if (!esOperador(request)) return { data: await service.get(request.authUser!.id, id) };
+    const tenantId = await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.ver');
+    const data = await service.get(tenantId, id);
+    const canSeeMargin = await scopes.assertPermission(request.authUser!.id, 'ordenes.ver_margen').then(() => true, () => false);
+    return { data: canSeeMargin ? data : sinMargen(data) };
   });
   contract.get('/ordenes-trabajo/:id/etapas', { preHandler: authenticate, schema: { response: { 200: etapasOrdenEnvelopeSchema, ...apiErrorResponses } } }, async (request) => {
     const { id } = idParams.parse(request.params);
-    return { data: await service.listStages(request.authUser!.id, id) };
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.ver') : request.authUser!.id;
+    return { data: await service.listStages(tenantId, id) };
   });
   contract.post('/ordenes-trabajo/:id/transiciones', {
     preHandler: authenticate, schema: { body: ordenTrabajoTransitionSchema, response: { 200: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } },
   }, async (request) => {
     const { id } = idParams.parse(request.params);
-    return { data: await service.transition(request.authUser!.id, id, ordenTrabajoTransitionSchema.parse(request.body), actorFrom(request)) };
+    const input = ordenTrabajoTransitionSchema.parse(request.body);
+    const permission: PermisoOperador = input.estado === 'PENDIENTE_CIERRE' || input.estado === 'CERRADA' ? 'ordenes.cerrar' : 'ordenes.editar';
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, permission) : request.authUser!.id;
+    return { data: await service.transition(tenantId, id, input, actorFrom(request)) };
   });
 }

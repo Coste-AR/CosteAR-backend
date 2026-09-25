@@ -5,6 +5,14 @@ import {
 } from '@/application/operacion/paquete-construccion-modular.js';
 
 describe('paquete de construcción modular', () => {
+  it('declara los permisos mínimos de órdenes, inventario y horas', () => {
+    expect(PAQUETE_CONSTRUCCION_MODULAR.access.permissions).toEqual([
+      'ordenes.ver', 'ordenes.editar', 'ordenes.ver_margen', 'ordenes.aprobar_presupuesto',
+      'ordenes.cerrar', 'inventario.mover', 'horas.cargar', 'horas.aprobar',
+    ]);
+    expect(PAQUETE_CONSTRUCCION_MODULAR.access.entities).toEqual(['OrdenTrabajo', 'Deposito']);
+  });
+
   it('camino de falla: un parámetro sin valor declarado queda ausente y sin confirmar', () => {
     const parametro = PAQUETE_CONSTRUCCION_MODULAR.seedParameters
       .find((item) => item.clave === 'umbral_desvio_margen_pp');

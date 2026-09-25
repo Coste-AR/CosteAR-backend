@@ -7,6 +7,7 @@ import { GroqService } from '../../infrastructure/ai/groq-service.js';
 import { randomBytes } from 'node:crypto';
 import { ingestDataEntry } from '../ingest/ingest-data-entry.js';
 import { SystemAlertService } from '../system/system-alert-service.js';
+import { esPermisoOperador } from './operator-scope-service.js';
 
 /**
  * Gestión de operadores de empresa (usuarios EMPRESA_OPERATOR).
@@ -258,6 +259,7 @@ export class EmpresaPortalService {
         operator: { select: { id: true, name: true, email: true, createdAt: true } },
         unidadesAutorizadas: { select: { unidadProductiva: { select: { id: true, referencia: true } } } },
         depositosAutorizados: { select: { deposito: { select: { id: true, referencia: true } } } },
+        ordenesAutorizadas: { select: { orden: { select: { id: true, codigo: true, descripcion: true } } } },
       },
       orderBy: { joinedAt: 'desc' },
     });
@@ -271,7 +273,9 @@ export class EmpresaPortalService {
       alcance: {
         unidadesProductivas: m.unidadesAutorizadas.map((x) => x.unidadProductiva),
         depositos: m.depositosAutorizados.map((x) => x.deposito),
+        ordenesTrabajo: m.ordenesAutorizadas.map((x) => x.orden),
       },
+      permisos: m.permisos.filter(esPermisoOperador),
     }));
   }
 

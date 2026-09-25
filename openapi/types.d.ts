@@ -12584,7 +12584,14 @@ export interface paths {
                                         id: string;
                                         referencia: string;
                                     }[];
+                                    ordenesTrabajo: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        codigo: string;
+                                        descripcion: string;
+                                    }[];
                                 };
+                                permisos: ("ordenes.ver" | "ordenes.editar" | "ordenes.ver_margen" | "ordenes.aprobar_presupuesto" | "ordenes.cerrar" | "inventario.mover" | "horas.cargar" | "horas.aprobar")[];
                             }[];
                         };
                     };
@@ -13184,6 +13191,10 @@ export interface paths {
                         unidadProductivaIds?: string[];
                         /** @default [] */
                         depositoIds?: string[];
+                        /** @default [] */
+                        ordenTrabajoIds?: string[];
+                        /** @default [] */
+                        permisos?: ("ordenes.ver" | "ordenes.editar" | "ordenes.ver_margen" | "ordenes.aprobar_presupuesto" | "ordenes.cerrar" | "inventario.mover" | "horas.cargar" | "horas.aprobar")[];
                     };
                 };
             };

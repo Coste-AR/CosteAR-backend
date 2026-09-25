@@ -113,9 +113,9 @@ export class OrdenTrabajoService {
     }));
   }
 
-  async list(userId: string, companyId: string) {
+  async list(userId: string, companyId: string, ordenIds?: string[]) {
     await this.companyDe(userId, companyId);
-    const orders = await withTenant(userId, (tx) => tx.ordenTrabajo.findMany({ where: { companyId, userId }, orderBy: { createdAt: 'desc' } }));
+    const orders = await withTenant(userId, (tx) => tx.ordenTrabajo.findMany({ where: { companyId, userId, ...(ordenIds ? { id: { in: ordenIds } } : {}) }, orderBy: { createdAt: 'desc' } }));
     return orders.map(present);
   }
 
