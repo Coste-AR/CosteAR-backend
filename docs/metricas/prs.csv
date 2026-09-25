@@ -180,3 +180,4 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 482,97,AlanArevalo1,dev,2026-09-25T04:03:54Z,2026-09-25T04:06:56Z,0.1,6,383,0,9,0,,,docs/sesiones/2026-09-25-97-control-variaciones.md
 483,428,AlanArevalo1,dev,2026-09-25T05:11:49Z,2026-09-25T05:15:02Z,0.1,15,1927,6,9,0,,,docs/sesiones/2026-09-25-428-ranking-rotacion.md
 484,429,AlanArevalo1,dev,2026-09-25T06:07:33Z,2026-09-25T06:11:15Z,0.1,3,115,0,9,0,,,docs/sesiones/2026-09-25-429-matriz-reglas-marginales.md
+485,468,AlanArevalo1,dev,2026-09-25T13:24:53Z,2026-09-25T13:28:34Z,0.1,12,795,7,9,0,,,docs/sesiones/2026-09-25-468-paquete-construccion-modular.md
