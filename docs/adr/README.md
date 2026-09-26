@@ -70,6 +70,9 @@ adelante todo va a esta carpeta, un archivo por decisión.
 
 <!-- Se agrega una línea por ADR. Más reciente arriba. -->
 
+- [0033 — El análisis marginal de procesos va por un camino propio](./0033-analisis-marginal-en-procesos.md) — 24-09-2026 · **Propuesta**. Reusa las funciones puras; cv por unidad terminada del último departamento; MO y CIF sin clasificar dan zona. Firma: #455.
+- [0032 — Cerrar un período congela sus insumos; toda escritura posterior pasa por el dato tardío](./0032-que-significa-cerrar-un-periodo.md) — 24-09-2026 · **Propuesta**. Snapshot por IDs de versión, un solo guardia con 409, reabrir marca y no reescribe. Firma: #454.
+- [0031 — Toda razón física como fracción exacta](./0031-razones-como-fraccion-exacta.md) — 24-09-2026 · **Propuesta**. `num/den` entero, pérdida normal en unidades, igualdad exacta. Firma: #453.
 - [0026 — La moneda homogénea usa snapshots completos y explícitos](./0026-moneda-homogenea-versionada.md) — 20-09-2026 · **Propuesta**. Cada corrección crea un snapshot auditable; sin todos los índices el cálculo queda nominal y lo declara.
 - [0025 — Las alertas distinguen ausencia de normalidad](./0025-alertas-distinguen-ausencia-de-normalidad.md) — 19-09-2026 · **Propuesta**. El contrato diferencia normalidad, inactividad y datos faltantes antes de generar alertas en app o email.
 - [0015 — Proyectar resultados en la unidad de gestión](./0015-proyectar-resultados-en-unidad-de-gestion.md) — 11-09-2026 · **Aceptada**. El motor persiste en base y una sola abstracción de dominio proyecta la salida sin inferir unidades.
