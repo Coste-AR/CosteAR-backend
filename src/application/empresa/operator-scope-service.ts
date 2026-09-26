@@ -86,6 +86,15 @@ export class OperatorScopeService {
     return allowed.userId;
   }
 
+  async tenantForParteHoras(operatorId: string, parteId: string, permission: PermisoOperador): Promise<string> {
+    const allowed = await this.db.parteHoras.findFirst({
+      where: { id: parteId, orden: { operadoresAutorizados: { some: { membership: { operatorId, isActive: true, permisos: { has: permission } } } } } },
+      select: { userId: true },
+    });
+    if (!allowed) throw new ForbiddenError('No tenés autorización para acceder a ese parte de horas.');
+    return allowed.userId;
+  }
+
   async ordenIds(operatorId: string, companyId: string): Promise<string[]> {
     const rows = await this.db.operatorOrdenTrabajo.findMany({
       where: { orden: { companyId }, membership: { operatorId, isActive: true, permisos: { has: 'ordenes.ver' } } },

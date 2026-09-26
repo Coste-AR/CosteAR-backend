@@ -8,6 +8,8 @@ import { authenticate } from '../plugins/authenticate.js';
 import { OperatorScopeService, type PermisoOperador } from '../../../application/empresa/operator-scope-service.js';
 import { PresupuestoOrdenService } from '../../../application/ordenes/presupuesto-orden-service.js';
 import { presupuestoCreateSchema, presupuestoEnvelopeSchema, presupuestosEnvelopeSchema, presupuestoRevalidarSchema } from '../../../shared/schemas/presupuesto-orden.schema.js';
+import { ParteHorasService } from '../../../application/ordenes/parte-horas-service.js';
+import { parteHorasCreateSchema, parteHorasEnvelopeSchema, partesHorasEnvelopeSchema } from '../../../shared/schemas/parte-horas.schema.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const idParams = z.object({ id: z.string().uuid() });
@@ -19,6 +21,10 @@ const esOperador = (request: FastifyRequest) => request.authUser!.role === 'EMPR
 const sinMargen = <T extends Record<string, unknown>>(value: T): T => Object.fromEntries(
   Object.entries(value).filter(([key]) => key !== 'precio' && key !== 'precioContractual' && !key.startsWith('margen')),
 ) as T;
+const sinTarifa = <T extends { tarifaHora?: unknown; primaExtraHora?: unknown; importeMod?: unknown }>(value: T): Omit<T, 'tarifaHora' | 'primaExtraHora' | 'importeMod'> => {
+  const { tarifaHora: _tarifa, primaExtraHora: _prima, importeMod: _importe, ...visible } = value;
+  return visible;
+};
 
 export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<void> {
   app.setSerializerCompiler(serializerCompiler);
@@ -26,6 +32,7 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
   const contract = app.withTypeProvider<ZodTypeProvider>();
   const service = new OrdenTrabajoService();
   const presupuestos = new PresupuestoOrdenService();
+  const partesHoras = new ParteHorasService();
   const scopes = new OperatorScopeService();
   contract.post('/companies/:companyId/ordenes-trabajo', {
     preHandler: authenticate, schema: { body: ordenTrabajoCreateSchema, response: { 201: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } },
@@ -104,5 +111,29 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
     const { id } = idParams.parse(request.params);
     const tenantId = esOperador(request) ? await scopes.tenantForPresupuesto(request.authUser!.id, id, 'ordenes.editar') : request.authUser!.id;
     return { data: await presupuestos.revalidate(tenantId, id, presupuestoRevalidarSchema.parse(request.body), actorFrom(request)) };
+  });
+  contract.post('/ordenes-trabajo/:id/partes-horas', {
+    preHandler: authenticate,
+    schema: { body: parteHorasCreateSchema, response: { 201: parteHorasEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'horas.cargar') : request.authUser!.id;
+    const data = await partesHoras.create(tenantId, id, parteHorasCreateSchema.parse(request.body), actorFrom(request));
+    return reply.code(201).send({ data: esOperador(request) ? sinTarifa(data) : data });
+  });
+  contract.get('/ordenes-trabajo/:id/partes-horas', {
+    preHandler: authenticate, schema: { response: { 200: partesHorasEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.ver') : request.authUser!.id;
+    const data = await partesHoras.list(tenantId, id);
+    return { data: esOperador(request) ? data.map(sinTarifa) : data };
+  });
+  contract.post('/partes-horas/:id/aprobar', {
+    preHandler: authenticate, schema: { response: { 200: parteHorasEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForParteHoras(request.authUser!.id, id, 'horas.aprobar') : request.authUser!.id;
+    return { data: await partesHoras.approve(tenantId, id, actorFrom(request)) };
   });
 }

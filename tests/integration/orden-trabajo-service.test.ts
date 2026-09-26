@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OrdenTrabajoService } from '@/application/ordenes/orden-trabajo-service.js';
+import { ParteHorasService } from '@/application/ordenes/parte-horas-service.js';
 import { prisma, withTenant } from '@/infrastructure/database/prisma.js';
 import { randomUUID } from 'node:crypto';
 import { createTenant, disconnect, type Tenant } from './helpers/tenants.js';
@@ -12,6 +13,33 @@ beforeAll(async () => { A = await createTenant('orden-a'); B = await createTenan
 afterAll(disconnect);
 
 describe('FX-OT — orden de trabajo con RLS real', () => {
+  it('aprueba 675.000 de MOD con prima causada y excluye entrega de la base del taller', async () => {
+    const orders = new OrdenTrabajoService();
+    const parts = new ParteHorasService();
+    await withTenant(A.userId, (tx) => tx.company.update({ where: { id: A.companyId }, data: { industry: 'CONSTRUCCION_MODULAR' } }));
+    const order = await orders.create(A.userId, A.companyId, {
+      codigo: `OT-HH-${randomUUID().slice(0, 8)}`, descripcion: 'Obra X', cliente: 'Cliente ficticio', plantillaId: null, fechaInicio: null,
+    }, actor(A.userId));
+    const stages = await orders.listStages(A.userId, order.id);
+    const stage = stages.find((row) => !row.esEntrega)!;
+    const rate = await withTenant(A.userId, (tx) => tx.tarifaManoObra.create({ data: {
+      companyId: A.companyId, userId: A.userId, nombre: 'Taller', basicRemuneration: 650000,
+      hoursWorked: 130, itcsPct: 0, primaExtraPct: 50, vigenteDesde: new Date('2026-09-01T00:00:00Z'),
+    } }));
+    const additional = await withTenant(A.userId, (tx) => tx.versionPresupuesto.create({ data: {
+      companyId: A.companyId, ordenId: order.id, userId: A.userId, tipo: 'ADICIONAL', numero: 1,
+      vigenteDesde: new Date('2026-09-01T00:00:00Z'), vigenciaDias: 30, estado: 'APROBADO',
+      costoPrevisto: 100000, precio: 150000, plazoDias: 0, causaAdicional: 'Cambio ficticio',
+    } }));
+    await withTenant(A.userId, (tx) => tx.company.update({ where: { id: A.companyId }, data: { politicaPrimaExtra: 'DIRECTA_CON_CAUSA' } }));
+    const loaded = await parts.create(A.userId, order.id, {
+      personaId: A.userId, etapaId: stage.id, fecha: '2026-09-25', horasNormales: 120, horasExtra: 10,
+      tarifaId: rate.id, causaExtra: { texto: 'Cambio ficticio', versionPresupuestoId: additional.id },
+    }, actor(A.userId));
+    const approved = await parts.approve(A.userId, loaded.id, actor(A.userId));
+    expect(approved).toMatchObject({ importeMod: 675000, incluyeBaseHorasTaller: true, estado: 'APROBADO' });
+    expect(await withTenant(B.userId, (tx) => tx.parteHoras.findMany({ where: { id: loaded.id } }))).toEqual([]);
+  });
   it('copia las siete etapas del modelo de 40 pies y no cambia si se edita el modelo', async () => {
     const service = new OrdenTrabajoService();
     await withTenant(A.userId, (tx) => tx.company.update({

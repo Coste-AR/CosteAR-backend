@@ -8,9 +8,11 @@ const { db, auth } = vi.hoisted(() => ({ auth: { role: 'EMPRESA_ADMIN' }, db: {
   company: { findFirst: vi.fn() },
   ordenTrabajo: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   plantillaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
-  etapaOrden: { findMany: vi.fn() },
+  etapaOrden: { findFirst: vi.fn(), findMany: vi.fn() },
   versionPresupuesto: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   parametroCosteo: { findFirst: vi.fn() },
+  tarifaManoObra: { findFirst: vi.fn() },
+  parteHoras: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   traceAuditLog: { create: vi.fn() },
   operatorMembership: { findFirst: vi.fn() },
   operatorOrdenTrabajo: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -132,5 +134,21 @@ describe('rutas de órdenes de trabajo', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('BUDGET_EXPIRED');
     expect(db.versionPresupuesto.update).not.toHaveBeenCalled();
+  });
+
+  it('un usuario de planta carga horas sin recibir tarifa ni importe', async () => {
+    auth.role = 'EMPRESA_OPERATOR';
+    db.operatorOrdenTrabajo.findFirst.mockResolvedValue({ orden: { userId: USER } });
+    db.ordenTrabajo.findFirst.mockResolvedValue({ id: ORDER, companyId: COMPANY, userId: USER, company: { politicaPrimaExtra: 'DENTRO_DE_TARIFA' } });
+    db.etapaOrden.findFirst.mockResolvedValue({ id: COMPANY, ordenId: ORDER, esEntrega: false });
+    db.tarifaManoObra.findFirst.mockResolvedValue({ id: COMPANY, companyId: COMPANY, nombre: 'Taller', basicRemuneration: '650000', hoursWorked: '130', productiveHours: null, standardHours: null, itcsPct: '0', primaExtraPct: '50' });
+    db.parteHoras.create.mockResolvedValue({ id: COMPANY, ordenId: ORDER, etapaId: COMPANY, personaId: USER, fecha: new Date('2026-09-25T00:00:00Z'), horasNormales: 8, horasExtra: 0, tarifaId: COMPANY, tarifaHora: 5000, primaExtraHora: 0, importeMod: null, estado: 'CARGADO' });
+    const api = await app();
+    const res = await api.inject({ method: 'POST', url: `/ordenes-trabajo/${ORDER}/partes-horas`, payload: {
+      personaId: USER, etapaId: COMPANY, fecha: '2026-09-25', horasNormales: 8, horasExtra: 0, tarifaId: COMPANY,
+    } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().data).not.toHaveProperty('tarifaHora');
+    expect(res.json().data).not.toHaveProperty('importeMod');
   });
 });
