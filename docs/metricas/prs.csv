@@ -186,3 +186,6 @@ pr,issue,autor,base,abierto,mergeado,horas,archivos,agregadas,borradas,corridas_
 489,471,AlanArevalo1,dev,2026-09-25T19:21:24Z,2026-09-25T19:24:47Z,0.1,23,547,26,8,0,,,docs/sesiones/2026-09-25-471-acceso-ordenes-depositos.md
 490,472,AlanArevalo1,dev,2026-09-25T20:15:10Z,2026-09-25T20:18:03Z,0.0,16,5270,66,9,0,,,docs/sesiones/2026-09-25-472-presupuesto-versionado.md
 491,473,AlanArevalo1,dev,2026-09-25T21:18:25Z,2026-09-25T21:21:47Z,0.1,17,2838,0,9,0,,,docs/sesiones/2026-09-25-473-inventario-ppp.md
+492,474,AlanArevalo1,dev,2026-09-26T00:16:59Z,2026-09-26T00:19:58Z,0.0,10,296,8,9,0,,,docs/sesiones/2026-09-25-474-devoluciones-transferencias.md
+493,475,AlanArevalo1,dev,2026-09-26T01:16:34Z,2026-09-26T01:19:21Z,0.0,14,2831,1,9,0,,,docs/sesiones/2026-09-25-475-partes-horas.md
+494,476,AlanArevalo1,dev,2026-09-26T02:16:16Z,2026-09-26T02:19:26Z,0.1,13,3559,0,9,0,,,docs/sesiones/2026-09-25-476-costos-directos-contingencias.md
