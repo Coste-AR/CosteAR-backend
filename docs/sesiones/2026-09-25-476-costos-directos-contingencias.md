@@ -1,7 +1,7 @@
 ---
 issue: 476
 repo: CosteAR-backend
-pr: pendiente
+pr: 494
 rama: feat/costos-directos-contingencias
 agente: codex
 modelo: gpt-5
