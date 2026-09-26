@@ -282,6 +282,7 @@ model Company {
   // default revaluaría en silencio datos vivos. Ver DECISIONES.md (CL-09).
   condicionIva CondicionIva @default(RESPONSABLE_INSCRIPTO)
   politicaPpp PoliticaPpp @default(MOVIL)
+  politicaDevolucionInventario PoliticaDevolucionInventario @default(COSTO_SALIDA)
 
   // Señal de la IA: el comprobante mostró indicios ("Factura C", "Consumidor
   // Final", "Monotributista", "Responsable No Inscripto") de que la condición
@@ -3155,6 +3156,11 @@ enum PoliticaPpp {
   PERIODO
 }
 
+enum PoliticaDevolucionInventario {
+  COSTO_SALIDA
+  PPP_VIGENTE
+}
+
 enum TipoMovimientoInventario {
   INGRESO
   SALIDA
@@ -3203,12 +3209,15 @@ model MovimientoInventario {
   movimientoOrigen   MovimientoInventario? @relation("MovimientoInventarioOrigen", fields: [movimientoOrigenId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   derivados          MovimientoInventario[] @relation("MovimientoInventarioOrigen")
   documento          String?  @db.VarChar(300)
+  identidadExterna   String?  @db.VarChar(200)
+  documentoHash      String?  @db.VarChar(64)
   periodoImputado    DateTime @db.Date
   createdAt          DateTime @default(now()) @db.Timestamptz
 
   @@index([companyId, articuloId, fecha, createdAt])
   @@index([userId])
   @@index([ordenId])
+  @@unique([companyId, identidadExterna, documentoHash])
   @@map("movimientos_inventario")
 }
 

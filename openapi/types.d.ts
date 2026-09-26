@@ -14267,7 +14267,7 @@ export interface paths {
                         /** Format: uuid */
                         depositoId?: string | null;
                         /** @enum {string} */
-                        tipo: "INGRESO" | "SALIDA" | "AJUSTE";
+                        tipo: "INGRESO" | "SALIDA" | "DEVOLUCION" | "TRANSFERENCIA" | "AJUSTE";
                         cantidad: number;
                         costoUnitario?: number;
                         /** @default 0 */
@@ -14276,9 +14276,15 @@ export interface paths {
                         fecha: string;
                         /** Format: uuid */
                         ordenId?: string | null;
+                        /** Format: uuid */
+                        ordenDestinoId?: string | null;
+                        /** Format: uuid */
+                        movimientoOrigenId?: string | null;
                         documento?: string | null;
                         /** Format: date */
                         periodoImputado: string;
+                        identidadExterna?: string | null;
+                        documentoHash?: string | null;
                     };
                 };
             };
