@@ -1,14 +1,14 @@
 ---
 issue: 474
 repo: CosteAR-backend
-pr: pendiente
+pr: 492
 rama: feat/inventario-devoluciones
 agente: codex
 modelo: gpt-5
 tanda: C1
 inicio: 2026-09-25T20:58-03:00
-fin: 2026-09-25T21:15-03:00
-minutos: 17
+fin: 2026-09-25T21:17-03:00
+minutos: 19
 tokens: no-informado
 clears: 0
 intentos_hasta_verde: 3
