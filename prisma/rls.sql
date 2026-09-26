@@ -755,6 +755,20 @@ CREATE POLICY tenant_isolation ON activos_amortizables
   USING ("userId" = current_app_user_id())
   WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE costos_directos_orden ENABLE ROW LEVEL SECURITY;
+ALTER TABLE costos_directos_orden FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON costos_directos_orden;
+CREATE POLICY tenant_isolation ON costos_directos_orden
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE eventos_contingencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE eventos_contingencia FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON eventos_contingencia;
+CREATE POLICY tenant_isolation ON eventos_contingencia
+  USING ("userId" = current_app_user_id())
+  WITH CHECK ("userId" = current_app_user_id());
+
 ALTER TABLE desperdicio_registros ENABLE ROW LEVEL SECURITY;
 ALTER TABLE desperdicio_registros FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON desperdicio_registros;

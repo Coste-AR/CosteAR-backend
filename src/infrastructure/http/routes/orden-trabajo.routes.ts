@@ -10,6 +10,8 @@ import { PresupuestoOrdenService } from '../../../application/ordenes/presupuest
 import { presupuestoCreateSchema, presupuestoEnvelopeSchema, presupuestosEnvelopeSchema, presupuestoRevalidarSchema } from '../../../shared/schemas/presupuesto-orden.schema.js';
 import { ParteHorasService } from '../../../application/ordenes/parte-horas-service.js';
 import { parteHorasCreateSchema, parteHorasEnvelopeSchema, partesHorasEnvelopeSchema } from '../../../shared/schemas/parte-horas.schema.js';
+import { CostosDirectosService } from '../../../application/ordenes/costos-directos-service.js';
+import { contingenciaCreateSchema, contingenciaEnvelopeSchema, contingenciasEnvelopeSchema, costoDirectoCreateSchema, costoDirectoEnvelopeSchema, costosDirectosEnvelopeSchema } from '../../../shared/schemas/costos-directos.schema.js';
 
 const companyParams = z.object({ companyId: z.string().uuid() });
 const idParams = z.object({ id: z.string().uuid() });
@@ -33,6 +35,7 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
   const service = new OrdenTrabajoService();
   const presupuestos = new PresupuestoOrdenService();
   const partesHoras = new ParteHorasService();
+  const costosDirectos = new CostosDirectosService();
   const scopes = new OperatorScopeService();
   contract.post('/companies/:companyId/ordenes-trabajo', {
     preHandler: authenticate, schema: { body: ordenTrabajoCreateSchema, response: { 201: ordenTrabajoEnvelopeSchema, ...apiErrorResponses } },
@@ -135,5 +138,33 @@ export async function registerOrdenTrabajoRoutes(app: FastifyInstance): Promise<
     const { id } = idParams.parse(request.params);
     const tenantId = esOperador(request) ? await scopes.tenantForParteHoras(request.authUser!.id, id, 'horas.aprobar') : request.authUser!.id;
     return { data: await partesHoras.approve(tenantId, id, actorFrom(request)) };
+  });
+  contract.post('/ordenes-trabajo/:id/costos-directos', {
+    preHandler: authenticate, schema: { body: costoDirectoCreateSchema, response: { 201: costoDirectoEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.editar') : request.authUser!.id;
+    return reply.code(201).send({ data: await costosDirectos.createCosto(tenantId, id, costoDirectoCreateSchema.parse(request.body), actorFrom(request)) });
+  });
+  contract.get('/ordenes-trabajo/:id/costos-directos', {
+    preHandler: authenticate, schema: { response: { 200: costosDirectosEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.ver') : request.authUser!.id;
+    return costosDirectos.listCostos(tenantId, id);
+  });
+  contract.post('/ordenes-trabajo/:id/contingencias', {
+    preHandler: authenticate, schema: { body: contingenciaCreateSchema, response: { 201: contingenciaEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.editar') : request.authUser!.id;
+    return reply.code(201).send({ data: await costosDirectos.createContingencia(tenantId, id, contingenciaCreateSchema.parse(request.body), actorFrom(request)) });
+  });
+  contract.get('/ordenes-trabajo/:id/contingencias', {
+    preHandler: authenticate, schema: { response: { 200: contingenciasEnvelopeSchema, ...apiErrorResponses } },
+  }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const tenantId = esOperador(request) ? await scopes.tenantForOrden(request.authUser!.id, id, 'ordenes.ver') : request.authUser!.id;
+    return costosDirectos.listContingencias(tenantId, id);
   });
 }

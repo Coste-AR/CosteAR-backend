@@ -13,6 +13,8 @@ const { db, auth } = vi.hoisted(() => ({ auth: { role: 'EMPRESA_ADMIN' }, db: {
   parametroCosteo: { findFirst: vi.fn() },
   tarifaManoObra: { findFirst: vi.fn() },
   parteHoras: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  costoDirectoOrden: { findMany: vi.fn(), create: vi.fn() },
+  eventoContingencia: { findMany: vi.fn(), create: vi.fn() },
   traceAuditLog: { create: vi.fn() },
   operatorMembership: { findFirst: vi.fn() },
   operatorOrdenTrabajo: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -150,5 +152,14 @@ describe('rutas de órdenes de trabajo', () => {
     expect(res.statusCode).toBe(201);
     expect(res.json().data).not.toHaveProperty('tarifaHora');
     expect(res.json().data).not.toHaveProperty('importeMod');
+  });
+
+  it('rechaza una falla de proveedor sin recupero ni reclamo', async () => {
+    const api = await app();
+    const res = await api.inject({ method: 'POST', url: `/ordenes-trabajo/${ORDER}/contingencias`, payload: {
+      etapaId: COMPANY, tipo: 'FALLA', cantidad: 1, valor: 50000, causa: 'Proveedor', tratamiento: 'Sin acción',
+    } });
+    expect(res.statusCode).toBe(400);
+    expect(db.eventoContingencia.create).not.toHaveBeenCalled();
   });
 });

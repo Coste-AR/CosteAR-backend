@@ -284,6 +284,7 @@ model Company {
   politicaPpp PoliticaPpp @default(MOVIL)
   politicaDevolucionInventario PoliticaDevolucionInventario @default(COSTO_SALIDA)
   politicaPrimaExtra PoliticaPrimaExtra @default(DENTRO_DE_TARIFA)
+  politicaRetrabajo PoliticaRetrabajo @default(CIF_POOL)
   tarifasManoObra TarifaManoObra[]
 
   // Señal de la IA: el comprobante mostró indicios ("Factura C", "Consumidor
@@ -325,6 +326,32 @@ enum EstadoParteHoras {
   APROBADO
 }
 
+enum EstadoValidacionOrden {
+  PENDIENTE
+  VALIDADO
+  MARCADO
+}
+enum CategoriaCostoDirectoOrden {
+  TERCEROS
+  TRANSPORTE
+  GRUA
+  VIATICOS
+  COMPRA_EXCLUSIVA
+  OTRO
+}
+enum TipoEventoContingencia {
+  DESPERDICIO
+  SOBRANTE
+  ROTURA
+  FALLA
+  RETRABAJO
+}
+enum PoliticaRetrabajo {
+  CIF_POOL
+  PERDIDA_PERIODO
+  CAMBIO_CLIENTE
+}
+
 /// Trabajo identificable que acumula hechos económicos a lo largo de varios
 /// períodos. Los hechos conservan su propio `periodoImputado`: la orden no
 /// pertenece a un período.
@@ -345,6 +372,8 @@ model OrdenTrabajo {
   movimientosDestino    MovimientoInventario[] @relation("OrdenDestinoMovimientoInventario")
   operadoresAutorizados OperatorOrdenTrabajo[]
   partesHoras           ParteHoras[]
+  costosDirectos        CostoDirectoOrden[]
+  contingencias         EventoContingencia[]
   estado                EstadoOrdenTrabajo     @default(BORRADOR)
   fechaInicio           DateTime?              @db.Date
   fechaFinTecnica       DateTime?              @db.Timestamptz
@@ -407,6 +436,8 @@ model EtapaOrden {
   createdAt            DateTime             @default(now()) @db.Timestamptz
   renglonesPresupuesto RenglonPresupuesto[]
   partesHoras          ParteHoras[]
+  costosDirectos       CostoDirectoOrden[]
+  contingencias        EventoContingencia[]
 
   @@unique([ordenId, clave])
   @@unique([ordenId, orden])
@@ -456,6 +487,7 @@ model VersionPresupuesto {
   causaAdicional String?                  @db.VarChar(500)
   renglones      RenglonPresupuesto[]
   partesHorasExtra ParteHoras[]
+  contingencias EventoContingencia[]
   createdAt      DateTime                 @default(now()) @db.Timestamptz
   updatedAt      DateTime                 @updatedAt @db.Timestamptz
 
@@ -515,6 +547,47 @@ model ParteHoras {
   @@index([userId])
   @@index([ordenId, fecha])
   @@map("partes_horas")
+}
+
+model CostoDirectoOrden {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ordenId String @db.Uuid
+  orden OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  etapaId String @db.Uuid
+  etapa EtapaOrden @relation(fields: [etapaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userId String @db.Uuid
+  categoria CategoriaCostoDirectoOrden
+  importe Decimal @db.Decimal(18, 4)
+  documento String? @db.VarChar(500)
+  periodoImputado DateTime @db.Date
+  estadoValidacion EstadoValidacionOrden @default(PENDIENTE)
+  createdAt DateTime @default(now()) @db.Timestamptz
+  @@index([userId])
+  @@index([ordenId, periodoImputado])
+  @@map("costos_directos_orden")
+}
+
+model EventoContingencia {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ordenId String @db.Uuid
+  orden OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  etapaId String @db.Uuid
+  etapa EtapaOrden @relation(fields: [etapaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userId String @db.Uuid
+  tipo TipoEventoContingencia
+  cantidad Decimal @db.Decimal(18, 4)
+  valor Decimal @db.Decimal(18, 4)
+  recupero Decimal? @db.Decimal(18, 4)
+  causa String @db.VarChar(500)
+  tratamiento String @db.VarChar(500)
+  politicaRetrabajo PoliticaRetrabajo?
+  versionPresupuestoId String? @db.Uuid
+  versionPresupuesto VersionPresupuesto? @relation(fields: [versionPresupuestoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  estadoValidacion EstadoValidacionOrden @default(PENDIENTE)
+  createdAt DateTime @default(now()) @db.Timestamptz
+  @@index([userId])
+  @@index([ordenId, createdAt])
+  @@map("eventos_contingencia")
 }
 
 model RenglonPresupuesto {
