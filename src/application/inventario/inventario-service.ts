@@ -6,6 +6,7 @@ import { recordTraceAudit, type TraceActor } from '../audit/trace-audit.js';
 import type { ArticuloCreateInput, MovimientoInventarioCreateInput } from '../../shared/schemas/inventario.schema.js';
 
 class StockInsuficienteError extends UnprocessableEntityError { override readonly code = 'STOCK_INSUFICIENTE'; }
+class CantidadOrigenExcedidaError extends UnprocessableEntityError { override readonly code = 'CANTIDAD_ORIGEN_EXCEDIDA'; }
 type Db = PrismaClient;
 type Tx = Prisma.TransactionClient;
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
@@ -36,6 +37,7 @@ export class InventarioService {
       const amount = new Decimal(row.cantidad.toString());
       if (row.tipo === 'INGRESO' || row.tipo === 'AJUSTE') { qty = qty.plus(amount); value = value.plus(amount.times(row.costoUnitario.toString())); }
       else if (row.tipo === 'SALIDA') { qty = qty.minus(amount); value = value.minus(amount.times(row.costoUnitario.toString())); }
+      else if (row.tipo === 'DEVOLUCION') { qty = qty.plus(amount); value = value.plus(amount.times(row.costoUnitario.toString())); }
     }
     return { qty, value, ppp: qty.isZero() ? new Decimal(0) : value.div(qty) };
   }
@@ -54,15 +56,38 @@ export class InventarioService {
       if (!company) throw new NotFoundError('Negocio no encontrado');
       const article = await tx.articulo.findFirst({ where: { id: input.articuloId, companyId } });
       if (!article) throw new NotFoundError('Artículo no encontrado');
+      if (input.identidadExterna && input.documentoHash) {
+        const imported = await tx.movimientoInventario.findFirst({ where: {
+          companyId, identidadExterna: input.identidadExterna, documentoHash: input.documentoHash.toLowerCase(),
+        } });
+        if (imported) return imported;
+      }
       if (input.depositoId && !await tx.deposito.findFirst({ where: { id: input.depositoId, companyId } })) throw new NotFoundError('Depósito no encontrado');
       if (input.tipo === 'SALIDA' && !input.ordenId) throw new UnprocessableEntityError('La salida requiere una orden de trabajo', { field: 'ordenId' });
       if (input.ordenId && !await tx.ordenTrabajo.findFirst({ where: { id: input.ordenId, companyId } })) throw new NotFoundError('Orden de trabajo no encontrada');
+      if (input.ordenDestinoId && !await tx.ordenTrabajo.findFirst({ where: { id: input.ordenDestinoId, companyId } })) throw new NotFoundError('Orden de trabajo destino no encontrada');
       const previous = await tx.movimientoInventario.findMany({ where: { articuloId: article.id }, orderBy: [{ fecha: 'asc' }, { createdAt: 'asc' }] });
       const current = this.valuation(previous);
       const quantity = new Decimal(input.cantidad);
       if (input.tipo === 'SALIDA' && quantity.gt(current.qty)) throw new StockInsuficienteError(`La salida de ${quantity} supera el saldo disponible de ${current.qty}`);
       let unitCost: Decimal;
-      if (input.tipo === 'INGRESO') {
+      let sourceOrderId = input.ordenId ?? null;
+      if (input.tipo === 'DEVOLUCION' || input.tipo === 'TRANSFERENCIA') {
+        if (!input.movimientoOrigenId) throw new UnprocessableEntityError('El movimiento requiere una salida de origen', { field: 'movimientoOrigenId' });
+        const source = await tx.movimientoInventario.findFirst({ where: { id: input.movimientoOrigenId, companyId, articuloId: article.id, tipo: 'SALIDA' } });
+        if (!source) throw new NotFoundError('Salida de origen no encontrada');
+        const used = previous.filter((row) => row.movimientoOrigenId === source.id && (row.tipo === 'DEVOLUCION' || row.tipo === 'TRANSFERENCIA'))
+          .reduce((sum, row) => sum.plus(row.cantidad.toString()), new Decimal(0));
+        if (quantity.plus(used).gt(source.cantidad.toString())) throw new CantidadOrigenExcedidaError(`La cantidad supera las ${source.cantidad} unidades disponibles de la salida`);
+        sourceOrderId = source.ordenId;
+        if (!sourceOrderId) throw new UnprocessableEntityError('La salida de origen no tiene una orden de trabajo');
+        if (input.tipo === 'TRANSFERENCIA') {
+          if (!input.ordenDestinoId) throw new UnprocessableEntityError('La transferencia requiere una orden destino', { field: 'ordenDestinoId' });
+          if (input.ordenDestinoId === sourceOrderId) throw new UnprocessableEntityError('La orden destino debe ser distinta de la orden origen', { field: 'ordenDestinoId' });
+        }
+        unitCost = input.tipo === 'DEVOLUCION' && company.politicaDevolucionInventario === 'PPP_VIGENTE'
+          ? current.ppp : new Decimal(source.costoUnitario.toString());
+      } else if (input.tipo === 'INGRESO') {
         if (input.costoUnitario === undefined) throw new UnprocessableEntityError('El ingreso requiere costo unitario', { field: 'costoUnitario' });
         unitCost = new Decimal(input.costoUnitario).plus(new Decimal(input.gastosCompra ?? 0).div(quantity));
       } else if (input.tipo === 'SALIDA') {
@@ -82,7 +107,9 @@ export class InventarioService {
       const movement = await tx.movimientoInventario.create({ data: {
         companyId, userId, articuloId: article.id, depositoId: input.depositoId ?? null, tipo: input.tipo,
         cantidad: quantity.toString(), costoUnitario: unitCost.toDecimalPlaces(4).toString(), fecha: day(input.fecha),
-        ordenId: input.ordenId ?? null, documento: input.documento ?? null, periodoImputado: day(input.periodoImputado),
+        ordenId: sourceOrderId, ordenDestinoId: input.ordenDestinoId ?? null, movimientoOrigenId: input.movimientoOrigenId ?? null,
+        documento: input.documento ?? null, periodoImputado: day(input.periodoImputado),
+        identidadExterna: input.identidadExterna ?? null, documentoHash: input.documentoHash?.toLowerCase() ?? null,
       } });
       await recordTraceAudit({ entityType: 'MovimientoInventario', entityId: movement.id, action: 'create', actor, after: movement }, tx);
       return movement;

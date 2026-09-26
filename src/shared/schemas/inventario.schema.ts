@@ -9,11 +9,18 @@ export const articuloCreateSchema = z.object({
 
 export const movimientoInventarioCreateSchema = z.object({
   articuloId: z.string().uuid(), depositoId: z.string().uuid().nullable().optional(),
-  tipo: z.enum(['INGRESO', 'SALIDA', 'AJUSTE']), cantidad: z.number().finite().positive(),
+  tipo: z.enum(['INGRESO', 'SALIDA', 'DEVOLUCION', 'TRANSFERENCIA', 'AJUSTE']), cantidad: z.number().finite().positive(),
   costoUnitario: z.number().finite().nonnegative().optional(),
   gastosCompra: z.number().finite().nonnegative().default(0),
   fecha: z.string().date(), ordenId: z.string().uuid().nullable().optional(),
+  ordenDestinoId: z.string().uuid().nullable().optional(), movimientoOrigenId: z.string().uuid().nullable().optional(),
   documento: z.string().trim().max(300).nullable().optional(), periodoImputado: z.string().date(),
+  identidadExterna: z.string().trim().min(1).max(200).nullable().optional(),
+  documentoHash: z.string().trim().regex(/^[a-fA-F0-9]{64}$/).nullable().optional(),
+}).superRefine((value, ctx) => {
+  if ((value.identidadExterna == null) !== (value.documentoHash == null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La identidad externa y el hash del documento deben informarse juntos', path: ['identidadExterna'] });
+  }
 });
 
 export type ArticuloCreateInput = z.infer<typeof articuloCreateSchema>;
