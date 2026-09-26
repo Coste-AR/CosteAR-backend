@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OrdenTrabajoService } from '@/application/ordenes/orden-trabajo-service.js';
 import { ParteHorasService } from '@/application/ordenes/parte-horas-service.js';
+import { CostosDirectosService } from '@/application/ordenes/costos-directos-service.js';
 import { prisma, withTenant } from '@/infrastructure/database/prisma.js';
 import { randomUUID } from 'node:crypto';
 import { createTenant, disconnect, type Tenant } from './helpers/tenants.js';
@@ -13,6 +14,23 @@ beforeAll(async () => { A = await createTenant('orden-a'); B = await createTenan
 afterAll(disconnect);
 
 describe('FX-OT — orden de trabajo con RLS real', () => {
+  it('aísla costos directos y contingencias y mantiene pendiente fuera del costo', async () => {
+    const orders = new OrdenTrabajoService();
+    const costs = new CostosDirectosService();
+    await withTenant(A.userId, (tx) => tx.company.update({ where: { id: A.companyId }, data: { industry: 'CONSTRUCCION_MODULAR' } }));
+    const order = await orders.create(A.userId, A.companyId, {
+      codigo: `OT-CD-${randomUUID().slice(0, 8)}`, descripcion: 'Obra X', cliente: 'Cliente ficticio', plantillaId: null, fechaInicio: null,
+    }, actor(A.userId));
+    const stage = (await orders.listStages(A.userId, order.id))[0]!;
+    const loaded = await costs.createCosto(A.userId, order.id, { etapaId: stage.id, categoria: 'TRANSPORTE', importe: 180000, periodoImputado: '2026-09-01' }, actor(A.userId));
+    expect(loaded).toMatchObject({ estadoValidacion: 'PENDIENTE', impactaCosto: false });
+    expect((await costs.listCostos(A.userId, order.id)).resumen.totalValidado).toBe(0);
+    expect(await withTenant(B.userId, (tx) => tx.costoDirectoOrden.findMany({ where: { id: loaded.id } }))).toEqual([]);
+
+    const incident = await costs.createContingencia(A.userId, order.id, { etapaId: stage.id, tipo: 'RETRABAJO', cantidad: 8, valor: 50000, causa: 'Error interno', tratamiento: 'Reproceso' }, actor(A.userId));
+    expect(incident).toMatchObject({ politicaRetrabajo: 'CIF_POOL', estadoValidacion: 'PENDIENTE' });
+    expect(await withTenant(B.userId, (tx) => tx.eventoContingencia.findMany({ where: { id: incident.id } }))).toEqual([]);
+  });
   it('aprueba 675.000 de MOD con prima causada y excluye entrega de la base del taller', async () => {
     const orders = new OrdenTrabajoService();
     const parts = new ParteHorasService();
