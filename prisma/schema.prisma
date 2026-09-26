@@ -283,6 +283,8 @@ model Company {
   condicionIva CondicionIva @default(RESPONSABLE_INSCRIPTO)
   politicaPpp PoliticaPpp @default(MOVIL)
   politicaDevolucionInventario PoliticaDevolucionInventario @default(COSTO_SALIDA)
+  politicaPrimaExtra PoliticaPrimaExtra @default(DENTRO_DE_TARIFA)
+  tarifasManoObra TarifaManoObra[]
 
   // Señal de la IA: el comprobante mostró indicios ("Factura C", "Consumidor
   // Final", "Monotributista", "Responsable No Inscripto") de que la condición
@@ -313,6 +315,16 @@ enum EstadoOrdenTrabajo {
   CANCELADA
 }
 
+enum PoliticaPrimaExtra {
+  DENTRO_DE_TARIFA
+  DIRECTA_CON_CAUSA
+}
+
+enum EstadoParteHoras {
+  CARGADO
+  APROBADO
+}
+
 /// Trabajo identificable que acumula hechos económicos a lo largo de varios
 /// períodos. Los hechos conservan su propio `periodoImputado`: la orden no
 /// pertenece a un período.
@@ -332,6 +344,7 @@ model OrdenTrabajo {
   movimientosInventario MovimientoInventario[] @relation("OrdenMovimientoInventario")
   movimientosDestino    MovimientoInventario[] @relation("OrdenDestinoMovimientoInventario")
   operadoresAutorizados OperatorOrdenTrabajo[]
+  partesHoras           ParteHoras[]
   estado                EstadoOrdenTrabajo     @default(BORRADOR)
   fechaInicio           DateTime?              @db.Date
   fechaFinTecnica       DateTime?              @db.Timestamptz
@@ -393,6 +406,7 @@ model EtapaOrden {
   esEntrega            Boolean              @default(false)
   createdAt            DateTime             @default(now()) @db.Timestamptz
   renglonesPresupuesto RenglonPresupuesto[]
+  partesHoras          ParteHoras[]
 
   @@unique([ordenId, clave])
   @@unique([ordenId, orden])
@@ -441,6 +455,7 @@ model VersionPresupuesto {
   aprobadoPor    String?                  @db.Uuid
   causaAdicional String?                  @db.VarChar(500)
   renglones      RenglonPresupuesto[]
+  partesHorasExtra ParteHoras[]
   createdAt      DateTime                 @default(now()) @db.Timestamptz
   updatedAt      DateTime                 @updatedAt @db.Timestamptz
 
@@ -448,6 +463,58 @@ model VersionPresupuesto {
   @@index([userId])
   @@index([companyId, estado])
   @@map("versiones_presupuesto")
+}
+
+/// Snapshot versionado de los insumos con los que el motor obtiene la tarifa integral.
+model TarifaManoObra {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId         String   @db.Uuid
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId            String   @db.Uuid
+  nombre            String   @db.VarChar(160)
+  basicRemuneration Decimal  @db.Decimal(18, 4)
+  hoursWorked       Decimal  @db.Decimal(18, 4)
+  productiveHours   Decimal? @db.Decimal(18, 4)
+  standardHours     Decimal? @db.Decimal(18, 4)
+  itcsPct           Decimal  @db.Decimal(9, 4)
+  primaExtraPct     Decimal  @default(50) @db.Decimal(9, 4)
+  vigenteDesde      DateTime @db.Date
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  partesHoras       ParteHoras[]
+
+  @@index([userId])
+  @@index([companyId, vigenteDesde])
+  @@map("tarifas_mano_obra")
+}
+
+model ParteHoras {
+  id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ordenId                String              @db.Uuid
+  orden                  OrdenTrabajo        @relation(fields: [ordenId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  etapaId                String              @db.Uuid
+  etapa                  EtapaOrden          @relation(fields: [etapaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userId                 String              @db.Uuid
+  personaId              String              @db.Uuid
+  fecha                  DateTime            @db.Date
+  horasNormales         Decimal             @db.Decimal(10, 4)
+  horasExtra            Decimal             @db.Decimal(10, 4)
+  tarifaId               String              @db.Uuid
+  tarifa                 TarifaManoObra      @relation(fields: [tarifaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tarifaHora             Decimal             @db.Decimal(18, 4)
+  primaExtraHora         Decimal             @default(0) @db.Decimal(18, 4)
+  causaExtra             String?             @db.VarChar(500)
+  versionPresupuestoId   String?             @db.Uuid
+  versionPresupuesto     VersionPresupuesto? @relation(fields: [versionPresupuestoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  estado                 EstadoParteHoras    @default(CARGADO)
+  importeMod             Decimal?            @db.Decimal(18, 4)
+  incluyeBaseHorasTaller Boolean             @default(true)
+  aprobadoPor            String?             @db.Uuid
+  aprobadoAt             DateTime?           @db.Timestamptz
+  createdAt              DateTime            @default(now()) @db.Timestamptz
+
+  @@index([userId])
+  @@index([ordenId, fecha])
+  @@map("partes_horas")
 }
 
 model RenglonPresupuesto {

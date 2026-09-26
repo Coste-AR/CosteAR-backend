@@ -725,6 +725,27 @@ CREATE POLICY tenant_select ON renglones_presupuesto FOR SELECT USING (
 CREATE POLICY tenant_write ON renglones_presupuesto FOR ALL
   USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
 
+ALTER TABLE tarifas_mano_obra ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tarifas_mano_obra FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON tarifas_mano_obra;
+CREATE POLICY tenant_isolation ON tarifas_mano_obra
+  USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+
+ALTER TABLE partes_horas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE partes_horas FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_select ON partes_horas;
+DROP POLICY IF EXISTS tenant_write ON partes_horas;
+CREATE POLICY tenant_select ON partes_horas FOR SELECT USING (
+  "userId" = current_app_user_id() OR EXISTS (
+    SELECT 1 FROM operator_ordenes_trabajo oot
+    JOIN operator_memberships om ON om.id = oot."membershipId"
+    WHERE oot."ordenId" = partes_horas."ordenId" AND om."operatorId" = current_app_user_id()
+      AND om."isActive" = true AND ('ordenes.ver' = ANY(om."permisos") OR 'horas.cargar' = ANY(om."permisos") OR 'horas.aprobar' = ANY(om."permisos"))
+  )
+);
+CREATE POLICY tenant_write ON partes_horas FOR ALL
+  USING ("userId" = current_app_user_id()) WITH CHECK ("userId" = current_app_user_id());
+
 -- activos_amortizables y desperdicio_registros (S-03 y S-04): `userId`
 -- denormalizado, mismo patrón que cost_periods.
 ALTER TABLE activos_amortizables ENABLE ROW LEVEL SECURITY;
